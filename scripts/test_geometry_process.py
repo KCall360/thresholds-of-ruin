@@ -39,6 +39,7 @@ class GeometryProcesses(unittest.TestCase):
         frame = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(frame["state"], seen["state"])
         o = seen["state"]["observation"]
+        self.assertEqual({(c["position"]["x"], c["position"]["y"]) for c in o["visible_cells"] if c["place_hint"]}, {(0, 0), (5, 0)})
         self.assertEqual(o["ground_items"][0]["position"], fixture["item_offset"])
         cells = {(c["position"]["x"], c["position"]["y"]) for c in o["visible_cells"]}
         for x in range(-2, 7):

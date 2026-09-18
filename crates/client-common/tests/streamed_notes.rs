@@ -8,7 +8,7 @@ fn snapshot() -> Snapshot {
         "state":{"wizard_game":false,"revision":0,"observation":{
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
 
-            "visible_cells":[{"key":"here","stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false}],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true
+            "visible_cells":[{"key":"here","stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true
         }}
     }"#).unwrap()
 }

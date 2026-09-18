@@ -3,6 +3,23 @@ use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId
 use crate::Game;
 
 impl Game {
+    /// Current authored map: two unnamed anchors selected by the map author.
+    /// The original fixture remains available for deterministic old-save replay.
+    pub fn two_room_with_place_hints(seed: u64) -> Self {
+        let mut game = Self::two_room(seed);
+        for region in [RegionId(1), RegionId(2)] {
+            game.set_place_hint(
+                Location {
+                    region,
+                    position: Position { x: 2, y: 1, z: 0 },
+                },
+                true,
+            )
+            .expect("valid authored anchor");
+        }
+        game
+    }
+
     /// A hand-authored two-room scenario with seed-selected collectible material.
     ///
     /// This is not a procedural dungeon generator. No PRNG is needed for this

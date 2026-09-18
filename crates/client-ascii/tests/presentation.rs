@@ -32,7 +32,7 @@ fn state() -> ClientState {
         "state":{"wizard_game":false,"revision":3,"observation":{
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
 
-            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false}))).collect::<Vec<_>>(),
+            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[{"reachable":true,"item":{"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
@@ -93,6 +93,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         stairs_down: false,
         position: Position { x: 2, y: 1, z: 0 },
         wall: true,
+        place_hint: false,
     });
     assert_eq!(glyph_at(&other_level, 2, 1), '#');
     other_level.ground_items[0].position = Position { x: 3, y: 1, z: 0 };

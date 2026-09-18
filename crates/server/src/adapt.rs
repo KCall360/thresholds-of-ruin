@@ -68,13 +68,13 @@ pub fn observation(
     let mut ground_items = Vec::new();
     let mut visible_actors = Vec::new();
     for cell in scene {
-        if !view
+        let Some(visible) = view
             .visible_cells
             .iter()
-            .any(|visible| visible.location == cell.location)
-        {
+            .find(|visible| visible.location == cell.location)
+        else {
             continue;
-        }
+        };
         let mut digest = Sha1::new();
         digest.update(salt.as_bytes());
         digest.update(view.actor.0.to_le_bytes());
@@ -95,6 +95,7 @@ pub fn observation(
                 .collect(),
             position: offset(cell.offset),
             wall: cell.wall,
+            place_hint: visible.place_hint,
             stairs_up: view
                 .exits
                 .iter()

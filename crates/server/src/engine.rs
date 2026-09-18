@@ -17,7 +17,8 @@ use crate::journal::{
 
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "observer-scene-v3";
+const RULESET: &str = "place-hints-v4";
+const SCENE_V3_RULESET: &str = "observer-scene-v3";
 const PORTAL_V2_RULESET: &str = "portal-sight-v2";
 const LEGACY_RULESET: &str = "two-room-v1";
 
@@ -138,7 +139,11 @@ impl Engine {
     }
 
     fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = Game::two_room(scenario.seed);
+        let mut game = if ruleset == RULESET {
+            Game::two_room_with_place_hints(scenario.seed)
+        } else {
+            Game::two_room(scenario.seed)
+        };
         if ruleset == PORTAL_V2_RULESET {
             game.use_portal_v2_rules();
         }
@@ -208,7 +213,7 @@ impl Engine {
             || (archive.version == ARCHIVE_VERSION && Uuid::parse_str(&archive.view_salt).is_err())
             || !matches!(
                 archive.ruleset.as_str(),
-                RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
+                RULESET | SCENE_V3_RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
             )
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
@@ -682,6 +687,15 @@ impl Engine {
                     )
                     .map_err(|_| invalid())?;
                 WizardResult::Connected
+            }
+            WizardOperation::SetPlaceHint { position, present } => {
+                if self.archive.ruleset != RULESET {
+                    return Err(invalid());
+                }
+                self.game
+                    .set_place_hint(adapt::location(*position), *present)
+                    .map_err(|_| invalid())?;
+                WizardResult::PlaceHintSet
             }
             WizardOperation::SetWall { position, wall } => {
                 self.game

@@ -72,7 +72,7 @@ fn state() -> StateView {
         "wizard_game":false,"revision": 7, "observation": {
             "actor": 1, "tick": 100, "position": {"x":1,"y":1,"z":0},
 
-            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false}))).collect::<Vec<_>>(),
+            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
                 {"reachable":true,"item":{"id":10,"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
                 {"reachable":false,"item":{"id":11,"name":"silver token"},"position":{"x":2,"y":1,"z":0}}

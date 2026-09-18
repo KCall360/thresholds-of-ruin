@@ -76,7 +76,7 @@ error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
 `two-room-v1` saves retain original whole-room perception; new saves use
-`observer-scene-v3`. Sound and interactive doors remain later work.
+`place-hints-v4`. Sound and interactive doors remain later work.
 
 ## Validation and remaining work
 
@@ -94,3 +94,8 @@ The [server/protocol slice](protocol.md) implements attachment, commands, stream
 updates, and durable action/annotation history. The [text](text-client.md) and
 [graphical ASCII](ascii-client.md) frontends now exercise this slice through actual
 process tests, including cross-frontend control transfer and save/resume.
+
+[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
+They carry no labels or boundaries. Shared memory retains last-seen hints; text
+and ASCII do not render them or use them for navigation yet. New saves use
+`place-hints-v4`; earlier saves retain their original rules.

@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 5)
+# Server protocol and annotations (version 6)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -67,15 +67,15 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 5 requires a backend-resolved observer-relative scene. Positions
+Protocol version 6 requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
-opaque `key`, `position`, `wall`, `stairs_up`, and `stairs_down`. Items include a
+opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`. Items include a
 `reachable` flag. The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
 must upgrade. Save format 3 adds a private stable view-identity salt; format 1/2
 saves migrate while retaining their original rules. New saves use
-`observer-scene-v3`. See [geometry and compatibility](portal-geometry.md).
+`place-hints-v4`. See [geometry and compatibility](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
@@ -84,7 +84,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":5,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":6,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -307,3 +307,6 @@ stream rules between snapshots.
 Filtering remains actor/user scoped and precedes pagination. Notes never move to
 a new branch; new entry anchors cannot reference another branch. Wizard parameters
 are private to their author so normal spectators do not receive hidden setup facts.
+
+See [unnamed place hints](place-hints.md) for the protocol-6 anchor attribute,
+authoring commands, and rules-version compatibility.

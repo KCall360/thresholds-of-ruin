@@ -27,7 +27,9 @@ current state; the headless output exposes this potentially stale local memory.
 New games now support [portal-aware sight and geometry](docs/portal-geometry.md),
 including wide joins, rotated connections, opaque walls, explicit stairs, and wizard setup.
 Clients receive one actor-relative scene with no internal region or portal metadata.
-Existing saves retain their original rules. Server and clients use protocol 5.
+New maps also carry [unnamed place hints](docs/place-hints.md) for future text
+location organization; hints are disclosed only with perceived cells.
+Existing saves retain their original rules. Server and clients use protocol 6.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

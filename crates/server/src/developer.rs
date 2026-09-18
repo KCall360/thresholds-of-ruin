@@ -6,7 +6,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let position = |v: &[&str]| -> Result<Position, String> {
         Ok(Position {
             region: v[0].parse().map_err(|_| usage)?,
@@ -58,6 +58,14 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
             },
             to: position(&[r2, x2, y2, z2])?,
             quarter_turns: turns.parse().map_err(|_| usage)?,
+        },
+        ["place", r, x, y, z, value] => WizardOperation::SetPlaceHint {
+            position: position(&[r, x, y, z])?,
+            present: match *value {
+                "on" => true,
+                "off" => false,
+                _ => return Err(usage.into()),
+            },
         },
         ["wall", r, x, y, z, value] => WizardOperation::SetWall {
             position: position(&[r, x, y, z])?,

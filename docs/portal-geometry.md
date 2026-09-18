@@ -9,7 +9,7 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `observer-scene-v3`, with deterministic integer cell-centre rays
+New games use `place-hints-v4`, with deterministic integer cell-centre rays
 within eight Manhattan steps. Clockwise quarter turns around z and translation
 map a ray across a join. Crossing consumes distance, including self-links and
 cycles. A physical cell may have multiple visible occurrences in non-Euclidean
@@ -74,7 +74,7 @@ the same identity. Wide joins require the new ruleset.
 
 ## Protocol and memory
 
-Protocol **5** sends positions as relative x/y/z offsets, with the actor at zero.
+Protocol **6** sends positions as relative x/y/z offsets, with the actor at zero.
 Each visible cell carries an opaque key, position, wall flag, and semantic stair
 flags. Items carry `reachable`; sight does not grant pickup reach. Movement
 history reports the chosen direction. Observations and history contain no region
@@ -110,3 +110,8 @@ history, reach, legacy replay, and rewind. `scripts/scenarios/wide-join.json` an
 `portal-geometry.json` drive the actual server, text, headless, and native ASCII
 clients. They test continuous sight, movement/pickup, hidden changes, stale
 memory, stairs, restart, and rewind on Windows/Linux in debug and release.
+
+[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
+They carry no labels or boundaries. Shared memory retains last-seen hints; text
+and ASCII do not render them or use them for navigation yet. New saves use
+`place-hints-v4`; earlier saves retain their original rules.
