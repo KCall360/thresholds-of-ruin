@@ -113,3 +113,11 @@ outcomes, alongside ordinary-play tests. Wizard shortcuts help arrange scenarios
 normal actions must still exercise the feature being verified. Versioned command
 scripts and seeds should make failures reproducible without manual setup. Keep
 unimplemented scenarios in this plan until their implementation begins.
+
+Wizard-command scripts should often be the final integration acceptance test for
+a new feature, driving actual server/frontend processes rather than only calling
+internal setup APIs. Assert both authoritative results and the observations shown
+to the client. These scenarios are part of the feature's completion criteria,
+along with focused behavior tests and updated documentation; see
+[development practices](../CONTRIBUTING.md). Until wizard mode is available,
+existing fixtures and process tests must still verify each new feature.

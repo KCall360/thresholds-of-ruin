@@ -99,3 +99,11 @@ deterministic. Protocol tests run a real server once transport exists; text test
 drive process input/output; ASCII tests combine input/presentation assertions with
 actual window-launch tests. Configure graphical environments explicitly on both
 platforms. Do not label model-only tests as graphical application tests.
+
+Every new feature carries behavior tests and an integration acceptance scenario,
+not only a milestone-wide test at the end. Once wizard mode exists, scripted
+wizard commands should often provide the final integration test through actual
+server/frontend processes. Use them to arrange and reproduce scenarios, then
+exercise the feature through its intended commands and assert outcomes. Keep
+normal-game coverage and update documentation as part of completing the feature.
+See [development practices](../CONTRIBUTING.md) for the testing requirements.
