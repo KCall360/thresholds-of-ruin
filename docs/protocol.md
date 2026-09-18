@@ -3,7 +3,8 @@
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
 internals. `tor-client-common::ClientState` validates ordered updates and keeps
-the current disclosed state plus a bounded recent history for future frontends.
+the current disclosed state plus a bounded recent history. The shared `Connection`
+transport applies validated snapshots/updates for the [playable text client](text-client.md).
 
 ## Run locally
 
@@ -200,4 +201,6 @@ durable retries, all three annotation sources, anchor validation, pagination,
 failed writes, save locking, corrupt saves, slow clients, and client-state ordering.
 A process test launches the actual server, commits an action and note, terminates
 it, and verifies both after restart. CI runs these in debug and release builds on
-Windows and Linux. Playable text/ASCII frontends remain the next Milestone 1 work.
+Windows and Linux. The text frontend additionally has actual process tests for
+interactive input/output, annotation commands, control transfer, and restart
+persistence. The graphical ASCII frontend remains upcoming Milestone 1 work.

@@ -482,14 +482,20 @@ dependencies = [
 name = "tor-client-common"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
  "tor-protocol",
+ "uuid",
 ]
 
 [[package]]
 name = "tor-client-text"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "tokio",
  "tor-client-common",
  "tor-protocol",
 ]

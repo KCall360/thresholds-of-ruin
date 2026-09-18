@@ -10,7 +10,11 @@ The simulation and server/protocol slices are implemented: a seeded two-room
 fixture, explicit actors, deterministic action timing, movement, inventory pickup,
 and actor-specific observations. The local WebSocket server supports pushed
 updates, client control transfer, and durable action history with user, frontend,
-and backend annotations. Playable text and graphical ASCII clients are next.
+and backend annotations. A playable text client now supports movement, pickup,
+live observation, control transfer, annotations, and paginated history.
+The graphical ASCII client is next.
+
+Start playing with [the text client guide](docs/text-client.md).
 
 See [the simulation slice](docs/simulation-slice.md) for its rules and limitations.
 See [the protocol guide](docs/protocol.md) to run the server and understand messages,
@@ -37,9 +41,11 @@ python scripts/check_architecture.py
 Python 3 is used only for development checks; the game remains Rust. The boundary
 checker reads Cargo metadata, including optional and platform-specific edges.
 GitHub Actions runs these checks on Windows and Linux and builds Rust documentation
-with warnings treated as errors. The initial integration
-tests exercise crate boundaries; actual frontend launch tests will be added
-alongside the first runnable clients.
+with warnings treated as errors. Python discovery includes actual server/text
+process tests and builds both binaries. To run those process tests against optimized
+binaries, set `TOR_TEST_PROFILE=release` before running
+`python scripts/test_text_process.py -v` (PowerShell:
+`$env:TOR_TEST_PROFILE = 'release'`). CI runs both profiles on both platforms.
 
 Dependabot checks weekly for Rust dependency and GitHub Actions updates and
 opens reviewable pull requests; updates are not automatically merged.

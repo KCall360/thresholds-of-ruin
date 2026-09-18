@@ -17,7 +17,12 @@ Completed: versioned JSON/WebSocket server, actor attachment and control transfe
 streamed observations, user/frontend/backend annotations, durable journal replay,
 and real WebSocket/process integration tests. See [the protocol](protocol.md).
 
-Remaining PRs: the text client; the graphical ASCII client; client-driven switching
+Completed: playable text client with deterministic command parsing, disclosed
+item-name resolution, annotations, paginated history, live updates, and control
+transfer. Actual server/text process tests cover play, two clients, and restart
+persistence in debug and release on Windows and Linux. See [the client guide](text-client.md).
+
+Remaining PRs: the graphical ASCII client; cross-frontend client-driven switching
 and save/resume acceptance. The journal already persists actions and notes, but
 the full milestone still requires both runnable frontends and their process tests.
 
