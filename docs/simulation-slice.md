@@ -76,7 +76,7 @@ error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
 `two-room-v1` saves retain original whole-room perception; new saves use
-`place-hints-v4`. Sound and interactive doors remain later work.
+`travel-v5`. Sound and interactive doors remain later work.
 
 ## Validation and remaining work
 
@@ -98,4 +98,7 @@ process tests, including cross-frontend control transfer and save/resume.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; text
 and ASCII do not render them or use them for navigation yet. New saves use
-`place-hints-v4`; earlier saves retain their original rules.
+`travel-v5`; earlier saves retain their original rules.
+
+[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
+Earlier rules retain their behavior; text has no travel commands in this slice.

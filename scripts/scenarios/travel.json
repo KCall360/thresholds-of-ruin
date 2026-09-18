@@ -1,0 +1,18 @@
+{
+  "seed": 42,
+  "setup": [
+    "wizard room 3 8 1 1 Travel corridor",
+    "wizard teleport 1 3 0 0 0"
+  ],
+  "harmless_discovery_setup": [
+    "wizard room 4 20 1 1 Discovery corridor",
+    "wizard item tablet 4 9 0 0",
+    "wizard place 4 10 0 0 on",
+    "wizard teleport 1 4 0 0 0"
+  ],
+  "hazard_setup": [
+    "wizard room 4 20 1 1 Hazard corridor",
+    "wizard actor 100 4 9 0 0",
+    "wizard teleport 1 4 0 0 0"
+  ]
+}

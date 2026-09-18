@@ -104,6 +104,10 @@ impl ClientState {
         }
     }
 
+    pub fn travel(&self) -> Option<&TravelStatus> {
+        self.snapshot.travel.as_ref()
+    }
+
     pub fn state(&self) -> &StateView {
         &self.snapshot.state
     }
@@ -130,6 +134,36 @@ impl ClientState {
         let mut candidate = self.clone();
         candidate.stream.accept(update.actor, update.cursor)?;
         match update.body {
+            UpdateBody::Travel { status, entry } => {
+                if update.cursor.tick != candidate.snapshot.state.observation.tick {
+                    return Err(StreamError::InconsistentState);
+                }
+                if let Some(previous) = candidate
+                    .snapshot
+                    .travel
+                    .as_ref()
+                    .filter(|old| old.id == status.id)
+                {
+                    if previous.destination != status.destination
+                        || status.completed_steps < previous.completed_steps
+                        || (previous.phase != TravelPhase::Active
+                            && status.phase == TravelPhase::Active)
+                    {
+                        return Err(StreamError::InconsistentState);
+                    }
+                } else if entry.is_none() {
+                    return Err(StreamError::InconsistentState);
+                }
+                if let Some(entry) = entry {
+                    if !matches!(&entry.content, HistoryContent::Travel { destination } if destination == &status.destination)
+                        || entry.id != status.id
+                    {
+                        return Err(StreamError::InconsistentState);
+                    }
+                    candidate.remember(*entry, update.cursor.tick)?;
+                }
+                candidate.snapshot.travel = Some(status);
+            }
             UpdateBody::Observation { state, event } => {
                 if state.observation.actor != update.actor
                     || state.observation.tick != update.cursor.tick

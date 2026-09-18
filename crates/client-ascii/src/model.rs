@@ -5,6 +5,7 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    Travel,
     Up,
     Down,
     Left,
@@ -29,6 +30,7 @@ pub enum Key {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Input {
+    Click { x: usize, y: usize },
     Key { key: Key },
     Text { text: String },
 }
@@ -47,6 +49,7 @@ pub struct NoteDraft {
 }
 
 pub struct App {
+    pub travel_cursor: Option<Position>,
     pub role: AccessRole,
     pub state: Option<ClientState>,
     pub connected: bool,
@@ -68,6 +71,7 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            travel_cursor: None,
             role: AccessRole::Spectator,
             state: None,
             connected: false,
@@ -87,6 +91,7 @@ impl App {
             .as_ref()
             .is_some_and(|old| old.branch() != state.branch())
         {
+            self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
             self.history_page = None;
@@ -100,6 +105,10 @@ impl App {
             .is_some_and(|old| old.state().revision != state.state().revision)
         {
             self.pickup.clear();
+            self.travel_cursor = None;
+        }
+        if !state.has_control() {
+            self.travel_cursor = None;
         }
         self.connected = true;
         self.state = Some(state);
@@ -110,6 +119,7 @@ impl App {
     }
 
     pub fn disconnect(&mut self, message: String) {
+        self.travel_cursor = None;
         self.connected = false;
         self.busy = false;
         self.note = None;
@@ -119,6 +129,24 @@ impl App {
 
     pub fn input(&mut self, input: Input) -> Effect {
         if let Input::Key { key: Key::Escape } = input {
+            if self.travel_cursor.take().is_some() {
+                self.status = "Travel selection cancelled.".into();
+                return Effect::None;
+            }
+            if self.connected
+                && self.state.as_ref().is_some_and(|s| {
+                    s.has_control() && s.travel().is_some_and(|t| t.phase == TravelPhase::Active)
+                })
+            {
+                if self.busy {
+                    return Effect::None;
+                }
+                let state = self.state.as_ref().expect("attached");
+                return self.request(Request::CancelTravel {
+                    branch: state.branch().clone(),
+                    travel_id: state.travel().expect("active travel").id.clone(),
+                });
+            }
             if self.note.take().is_some()
                 || self.history_page.take().is_some()
                 || !self.pickup.is_empty()
@@ -170,6 +198,19 @@ impl App {
             }
             return Effect::None;
         }
+        if let Input::Click { x, y } = input {
+            if self.history_page.is_some() || !self.pickup.is_empty() {
+                return Effect::None;
+            }
+            if let Some(position) = self
+                .state
+                .as_ref()
+                .and_then(|s| crate::render::cell_at(&s.state().observation, x, y))
+            {
+                return self.travel_to(position);
+            }
+            return Effect::None;
+        }
         let Input::Key { key } = input else {
             return Effect::None;
         };
@@ -207,7 +248,44 @@ impl App {
             }
             return Effect::None;
         }
+        if let Some(mut cursor) = self.travel_cursor {
+            match key {
+                Key::Up => cursor.y -= 1,
+                Key::Down => cursor.y += 1,
+                Key::Left => cursor.x -= 1,
+                Key::Right => cursor.x += 1,
+                Key::Ascend => cursor.z += 1,
+                Key::Descend => cursor.z -= 1,
+                Key::Enter => return self.travel_to(cursor),
+                _ => return Effect::None,
+            }
+            cursor.x = cursor.x.clamp(-16, 16);
+            cursor.y = cursor.y.clamp(-16, 16);
+            cursor.z = cursor.z.clamp(-16, 16);
+            self.travel_cursor = Some(cursor);
+            return Effect::None;
+        }
         match key {
+            Key::Travel => {
+                if self
+                    .state
+                    .as_ref()
+                    .is_some_and(|s| s.travel().is_some_and(|t| t.phase == TravelPhase::Active))
+                {
+                    self.status =
+                        "Press Esc to cancel travel before selecting another destination.".into();
+                    return Effect::None;
+                }
+                if let Some(state) = self.state.as_ref().filter(|s| s.has_control()) {
+                    self.travel_cursor = Some(state.state().observation.position);
+                    self.status =
+                        "Travel: arrows/HJKL select, U/D height, Enter confirms, Esc cancels."
+                            .into();
+                } else {
+                    self.status = "Acquire control before travelling.".into();
+                }
+                Effect::None
+            }
             Key::Up => self.act(Action::Move {
                 direction: Direction::North,
             }),
@@ -294,6 +372,35 @@ impl App {
         }
     }
 
+    fn travel_to(&mut self, position: Position) -> Effect {
+        let Some(state) = self.state.as_ref() else {
+            return Effect::None;
+        };
+        if self.role == AccessRole::Spectator
+            || !state.has_control()
+            || !state.state().observation.ready
+        {
+            self.status = "Travel requires control of a ready actor.".into();
+            return Effect::None;
+        }
+        let Some(cell) = state
+            .state()
+            .observation
+            .visible_cells
+            .iter()
+            .find(|c| c.position == position && !c.wall)
+        else {
+            self.status = "Select a visible floor cell.".into();
+            return Effect::None;
+        };
+        let command = Command::Travel {
+            expected_revision: state.state().revision,
+            destination: cell.key.clone(),
+        };
+        self.travel_cursor = None;
+        self.command(command)
+    }
+
     fn act(&mut self, action: Action) -> Effect {
         let Some(state) = &self.state else {
             return Effect::None;
@@ -366,6 +473,7 @@ pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
 
 pub fn history_text(entry: &HistoryEntry) -> String {
     match &entry.content {
+        HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {
             Event::Moved { direction } => format!("Moved {direction:?}."),

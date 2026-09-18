@@ -53,6 +53,9 @@ impl HistoryEntry {
     pub fn disclosed(&self) -> tor_protocol::HistoryEntry {
         use tor_protocol::{Event as VisibleEvent, HistoryContent as Content};
         let content = match &self.content {
+            HistoryContent::Travel { destination } => Content::Travel {
+                destination: destination.clone(),
+            },
             HistoryContent::Wizard { result, .. } => Content::Wizard {
                 summary: match result {
                     WizardResult::Rewound { .. } => "Timeline rewound.",
@@ -116,6 +119,10 @@ pub struct RegionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    Travel {
+        expected_revision: u64,
+        destination: String,
+    },
     Wizard {
         expected_revision: u64,
         operation: WizardOperation,
@@ -226,6 +233,9 @@ pub enum WizardResult {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    Travel {
+        destination: String,
+    },
     Wizard {
         operation: WizardOperation,
         result: WizardResult,

@@ -131,7 +131,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 6](protocol.md) for the implemented format.
+visibility rules. See [protocol version 7](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -146,11 +146,18 @@ world relationships. Implement a small coherent interaction set first.
 
 ## Travel
 
+[The backend travel slice](travel.md) is implemented for known cells, with ASCII
+`_` selection and mouse-click destinations. Actor navigation knowledge is rebuilt
+from perceived connections at committed boundaries and retained through replay;
+clients still receive no topology. Text interpretation and travel-based compound
+commands remain future work. Active jobs never resume automatically after restart.
+
+
 The server executes travel toward known destinations as a sequence of ordinary
 actions. It resolves and publishes each completed step without disclosing
 unresolved route steps or future outcomes. Clients choose how to present completed
 progress, including animation or slower pacing, but cannot affect simulation time.
-Threats, damage, blocked paths, relevant discoveries, arrival, and decisions
+Threats, damage, blocked paths, newly perceived hazards, arrival, and decisions
 interrupt travel. Player cancellation takes effect at an action boundary; already
 executed actions cannot be cancelled. Navigation cannot use undiscovered terrain.
 
@@ -192,7 +199,7 @@ publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
 version 6 and save format 3 support this foundation; normal format-1 saves migrate
-on open. New games use place-hints-v4; existing saves retain their ruleset.
+on open. New games use travel-v5; existing saves retain their ruleset.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII

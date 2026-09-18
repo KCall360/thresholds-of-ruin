@@ -1,6 +1,6 @@
 use crate::engine::valid_label;
 use crate::{Engine, Failure};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use tokio::sync::{mpsc, watch};
 use tor_protocol::*;
 
@@ -31,9 +31,30 @@ pub(crate) struct Connection {
     pub close: watch::Receiver<bool>,
 }
 
+/// Until hostility and environmental danger are modeled, another perceived
+/// actor is conservatively a potential hazard. Never consult hidden actors,
+/// and do not classify another portal view of the observer as a threat.
+fn potential_hazards(observation: &Observation) -> BTreeSet<ActorId> {
+    observation
+        .visible_actors
+        .iter()
+        .filter(|other| other.id != observation.actor)
+        .map(|other| other.id)
+        .collect()
+}
+
+struct TravelJob {
+    owner: u64,
+    steps: VecDeque<tor_simulation::TravelStep>,
+    hazards: BTreeSet<ActorId>,
+}
+
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    travels: BTreeMap<ActorId, TravelJob>,
+    travel_status: BTreeMap<ActorId, TravelStatus>,
     resetting_streams: bool,
+    broadcasting_travel: bool,
     engine: Engine,
     clients: BTreeMap<u64, Client>,
     controllers: BTreeMap<ActorId, u64>,
@@ -43,7 +64,10 @@ pub struct Service {
 impl Service {
     pub fn new(engine: Engine) -> Self {
         Self {
+            travels: BTreeMap::new(),
+            travel_status: BTreeMap::new(),
             resetting_streams: false,
+            broadcasting_travel: false,
             engine,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
@@ -174,6 +198,28 @@ impl Service {
         let user = client.user.clone();
         let frontend = client.frontend.clone();
         match request {
+            Request::CancelTravel { branch, travel_id } => {
+                if self.controllers.get(&actor) != Some(&id) {
+                    return Err(Failure::new(
+                        ErrorCode::NotController,
+                        "Acquire control before cancelling travel",
+                    ));
+                }
+                if &branch != self.engine.branch() {
+                    return Err(Failure::new(
+                        ErrorCode::WrongBranch,
+                        "Travel belongs to another branch",
+                    ));
+                }
+                if self.travel_status.get(&actor).map(|s| &s.id) != Some(&travel_id) {
+                    return Err(Failure::new(
+                        ErrorCode::InvalidRequest,
+                        "Travel is unavailable",
+                    ));
+                }
+                self.stop_travel(actor, TravelPhase::Cancelled);
+                self.ack(id, request_id, None);
+            }
             Request::AcquireControl => {
                 match self.controllers.get(&actor) {
                     Some(owner) if *owner != id => {
@@ -201,6 +247,7 @@ impl Service {
                         "This client does not control the actor",
                     ));
                 }
+                self.stop_travel(actor, TravelPhase::ControlLost);
                 if self.controllers.remove(&actor).is_some() {
                     self.control_update(actor);
                 }
@@ -248,8 +295,10 @@ impl Service {
                     self.ack(id, request_id, Some(previous.entry.id));
                     return Ok(());
                 }
-                if matches!(command, crate::journal::Command::Act { .. })
-                    && self.controllers.get(&actor) != Some(&id)
+                if matches!(
+                    command,
+                    crate::journal::Command::Act { .. } | crate::journal::Command::Travel { .. }
+                ) && self.controllers.get(&actor) != Some(&id)
                 {
                     return Err(Failure::new(
                         ErrorCode::NotController,
@@ -267,7 +316,47 @@ impl Service {
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
                 let visible_entry = result.entry.disclosed();
                 match visible_entry.content {
+                    HistoryContent::Travel { ref destination } => {
+                        self.stop_travel(actor, TravelPhase::Cancelled);
+                        let steps = self.engine.travel_route(actor, destination)?;
+                        let observation = self.engine.observation(actor)?;
+                        let phase = if steps.is_empty() {
+                            TravelPhase::Arrived
+                        } else {
+                            TravelPhase::Active
+                        };
+                        self.travel_status.insert(
+                            actor,
+                            TravelStatus {
+                                id: result.entry.id.clone(),
+                                destination: destination.clone(),
+                                completed_steps: 0,
+                                phase,
+                            },
+                        );
+                        if phase == TravelPhase::Active {
+                            self.travels.insert(
+                                actor,
+                                TravelJob {
+                                    owner: id,
+                                    steps: steps.into(),
+                                    hazards: potential_hazards(&observation),
+                                },
+                            );
+                        }
+                        self.travel_update(actor, Some(visible_entry.clone()));
+                    }
                     HistoryContent::Wizard { rewind, .. } => {
+                        if rewind {
+                            // The committed rewind already changed the branch. Publish
+                            // only the explicit snapshot boundary into the old stream.
+                            self.travels.clear();
+                            self.travel_status.clear();
+                        } else {
+                            for travelling in self.travels.keys().copied().collect::<Vec<_>>() {
+                                self.stop_travel(travelling, TravelPhase::WorldChanged);
+                            }
+                        }
                         // A committed setup/rewind establishes an explicit stream boundary.
                         // Clients attached to actors removed by rewind must reattach.
                         let recipients: Vec<_> = self
@@ -305,25 +394,8 @@ impl Service {
                     }
                     HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
                     HistoryContent::Action { .. } => {
-                        let recipients: Vec<_> = self
-                            .clients
-                            .iter()
-                            .filter_map(|(&id, client)| client.actor.map(|actor| (id, actor)))
-                            .collect();
-                        for (recipient, observer) in recipients {
-                            let state = self.engine.state(observer)?;
-                            if revisions.get(&observer) != Some(&state.revision) {
-                                let event = (observer == result.entry.actor)
-                                    .then(|| Box::new(visible_entry.clone()));
-                                self.update(
-                                    recipient,
-                                    UpdateBody::Observation {
-                                        state: Box::new(state),
-                                        event,
-                                    },
-                                );
-                            }
-                        }
+                        self.stop_travel(actor, TravelPhase::Cancelled);
+                        self.action_update(&revisions, &visible_entry)?;
                     }
                 }
                 self.ack(id, request_id, Some(result.entry.id));
@@ -333,6 +405,166 @@ impl Service {
         Ok(())
     }
 
+    fn action_update(
+        &mut self,
+        revisions: &BTreeMap<ActorId, u64>,
+        entry: &HistoryEntry,
+    ) -> Result<(), Failure> {
+        let recipients: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
+            .collect();
+        for (recipient, observer) in recipients {
+            let state = self.engine.state(observer)?;
+            if revisions.get(&observer) != Some(&state.revision) {
+                self.update(
+                    recipient,
+                    UpdateBody::Observation {
+                        state: Box::new(state),
+                        event: (observer == entry.actor).then(|| Box::new(entry.clone())),
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn travel_update(&mut self, actor: ActorId, entry: Option<HistoryEntry>) {
+        let Some(initial) = self.travel_status.get(&actor).cloned() else {
+            return;
+        };
+        let recipients: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.actor == Some(actor))
+            .map(|(&id, _)| id)
+            .collect();
+        self.broadcasting_travel = true;
+        for id in recipients {
+            // Sending can disconnect a slow controller and stop its job. Never
+            // follow that terminal status with an obsolete active status.
+            let status = self.travel_status[&actor].clone();
+            self.update(
+                id,
+                UpdateBody::Travel {
+                    status,
+                    entry: entry.clone().map(Box::new),
+                },
+            );
+        }
+        self.broadcasting_travel = false;
+        if self.travel_status.get(&actor) != Some(&initial) {
+            self.travel_update(actor, None);
+        }
+    }
+
+    fn stop_travel(&mut self, actor: ActorId, phase: TravelPhase) {
+        self.travels.remove(&actor);
+        if let Some(status) = self.travel_status.get_mut(&actor) {
+            if status.phase == TravelPhase::Active {
+                status.phase = phase;
+                if !self.broadcasting_travel {
+                    self.travel_update(actor, None);
+                }
+            }
+        }
+    }
+
+    /// At most one ordinary action per actor per pump; never hold the service lock
+    /// for a whole route. Network delivery/cancellation runs between boundaries.
+    pub(crate) fn advance_travel(&mut self) {
+        for actor in self.travels.keys().copied().collect::<Vec<_>>() {
+            let Some(mut job) = self.travels.remove(&actor) else {
+                continue;
+            };
+            if self.controllers.get(&actor) != Some(&job.owner) {
+                self.stop_travel(actor, TravelPhase::ControlLost);
+                continue;
+            }
+            let Ok(state) = self.engine.state(actor) else {
+                self.stop_travel(actor, TravelPhase::Failed);
+                continue;
+            };
+            if !potential_hazards(&state.observation).is_subset(&job.hazards) {
+                self.stop_travel(actor, TravelPhase::Hazard);
+                continue;
+            }
+            if !state.observation.ready {
+                self.stop_travel(actor, TravelPhase::DecisionRequired);
+                continue;
+            }
+            let step = job.steps.pop_front().expect("active route");
+            let direction = match step.direction {
+                tor_world::Direction::North => Direction::North,
+                tor_world::Direction::East => Direction::East,
+                tor_world::Direction::South => Direction::South,
+                tor_world::Direction::West => Direction::West,
+                tor_world::Direction::Up => Direction::Up,
+                tor_world::Direction::Down => Direction::Down,
+            };
+            let revisions = self
+                .engine
+                .actors()
+                .into_iter()
+                .map(|a| (a, self.engine.revision(a).expect("existing actor")))
+                .collect();
+            let client = &self.clients[&job.owner];
+            let result = self.engine.command(
+                &client.user,
+                &client.frontend,
+                actor,
+                &uuid::Uuid::new_v4().to_string(),
+                &self.engine.branch().clone(),
+                crate::journal::Command::Act {
+                    expected_revision: state.revision,
+                    action: Action::Move { direction },
+                },
+            );
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    self.stop_travel(
+                        actor,
+                        if error.code == ErrorCode::InvalidAction {
+                            TravelPhase::Blocked
+                        } else {
+                            TravelPhase::Failed
+                        },
+                    );
+                    continue;
+                }
+            };
+            self.travel_status
+                .get_mut(&actor)
+                .expect("active status")
+                .completed_steps += 1;
+            if self
+                .action_update(&revisions, &result.entry.disclosed())
+                .is_err()
+            {
+                self.stop_travel(actor, TravelPhase::Failed);
+                continue;
+            }
+            if self.controllers.get(&actor) != Some(&job.owner) {
+                self.stop_travel(actor, TravelPhase::ControlLost);
+                continue;
+            }
+            let observation = self.engine.observation(actor).expect("surviving actor");
+            let hazard = !potential_hazards(&observation).is_subset(&job.hazards);
+            if job.steps.is_empty() {
+                self.stop_travel(actor, TravelPhase::Arrived);
+            } else if hazard {
+                self.stop_travel(actor, TravelPhase::Hazard);
+            } else if !observation.ready {
+                self.stop_travel(actor, TravelPhase::DecisionRequired);
+            } else {
+                self.travels.insert(actor, job);
+                self.travel_update(actor, None);
+            }
+        }
+    }
+
     fn snapshot(&mut self, id: u64, request_id: &str) -> Result<(), Failure> {
         let client = &self.clients[&id];
         let actor = client
@@ -340,6 +572,7 @@ impl Service {
             .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
         let state = self.engine.state(actor)?;
         let snapshot = Snapshot {
+            travel: self.travel_status.get(&actor).cloned(),
             actor,
             branch: self.engine.branch().clone(),
             cursor: StreamCursor {
@@ -478,6 +711,9 @@ impl Service {
         };
         let _ = client.close.send(true);
         if let Some(actor) = client.actor {
+            if self.controllers.get(&actor) == Some(&id) {
+                self.stop_travel(actor, TravelPhase::ControlLost);
+            }
             if self.controllers.get(&actor) == Some(&id) {
                 self.controllers.remove(&actor);
                 if !self.resetting_streams {
@@ -647,3 +883,7 @@ mod tests {
         assert_eq!(service.controllers.get(&ActorId(1)), Some(&replacement.id));
     }
 }
+
+#[cfg(test)]
+#[path = "travel_tests.rs"]
+mod travel_tests;

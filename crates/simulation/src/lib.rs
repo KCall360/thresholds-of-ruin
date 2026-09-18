@@ -5,6 +5,8 @@
 
 mod fixture;
 mod observation;
+mod travel;
+pub use travel::TravelStep;
 
 pub use observation::{
     ActorView, CellView, ExitView, GroundItemView, ItemView, KnownPlace, Observation,
@@ -87,6 +89,7 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    navigation: BTreeMap<ActorId, travel::Navigation>,
     world: World,
     legacy_perception: bool,
     scene_rules: bool,
@@ -101,6 +104,7 @@ pub struct Game {
 impl Game {
     pub fn new(world: World, seed: u64) -> Self {
         Self {
+            navigation: BTreeMap::new(),
             world,
             legacy_perception: false,
             scene_rules: true,

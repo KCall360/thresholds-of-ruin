@@ -3,6 +3,44 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn travel_selection_is_free_and_submits_an_opaque_cell_key() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Travel }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Enter }),
+        Effect::Request(Request::Command {
+            branch: BranchId("test".into()),
+            command: Command::Travel {
+                expected_revision: 3,
+                destination: "2:1".into()
+            }
+        })
+    );
+}
+
+#[test]
+fn travel_clicks_ignore_unknown_cells_and_spectators() {
+    let mut app = App::new();
+    app.set_state(state());
+    app.ready();
+    assert_eq!(app.input(Input::Click { x: 400, y: 220 }), Effect::None);
+    app.role = AccessRole::Player;
+    assert_eq!(app.input(Input::Click { x: 800, y: 500 }), Effect::None);
+    let (x, y) = tor_client_ascii::render::cell_center(
+        &state().state().observation,
+        Position { x: 3, y: 1, z: 0 },
+    )
+    .unwrap();
+    assert!(
+        matches!(app.input(Input::Click { x, y }), Effect::Request(Request::Command { command: Command::Travel { destination, .. }, .. }) if destination == "3:1")
+    );
+}
+
+#[test]
 fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     let mut app = App::new();
     app.role = AccessRole::Player;
@@ -258,6 +296,7 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
     view.observation.position.y = i32::MAX - 1;
     app.set_state(
         ClientState::from_snapshot(Snapshot {
+            travel: None,
             actor: ActorId(1),
             branch: original.branch().clone(),
             cursor: original.cursor(),
@@ -322,4 +361,101 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
     assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
     assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
     assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
+}
+
+#[test]
+fn resized_clicks_and_stair_panels_use_the_rendered_cell_layout() {
+    use tor_client_ascii::render::{cell_at, cell_center, logical_mouse};
+    let mut view = state().state().observation.clone();
+    let mut landing = view.visible_cells[0].clone();
+    landing.key = "landing".into();
+    landing.position.z = 1;
+    view.visible_cells.push(landing.clone());
+    for position in [view.position, landing.position] {
+        let (x, y) = cell_center(&view, position).unwrap();
+        assert_eq!(cell_at(&view, x, y), Some(position));
+        // 1600x800 has 200 pixels of letterboxing on either side.
+        assert_eq!(
+            logical_mouse((x + 200) as f32, y as f32, 1600, 800),
+            Some((x, y))
+        );
+        assert_eq!(
+            logical_mouse(x as f32 / 2.0, y as f32 / 2.0, 600, 400),
+            Some((x, y))
+        );
+    }
+    assert_eq!(logical_mouse(10.0, 100.0, 1600, 800), None);
+}
+
+#[test]
+fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    app.input(Input::Key { key: Key::Travel });
+    assert!(app.travel_cursor.is_some());
+    let mut current = state();
+    current
+        .apply(StreamUpdate {
+            actor: ActorId(1),
+            branch: BranchId("test".into()),
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 100,
+            },
+            body: UpdateBody::Observation {
+                state: Box::new(StateView {
+                    revision: 4,
+                    observation: Observation {
+                        tick: 100,
+                        ..current.state().observation.clone()
+                    },
+                    ..current.state().clone()
+                }),
+                event: None,
+            },
+        })
+        .unwrap();
+    app.set_state(current.clone());
+    assert!(app.travel_cursor.is_none());
+    current
+        .apply(StreamUpdate {
+            actor: ActorId(1),
+            branch: BranchId("test".into()),
+            cursor: StreamCursor {
+                sequence: 2,
+                tick: 100,
+            },
+            body: UpdateBody::Travel {
+                status: TravelStatus {
+                    id: EntryId("trip".into()),
+                    destination: "2:1".into(),
+                    completed_steps: 0,
+                    phase: TravelPhase::Active,
+                },
+                entry: Some(Box::new(HistoryEntry {
+                    id: EntryId("trip".into()),
+                    branch: BranchId("test".into()),
+                    actor: ActorId(1),
+                    tick: 100,
+                    author: Author::User {
+                        user: "test".into(),
+                    },
+                    audience: Audience::Actor,
+                    content: HistoryContent::Travel {
+                        destination: "2:1".into(),
+                    },
+                })),
+            },
+        })
+        .unwrap();
+    app.set_state(current);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Escape }),
+        Effect::Request(Request::CancelTravel {
+            branch: BranchId("test".into()),
+            travel_id: EntryId("trip".into())
+        })
+    );
 }
