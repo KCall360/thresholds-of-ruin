@@ -13,6 +13,8 @@ updates, client control transfer, and durable action history with user, frontend
 and backend annotations. A playable text client now supports movement, pickup,
 live observation, control transfer, annotations, and paginated history.
 The graphical ASCII client is next.
+The [wizard mode plan](docs/wizard-mode.md) adds server-enabled development tools
+and permanently marked wizard games to the roadmap; it is not implemented yet.
 
 Start playing with [the text client guide](docs/text-client.md).
 
