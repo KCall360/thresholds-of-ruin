@@ -23,6 +23,7 @@ are playable. Richer perception, the 3D frontend, and remaining milestones are p
 | tor-client-common | Connections and a model of disclosed observations |
 | tor-client-ascii | Graphical ASCII input and presentation |
 | tor-client-text | Deterministic language parsing, clarification, prose |
+| tor-client-headless | JSON-lines scripted play and disclosed-state inspection |
 | tor-test-support | Shared scenario fixtures and integration tests |
 
 The world and simulation have no network, filesystem, rendering, or clock
@@ -54,8 +55,16 @@ A room may span regions; a region can contain several meaningful places. Text
 navigation refers to known places rather than exposing geometry partitions.
 
 Visibility follows portal paths with explicit range limits and cycle handling.
-The backend owns visibility, appearance facts, memory, sound disclosure, and
-hidden information. Exact sound propagation rules are deferred.
+The backend owns visibility, appearance facts, sound disclosure, and hidden
+information. Clients retain their own prior disclosed observations as remembered
+knowledge, separately from the backend's current world truth; that memory can be
+incomplete or stale. Exact sound propagation rules are deferred.
+
+The first [client-memory slice](headless-client.md) retains received room-elevation
+views in `tor-client-common`, separate from current state. Same-branch snapshots
+preserve memory; new branches clear it. It lasts only for the connection and
+does not infer views from known place names or history. Partial-cell visibility
+and memory presentation in text/ASCII remain later perception work.
 
 ## Time and actions
 
@@ -128,10 +137,12 @@ world relationships. Implement a small coherent interaction set first.
 
 ## Travel
 
-The server executes travel toward known destinations as ordinary actions in
-bounded batches. Clients choose when to request more and how to present progress.
+The server executes travel toward known destinations as a sequence of ordinary
+actions. It resolves and publishes each completed step without disclosing
+unresolved route steps or future outcomes. Clients choose how to present completed
+progress, including animation or slower pacing, but cannot affect simulation time.
 Threats, damage, blocked paths, relevant discoveries, arrival, and decisions
-interrupt travel. Cancellation takes effect at an action boundary; already
+interrupt travel. Player cancellation takes effect at an action boundary; already
 executed actions cannot be cancelled. Navigation cannot use undiscovered terrain.
 
 ## Persistence and history
@@ -176,11 +187,15 @@ displays wizard status and follows explicit setup/rewind snapshots.
 
 ## Initial content and deferred decisions
 
-Use original code and content with NetHack as a gameplay reference. Start with
-hand-authored scenarios, then seeded procedural generation. First dungeon:
-several rooms across two elevations, stairs, an unusual portal connection,
-doors/keys/containers, inventory/equipment, melee, two enemies, death, and an exit.
-Hunger, identification, ranged combat, multiplayer, and a 3D client follow later.
+Use original code and content with NetHack as a gameplay reference. A world schema
+defines a generation model and its content rules. A scenario defines a particular
+starting world and may be fully authored, fully generated from a schema, or
+authored with marked procedural-generation regions. Use deterministic scenarios
+for integration tests and wizard-mode setups. Start with hand-authored scenarios,
+then seeded procedural generation. First dungeon: several rooms across two
+elevations, stairs, an unusual portal connection, doors/keys/containers,
+inventory/equipment, melee, two enemies, death, and an exit. Hunger,
+identification, ranged combat, multiplayer, and a 3D client follow later.
 
 The ASCII client uses minifb for a native pixel-buffer window and font8x8 for
 bitmap glyphs, with Win32 and X11 backends. UI input/presentation stay separate

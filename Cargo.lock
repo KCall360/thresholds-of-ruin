@@ -691,11 +691,23 @@ name = "tor-client-common"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
  "tor-protocol",
  "uuid",
+]
+
+[[package]]
+name = "tor-client-headless"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "tor-client-common",
+ "tor-protocol",
 ]
 
 [[package]]

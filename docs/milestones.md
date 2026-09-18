@@ -73,6 +73,13 @@ facts. Turning off privileged access must not remove the marker.
 
 ## 2: Geometry and perception
 
+First slice complete locally: a JSON-lines headless frontend uses the shared
+connection and exposes current disclosed state separately from last-seen room
+memory. Same-branch snapshots preserve memory; rewind resets it. Actual process
+tests cover player/spectator access, stale hidden-room contents, revisit refresh,
+and save/resume. See [the headless guide](headless-client.md). Geometry and richer
+perception below remain pending; this does not complete milestone 2.
+
 Stairs/elevations, rotated portal, portal-aware visibility, knowledge and memory.
 Test an interior door unrelated to a portal, portal orientation transforms,
 vertical movement, cycles, and hidden-information disclosure. Test one action
@@ -80,24 +87,50 @@ producing several ordered updates before the next player decision.
 Extend wizard commands with room placement and explicit passage connections as
 the geometry model supports them; use these to reproduce perception edge cases.
 
+Headless-client requirements (foundation implemented; portal coverage pending):
+
+Add a thin headless client built on `tor-client-common`. It must connect as a
+player or authorized spectator, issue scripted actions where permitted, and
+expose only its received disclosed state to tests. Use it to test current
+visibility separately from retained client memory, including portal views and
+hidden-information boundaries.
+
 ## 3: Interactions and travel
 
 Doors, locks, keys, containers, clarification, named places and interrupted travel.
 Both clients complete the same manipulation scenarios. Unknown map regions must
-not influence travel. Ambiguity consumes no time; threats interrupt before another
-automatic movement action. Test cancellation and slow-client resynchronization.
+not influence travel. Travel is server-managed: it resolves ordinary movement
+steps without disclosing unresolved route steps or future outcomes. Ambiguity
+consumes no time; threats interrupt before another automatic movement action.
+Player cancellation takes effect at an action boundary. Test cancellation,
+slow-client resynchronization, and clients that present already-completed travel
+updates more slowly than the simulation.
 Extend wizard object placement with supported container, door, lock, and item
 properties so interaction/travel failures can be reproduced without manual setup.
 
 ## 4: Dungeon gameplay
 
 Equipment, melee, two enemy types, different action durations/speeds, death and
-exit objective. Add seeded generation after hand-authored fixtures are reliable.
-Test deterministic combat, victory and persistent permadeath through both clients.
+exit objective. Player actors and mobs interact through the same action and world
+interfaces; distinct player, AI, and future bot controllers supply their intents.
+Add scenario and world-schema inputs before making seeded generation the default:
+support fully authored scenarios, fully generated scenarios, and authored
+scenarios with marked procedural-generation regions. Test deterministic combat,
+victory, persistent permadeath, and each scenario form through both clients.
 Add wizard mob placement with explicit supported archetypes and behavior settings;
 use placement, teleportation, and rewind to verify combat and death scenarios.
 
-## 5: History and release preparation
+## 5: Rogue-o-matic bot framework
+
+Build a rogue-o-matic client framework on the ordinary disclosed client view. It
+tracks received state, retained map memory, inventory and equipment, messages, and
+explicitly uncertain or inferred knowledge; it cannot access server world state.
+Provide a small action interface so multiple bot policies can be implemented on
+top, starting with deterministic exploration and scenario-driven test bots. Test
+that bots obey the same visibility, travel, and action boundaries as a human
+client.
+
+## 6: History and release preparation
 
 Scale wizard rewind/branching beyond the initial bounded implementation; add
 replay checksums, save-write recovery and packaged builds.
