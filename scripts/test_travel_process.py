@@ -145,6 +145,13 @@ class TravelProcesses(unittest.TestCase):
             self.addCleanup(lambda: user32.SetCursorPos(original.x, original.y))
             self.addCleanup(lambda: user32.mouse_event(0x0004, 0, 0, 0, 0))
             user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+            user32.WindowFromPoint.argtypes = [wintypes.POINT]
+            user32.WindowFromPoint.restype = wintypes.HWND
+            # Hosted desktops can be smaller than the default game window.
+            # Keep the test window and click target on screen and unobscured.
+            self.assertTrue(user32.SetWindowPos(handles[0], wintypes.HWND(-1), 0, 0,
+                min(1000, user32.GetSystemMetrics(0)), min(700, user32.GetSystemMetrics(1)), 0x0040))
             def mouse(down):
                 rect = wintypes.RECT()
                 user32.GetClientRect(handles[0], ctypes.byref(rect))
@@ -153,6 +160,10 @@ class TravelProcesses(unittest.TestCase):
                 user32.ClientToScreen(handles[0], ctypes.byref(point))
                 self.assertTrue(user32.SetCursorPos(point.x, point.y))
                 user32.SetForegroundWindow(handles[0])
+                actual = wintypes.POINT()
+                self.assertTrue(user32.GetCursorPos(ctypes.byref(actual)))
+                self.assertEqual((actual.x, actual.y), (point.x, point.y))
+                self.assertEqual(user32.WindowFromPoint(actual), handles[0], "Native click must hit the game window")
                 # Use real button state: synthetic WM_LBUTTONDOWN can be undone
                 # by a queued native WM_MOUSEMOVE reporting no held button.
                 user32.mouse_event(0x0002 if down else 0x0004, 0, 0, 0, 0)
