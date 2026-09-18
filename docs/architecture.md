@@ -7,8 +7,9 @@ immersive 3D clients using the same protocol. A game can continue across client
 switches. Initial gameplay is single player, with explicit actor identities and
 controllers so multiplayer can be designed later. Windows first; Linux portable.
 
-This document records intended architecture. Only the foundational types and
-stream-ordering behavior described in README.md are implemented initially.
+This document records intended architecture. Implemented behavior is described in
+[the simulation slice](simulation-slice.md); networking, richer perception, and
+the remaining milestones are still planned.
 
 ## Workspace boundaries
 
