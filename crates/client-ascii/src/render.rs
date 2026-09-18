@@ -61,7 +61,7 @@ impl Canvas {
     pub fn draw(&mut self, app: &App) {
         self.pixels.fill(BG);
         self.text(28, 24, "THRESHOLDS OF RUIN", TEXT, 2, 35);
-        self.text(28, 54, "ASCII / EXPEDITION", MUTED, 1, 60);
+        self.text(28, 54, &enclosure_label(app), MUTED, 1, 110);
         if app.state.as_ref().is_some_and(|s| s.state().wizard_game) {
             self.text(560, 30, "WIZARD GAME", GOLD, 2, 20);
         }
@@ -341,6 +341,33 @@ impl Canvas {
                 self.text(72, 180, "No history entries yet.", MUTED, 2, 60);
             }
         }
+    }
+}
+
+fn enclosure_label(app: &App) -> String {
+    let cell = app.state.as_ref().and_then(|s| {
+        s.state()
+            .observation
+            .visible_cells
+            .iter()
+            .find(|c| c.position == tor_protocol::Position { x: 0, y: 0, z: 0 })
+    });
+    match cell {
+        Some(c) if c.floor.is_some() || c.ceiling.is_some() => format!(
+            "FLOOR: {} / CEILING: {}",
+            c.floor
+                .as_ref()
+                .map_or_else(|| "not visible".into(), |s| s.material.clone()),
+            c.ceiling.as_ref().map_or_else(
+                || "not visible".into(),
+                |s| format!(
+                    "{} ({} ft above feet)",
+                    s.material,
+                    u64::from(s.distance) * 5
+                )
+            )
+        ),
+        _ => "ASCII / EXPEDITION".into(),
     }
 }
 

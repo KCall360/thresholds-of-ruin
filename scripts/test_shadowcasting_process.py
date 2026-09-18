@@ -58,7 +58,7 @@ class ShadowcastingProcesses(unittest.TestCase):
         self.assertEqual(window.child.wait(timeout=10),0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         text.stop(); observer.stop(); wizard.stop(); server.stop()
-        self.assertEqual(json.loads(self.save.read_text())["ruleset"],"doorway-v8")
+        self.assertEqual(json.loads(self.save.read_text())["ruleset"],"material-rims-v10")
         self.server(wizard=True)
         _, resumed=self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],closed["state"])

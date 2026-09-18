@@ -150,22 +150,39 @@ impl Dialogue {
 
     fn object(&mut self, noun: &str, state: &StateView, verb: &str) -> Intent {
         if verb == "examine"
-            && matches!(noun, "wall" | "walls" | "floor" | "the walls" | "the floor")
+            && matches!(
+                noun,
+                "wall" | "walls" | "floor" | "the walls" | "the floor" | "ceiling" | "the ceiling"
+            )
         {
             let walls = noun.contains("wall");
+            let ceiling = noun.contains("ceiling");
             let materials: BTreeSet<_> = state
                 .observation
                 .visible_cells
                 .iter()
-                .filter(|c| c.wall == walls)
-                .map(surface)
+                .filter_map(|c| {
+                    if walls {
+                        c.wall.then(|| surface(c))
+                    } else if ceiling {
+                        c.ceiling.as_ref().map(|s| s.material.as_str())
+                    } else {
+                        floor_material(c)
+                    }
+                })
                 .collect();
             return Intent::Say(if materials.is_empty() {
                 "You cannot see that here.".into()
             } else {
                 format!(
                     "The visible {} {} made of {}.",
-                    if walls { "walls" } else { "floor" },
+                    if walls {
+                        "walls"
+                    } else if ceiling {
+                        "ceiling"
+                    } else {
+                        "floor"
+                    },
                     if walls { "are" } else { "is" },
                     materials.into_iter().collect::<Vec<_>>().join(" and ")
                 )
@@ -484,6 +501,16 @@ fn surface(cell: &CellView) -> &str {
     }
 }
 
+fn floor_material(cell: &CellView) -> Option<&str> {
+    if cell.wall {
+        return None;
+    }
+    cell.floor
+        .as_ref()
+        .map(|s| s.material.as_str())
+        .or_else(|| (!cell.material.is_empty()).then_some(cell.material.as_str()))
+}
+
 fn indefinite(name: &str) -> String {
     let article = if name.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U']) {
         "an"
@@ -505,7 +532,12 @@ pub fn describe(state: &StateView) -> String {
         .find(|c| distance(c.position) == 0 && !c.wall);
     lines.push(floor.map_or_else(
         || "Your surroundings".into(),
-        |c| format!("You stand in a space with a {} floor.", safe(surface(c))),
+        |c| {
+            floor_material(c).map_or_else(
+                || "You stand in an open space.".into(),
+                |m| format!("You stand in a space with a {} floor.", safe(m)),
+            )
+        },
     ));
     let walls: BTreeSet<_> = o
         .visible_cells

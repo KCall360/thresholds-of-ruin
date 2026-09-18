@@ -41,6 +41,8 @@ pub struct ExitView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub floor: Option<(&'static str, u32)>,
+    pub ceiling: Option<(&'static str, u32)>,
     pub door: Option<tor_world::Door>,
     pub door_reachable: bool,
     pub door_approaches: Vec<Location>,
@@ -101,6 +103,31 @@ impl Game {
             }
         };
         let visible = |location: Location| cells.contains(&location);
+        let surface_scene = if self.legacy_perception {
+            vec![]
+        } else {
+            self.scene(id)?
+        };
+        let surface = |location, direction| {
+            if !self.material_surfaces {
+                return None;
+            }
+            let range = surface_scene
+                .iter()
+                .filter(|c| c.location == location)
+                .map(|c| {
+                    8u32.saturating_sub(
+                        c.offset.x.unsigned_abs()
+                            + c.offset.y.unsigned_abs()
+                            + c.offset.z.unsigned_abs(),
+                    )
+                })
+                .max()
+                .unwrap_or(0);
+            self.world
+                .vertical_surface(location, direction, range)
+                .map(|(m, d)| (m.name(), d))
+        };
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         for (&item_id, item) in &self.items {
@@ -136,6 +163,8 @@ impl Game {
             visible_cells: cells
                 .iter()
                 .map(|&location| CellView {
+                    floor: surface(location, Direction::Down),
+                    ceiling: surface(location, Direction::Up),
                     door: self.world.door(location),
                     door_reachable: self.world.door(location).is_some()
                         && self.door_reachable_from(actor.location, location),
@@ -144,7 +173,11 @@ impl Game {
                     } else {
                         vec![]
                     },
-                    material: "stone",
+                    material: match self.world.terrain(location) {
+                        Some(tor_world::Terrain::Solid(material)) => material.name(),
+                        _ if self.world.is_chamber(location.region) => "",
+                        _ => "stone", // Historical cosmetic surface for raw/legacy regions.
+                    },
                     location,
                     wall: self.world.is_wall(location),
                     place_hint: self.world.has_place_hint(location),

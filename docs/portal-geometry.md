@@ -9,7 +9,7 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `doorway-v8`, with [symmetric shadowcasting](shadowcasting.md)
+New games use `material-rims-v10`, with [symmetric shadowcasting](shadowcasting.md)
 within eight Manhattan steps. Topology is resolved separately from opacity;
 clockwise quarter turns around z and translation map observer offsets across
 joins. Crossing consumes distance, including self-links and cycles. A physical
@@ -79,7 +79,7 @@ the same identity. Wide joins require the new ruleset.
 
 ## Protocol and memory
 
-Protocol **9** sends positions as relative x/y/z offsets, with the actor at zero.
+Protocol **10** sends positions as relative x/y/z offsets, with the actor at zero.
 Each visible cell carries an opaque key, position, wall flag, and semantic stair
 flags. Items carry `reachable`; sight does not grant pickup reach. Movement
 history reports the chosen direction. Observations and history contain no region
@@ -119,7 +119,7 @@ memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`doorway-v8`; earlier saves retain their original rules.
+`material-rims-v10`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

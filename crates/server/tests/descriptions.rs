@@ -27,5 +27,5 @@ fn appearance_is_disclosed_with_objects_and_survives_replay_without_changing_rul
     let resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
     assert_eq!(resumed.observation(ActorId(1)).unwrap(), view);
     let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(archive["ruleset"], "doorway-v8");
+    assert_eq!(archive["ruleset"], "material-rims-v10");
 }

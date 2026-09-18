@@ -166,6 +166,9 @@ pub enum WizardItem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardOperation {
+    PlaceChamber {
+        region: RegionView,
+    },
     PlaceDoor {
         position: Position,
         open: bool,

@@ -126,6 +126,8 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        floor: None,
+        ceiling: None,
         door: None,
         material: "stone".into(),
         key: "wall".into(),

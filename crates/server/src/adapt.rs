@@ -82,6 +82,14 @@ pub fn observation(
             continue;
         };
         visible_cells.push(p::CellView {
+            floor: visible.floor.map(|(material, distance)| p::SurfaceView {
+                material: material.into(),
+                distance,
+            }),
+            ceiling: visible.ceiling.map(|(material, distance)| p::SurfaceView {
+                material: material.into(),
+                distance,
+            }),
             door: visible.door.map(|door| p::DoorView {
                 id: door.id,
                 name: "wooden door".into(),

@@ -34,8 +34,11 @@ The client crates cannot depend on world or simulation crates.
 ## Geometry and barriers
 
 Regions are bounded rectangular 3D volumes with integer local coordinates.
-Cells are square horizontally; elevations use an integer z coordinate. Separate
-regions make sparse allocation natural. Dense, chunked, or sparse cell storage
+Cells are five-foot cubes; elevations use an integer z coordinate.
+[Material volumes](material-volumes.md) define finite stone storage with carved
+interiors, including floors and ceilings. Standard interiors are two cells high.
+Terrain occupancy and backend material identity are separate; unallocated space
+is neither empty terrain nor stone. Separate regions make sparse allocation natural. Dense, chunked, or sparse cell storage
 within a region is an implementation choice to measure later.
 
 Clients know nothing about regions, portals, or their transforms. The backend
@@ -133,7 +136,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 9](protocol.md) for the implemented format.
+visibility rules. See [protocol version 10](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -200,8 +203,8 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 9 and save format 3 support the current interface; normal format-1 saves migrate
-on open. New games use doorway-v8; existing saves retain their ruleset.
+version 10 and save format 3 support the current interface; normal format-1 saves migrate
+on open. New games use material-rims-v10; existing saves retain their ruleset.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII

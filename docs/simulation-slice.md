@@ -6,10 +6,12 @@ wall-clock access, or implicit random sampling.
 
 ## Scenario and geometry
 
-`Game::two_room_with_doorway(seed)` creates two 5 x 3 x 1 rooms connected
-through a 1 x 1 hall containing an initially open wooden door. The hallway is
-stored in the extra east column of region 1, with wall cells north and south;
-region 2 remains the Gallery. Storage regions are not player-facing rooms.
+`Game::two_room_in_stone(seed)` creates two 5 x 3 x 2 empty room interiors
+inside finite stone shells, connected through a 1 x 1 hall with two empty height
+layers and an initially open wooden door. The hallway is
+stored in the extra east column of region 1, with solid cells north and south;
+both regions include an additional one-cell stone shell on every face.
+Storage regions are not player-facing rooms.
 Only the two room interiors have place hints, at local (2,1,0); the hall has none.
 
 Start an actor at region 1, position (1,1,0), on the seeded token. The stone tablet
@@ -69,8 +71,8 @@ controller ownership without changing these simulation rules.
 
 ## Perception and inventory
 
-New games compute cells within eight Manhattan steps using integer rays through
-rotated, potentially multi-cell joins. Walls stop movement and sight; vertical
+New games compute horizontal cells within eight Manhattan steps using symmetric
+shadowcasting through rotated, potentially multi-cell joins. Walls stop movement and sight; vertical
 sight follows explicit links. The backend projects visible occurrences into the
 actor’s frame. Clients receive relative positions and opaque cell keys, never
 internal region coordinates, names, bounds, or links. Orientation follows the
@@ -83,7 +85,7 @@ error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
 `two-room-v1` saves retain original whole-room perception; new saves use
-`doorway-v8`. Sound remains later work. New server games add an initially
+`material-rims-v10`. Sound remains later work. New server games add an initially
 open door; older fixtures retain their original rules.
 
 ## Validation and remaining work
@@ -106,7 +108,7 @@ process tests, including cross-frontend control transfer and save/resume.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`doorway-v8`; earlier saves retain their original rules.
+`material-rims-v10`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

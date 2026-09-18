@@ -137,6 +137,20 @@ travel targets the far room rather than stopping in the doorway. Seven previous
 rulesets retain their original layouts. Server and actual-client tests cover
 hall geometry, crossing, sight obstruction, text navigation, save and rewind.
 
+Implemented: [finite material volumes](material-volumes.md), five-foot cubes,
+two-cell-high carved interiors, stone shells with floors and ceilings, bounded
+surface disclosure, and wizard chamber authoring. Protocol 10 and
+material-rims-v10 preserve all nine earlier rulesets. The doorway rim correction
+verifies solid/empty corners from every floor position through all rotations,
+plus the three reported viewpoints in the actual ASCII client. World tests verify
+storage-independent views through ordinary and rotated joins; real text/headless/
+native ASCII acceptance covers normal play, stale surfaces, edits, rewind and
+resume. Gravity, falling, digging, destruction, and body clearance remain deferred.
+Buffered journal serialization also reduces movement latency while retaining
+explicit flush, disk sync, and atomic replacement. A diagnostic benchmark separates
+perception costs from save costs; long-history storage improvements remain deferred.
+Richer perceived events are still pending in milestone 2.
+
 ## 3: Interactions and travel
 
 Implemented first travel slice: [backend travel to known cells](travel.md), ASCII
