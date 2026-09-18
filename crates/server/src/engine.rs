@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::fs;
+use std::io::{BufWriter, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,7 +18,9 @@ use crate::journal::{
 
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "doorway-v8";
+const RULESET: &str = "material-rims-v10";
+const MATERIAL_V9_RULESET: &str = "material-volumes-v9";
+const DOORWAY_V8_RULESET: &str = "doorway-v8";
 const SHADOW_V7_RULESET: &str = "shadowcasting-v7";
 const DOORS_V6_RULESET: &str = "doors-v6";
 const TRAVEL_V5_RULESET: &str = "travel-v5";
@@ -143,7 +146,9 @@ impl Engine {
     }
 
     fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = if ruleset == RULESET {
+        let mut game = if matches!(ruleset, RULESET | MATERIAL_V9_RULESET) {
+            Game::two_room_in_stone(scenario.seed)
+        } else if ruleset == DOORWAY_V8_RULESET {
             Game::two_room_with_doorway(scenario.seed)
         } else if matches!(
             ruleset,
@@ -153,7 +158,10 @@ impl Engine {
         } else {
             Game::two_room(scenario.seed)
         };
-        if !matches!(ruleset, RULESET | SHADOW_V7_RULESET) {
+        if !matches!(
+            ruleset,
+            RULESET | MATERIAL_V9_RULESET | DOORWAY_V8_RULESET | SHADOW_V7_RULESET
+        ) {
             game.use_ray_perception();
         }
         if ruleset == PORTAL_V2_RULESET {
@@ -174,6 +182,9 @@ impl Engine {
             )
             .map_err(|_| invalid_archive())?;
         }
+        if ruleset == MATERIAL_V9_RULESET {
+            game.use_initial_material_rims();
+        }
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
@@ -187,7 +198,12 @@ impl Engine {
         }
         if matches!(
             ruleset,
-            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+            RULESET
+                | MATERIAL_V9_RULESET
+                | DOORWAY_V8_RULESET
+                | SHADOW_V7_RULESET
+                | DOORS_V6_RULESET
+                | TRAVEL_V5_RULESET
         ) {
             game.refresh_navigation();
         }
@@ -244,6 +260,8 @@ impl Engine {
             || !matches!(
                 archive.ruleset.as_str(),
                 RULESET
+                    | MATERIAL_V9_RULESET
+                    | DOORWAY_V8_RULESET
                     | SHADOW_V7_RULESET
                     | DOORS_V6_RULESET
                     | TRAVEL_V5_RULESET
@@ -375,7 +393,12 @@ impl Engine {
         };
         if !matches!(
             self.archive.ruleset.as_str(),
-            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+            RULESET
+                | MATERIAL_V9_RULESET
+                | DOORWAY_V8_RULESET
+                | SHADOW_V7_RULESET
+                | DOORS_V6_RULESET
+                | TRAVEL_V5_RULESET
         ) {
             return Err(unavailable());
         }
@@ -598,7 +621,11 @@ impl Engine {
                 if matches!(action, tor_protocol::Action::SetDoor { .. })
                     && !matches!(
                         self.archive.ruleset.as_str(),
-                        RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET
+                        RULESET
+                            | MATERIAL_V9_RULESET
+                            | DOORWAY_V8_RULESET
+                            | SHADOW_V7_RULESET
+                            | DOORS_V6_RULESET
                     )
                 {
                     return Err(Failure::new(
@@ -664,7 +691,12 @@ impl Engine {
         };
         if matches!(
             candidate.archive.ruleset.as_str(),
-            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+            RULESET
+                | MATERIAL_V9_RULESET
+                | DOORWAY_V8_RULESET
+                | SHADOW_V7_RULESET
+                | DOORS_V6_RULESET
+                | TRAVEL_V5_RULESET
         ) {
             candidate.game.refresh_navigation();
         }
@@ -735,7 +767,11 @@ impl Engine {
             WizardOperation::PlaceDoor { position, open } => {
                 if !matches!(
                     self.archive.ruleset.as_str(),
-                    RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET
+                    RULESET
+                        | MATERIAL_V9_RULESET
+                        | DOORWAY_V8_RULESET
+                        | SHADOW_V7_RULESET
+                        | DOORS_V6_RULESET
                 ) {
                     return Err(Failure::new(
                         ErrorCode::InvalidAction,
@@ -772,7 +808,13 @@ impl Engine {
                     .map_err(|_| invalid())?;
                 WizardResult::Connected
             }
-            WizardOperation::PlaceRoom { region } => {
+            WizardOperation::PlaceRoom { region } | WizardOperation::PlaceChamber { region } => {
+                let chamber = matches!(operation, WizardOperation::PlaceChamber { .. });
+                if chamber
+                    && !matches!(self.archive.ruleset.as_str(), RULESET | MATERIAL_V9_RULESET)
+                {
+                    return Err(invalid());
+                }
                 // Bound setup and disclosure work independently of wire limits.
                 if region.id == 0
                     || region.name.is_empty()
@@ -784,14 +826,18 @@ impl Engine {
                 {
                     return Err(invalid());
                 }
-                self.game
-                    .add_region(tor_world::Region {
-                        id: tor_world::RegionId(region.id),
-                        name: region.name.clone(),
-                        bounds: tor_world::Extent::new(region.width, region.depth, region.height)
-                            .ok_or_else(invalid)?,
-                    })
-                    .map_err(|_| invalid())?;
+                let room = tor_world::Region {
+                    id: tor_world::RegionId(region.id),
+                    name: region.name.clone(),
+                    bounds: tor_world::Extent::new(region.width, region.depth, region.height)
+                        .ok_or_else(invalid)?,
+                };
+                if chamber {
+                    self.game.add_chamber(room)
+                } else {
+                    self.game.add_region(room)
+                }
+                .map_err(|_| invalid())?;
                 WizardResult::RoomPlaced { region: region.id }
             }
             WizardOperation::Connect {
@@ -816,6 +862,8 @@ impl Engine {
                 if !matches!(
                     self.archive.ruleset.as_str(),
                     RULESET
+                        | MATERIAL_V9_RULESET
+                        | DOORWAY_V8_RULESET
                         | SHADOW_V7_RULESET
                         | DOORS_V6_RULESET
                         | TRAVEL_V5_RULESET
@@ -1013,8 +1061,13 @@ impl Engine {
         fs::create_dir_all(parent).map_err(|_| storage_failure())?;
         let mut temporary =
             tempfile::NamedTempFile::new_in(parent).map_err(|_| storage_failure())?;
-        serde_json::to_writer(temporary.as_file_mut(), &self.archive)
-            .map_err(|_| storage_failure())?;
+        {
+            // JSON emits many small writes. Buffer them before touching the file;
+            // explicitly propagate flush failures before syncing or publishing.
+            let mut writer = BufWriter::new(temporary.as_file_mut());
+            serde_json::to_writer(&mut writer, &self.archive).map_err(|_| storage_failure())?;
+            writer.flush().map_err(|_| storage_failure())?;
+        }
         temporary
             .as_file()
             .sync_all()

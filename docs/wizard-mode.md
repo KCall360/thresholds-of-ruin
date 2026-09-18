@@ -41,8 +41,8 @@ the service; session accounts must separately have `AccessRole::Wizard`.
 ## Text commands
 
 The client forwards developer text without interpreting its geometry; only the
-server parses these commands. Coordinates in this developer console are region-local integers, with north decreasing y. The fixture has
-regions 1 and 2, each 5 by 3 by 1. Supported commands are:
+server parses these commands. Coordinates in this developer console are region-local integers, with north decreasing y. The current fixture has two 5 by 3 by 2 interiors and an adjoining
+hall stored with region 1; stone shells extend one cell beyond the interiors. Supported commands are:
 
 | Command | Behavior |
 | --- | --- |
@@ -85,7 +85,7 @@ authenticated author and actor, and public history contains only a sanitized
 summary and rewind flag. Full parameters/results remain in the backend journal.
 Ordinary action/result disclosure and note audiences retain their normal rules.
 
-Protocol version **9** retains role `wizard`, required `state.wizard_game`, and
+Protocol version **10** retains role `wizard`, required `state.wizard_game`, and
 `history_branch`. Developer input is opaque text parsed only by the server;
 observations are backend-resolved scenes without internal geometry. Snapshots use
 an empty request ID and establish an explicit stream boundary after setup/rewind;
@@ -100,7 +100,7 @@ Save format **3** preserves the root branch, permanent marker, and chronological
 records with authenticated receipts. Replaying the records reconstructs all
 branches and the bounded decision cache; the final branch is determined by the
 rewind records. Normal format-1 saves migrate on successful open while retaining
-`two-room-v1`. New games use `doorway-v8`; wide joins also remain supported
+`two-room-v1`. New games use `material-rims-v10`; wide joins also remain supported
 in `observer-scene-v3`.
 Legacy rules remain unchanged. Older servers cannot load the new ruleset. Rewind restores complete
 simulation state, including scheduler, knowledge, inventory, and ID allocation.
@@ -249,8 +249,11 @@ existing fixtures and process tests must still verify each new feature.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`doorway-v8`; earlier saves retain their original rules.
+`material-rims-v10`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
 now adds text travel and approach-then-pickup.
+
+Use `wizard chamber <id> <width> <depth> <height> <name>` in new-rule games
+to author enclosed interiors; see [material volumes](material-volumes.md).

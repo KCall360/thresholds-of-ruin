@@ -35,10 +35,13 @@ Escape cancellation. The [text adventure interface](docs/text-adventure.md) adds
 prose, examination, conversational clarification, travel and approach-then-pickup.
 [Independent doors](docs/doors.md) now support open/close actions, sight and
 movement obstruction, text approach intentions, and ASCII O/C then direction controls. New
-games include an open wooden door in an unhinted 1x1 hall between the rooms; new saves use `doorway-v8`.
+games include an open wooden door in an unhinted 1x1 hall between the rooms.
 [Symmetric shadowcasting](docs/shadowcasting.md) allows sight around door corners
 while preserving shadows behind closed doors. Existing saves retain their original
-rules. Server and clients use protocol 9.
+rules. Server and clients use protocol 10.
+New games now use [finite material volumes](docs/material-volumes.md): 5-foot
+cubes, 10-foot room interiors, and actual stone walls, floors, and ceilings.
+New saves use `material-rims-v10`; existing saves keep their original rules.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

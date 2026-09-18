@@ -28,6 +28,34 @@ fn ordinary_prose_has_objects_and_ways_without_debug_metadata() {
 }
 
 #[test]
+fn enclosure_prose_uses_disclosed_surfaces_and_does_not_invent_missing_ones() {
+    let mut s = state();
+    for c in &mut s.observation.visible_cells {
+        c.material.clear();
+    }
+    let here = &mut s.observation.visible_cells[0];
+    here.floor = Some(SurfaceView {
+        material: "stone".into(),
+        distance: 1,
+    });
+    here.ceiling = Some(SurfaceView {
+        material: "stone".into(),
+        distance: 2,
+    });
+    assert!(describe(&s).contains("stone floor"));
+    let mut dialogue = Dialogue::default();
+    assert!(
+        matches!(dialogue.interpret("examine ceiling", &s), Intent::Say(text) if text.contains("stone"))
+    );
+    s.observation.visible_cells[0].ceiling = None;
+    assert!(
+        matches!(dialogue.interpret("examine ceiling", &s), Intent::Say(text) if text == "You cannot see that here.")
+    );
+    s.observation.visible_cells[0].floor = None;
+    assert!(!describe(&s).contains("floor."));
+}
+
+#[test]
 fn items_in_the_current_place_are_nearby_but_other_places_keep_directions() {
     let mut s = state();
     // Move within the first place, leaving the token behind.

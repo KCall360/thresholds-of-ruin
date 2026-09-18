@@ -152,4 +152,8 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. New saves use doorway-v8; old saves keep their rules.
+automatically opens a door. New saves use material-rims-v10; old saves keep their rules.
+
+[Material volumes](material-volumes.md) add real stone enclosure and
+`examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling
+facts; missing enclosure is not inferred from a storage boundary.

@@ -1,6 +1,6 @@
 # Doors
 
-Doors were introduced in **doors-v6**. New games use **doorway-v8**, with an
+Doors were introduced in **doors-v6**. New games use **material-rims-v10**, with an
 initially open wooden door in a 1x1 hall between two 5x3 rooms. The hall has no
 place hint; each room retains its own interior anchor for text navigation.
 
@@ -13,7 +13,7 @@ place hint; each room retains its own interior anchor for text navigation.
 Here `/` is the open door and `#` the walls flanking its one-cell hall. Doors
 remain independent, cell-sized world entities: interior doors and doors on join
 endpoints obey the same rules. Opening or closing does not change topology.
-Protocol **9** and save format **3** are unchanged.
+Protocol **10** adds surface facts; save format **3** is unchanged.
 
 ## Playing
 
@@ -88,7 +88,7 @@ Existing `two-room-v1`, `portal-sight-v2`, `observer-scene-v3`, `place-hints-v4`
 `travel-v5` saves retain their original fixture, replay, and rules, with no doors.
 They reject door placement and manipulation; travel-v5 continues supporting
 travel. The doors-v6 and shadowcasting-v7 fixtures retain their original interior door.
-No existing game is silently upgraded. All clients must use protocol 9.
+No existing game is silently upgraded. All clients must use protocol 10.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 

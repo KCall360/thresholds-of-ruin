@@ -1,8 +1,8 @@
 # Backend travel and ASCII destinations
 
-`travel-v5`, `doors-v6`, `shadowcasting-v7`, and new `doorway-v8` games support travel to an actor's known cell,
+`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`, and new `material-rims-v10` games support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 9 is required. Save format remains 3.
+region names, and frontend language. Protocol 10 is required. Save format remains 3.
 
 ## ASCII controls
 
@@ -109,7 +109,7 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-New saves use `doorway-v8`; `travel-v5` retains travel support. The four earlier
+New saves use `material-rims-v10`; `travel-v5` retains travel support. The four earlier
 rulesets retain their original behavior and reject travel. `place-hints-v4`
 continues supporting authored hints and edits.
 No existing save is silently upgraded to new gameplay rules or wizard mode.

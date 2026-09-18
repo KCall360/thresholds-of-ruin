@@ -92,6 +92,7 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    material_surfaces: bool,
     navigation: BTreeMap<ActorId, travel::Navigation>,
     world: World,
     legacy_perception: bool,
@@ -109,6 +110,7 @@ pub struct Game {
 impl Game {
     pub fn new(world: World, seed: u64) -> Self {
         Self {
+            material_surfaces: false,
             navigation: BTreeMap::new(),
             world,
             legacy_perception: false,
@@ -282,6 +284,20 @@ impl Game {
         self.world
             .add_region(region)
             .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn add_chamber(&mut self, region: Region) -> Result<(), GameError> {
+        if self.legacy_perception {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .add_chamber(region)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    /// Original material-volume sight retained only for older saved rules.
+    pub fn use_initial_material_rims(&mut self) {
+        self.world.use_initial_material_rims();
     }
 
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), GameError> {

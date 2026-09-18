@@ -6,7 +6,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let position = |v: &[&str]| -> Result<Position, String> {
         Ok(Position {
             region: v[0].parse().map_err(|_| usage)?,
@@ -42,15 +42,18 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                 height: height.parse().map_err(|_| usage)?,
             }
         }
-        ["room", id, width, depth, height, name @ ..] if !name.is_empty() => {
-            WizardOperation::PlaceRoom {
-                region: RegionView {
-                    id: id.parse().map_err(|_| usage)?,
-                    name: name.join(" "),
-                    width: width.parse().map_err(|_| usage)?,
-                    depth: depth.parse().map_err(|_| usage)?,
-                    height: height.parse().map_err(|_| usage)?,
-                },
+        [kind @ ("room" | "chamber"), id, width, depth, height, name @ ..] if !name.is_empty() => {
+            let region = RegionView {
+                id: id.parse().map_err(|_| usage)?,
+                name: name.join(" "),
+                width: width.parse().map_err(|_| usage)?,
+                depth: depth.parse().map_err(|_| usage)?,
+                height: height.parse().map_err(|_| usage)?,
+            };
+            if *kind == "chamber" {
+                WizardOperation::PlaceChamber { region }
+            } else {
+                WizardOperation::PlaceRoom { region }
             }
         }
         ["connect", r, x, y, z, facing, r2, x2, y2, z2, turns] => WizardOperation::Connect {

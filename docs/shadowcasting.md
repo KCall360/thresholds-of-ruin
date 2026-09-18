@@ -1,8 +1,9 @@
 # Symmetric shadowcasting
 
 Symmetric shadowcasting was introduced in **shadowcasting-v7**. New games use
-**doorway-v8**, which keeps that perception and moves the fixture door into an
-unhinted one-cell hall. Protocol 9 and save format 3 are unchanged.
+**material-rims-v10**, which keeps that perception and adds finite stone
+enclosure to the doorway-v8 fixture. Protocol 10 adds floor/ceiling surfaces;
+save format 3 is unchanged. See [material volumes](material-volumes.md).
 The six earlier rulesets retain their original behavior, including doors-v6's
 strict cell-centre rays. Restarting an old save does not upgrade its perception.
 

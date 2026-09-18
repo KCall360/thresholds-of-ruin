@@ -137,7 +137,7 @@ impl World {
             },
             ..origin
         };
-        if self.contains(direct) {
+        if self.within_aperture_bounds(origin) && self.within_aperture_bounds(direct) {
             return Some((direct, orientation % 4));
         }
         let (nx, ny) = (dx.abs(), dy.abs());

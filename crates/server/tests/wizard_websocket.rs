@@ -89,6 +89,15 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
         let (mut spectator, _) = connect(&address, AccessRole::Spectator).await;
         assert_eq!(initial.state.wizard_game, enabled);
         let operations = [
+            WizardOperation::PlaceChamber {
+                region: RegionView {
+                    id: 99,
+                    name: "Stone chamber".into(),
+                    width: 5,
+                    depth: 3,
+                    height: 2,
+                },
+            },
             WizardOperation::PlaceDoor {
                 position: Position {
                     region: 1,

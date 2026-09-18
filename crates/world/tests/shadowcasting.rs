@@ -79,8 +79,27 @@ fn room_walls_are_visible_and_diagonally_touching_blockers_allow_sight() {
 }
 #[test]
 fn broad_rotated_join_matches_one_room_with_doors_and_walls() {
-    let mut whole = World::new(vec![room(1, 10, 5)], vec![]).unwrap();
-    let mut split = World::new(vec![room(1, 5, 5), room(2, 5, 5)], vec![]).unwrap();
+    check_rotated_join(false);
+}
+#[test]
+fn enclosed_rotated_join_matches_one_volume_from_both_sides() {
+    check_rotated_join(true);
+}
+fn check_rotated_join(enclosed: bool) {
+    let build = |rooms: Vec<Region>| {
+        let mut world = World::new(vec![], vec![]).unwrap();
+        for region in rooms {
+            if enclosed {
+                world.add_chamber(region)
+            } else {
+                world.add_region(region)
+            }
+            .unwrap();
+        }
+        world
+    };
+    let mut whole = build(vec![room(1, 10, 5)]);
+    let mut split = build(vec![room(1, 5, 5), room(2, 5, 5)]);
     split
         .connect_area(
             Passage {

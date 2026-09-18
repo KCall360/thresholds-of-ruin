@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Extent, Position};
+use crate::{Extent, Material, Position, Terrain};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RegionId(pub u64);
@@ -78,11 +78,14 @@ pub enum WorldError {
 /// Validated region topology with stable iteration order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct World {
+    initial_material_rims: bool,
     doors: BTreeMap<Location, Door>,
     regions: BTreeMap<RegionId, Region>,
     passages: BTreeMap<(Location, Direction), Passage>,
     rotations: BTreeMap<(Location, Direction), u8>,
-    walls: BTreeSet<Location>,
+    terrain: BTreeMap<Location, Terrain>,
+    /// Carved interior extents also locate join apertures; storage includes a shell.
+    chambers: BTreeMap<RegionId, Extent>,
     place_hints: BTreeSet<Location>,
 }
 
@@ -130,11 +133,13 @@ impl World {
 
     pub fn new(regions: Vec<Region>, passages: Vec<Passage>) -> Result<Self, WorldError> {
         let mut world = Self {
+            initial_material_rims: false,
             doors: BTreeMap::new(),
             regions: BTreeMap::new(),
             passages: BTreeMap::new(),
             rotations: BTreeMap::new(),
-            walls: BTreeSet::new(),
+            terrain: BTreeMap::new(),
+            chambers: BTreeMap::new(),
             place_hints: BTreeSet::new(),
         };
         for region in regions {
@@ -156,6 +161,68 @@ impl World {
         Ok(())
     }
 
+    /// Allocate finite stone and carve the requested interior. Joins override
+    /// adjacent shell cells, so a storage partition does not create a barrier.
+    pub fn add_chamber(&mut self, mut region: Region) -> Result<(), WorldError> {
+        let interior = region.bounds;
+        region.bounds = interior.with_shell().ok_or(WorldError::InvalidEndpoint)?;
+        let id = region.id;
+        self.add_region(region)?;
+        self.chambers.insert(id, interior);
+        Ok(())
+    }
+
+    pub fn terrain(&self, location: Location) -> Option<Terrain> {
+        if !self.contains(location) {
+            return None;
+        }
+        Some(self.terrain.get(&location).copied().unwrap_or_else(|| {
+            if self
+                .chambers
+                .get(&location.region)
+                .is_some_and(|bounds| !bounds.contains(location.position))
+            {
+                Terrain::Solid(Material::Stone)
+            } else {
+                Terrain::Empty
+            }
+        }))
+    }
+
+    pub fn is_chamber(&self, region: RegionId) -> bool {
+        self.chambers.contains_key(&region)
+    }
+
+    /// Conservative vertical surface probe in allocated space. It follows no
+    /// stair teleport, stops at the first obstruction, and never invents a shell.
+    pub fn vertical_surface(
+        &self,
+        from: Location,
+        direction: Direction,
+        range: u32,
+    ) -> Option<(Material, u32)> {
+        if !matches!(direction, Direction::Up | Direction::Down) || !self.walkable(from) {
+            return None;
+        }
+        let mut location = from;
+        for distance in 1..=range.min(16) {
+            location.position = direction.offset(location.position)?;
+            match self.terrain(location)? {
+                Terrain::Solid(material) => return Some((material, distance)),
+                Terrain::Empty if self.opaque(location) => return None,
+                Terrain::Empty => {}
+            }
+        }
+        None
+    }
+
+    pub(crate) fn within_aperture_bounds(&self, location: Location) -> bool {
+        self.chambers
+            .get(&location.region)
+            .or_else(|| self.region(location.region).map(|r| &r.bounds))
+            .is_some_and(|bounds| bounds.contains(location.position))
+    }
+
     /// Clockwise quarter turns about z transform sight after crossing. Connections
     /// are directed: callers must explicitly construct and validate reverse links.
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), WorldError> {
@@ -172,10 +239,10 @@ impl World {
                 .direction
                 .offset(passage.from.position)
                 .is_some_and(|position| {
-                    self.contains(Location {
-                        position,
-                        ..passage.from
-                    })
+                    self.chambers
+                        .get(&passage.from.region)
+                        .or_else(|| self.region(passage.from.region).map(|r| &r.bounds))
+                        .is_some_and(|bounds| bounds.contains(position))
                 })
         {
             return Err(WorldError::NotBoundaryExit);
@@ -263,11 +330,14 @@ impl World {
         if !self.contains(location) || (wall && self.doors.contains_key(&location)) {
             return Err(WorldError::InvalidEndpoint);
         }
-        if wall {
-            self.walls.insert(location);
-        } else {
-            self.walls.remove(&location);
-        }
+        self.terrain.insert(
+            location,
+            if wall {
+                Terrain::Solid(Material::Stone)
+            } else {
+                Terrain::Empty
+            },
+        );
         Ok(())
     }
 
@@ -290,7 +360,7 @@ impl World {
     }
 
     pub fn is_wall(&self, location: Location) -> bool {
-        self.walls.contains(&location)
+        matches!(self.terrain(location), Some(Terrain::Solid(_)))
     }
 
     pub fn walkable(&self, location: Location) -> bool {
@@ -320,6 +390,119 @@ impl World {
     ) -> Option<(Location, u8)> {
         if let Some(passage) = self.passage(from, direction) {
             return Some((passage.to, self.rotations[&(from, direction)]));
+        }
+        if self.initial_material_rims {
+            return self.initial_rim_step(from, direction);
+        }
+        if self.chambers.contains_key(&from.region) {
+            return self.rim_step(from, direction);
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
+
+    /// Resolve a consistent transform across the solid portion of a chamber
+    /// face. A solid/floor rim is as important as a solid/solid rim: the former
+    /// occurs at narrow doors. This never creates an unadvertised floor/floor
+    /// opening. Several incompatible transforms leave the geometry unresolved.
+    fn rim_step(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
+        let mut projected = None;
+        for passage in self.exits(from.region).filter(|p| p.direction == direction) {
+            let a = passage.from.position;
+            let b = from.position;
+            let same_plane = match direction {
+                Direction::East | Direction::West => a.x == b.x,
+                Direction::North | Direction::South => a.y == b.y,
+                Direction::Up | Direction::Down => a.z == b.z,
+            };
+            if !same_plane {
+                continue;
+            }
+            let dx = i64::from(b.x) - i64::from(a.x);
+            let dy = i64::from(b.y) - i64::from(a.y);
+            let dz = i64::from(b.z) - i64::from(a.z);
+            let turns = self.crossing_rotation(passage.from, direction);
+            let (dx, dy) = match turns {
+                0 => (dx, dy),
+                1 => (-dy, dx),
+                2 => (-dx, -dy),
+                _ => (dy, -dx),
+            };
+            let to = Location {
+                region: passage.to.region,
+                position: Position {
+                    x: i32::try_from(i64::from(passage.to.position.x) + dx).ok()?,
+                    y: i32::try_from(i64::from(passage.to.position.y) + dy).ok()?,
+                    z: i32::try_from(i64::from(passage.to.position.z) + dz).ok()?,
+                },
+            };
+            let candidate = (to, turns);
+            if projected.is_some_and(|old| old != candidate) {
+                return None;
+            }
+            projected = Some(candidate);
+        }
+        if let Some((to, turns)) = projected {
+            if self.contains(to) && (self.is_wall(from) || self.is_wall(to)) {
+                return Some((to, turns));
+            }
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
+
+    /// Preserve the original material-volumes-v9 perception for journal replay.
+    pub fn use_initial_material_rims(&mut self) {
+        self.initial_material_rims = true;
+    }
+
+    fn initial_rim_step(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
+        if self.chambers.contains_key(&from.region) && self.is_wall(from) {
+            let mut rim = None;
+            for side in [
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
+                Direction::Up,
+                Direction::Down,
+            ] {
+                let Some(position) = side.offset(from.position) else {
+                    continue;
+                };
+                let neighbor = Location { position, ..from };
+                if let Some(passage) = self.passage(neighbor, direction) {
+                    let turns = self.crossing_rotation(neighbor, direction);
+                    let opposite = match side {
+                        Direction::Up => Direction::Down,
+                        Direction::Down => Direction::Up,
+                        value => value.rotated(2),
+                    };
+                    let Some(position) = opposite.rotated(turns).offset(passage.to.position) else {
+                        continue;
+                    };
+                    let to = Location {
+                        position,
+                        ..passage.to
+                    };
+                    if self.is_wall(to) {
+                        let candidate = (to, turns);
+                        if rim.is_some_and(|old| old != candidate) {
+                            return None;
+                        }
+                        rim = Some(candidate);
+                    }
+                }
+            }
+            if rim.is_some() {
+                return rim;
+            }
         }
         let to = Location {
             position: direction.offset(from.position)?,
