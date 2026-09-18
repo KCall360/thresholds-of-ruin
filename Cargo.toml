@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/world",
+    "crates/simulation",
+    "crates/protocol",
+    "crates/server",
+    "crates/client-common",
+    "crates/client-ascii",
+    "crates/client-text",
+    "crates/test-support",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/KCall360/thresholds-of-ruin"
+
+[workspace.dependencies]
+tor-world = { path = "crates/world" }
+tor-simulation = { path = "crates/simulation" }
+tor-protocol = { path = "crates/protocol" }
+tor-client-common = { path = "crates/client-common" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
