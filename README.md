@@ -23,11 +23,20 @@ and Clippy.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo test --workspace --release --locked
+python -m unittest discover -s scripts -p "test_*.py" -v
+python scripts/check_architecture.py
 ```
 
-GitHub Actions runs these checks on Windows and Linux. The initial integration
+Python 3 is used only for development checks; the game remains Rust. The boundary
+checker reads Cargo metadata, including optional and platform-specific edges.
+GitHub Actions runs these checks on Windows and Linux and builds Rust documentation
+with warnings treated as errors. The initial integration
 tests exercise crate boundaries; actual frontend launch tests will be added
 alongside the first runnable clients.
+
+Dependabot checks weekly for Rust dependency and GitHub Actions updates and
+opens reviewable pull requests; updates are not automatically merged.
 
 Read [the architecture](docs/architecture.md), [milestones](docs/milestones.md),
 and [development practices](CONTRIBUTING.md) before making changes.

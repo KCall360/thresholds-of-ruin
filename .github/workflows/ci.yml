@@ -29,5 +29,15 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint all targets
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test dependency-boundary checker
+        run: python -m unittest discover -s scripts -p "test_*.py" -v
+      - name: Enforce workspace dependency boundaries
+        run: python scripts/check_architecture.py
+      - name: Build documentation without warnings
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --document-private-items --locked
       - name: Unit and integration tests
         run: cargo test --workspace --locked
+      - name: Unit and integration tests (release)
+        run: cargo test --workspace --release --locked

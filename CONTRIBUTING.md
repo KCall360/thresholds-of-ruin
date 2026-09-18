@@ -9,6 +9,13 @@ document until implementation starts, not in permanently ignored tests.
 Run the commands in README.md before pushing. Both Windows and Linux CI must pass.
 Document any checks that could not run locally.
 
+CI also tests optimized builds and builds documentation with `RUSTDOCFLAGS=-D warnings`.
+The dependency policy in `scripts/check_architecture.py` enforces declared internal
+crate edges for all targets, including optional, build, and development dependencies.
+New crates and intentional boundary changes require an explicit policy update.
+External library suitability (such as avoiding I/O in simulation code) still
+requires review; this guard is not a sandbox for Rust code.
+
 The simulation must not read wall-clock time, access the filesystem/network, or
 depend on UI code. Randomness must be explicitly seeded and persistable. Do not
 use unordered iteration to resolve simulation outcomes.
