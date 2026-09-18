@@ -1,6 +1,8 @@
 //! Client-side validation of server-pushed observation ordering.
 
+mod connection;
 mod state;
+pub use connection::Connection;
 pub use state::ClientState;
 
 use tor_protocol::{ActorId, StreamCursor};
@@ -16,8 +18,8 @@ pub enum StreamError {
 
 /// Tracks one attachment after its authoritative snapshot has been received.
 ///
-/// This only validates ordering. Transport, payload application, and reconnect
-/// orchestration are implemented in later milestones.
+/// This only validates ordering. `ClientState` applies payloads and `Connection`
+/// supplies the transport. Reconnects establish a fresh snapshot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservationStream {
     actor: ActorId,

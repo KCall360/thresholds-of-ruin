@@ -9,7 +9,8 @@ controllers so multiplayer can be designed later. Windows first; Linux portable.
 
 This document records intended architecture. Implemented behavior is described in
 [the simulation slice](simulation-slice.md) and [the server protocol](protocol.md).
-Richer perception, playable frontends, and the remaining milestones are planned.
+The [text frontend](text-client.md) is playable. Richer perception, graphical
+frontends, and the remaining milestones are planned.
 
 ## Workspace boundaries
 

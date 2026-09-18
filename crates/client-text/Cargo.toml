@@ -12,3 +12,7 @@ workspace = true
 [dependencies]
 tor-client-common.workspace = true
 tor-protocol.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

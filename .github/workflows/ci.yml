@@ -31,7 +31,7 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint all targets
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test dependency-boundary checker
+      - name: Test dependency checker and actual text/server processes
         run: python -m unittest discover -s scripts -p "test_*.py" -v
       - name: Enforce workspace dependency boundaries
         run: python scripts/check_architecture.py
@@ -43,3 +43,7 @@ jobs:
         run: cargo test --workspace --locked
       - name: Unit and integration tests (release)
         run: cargo test --workspace --release --locked
+      - name: Actual text/server process tests (release)
+        env:
+          TOR_TEST_PROFILE: release
+        run: python -m unittest discover -s scripts -p "test_text_process.py" -v

@@ -1,0 +1,194 @@
+"""Launch the real server and text client; no simulated input/presentation adapters."""
+import json
+import os
+from pathlib import Path
+import queue
+import subprocess
+import tempfile
+import threading
+import time
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+TOKEN = "text-process-test-token-not-a-secret"
+
+
+class Process:
+    def __init__(self, executable, args, token=TOKEN):
+        self.child = subprocess.Popen(
+            [str(executable), *map(str, args)], cwd=ROOT,
+            env={**os.environ, "TOR_SERVER_TOKEN": token},
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", bufsize=1,
+        )
+        self.lines = queue.Queue()
+        self.transcript = []
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+
+    def _read(self):
+        try:
+            for line in self.child.stdout:
+                self.lines.put(line.rstrip("\n"))
+        finally:
+            self.lines.put(None)
+
+    def until(self, predicate, seconds=15):
+        deadline = time.monotonic() + seconds
+        output = []
+        while True:
+            try:
+                line = self.lines.get(timeout=max(0, deadline - time.monotonic()))
+            except queue.Empty:
+                raise AssertionError(f"Process output deadline: {self.transcript}") from None
+            if line is None:
+                raise AssertionError(f"Unexpected process exit: {self.transcript}")
+            self.transcript.append(line)
+            output.append(line)
+            if predicate(line):
+                return "\n".join(output)
+
+    def command(self, command):
+        self.child.stdin.write(command + "\n")
+        self.child.stdin.flush()
+        return self.until(lambda line: line == "Ready.")
+
+    def stop(self):
+        if self.child.poll() is None:
+            self.child.kill()
+        self.child.wait(timeout=10)
+        self.reader.join(timeout=10)
+        for stream in (self.child.stdin, self.child.stdout):
+            stream.close()
+
+
+class TextProcesses(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        profile = os.environ.get("TOR_TEST_PROFILE", "debug")
+        if profile not in ("debug", "release"):
+            raise ValueError("TOR_TEST_PROFILE must be debug or release")
+        command = ["cargo", "build", "--workspace", "--bins", "--locked"]
+        if profile == "release":
+            command.append("--release")
+        subprocess.run(command, cwd=ROOT, check=True, timeout=300)
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"], cwd=ROOT,
+        ))
+        cls.bin = Path(metadata["target_directory"]) / profile
+        cls.suffix = ".exe" if os.name == "nt" else ""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.save = Path(self.directory.name) / "game.json"
+        self.server, self.address = self.start_server()
+
+    def launch(self, name, args, **kwargs):
+        process = Process(self.bin / (name + self.suffix), args, **kwargs)
+        self.addCleanup(process.stop)
+        return process
+
+    def start_server(self):
+        server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42", "--save", self.save])
+        ready = json.loads(server.until(lambda line: line.startswith("{")))
+        return server, ready["address"]
+
+    def client(self, observe=False):
+        client = self.launch("tor-client-text", ["--connect", self.address, *(["--observe"] if observe else [])])
+        welcome = client.until(lambda line: line == "Ready.")
+        self.assertNotIn(TOKEN, welcome)
+        return client, welcome
+
+    def test_play_notes_and_real_restart(self):
+        client, welcome = self.client()
+        self.assertIn("Entry chamber", welcome)
+        self.assertNotIn("stone tablet", welcome)
+        self.assertIn("No disclosed", client.command("take stone tablet"))
+        self.assertIn("tick 0; revision 0", client.command("look"))
+        self.assertIn("Taken", client.command("take the token"))
+        self.assertIn("token", client.command("inventory"))
+        self.assertIn("Private User", client.command("note Return here later."))
+        note = client.command("annotate frontend actor explanation here The token is safe.")
+        self.assertIn("Actor Frontend", note)
+        self.assertIn('component: "text"', note)
+        self.assertIn("tick 50; revision 1", client.command("look"))
+        self.assertIn("InvalidAnchor", client.command("annotate user private note state:99 Future"))
+        self.assertIn("tick 50; revision 1", client.command("look"))
+        for _ in range(4):
+            movement = client.command("east")
+        self.assertIn("Gallery", movement)
+        self.assertIn("stone tablet", movement)
+        self.assertIn("tick 450; revision 5", movement)
+        client.child.stdin.write("quit\n")
+        client.child.stdin.flush()
+        self.assertEqual(client.child.wait(timeout=10), 0)
+        self.server.stop()
+        self.server, self.address = self.start_server()
+        resumed, welcome = self.client()
+        self.assertIn("Gallery", welcome)
+        self.assertIn("tick 450; revision 5", welcome)
+        self.assertIn("Inventory: ", welcome)
+        self.assertIn("token", welcome)
+        self.assertIn("Return here later.", welcome)
+        self.assertIn("The token is safe.", resumed.command("history"))
+        # EOF must terminate promptly even though stdin is handled on a thread.
+        resumed.child.stdin.close()
+        self.assertEqual(resumed.child.wait(timeout=10), 0)
+
+    def test_idle_streaming_control_transfer_and_disconnect(self):
+        controller, _ = self.client()
+        observer, _ = self.client(observe=True)
+        self.assertIn("observing", observer.command("wait"))
+        self.assertIn("ControlTaken", observer.command("control"))
+        controller.command("note live note")
+        self.assertIn("live note", observer.until(lambda line: "live note" in line))
+        # Same authenticated user sees its private notes in both frontends.
+        controller.command("wait")
+        observer.until(lambda line: "tick 100; revision 1" in line)
+        controller.command("release")
+        self.assertIn("Control: yours", observer.command("control"))
+        self.assertIn("tick 200; revision 2", observer.command("wait"))
+        self.server.stop()
+        self.assertNotEqual(observer.child.wait(timeout=15), 0)
+        self.assertNotEqual(controller.child.wait(timeout=15), 0)
+
+    def test_history_pagination_and_entry_anchors(self):
+        client, _ = self.client()
+        note = client.command("bookmark first marker")
+        entry = next(line.split("]", 1)[0][1:] for line in note.splitlines() if line.startswith("["))
+        self.assertIn("InvalidAnchor", client.command(f"annotate user actor note entry:{entry} shared link"))
+        self.assertIn("Entry", client.command(f"annotate user private note entry:{entry} linked marker"))
+        for index in range(50):
+            client.command(f"note marker {index}")
+        page = client.command("history")
+        cursor = next(line.removeprefix("Older entries: history ") for line in page.splitlines() if line.startswith("Older entries:"))
+        older = client.command(f"history {cursor}")
+        self.assertIn("first marker", older)
+        self.assertIn("linked marker", older)
+        self.assertIn("tick 0; revision 0", client.command("look"))
+
+    def test_bad_authentication_and_cli_fail_without_disclosing_token(self):
+        for args, token in [(["--connect", self.address], "incorrect-test-token"), (["--actor"], TOKEN), (["--connect", "192.0.2.1:4000"], TOKEN)]:
+            result = subprocess.run([str(self.bin / ("tor-client-text" + self.suffix)), *args], env={**os.environ, "TOR_SERVER_TOKEN": token}, text=True, capture_output=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(token, result.stdout + result.stderr)
+            self.assertNotIn("Entry chamber", result.stdout)
+
+    def test_piped_commands_wait_for_authoritative_updates(self):
+        result = subprocess.run(
+            [str(self.bin / ("tor-client-text" + self.suffix)), "--connect", self.address],
+            env={**os.environ, "TOR_SERVER_TOKEN": TOKEN},
+            input="east\ntake token\nwest\ntake token\nnote piped note\nlook\ninventory\n",
+            text=True, encoding="utf-8", capture_output=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("InvalidAction", result.stdout)  # Visible, but out of reach.
+        self.assertIn("tick 250; revision 3", result.stdout)
+        self.assertIn("Taken", result.stdout)
+        self.assertIn("piped note", result.stdout)
+        self.assertIn("Goodbye.", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
