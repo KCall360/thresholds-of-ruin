@@ -9,27 +9,32 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `travel-v5`, with deterministic integer cell-centre rays
-within eight Manhattan steps. Clockwise quarter turns around z and translation
-map a ray across a join. Crossing consumes distance, including self-links and
-cycles. A physical cell may have multiple visible occurrences in non-Euclidean
-geometry. The scene preserves those occurrences at distinct offsets. The world
-API caps sight radius at 16; the current game fixes it at eight.
+New games use `doorway-v8`, with [symmetric shadowcasting](shadowcasting.md)
+within eight Manhattan steps. Topology is resolved separately from opacity;
+clockwise quarter turns around z and translation map observer offsets across
+joins. Crossing consumes distance, including self-links and cycles. A physical
+cell may have multiple visible occurrences in non-Euclidean geometry. The scene
+preserves those occurrences at distinct offsets. The world API caps sight radius
+at 16; the current game fixes it at eight. Earlier rules retain their original
+cell-centre rays and corner restrictions.
 
 A rectangular join glues an entire aperture with one affine transform. Every
 constituent crossing is validated before any mutation commits. Horizontal joins
 can cover both width and height. Several adjacent joins can cover irregular
 areas. Reverse connections are explicit and separately validated.
 
-Walls are visible and stop sight and movement. At a diagonal corner both routes
-must be clear and resolve to the same destination and orientation. This preserves
-continuous sight across broad joins while preventing blocked corner cuts.
+Walls and closed doors block movement and cast sight shadows. Shadowcasting uses
+point floor centers and beveled (diamond) occluders; diagonal corner contact does
+not seal sight. Both topology routes at an exact corner must still agree on the
+destination and orientation, independently of opacity. Missing or ambiguous
+geometry casts a shadow and is never disclosed as a made-up wall. This keeps
+broad region partitions invisible without inventing connections at narrow joins.
 Movement retains the observer's axes across rotated joins: repeated north input
 continues toward what appeared north in the view, even if backend axes rotate.
 
 Actors and items do not block sight in this slice. There is no lighting or sound
-propagation. Visibility samples cell centres rather than continuous surfaces;
-narrow corner views are conservatively hidden. Up/down sight follows explicit
+propagation. Visibility uses the shadowcasting model described above; it is not continuous
+surface rendering. Up/down sight follows explicit
 stair links and reveals their landings, not an entire destination floor. Separate
 visible heights are displayed in adjacent ASCII panels. Arbitrary gravity,
 falling/support physics, and continuous stair meshes remain future work.
@@ -63,8 +68,8 @@ control characters. These names never label the player's scene.
 
 `wall <region> <x> <y> <z> <closed|open>` sets opaque terrain or clears it.
 Placement cannot cover an actor or ground item. Walls can obstruct joins without
-removing them. This is terrain setup, not a door interaction: independent door
-entities remain pending and will not be tied to portal locations.
+removing them. This is terrain setup, not a door interaction: [independent door entities](doors.md) now support ordinary open/close actions
+without being tied to portal locations.
 
 Setup consumes no action time. Authorization, revisions, idempotent receipts,
 branch checks, durable replay, and rewind apply to entire joins. The private
@@ -74,7 +79,7 @@ the same identity. Wide joins require the new ruleset.
 
 ## Protocol and memory
 
-Protocol **8** sends positions as relative x/y/z offsets, with the actor at zero.
+Protocol **9** sends positions as relative x/y/z offsets, with the actor at zero.
 Each visible cell carries an opaque key, position, wall flag, and semantic stair
 flags. Items carry `reachable`; sight does not grant pickup reach. Movement
 history reports the chosen direction. Observations and history contain no region
@@ -114,7 +119,7 @@ memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`travel-v5`; earlier saves retain their original rules.
+`doorway-v8`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

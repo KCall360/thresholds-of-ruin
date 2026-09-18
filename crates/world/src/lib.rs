@@ -1,11 +1,12 @@
 //! Region-local geometry, independent of rendering and transport.
 
 mod scene;
+mod shadowcasting;
 mod topology;
 pub use scene::SightCell;
 mod visibility;
 
-pub use topology::{Direction, Location, Passage, Region, RegionId, World, WorldError};
+pub use topology::{Direction, Door, Location, Passage, Region, RegionId, World, WorldError};
 
 /// Integer position in a region's local coordinate system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

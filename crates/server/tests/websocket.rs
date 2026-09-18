@@ -397,6 +397,19 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
     for (id, mutation) in [
         ("acquire", Request::AcquireControl),
         ("release", Request::ReleaseControl),
+        (
+            "door",
+            Request::Command {
+                branch: initial.branch.clone(),
+                command: Command::Act {
+                    expected_revision: 0,
+                    action: Action::SetDoor {
+                        door: 1,
+                        open: false,
+                    },
+                },
+            },
+        ),
         ("original", note.clone()),
         ("new-note", note),
         (

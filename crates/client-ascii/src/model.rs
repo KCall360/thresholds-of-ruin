@@ -14,6 +14,8 @@ pub enum Key {
     Descend,
     Wait,
     Pickup,
+    OpenDoor,
+    CloseDoor,
     Control,
     Release,
     Note,
@@ -57,6 +59,7 @@ pub struct App {
     pub status: String,
     pub note: Option<NoteDraft>,
     pub pickup: Vec<ItemView>,
+    pub door_direction: Option<bool>,
     pub selected: usize,
     pub history_page: Option<HistoryPage>,
     pub history_scroll: usize,
@@ -79,6 +82,7 @@ impl App {
             status: "Connecting to the local server...".into(),
             note: None,
             pickup: vec![],
+            door_direction: None,
             selected: 0,
             history_page: None,
             history_scroll: 0,
@@ -94,6 +98,7 @@ impl App {
             self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
+            self.door_direction = None;
             self.history_page = None;
             self.history_scroll = 0;
             self.status = "Timeline changed; pending selections cleared.".into();
@@ -105,9 +110,11 @@ impl App {
             .is_some_and(|old| old.state().revision != state.state().revision)
         {
             self.pickup.clear();
+            self.door_direction = None;
             self.travel_cursor = None;
         }
         if !state.has_control() {
+            self.door_direction = None;
             self.travel_cursor = None;
         }
         self.connected = true;
@@ -124,6 +131,7 @@ impl App {
         self.busy = false;
         self.note = None;
         self.pickup.clear();
+        self.door_direction = None;
         self.status = message;
     }
 
@@ -150,8 +158,10 @@ impl App {
             if self.note.take().is_some()
                 || self.history_page.take().is_some()
                 || !self.pickup.is_empty()
+                || self.door_direction.is_some()
             {
                 self.pickup.clear();
+                self.door_direction = None;
                 self.status = "Cancelled.".into();
                 return Effect::None;
             }
@@ -199,7 +209,10 @@ impl App {
             return Effect::None;
         }
         if let Input::Click { x, y } = input {
-            if self.history_page.is_some() || !self.pickup.is_empty() {
+            if self.history_page.is_some()
+                || !self.pickup.is_empty()
+                || self.door_direction.is_some()
+            {
                 return Effect::None;
             }
             if let Some(position) = self
@@ -235,6 +248,35 @@ impl App {
             self.status = "Spectator access is read-only.".into();
             return Effect::None;
         }
+        if let Some(open) = self.door_direction {
+            let Some(state) = &self.state else {
+                return Effect::None;
+            };
+            let observation = &state.state().observation;
+            let mut target = observation.position;
+            match key {
+                Key::Up => target.y -= 1,
+                Key::Down => target.y += 1,
+                Key::Left => target.x -= 1,
+                Key::Right => target.x += 1,
+                Key::Ascend => target.z += 1,
+                Key::Descend => target.z -= 1,
+                _ => return Effect::None,
+            }
+            let door = observation
+                .visible_cells
+                .iter()
+                .find(|cell| cell.position == target)
+                .and_then(|cell| cell.door.as_ref())
+                .filter(|door| door.reachable)
+                .map(|door| door.id);
+            self.door_direction = None;
+            if let Some(door) = door {
+                return self.act(Action::SetDoor { door, open });
+            }
+            self.status = "There is no door in that direction.".into();
+            return Effect::None;
+        }
         if !self.pickup.is_empty() {
             match key {
                 Key::Up => self.selected = self.selected.saturating_sub(1),
@@ -242,6 +284,7 @@ impl App {
                 Key::Enter => {
                     let item = self.pickup[self.selected].id;
                     self.pickup.clear();
+                    self.door_direction = None;
                     return self.act(Action::Take { item });
                 }
                 _ => {}
@@ -307,6 +350,29 @@ impl App {
             Key::Wait => self.act(Action::Wait),
             Key::Control => self.request(Request::AcquireControl),
             Key::Release => self.request(Request::ReleaseControl),
+            Key::OpenDoor | Key::CloseDoor => {
+                let Some(state) = &self.state else {
+                    return Effect::None;
+                };
+                if !state.has_control() {
+                    self.status = "You are observing. Press F3 to request control.".into();
+                } else if !state.state().observation.ready {
+                    self.status = "Waiting for another actor to act.".into();
+                } else if state
+                    .travel()
+                    .is_some_and(|t| t.phase == TravelPhase::Active)
+                {
+                    self.status = "Press Esc to cancel travel before using a door.".into();
+                } else {
+                    let open = key == Key::OpenDoor;
+                    self.door_direction = Some(open);
+                    self.status = format!(
+                        "{} in which direction? Arrows/HJKL; Esc cancels.",
+                        if open { "Open" } else { "Close" }
+                    );
+                }
+                Effect::None
+            }
             Key::Pickup => {
                 let Some(state) = &self.state else {
                     return Effect::None;
@@ -383,12 +449,10 @@ impl App {
             self.status = "Travel requires control of a ready actor.".into();
             return Effect::None;
         }
-        let Some(cell) = state
-            .state()
-            .observation
-            .visible_cells
-            .iter()
-            .find(|c| c.position == position && !c.wall)
+        let Some(cell) =
+            state.state().observation.visible_cells.iter().find(|c| {
+                c.position == position && !c.wall && c.door.as_ref().is_none_or(|d| d.open)
+            })
         else {
             self.status = "Select a visible floor cell.".into();
             return Effect::None;
@@ -406,7 +470,8 @@ impl App {
             return Effect::None;
         };
         if !state.has_control() {
-            self.status = "You are observing. Press C to request control.".into();
+            self.door_direction = None;
+            self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
         }
         if !state.state().observation.ready {
@@ -462,6 +527,9 @@ pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
     if o.ground_items.iter().any(|i| i.position == position) {
         return '!';
     }
+    if let Some(door) = &cell.door {
+        return if door.open { '/' } else { '+' };
+    }
     if cell.stairs_up {
         return '<';
     }
@@ -478,6 +546,9 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::Action { event, .. } => match event {
             Event::Moved { direction } => format!("Moved {direction:?}."),
             Event::Taken { item } => format!("Picked up item #{item}."),
+            Event::DoorChanged { open, .. } => {
+                format!("{} door.", if *open { "Opened" } else { "Closed" })
+            }
             Event::Waited => "Waited.".into(),
         },
         HistoryContent::Annotation { text, category, .. } => {

@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 8)
+# Server protocol and annotations (version 9)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -67,16 +67,17 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 8 requires a backend-resolved observer-relative scene. Positions
+Protocol version 9 requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
-opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`. Cells also carry cosmetic `material`; items include `description` and a
+opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
+Cells also carry cosmetic `material`; items include `description` and a
 `reachable` flag, and actors carry perceived `name` and `description`. These
 protocol-8 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
 must upgrade. Save format 3 adds a private stable view-identity salt; format 1/2
 saves migrate while retaining their original rules. New saves use
-`travel-v5`. See [geometry and compatibility](portal-geometry.md).
+`doorway-v8`. See [geometry and compatibility](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
@@ -85,7 +86,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":8,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":9,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -315,3 +316,6 @@ authoring commands, and rules-version compatibility.
 
 See [travel](travel.md) for protocol-7 start/cancel requests, status, durable
 receipts, navigation knowledge, and the `travel-v5` ruleset.
+
+See [doors](doors.md) for protocol-9 door observations, set_door actions,
+door_changed events, privileged placement, and doors-v6 compatibility.

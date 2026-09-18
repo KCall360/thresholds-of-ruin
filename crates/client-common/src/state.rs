@@ -7,6 +7,7 @@ use tor_protocol::*;
 /// observation of this exact cell can replace its remembered contents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RememberedCell {
+    pub door: Option<DoorView>,
     pub material: String,
     pub key: String,
     /// Relative offset at the last sighting, not a current map location.
@@ -80,6 +81,7 @@ impl ClientState {
             self.memory.insert(
                 cell.key.clone(),
                 RememberedCell {
+                    door: cell.door.clone(),
                     material: cell.material.clone(),
                     key: cell.key.clone(),
                     position: cell.position,

@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +52,7 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    SetDoor { door: u64, open: bool },
     Move { direction: Direction },
     Take { item: u64 },
     Wait,
@@ -105,6 +106,7 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellView {
+    pub door: Option<DoorView>,
     /// Cosmetic surface material, not a physical interaction rule.
     #[serde(default)]
     pub material: String,
@@ -116,6 +118,18 @@ pub struct CellView {
     pub wall: bool,
     /// Unnamed anchor hint, disclosed only with this cell; no area membership.
     pub place_hint: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DoorView {
+    pub id: u64,
+    pub name: String,
+    pub description: String,
+    pub open: bool,
+    pub reachable: bool,
+    /// Currently perceived standing cells from which this door can be reached.
+    /// These disclose no unobserved geometry and are not a planned route.
+    pub approaches: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +212,7 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    DoorChanged { door: u64, open: bool },
     Moved { direction: Direction },
     Taken { item: u64 },
     Waited,

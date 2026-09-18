@@ -79,7 +79,7 @@ async fn run(
     } else {
         publish(
             tx,
-            Event::Status("Observing. Press C to request control.".into()),
+            Event::Status("Observing. Press F3 to request control.".into()),
         )?;
     }
     publish(tx, Event::Ready)?;

@@ -89,8 +89,9 @@ joins are atomic, and orientation stays consistent through crossings. That slice
 introduced protocol 5, save format 3, and observer-scene-v3 while preserving older
 rules during replay.
 Actual server/text/headless/native ASCII acceptance covers sight, stale memory,
-movement, pickup, stairs, save/resume and rewind. Interactive doors independent
-of portals and richer multi-event perception remain pending.
+movement, pickup, stairs, save/resume and rewind. Independent doors are now
+implemented as described below; richer multi-event
+perception remains pending.
 
 Implemented: [unnamed place hints](place-hints.md), authored cell anchors
 independent of regions and portals. Protocol 6 discloses hints only with perceived
@@ -114,6 +115,28 @@ expose only its received disclosed state to tests. Use it to test current
 visibility separately from retained client memory, including portal views and
 hidden-information boundaries.
 
+Implemented: [independent doors](doors.md), cell-sized entities with open/close
+ordinary actions, sight/movement obstruction, topology-independent placement,
+perceived reach and approach cells, stale memory, and deterministic replay/rewind.
+World tests compare interior and wide-join doors; actual text/headless/native ASCII
+acceptance covers ordinary play, wizard scenarios, rotated joins, permissions and
+persistence. Protocol 9 and doors-v6 preserve all earlier saves' rules. This does
+not complete milestone 2; richer perceived events remain pending.
+
+Implemented: [symmetric shadowcasting](shadowcasting.md), exact slope arithmetic,
+beveled door/wall corners, symmetric floor visibility on ordinary grids, and
+bounded topology resolution across rotated joins and cycles. Exhaustive small-map
+tests cover reciprocity; split-room tests cover storage independence. Actual
+text/headless/native ASCII tests cover door shadows, diagonal contents, stale
+memory, and resume. That slice introduced shadowcasting-v7; all six earlier rulesets
+retain their behavior. A release benchmark measures complete scene construction.
+
+Fixture refinement: doorway-v8 places the initially open door in an unhinted
+1x1 hall between two 5x3 rooms. Only the room interiors have place hints; text
+travel targets the far room rather than stopping in the doorway. Seven previous
+rulesets retain their original layouts. Server and actual-client tests cover
+hall geometry, crossing, sight obstruction, text navigation, save and rewind.
+
 ## 3: Interactions and travel
 
 Implemented first travel slice: [backend travel to known cells](travel.md), ASCII
@@ -129,9 +152,10 @@ ordinary floor within the current place; compound intentions have one narrative
 response and a completion prompt. Protocol 8 leaves
 travel-v5 and save format 3 unchanged. Generic descriptions and a conservative
 visible-place heuristic are initial foundations; persistent named places, richer
-spatial descriptions, and broader compound interactions remain future work. Doors,
-locks, containers, richer threat/damage interruptions and the remaining work below are
-still pending.
+spatial descriptions, and broader compound interactions remain future work.
+The [door slice](doors.md) adds examination, noun clarification, approach-then-open/close,
+ASCII O/C then direction controls and explicit travel barriers. Locks, containers, richer
+threat/damage interruptions and the remaining work below are still pending.
 
 
 Doors, locks, keys, containers, clarification, named places and interrupted travel.

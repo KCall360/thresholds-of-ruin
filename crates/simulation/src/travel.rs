@@ -37,8 +37,10 @@ impl Game {
                 .edges
                 .retain(|(from, _), (to, _)| !(visible.contains(from) && visible.contains(to)));
             for cell in &scene {
-                knowledge.cells.insert(cell.location, cell.wall);
-                if cell.wall {
+                knowledge
+                    .cells
+                    .insert(cell.location, self.world.opaque(cell.location));
+                if self.world.opaque(cell.location) {
                     continue;
                 }
                 for direction in DIRECTIONS {

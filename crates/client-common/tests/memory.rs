@@ -145,6 +145,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     let mut first = snapshot(1, 0, 0);
     let distant = Position { x: 4, y: 1, z: 0 };
     first.state.observation.visible_cells.push(CellView {
+        door: None,
         material: "stone".into(),
         key: "distant".into(),
         stairs_up: false,
@@ -172,6 +173,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     assert_eq!(memory.ground_items.len(), 1);
     let mut revisit = snapshot(1, 200, 2);
     revisit.state.observation.visible_cells.push(CellView {
+        door: None,
         material: "stone".into(),
         key: "distant".into(),
         stairs_up: false,
@@ -187,4 +189,49 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .unwrap();
     assert_eq!(memory.last_seen_tick, 200);
     assert!(memory.ground_items.is_empty());
+}
+
+#[test]
+fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
+    let mut first = snapshot(1, 0, 0);
+    first.state.observation.visible_cells[0].door = Some(DoorView {
+        id: 4,
+        name: "wooden door".into(),
+        description: "wood".into(),
+        open: true,
+        reachable: true,
+        approaches: vec![],
+    });
+    let mut client = ClientState::from_snapshot(first.clone()).unwrap();
+    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    assert!(
+        client
+            .memory()
+            .find(|c| c.key == "1")
+            .unwrap()
+            .door
+            .as_ref()
+            .unwrap()
+            .open
+    );
+    first.state.observation.visible_cells[0]
+        .door
+        .as_mut()
+        .unwrap()
+        .open = false;
+    client.replace_snapshot(first).unwrap();
+    assert!(
+        !client
+            .memory()
+            .find(|c| c.key == "1")
+            .unwrap()
+            .door
+            .as_ref()
+            .unwrap()
+            .open
+    );
+    let mut rewind = snapshot(2, 0, 0);
+    rewind.branch = BranchId("new".into());
+    client.replace_snapshot(rewind).unwrap();
+    assert!(client.memory().all(|c| c.door.is_none()));
 }

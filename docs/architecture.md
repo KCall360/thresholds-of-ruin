@@ -50,8 +50,9 @@ rooms larger inside than outside are supported conceptually. Multiple elevations
 stairs, and vertical movement are part of the first dungeon. Arbitrary gravity
 and reflections are deferred.
 
-Doors are interactive world entities, independent of portals. A door may occupy
-an interior opening or obstruct a portal aperture. Its closed or locked state
+[Doors](doors.md) are implemented interactive world entities, independent of
+portals. A door may occupy an interior opening or obstruct a portal aperture.
+Its closed state (and future locked state)
 does not define portal topology. Movement and perception evaluate terrain and
 barriers along their paths.
 
@@ -132,7 +133,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 8](protocol.md) for the implemented format.
+visibility rules. See [protocol version 9](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -199,8 +200,8 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 8 and save format 3 support the current interface; normal format-1 saves migrate
-on open. New games use travel-v5; existing saves retain their ruleset.
+version 9 and save format 3 support the current interface; normal format-1 saves migrate
+on open. New games use doorway-v8; existing saves retain their ruleset.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII

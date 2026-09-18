@@ -6,11 +6,18 @@ wall-clock access, or implicit random sampling.
 
 ## Scenario and geometry
 
-`Game::two_room(seed)` creates an Entry chamber and Gallery, each 5 x 3 x 1 cells,
-connected by two directed passages. Start an actor at region 1, position (1,1,0).
-A token is on that cell; a stone tablet is in the initially undisclosed Gallery.
-The seed chooses copper, silver, or iron for the token. Layout generation and
-random gameplay mechanics are deferred, so this fixture needs no PRNG state.
+`Game::two_room_with_doorway(seed)` creates two 5 x 3 x 1 rooms connected
+through a 1 x 1 hall containing an initially open wooden door. The hallway is
+stored in the extra east column of region 1, with wall cells north and south;
+region 2 remains the Gallery. Storage regions are not player-facing rooms.
+Only the two room interiors have place hints, at local (2,1,0); the hall has none.
+
+Start an actor at region 1, position (1,1,0), on the seeded token. The stone tablet
+is at region 2 (2,1,0), seven eastward steps away through the open hall. Closing
+the door blocks movement and sight through the hall. The seed chooses copper,
+silver, or iron for the token. Layout generation and random gameplay mechanics
+are deferred, so this fixture needs no PRNG state. Historical `Game::two_room`
+and `Game::two_room_with_place_hints` layouts remain available for old-save replay.
 
 `World` validates unique region IDs, in-bounds passage endpoints, boundary exits,
 and unique (source cell, direction) connections. Cardinal and vertical movement
@@ -20,8 +27,8 @@ the same cell. Occupancy only blocks another actor.
 
 The [portal-geometry slice](portal-geometry.md) adds clockwise passage rotations,
 opaque wall terrain and explicit up/down links for stairs. Horizontal connections
-must exit a boundary; vertical links may start in the interior. Gravity, support,
-and interactive door entities remain pending. Rectangular joins can cover multiple cells. Passages are not door entities
+must exit a boundary; vertical links may start in the interior. Gravity and support remain pending; [independent doors](doors.md) now obstruct
+sight and movement. Rectangular joins can cover multiple cells. Passages are not door entities
 and do not constrain where future doors can be placed. Old-rule saves retain
 the original vertical-step behavior.
 
@@ -76,7 +83,8 @@ error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
 `two-room-v1` saves retain original whole-room perception; new saves use
-`travel-v5`. Sound and interactive doors remain later work.
+`doorway-v8`. Sound remains later work. New server games add an initially
+open door; older fixtures retain their original rules.
 
 ## Validation and remaining work
 
@@ -98,7 +106,7 @@ process tests, including cross-frontend control transfer and save/resume.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`travel-v5`; earlier saves retain their original rules.
+`doorway-v8`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

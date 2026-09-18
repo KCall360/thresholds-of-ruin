@@ -78,7 +78,7 @@ impl World {
                         rotation = (rotation + turns) % 4;
                     }
                     seen.insert(current);
-                    if self.is_wall(current) {
+                    if self.opaque(current) {
                         break;
                     }
                 }
@@ -89,7 +89,7 @@ impl World {
         for direction in [Direction::Up, Direction::Down] {
             let mut current = origin;
             for _ in 0..radius {
-                if self.is_wall(current) {
+                if self.opaque(current) {
                     break;
                 }
                 let Some(passage) = self.passage(current, direction) else {

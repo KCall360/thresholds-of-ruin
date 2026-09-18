@@ -67,6 +67,10 @@ impl HistoryEntry {
             HistoryContent::Action { action, event } => Content::Action {
                 action: action.clone(),
                 event: match event {
+                    Event::DoorChanged { door, open } => VisibleEvent::DoorChanged {
+                        door: *door,
+                        open: *open,
+                    },
                     Event::Moved { .. } => VisibleEvent::Moved {
                         direction: match action {
                             Action::Move { direction } => *direction,
@@ -146,6 +150,7 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    DoorChanged { door: u64, open: bool },
     Moved { from: Position, to: Position },
     Taken { item: u64 },
     Waited,
@@ -161,6 +166,10 @@ pub enum WizardItem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardOperation {
+    PlaceDoor {
+        position: Position,
+        open: bool,
+    },
     ConnectArea {
         from: Position,
         direction: Direction,
@@ -207,6 +216,9 @@ pub enum WizardOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardResult {
+    DoorPlaced {
+        door: u64,
+    },
     RoomPlaced {
         region: u64,
     },

@@ -126,8 +126,8 @@ Spectators receive prose but remain read-only.
 
 ## Compatibility and acceptance
 
-All binaries require protocol 8. Save format **3** and rules **travel-v5** remain
-unchanged: appearances are deterministic presentation facts, and the text client
+The original text slice used protocol 8, save format **3** and rules **travel-v5**:
+appearances are deterministic presentation facts, and the text client
 composes existing travel and pickup requests. Existing rulesets retain their
 behavior. Rules predating travel continue rejecting travel; use `step` and take
 reachable items, or start a fresh game for the full adventure interface.
@@ -145,3 +145,11 @@ exact successful/interrupted transcripts, prompt boundaries, cancellation,
 spectators, persistence, and wizard-authored geometry/hazards using
 `scripts/scenarios/text-adventure.json`, `wide-join.json`, and `portal-geometry.json`.
 The existing discovery runs these tests in debug and release on Windows and Linux.
+
+## Door interactions
+
+The [door slice](doors.md) adds visible doors to descriptions, examination, noun
+clarification and pronouns. `open door` / `close door` approach a disclosed standing
+cell when necessary, then submit an ordinary action with the same interruption
+checks as pickup. `go to door` approaches without manipulating it. Travel never
+automatically opens a door. New saves use doorway-v8; old saves keep their rules.

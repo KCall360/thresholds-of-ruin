@@ -152,3 +152,50 @@ fn multiple_places_ask_before_travel_and_a_missing_referent_is_not_used() {
     d.reset();
     assert!(matches!(d.interpret("take it", &state()), Intent::Say(_)));
 }
+
+#[test]
+fn doors_are_examined_clarified_and_approached_without_entering_the_barrier() {
+    let mut s = state();
+    s.observation.visible_cells[3].door = Some(DoorView {
+        id: 7,
+        name: "wooden door".into(),
+        description: "An iron handle.".into(),
+        open: false,
+        reachable: false,
+        approaches: vec!["cell-2".into(), "cell-4".into()],
+    });
+    let mut d = Dialogue::default();
+    assert!(describe(&s).contains("closed wooden door"));
+    assert!(tor_client_text::describe(&s).contains("wooden door (#7)"));
+    assert!(
+        matches!(d.interpret("examine door", &s), Intent::Say(text) if text.contains("iron handle") && text.contains("closed"))
+    );
+    assert!(
+        matches!(d.interpret("open it", &s), Intent::Travel { destination, door: Some((7, true)), .. } if destination == "cell-2")
+    );
+    s.observation.visible_cells[3]
+        .door
+        .as_mut()
+        .unwrap()
+        .reachable = true;
+    assert_eq!(
+        d.interpret("open door", &s),
+        Intent::Action(Action::SetDoor {
+            door: 7,
+            open: true
+        })
+    );
+    let mut second = s.observation.visible_cells[3].door.clone().unwrap();
+    second.id = 8;
+    s.observation.visible_cells[5].door = Some(second);
+    assert!(matches!(d.interpret("open door", &s), Intent::Say(text) if text.contains("Which")));
+    assert_eq!(
+        d.interpret("2", &s),
+        Intent::Action(Action::SetDoor {
+            door: 8,
+            open: true
+        })
+    );
+    s.revision += 1;
+    assert!(matches!(d.interpret("take door", &s), Intent::Say(_)));
+}

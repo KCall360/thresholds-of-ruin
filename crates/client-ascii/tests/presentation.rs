@@ -126,6 +126,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        door: None,
         material: "stone".into(),
         key: "wall".into(),
         stairs_up: false,
@@ -460,4 +461,57 @@ fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
             travel_id: EntryId("trip".into())
         })
     );
+}
+
+#[test]
+fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
+    let mut snapshot = serde_json::to_value(serde_json::json!({
+        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "history":{"entries":[],"older_before":null},"state":state().state()
+    }))
+    .unwrap();
+    let cells = snapshot["state"]["observation"]["visible_cells"]
+        .as_array_mut()
+        .unwrap();
+    for (index, id) in [(7, 11), (5, 12)] {
+        cells[index]["door"] = serde_json::json!({"id":id,"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
+    }
+    let state = ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap();
+    assert_eq!(glyph_at(&state.state().observation, 2, 1), '+');
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state);
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::OpenDoor }), Effect::None);
+    assert!(matches!(
+        app.input(Input::Key { key: Key::Down }),
+        Effect::Request(Request::Command {
+            command: Command::Act {
+                action: Action::SetDoor {
+                    door: 12,
+                    open: true
+                },
+                ..
+            },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn missing_door_direction_is_rejected_locally_and_escape_cancels() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    let before = app.state.as_ref().unwrap().state().clone();
+    for action in [Key::OpenDoor, Key::CloseDoor] {
+        assert_eq!(app.input(Input::Key { key: action }), Effect::None);
+        assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+        assert_eq!(app.status, "There is no door in that direction.");
+        assert!(!app.busy);
+        assert_eq!(app.state.as_ref().unwrap().state(), &before);
+        assert_eq!(app.input(Input::Key { key: action }), Effect::None);
+        assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    }
 }

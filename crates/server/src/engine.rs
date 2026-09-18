@@ -17,7 +17,10 @@ use crate::journal::{
 
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "travel-v5";
+const RULESET: &str = "doorway-v8";
+const SHADOW_V7_RULESET: &str = "shadowcasting-v7";
+const DOORS_V6_RULESET: &str = "doors-v6";
+const TRAVEL_V5_RULESET: &str = "travel-v5";
 const PLACES_V4_RULESET: &str = "place-hints-v4";
 const SCENE_V3_RULESET: &str = "observer-scene-v3";
 const PORTAL_V2_RULESET: &str = "portal-sight-v2";
@@ -140,16 +143,36 @@ impl Engine {
     }
 
     fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = if matches!(ruleset, RULESET | PLACES_V4_RULESET) {
+        let mut game = if ruleset == RULESET {
+            Game::two_room_with_doorway(scenario.seed)
+        } else if matches!(
+            ruleset,
+            SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET | PLACES_V4_RULESET
+        ) {
             Game::two_room_with_place_hints(scenario.seed)
         } else {
             Game::two_room(scenario.seed)
         };
+        if !matches!(ruleset, RULESET | SHADOW_V7_RULESET) {
+            game.use_ray_perception();
+        }
         if ruleset == PORTAL_V2_RULESET {
             game.use_portal_v2_rules();
         }
         if ruleset == LEGACY_RULESET {
             game.use_legacy_perception();
+        }
+        if matches!(ruleset, SHADOW_V7_RULESET | DOORS_V6_RULESET) {
+            game.place_door(
+                adapt::location(crate::journal::Position {
+                    region: 1,
+                    x: 3,
+                    y: 1,
+                    z: 0,
+                }),
+                true,
+            )
+            .map_err(|_| invalid_archive())?;
         }
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
@@ -162,7 +185,10 @@ impl Engine {
                 .map_err(|_| invalid_archive())?;
             revisions.insert(ActorId(id.0), 0);
         }
-        if ruleset == RULESET {
+        if matches!(
+            ruleset,
+            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+        ) {
             game.refresh_navigation();
         }
         let branch = BranchId(Uuid::new_v4().to_string());
@@ -217,7 +243,14 @@ impl Engine {
             || (archive.version == ARCHIVE_VERSION && Uuid::parse_str(&archive.view_salt).is_err())
             || !matches!(
                 archive.ruleset.as_str(),
-                RULESET | PLACES_V4_RULESET | SCENE_V3_RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
+                RULESET
+                    | SHADOW_V7_RULESET
+                    | DOORS_V6_RULESET
+                    | TRAVEL_V5_RULESET
+                    | PLACES_V4_RULESET
+                    | SCENE_V3_RULESET
+                    | PORTAL_V2_RULESET
+                    | LEGACY_RULESET
             )
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
@@ -340,7 +373,10 @@ impl Engine {
                 "Travel destination or known route is unavailable",
             )
         };
-        if self.archive.ruleset != RULESET {
+        if !matches!(
+            self.archive.ruleset.as_str(),
+            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+        ) {
             return Err(unavailable());
         }
         let location = self
@@ -559,6 +595,17 @@ impl Engine {
                         "Refresh the observation before acting",
                     ));
                 }
+                if matches!(action, tor_protocol::Action::SetDoor { .. })
+                    && !matches!(
+                        self.archive.ruleset.as_str(),
+                        RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET
+                    )
+                {
+                    return Err(Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Action is unavailable",
+                    ));
+                }
                 let before: BTreeMap<_, _> = self
                     .actors()
                     .into_iter()
@@ -615,7 +662,10 @@ impl Engine {
                 )
             }
         };
-        if candidate.archive.ruleset == RULESET {
+        if matches!(
+            candidate.archive.ruleset.as_str(),
+            RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET
+        ) {
             candidate.game.refresh_navigation();
         }
         let entry = HistoryEntry {
@@ -682,6 +732,24 @@ impl Engine {
             .map(|actor| Ok((actor, self.revision_view(actor)?)))
             .collect::<Result<_, Failure>>()?;
         let result = match operation {
+            WizardOperation::PlaceDoor { position, open } => {
+                if !matches!(
+                    self.archive.ruleset.as_str(),
+                    RULESET | SHADOW_V7_RULESET | DOORS_V6_RULESET
+                ) {
+                    return Err(Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Door setup requires new rules",
+                    ));
+                }
+                let door = self
+                    .game
+                    .place_door(adapt::location(*position), *open)
+                    .map_err(|_| {
+                        Failure::new(ErrorCode::InvalidAction, "Invalid door placement")
+                    })?;
+                WizardResult::DoorPlaced { door }
+            }
             WizardOperation::ConnectArea {
                 from,
                 direction,
@@ -745,7 +813,14 @@ impl Engine {
                 WizardResult::Connected
             }
             WizardOperation::SetPlaceHint { position, present } => {
-                if !matches!(self.archive.ruleset.as_str(), RULESET | PLACES_V4_RULESET) {
+                if !matches!(
+                    self.archive.ruleset.as_str(),
+                    RULESET
+                        | SHADOW_V7_RULESET
+                        | DOORS_V6_RULESET
+                        | TRAVEL_V5_RULESET
+                        | PLACES_V4_RULESET
+                ) {
                     return Err(invalid());
                 }
                 self.game

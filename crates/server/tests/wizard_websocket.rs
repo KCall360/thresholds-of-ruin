@@ -89,6 +89,15 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
         let (mut spectator, _) = connect(&address, AccessRole::Spectator).await;
         assert_eq!(initial.state.wizard_game, enabled);
         let operations = [
+            WizardOperation::PlaceDoor {
+                position: Position {
+                    region: 1,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                },
+                open: false,
+            },
             WizardOperation::SetPlaceHint {
                 position: Position {
                     region: 1,
