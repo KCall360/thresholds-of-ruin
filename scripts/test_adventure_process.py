@@ -89,12 +89,12 @@ class AdventureProcesses(unittest.TestCase):
         player, _ = self.adventure()
         self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
         observer, initial = self.client(support.SPECTATOR_TOKEN)
-        self.assertEqual(initial["state"]["observation"]["tick"], 650)
+        self.assertEqual(initial["state"]["observation"]["tick"], 750)
         self.assertEqual([i["name"] for i in initial["state"]["observation"]["inventory"]], ["stone tablet"])
         self.assertEqual(initial["travel"]["phase"], "arrived")
-        self.assertEqual(initial["travel"]["completed_steps"], 6)
+        self.assertEqual(initial["travel"]["completed_steps"], 7)
         kinds = [h["content"]["type"] for h in initial["history"]]
-        self.assertEqual(kinds, ["travel"] + ["action"] * 7)
+        self.assertEqual(kinds, ["travel"] + ["action"] * 8)
 
     def test_moving_within_the_place_does_not_add_exits_and_get_token_is_one_response(self):
         self.server()
@@ -125,7 +125,7 @@ class AdventureProcesses(unittest.TestCase):
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(initial["travel"]["phase"], "cancelled")
         self.assertEqual(initial["state"]["observation"]["inventory"], [])
-        self.assertLess(initial["travel"]["completed_steps"], 6)
+        self.assertLess(initial["travel"]["completed_steps"], 7)
         self.assertIn("empty-handed", self.say(player, "inventory"))
 
     def test_directional_interruption_is_one_narrative_response(self):

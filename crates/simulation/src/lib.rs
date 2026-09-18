@@ -25,6 +25,7 @@ pub struct ItemId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    SetDoor { door: u64, open: bool },
     Move(Direction),
     Take(ItemId),
     Wait,
@@ -39,12 +40,14 @@ pub enum GameError {
     Blocked,
     /// No distinction between unknown, hidden, carried, and out-of-reach items.
     ItemUnavailable,
+    DoorUnavailable,
     TimeExhausted,
     IdentityExhausted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    DoorChanged { door: u64, open: bool },
     Moved { from: Location, to: Location },
     Taken { item: ItemId },
     Waited,
@@ -93,12 +96,14 @@ pub struct Game {
     world: World,
     legacy_perception: bool,
     scene_rules: bool,
+    shadowcasting: bool,
     seed: u64,
     tick: u64,
     actors: BTreeMap<ActorId, Actor>,
     items: BTreeMap<ItemId, Item>,
     next_actor_id: u64,
     next_item_id: u64,
+    next_door_id: u64,
 }
 
 impl Game {
@@ -108,12 +113,14 @@ impl Game {
             world,
             legacy_perception: false,
             scene_rules: true,
+            shadowcasting: true,
             seed,
             tick: 0,
             actors: BTreeMap::new(),
             items: BTreeMap::new(),
             next_actor_id: 1,
             next_item_id: 1,
+            next_door_id: 1,
         }
     }
 
@@ -170,6 +177,40 @@ impl Game {
         Ok(id)
     }
 
+    /// Author a door; a closed door cannot cover an actor or ground object.
+    pub fn place_door(&mut self, location: Location, open: bool) -> Result<u64, GameError> {
+        if !open && self.door_obstructed(location) {
+            return Err(GameError::InvalidLocation);
+        }
+        let next = self
+            .next_door_id
+            .checked_add(1)
+            .ok_or(GameError::IdentityExhausted)?;
+        let id = self.next_door_id;
+        self.world
+            .place_door(location, id, open)
+            .map_err(|_| GameError::InvalidLocation)?;
+        self.next_door_id = next;
+        Ok(id)
+    }
+    fn door_obstructed(&self, location: Location) -> bool {
+        self.occupied(location)
+            || self
+                .items
+                .values()
+                .any(|i| i.location == ItemLocation::Ground(location))
+    }
+    pub fn door_reachable_from(&self, from: Location, door: Location) -> bool {
+        [
+            Direction::North,
+            Direction::East,
+            Direction::South,
+            Direction::West,
+        ]
+        .into_iter()
+        .any(|direction| self.world.adjacent(from, direction) == Some(door))
+    }
+
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -204,10 +245,16 @@ impl Game {
     pub fn use_legacy_perception(&mut self) {
         self.legacy_perception = true;
         self.scene_rules = false;
+        self.shadowcasting = false;
     }
 
     pub fn use_portal_v2_rules(&mut self) {
         self.scene_rules = false;
+        self.shadowcasting = false;
+    }
+    /// Preserve cell-centre ray perception when replaying pre-shadowcasting saves.
+    pub fn use_ray_perception(&mut self) {
+        self.shadowcasting = false;
     }
     pub fn uses_scene_rules(&self) -> bool {
         self.scene_rules
@@ -289,6 +336,28 @@ impl Game {
             return Err(GameError::NotActorsTurn);
         }
         let (kind, duration) = match action {
+            Action::SetDoor { door, open } => {
+                let location = self
+                    .world
+                    .door_location(door)
+                    .ok_or(GameError::DoorUnavailable)?;
+                let current = self.world.door(location).expect("existing door");
+                if current.open == open
+                    || !self.door_reachable_from(actor.location, location)
+                    || !self
+                        .observe(id)?
+                        .visible_cells
+                        .iter()
+                        .any(|c| c.location == location)
+                    || (!open && self.door_obstructed(location))
+                {
+                    return Err(GameError::DoorUnavailable);
+                }
+                (
+                    OutcomeKind::DoorChanged { door, open },
+                    actor.turn_ticks.get(),
+                )
+            }
             Action::Move(direction) => {
                 let direction = if self.scene_rules {
                     direction.rotated(actor.orientation)
@@ -352,6 +421,10 @@ impl Game {
         let actor = self.actors.get_mut(&id).expect("actor validated above");
         actor.orientation = new_orientation;
         match kind {
+            OutcomeKind::DoorChanged { door, open } => {
+                let location = self.world.door_location(door).expect("validated door");
+                self.world.set_door(location, open);
+            }
             OutcomeKind::Moved { to, .. } => {
                 actor.location = to;
                 actor.visited.insert(to.region);

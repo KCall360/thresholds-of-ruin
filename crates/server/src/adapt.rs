@@ -35,6 +35,10 @@ pub fn direction(direction: p::Direction) -> w::Direction {
 
 pub fn action(action: &p::Action) -> s::Action {
     match action {
+        p::Action::SetDoor { door, open } => s::Action::SetDoor {
+            door: *door,
+            open: *open,
+        },
         p::Action::Move { direction: value } => s::Action::Move(direction(*value)),
         p::Action::Take { item } => s::Action::Take(s::ItemId(*item)),
         p::Action::Wait => s::Action::Wait,
@@ -43,6 +47,9 @@ pub fn action(action: &p::Action) -> s::Action {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::DoorChanged { door, open } => {
+            crate::journal::Event::DoorChanged { door, open }
+        }
         s::OutcomeKind::Moved { from, to } => crate::journal::Event::Moved {
             from: position(from),
             to: position(to),
@@ -75,6 +82,18 @@ pub fn observation(
             continue;
         };
         visible_cells.push(p::CellView {
+            door: visible.door.map(|door| p::DoorView {
+                id: door.id,
+                name: "wooden door".into(),
+                description: "A plain wooden door with an iron handle.".into(),
+                open: door.open,
+                reachable: visible.door_reachable,
+                approaches: visible
+                    .door_approaches
+                    .iter()
+                    .map(|location| cell_key(salt, view.actor.0, *location))
+                    .collect(),
+            }),
             material: visible.material.into(),
             key: cell_key(salt, view.actor.0, cell.location),
             position: offset(cell.offset),

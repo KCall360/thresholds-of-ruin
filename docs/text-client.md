@@ -78,7 +78,7 @@ that user's private notes. Other-user privacy is enforced by the server.
 
 The server commits accepted actions and notes automatically. Restart it with the
 same save path, then relaunch the text client to restore position, inventory, and
-visible history. Protocol 8 is required; save format 3 and existing rules are unchanged.
+visible history. Protocol 9 is required; save format 3 and existing rules are unchanged.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
 reconnect/retry is not implemented. If a command's response is lost, inspect history
@@ -109,7 +109,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 8. Real process tests cover live spectator
+clients must all use protocol version 9. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -118,8 +118,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 8.
+and selections from an abandoned branch. Server and clients must use protocol 9.
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on
-arrival. Existing saves retain their original rules; only travel-v5 supports travel.
+arrival. Existing saves retain their original rules; travel-v5, doors-v6, shadowcasting-v7, and doorway-v8 support travel.
+
+[Door interactions](doors.md) add open/close, examination, clarification and
+approach intentions to the adventure interface.

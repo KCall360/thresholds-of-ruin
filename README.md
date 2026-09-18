@@ -33,8 +33,12 @@ location organization; hints are disclosed only with perceived cells.
 saved actions. ASCII exposes `_` destination selection, mouse-click travel, and
 Escape cancellation. The [text adventure interface](docs/text-adventure.md) adds
 prose, examination, conversational clarification, travel and approach-then-pickup.
-New saves use `travel-v5`.
-Existing saves retain their original rules. Server and clients use protocol 8.
+[Independent doors](docs/doors.md) now support open/close actions, sight and
+movement obstruction, text approach intentions, and ASCII O/C then direction controls. New
+games include an open wooden door in an unhinted 1x1 hall between the rooms; new saves use `doorway-v8`.
+[Symmetric shadowcasting](docs/shadowcasting.md) allows sight around door corners
+while preserving shadows behind closed doors. Existing saves retain their original
+rules. Server and clients use protocol 9.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

@@ -215,7 +215,7 @@ fn public_scenes_and_history_do_not_expose_backend_geometry() {
         .iter()
         .find(|i| i.item.name == "stone tablet")
         .unwrap();
-    assert_eq!(tablet.position, tor_protocol::Position { x: 6, y: 0, z: 0 });
+    assert_eq!(tablet.position, tor_protocol::Position { x: 7, y: 0, z: 0 });
     assert!(!tablet.reachable);
     let key = initial
         .visible_cells
@@ -225,7 +225,7 @@ fn public_scenes_and_history_do_not_expose_backend_geometry() {
         .key
         .clone();
     let branch = engine.branch().clone();
-    for index in 0..4 {
+    for index in 0..5 {
         engine
             .command(
                 "test",

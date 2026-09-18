@@ -1,8 +1,8 @@
 # Backend travel and ASCII destinations
 
-New `travel-v5` games support travel to an actor's known cell, identified by its
-opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 8 is required. Save format remains 3.
+`travel-v5`, `doors-v6`, `shadowcasting-v7`, and new `doorway-v8` games support travel to an actor's known cell,
+identified by its opaque disclosed key. This is a server capability, independent of place hints,
+region names, and frontend language. Protocol 9 is required. Save format remains 3.
 
 ## ASCII controls
 
@@ -109,8 +109,9 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-New saves use `travel-v5`; all four earlier rulesets retain their original behavior
-and reject travel. `place-hints-v4` continues supporting authored hints and edits.
+New saves use `doorway-v8`; `travel-v5` retains travel support. The four earlier
+rulesets retain their original behavior and reject travel. `place-hints-v4`
+continues supporting authored hints and edits.
 No existing save is silently upgraded to new gameplay rules or wizard mode.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,
@@ -126,3 +127,6 @@ The existing Windows/Linux CI discovery runs these in debug and release.
 The hazard-only interruption policy is part of the protocol-7/travel-v5
 slice. It changes session interruption/status behavior, not persisted action
 semantics or save format. Earlier rulesets remain unchanged.
+
+[Doors](doors.md) add explicit barriers. Travel never opens a closed door; known
+closed doors exclude routes, and stale open-door routes stop on blocked movement.

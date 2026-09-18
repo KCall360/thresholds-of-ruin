@@ -46,6 +46,7 @@ regions 1 and 2, each 5 by 3 by 1. Supported commands are:
 
 | Command | Behavior |
 | --- | --- |
+| `wizard door 1 0 0 0 closed` | Place a closed door (doors-v6 and later); use ordinary open/close to interact |
 | `wizard item token 1 1 1 0` | Place a copper token on the ground |
 | `wizard item tablet 1 1 1 0` | Place a stone tablet on the ground |
 | `wizard actor 75 1 2 1 0` | Spawn an ordinary actor with base recovery 75 ticks |
@@ -84,7 +85,7 @@ authenticated author and actor, and public history contains only a sanitized
 summary and rewind flag. Full parameters/results remain in the backend journal.
 Ordinary action/result disclosure and note audiences retain their normal rules.
 
-Protocol version **8** retains role `wizard`, required `state.wizard_game`, and
+Protocol version **9** retains role `wizard`, required `state.wizard_game`, and
 `history_branch`. Developer input is opaque text parsed only by the server;
 observations are backend-resolved scenes without internal geometry. Snapshots use
 an empty request ID and establish an explicit stream boundary after setup/rewind;
@@ -99,7 +100,7 @@ Save format **3** preserves the root branch, permanent marker, and chronological
 records with authenticated receipts. Replaying the records reconstructs all
 branches and the bounded decision cache; the final branch is determined by the
 rewind records. Normal format-1 saves migrate on successful open while retaining
-`two-room-v1`. New games use `travel-v5`; wide joins also remain supported
+`two-room-v1`. New games use `doorway-v8`; wide joins also remain supported
 in `observer-scene-v3`.
 Legacy rules remain unchanged. Older servers cannot load the new ruleset. Rewind restores complete
 simulation state, including scheduler, knowledge, inventory, and ID allocation.
@@ -248,7 +249,7 @@ existing fixtures and process tests must still verify each new feature.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`travel-v5`; earlier saves retain their original rules.
+`doorway-v8`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

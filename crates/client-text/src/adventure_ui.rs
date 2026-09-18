@@ -17,6 +17,7 @@ struct Journey {
     branch: BranchId,
     receipt: Option<EntryId>,
     item: Option<u64>,
+    door: Option<(u64, bool)>,
     label: String,
     direction: Option<Direction>,
     hazards: BTreeSet<ActorId>,
@@ -167,6 +168,7 @@ async fn dispatch(
         Intent::Travel {
             destination,
             take,
+            door,
             label,
             direction,
         } => {
@@ -179,6 +181,7 @@ async fn dispatch(
                     branch: branch.clone(),
                     receipt: None,
                     item: take,
+                    door,
                     label,
                     direction,
                     hazards,
@@ -297,6 +300,34 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
             "{}",
             journey.interrupted(&interruption(TravelPhase::Hazard, state, &journey.hazards))
         );
+    } else if let Some((door, open)) = journey.door {
+        if journey.branch != *connection.state.branch()
+            || !connection.state.has_control()
+            || !state.observation.ready
+        {
+            println!("You stop before touching the door.");
+        } else if state.observation.visible_cells.iter().any(|c| {
+            c.door
+                .as_ref()
+                .is_some_and(|d| d.id == door && d.reachable && d.open != open)
+        }) {
+            session.summarizing_pickup = true;
+            let accepted = act(connection, session, Action::SetDoor { door, open }).await?;
+            session.summarizing_pickup = false;
+            if accepted {
+                println!(
+                    "You walk over to {} and {} it.",
+                    journey.label,
+                    if open { "open" } else { "close" }
+                );
+            }
+        } else {
+            println!(
+                "You walk over to {}, but cannot {} it now.",
+                journey.label,
+                if open { "open" } else { "close" }
+            );
+        }
     } else if let Some(item) = journey.item {
         if journey.branch != *connection.state.branch() || !connection.state.has_control() {
             println!("You stop before picking anything up.");

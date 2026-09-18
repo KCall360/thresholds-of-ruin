@@ -39,7 +39,9 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::D => Key::Descend,
         NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
-        NativeKey::C => Key::Control,
+        NativeKey::O => Key::OpenDoor,
+        NativeKey::C => Key::CloseDoor,
+        NativeKey::F3 => Key::Control,
         NativeKey::R => Key::Release,
         NativeKey::N => Key::Note,
         NativeKey::Enter => Key::Enter,
@@ -78,7 +80,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL: move; U/D: up/down; Space: wait; G: pickup; _: select travel destination; left click: travel; C/R: acquire/release control.\nN: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL: move; U/D: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nN: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -268,7 +270,7 @@ fn window_loop(
                 "{}",
                 serde_json::json!({"type":"frame","frame":frame,"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
-                "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,
+                "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
             );
@@ -304,6 +306,10 @@ mod tests {
     fn native_navigation_and_modal_keys_map_to_tested_inputs() {
         assert_eq!(native_key(NativeKey::Right), Some(Key::Right));
         assert_eq!(native_key(NativeKey::L), Some(Key::Right));
+        assert_eq!(native_key(NativeKey::O), Some(Key::OpenDoor));
+        assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
+        assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
+        assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
         assert_eq!(native_key(NativeKey::N), Some(Key::Note));
         assert_eq!(native_key(NativeKey::Escape), Some(Key::Escape));

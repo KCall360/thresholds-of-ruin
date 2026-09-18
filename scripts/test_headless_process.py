@@ -69,7 +69,7 @@ class HeadlessProcesses(unittest.TestCase):
         denied = self.request(spectator, {"type": "acquire_control"})
         self.assertIn("read-only", denied["error"])
         self.assertEqual(self.save.read_bytes(), before)
-        for _ in range(4):
+        for _ in range(5):
             moved = self.act(player, {"type": "move", "direction": "east"})
         self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         self.assertGreater(len(moved["memory"]), len(initial["memory"]))

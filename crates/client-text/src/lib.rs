@@ -41,6 +41,30 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         ("inventory" | "i", "") => Ok(Input::Inventory),
         ("help" | "?", "") => Ok(Input::Help),
         ("quit" | "q", "") => Ok(Input::Quit),
+        ("open" | "close", noun) => {
+            let mut doors: Vec<_> = state
+                .observation
+                .visible_cells
+                .iter()
+                .filter_map(|c| c.door.as_ref())
+                .filter(|d| {
+                    noun.is_empty()
+                        || noun == "door"
+                        || noun == d.name
+                        || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok()) == Some(d.id)
+                })
+                .collect();
+            doors.sort_by_key(|d| d.id);
+            doors.dedup_by_key(|d| d.id);
+            match doors.as_slice() {
+                [door] => action(Action::SetDoor {
+                    door: door.id,
+                    open: verb == "open",
+                }),
+                [] => Err("No matching door is visible.".into()),
+                _ => Err("Which door? Use open #id or close #id.".into()),
+            }
+        }
         ("wait" | ".", "") => action(Action::Wait),
         ("control", "") => Ok(Input::Request(Request::AcquireControl)),
         ("release", "") => Ok(Input::Request(Request::ReleaseControl)),
@@ -215,6 +239,18 @@ pub fn describe(state: &StateView) -> String {
         ));
     }
     for cell in &o.visible_cells {
+        if let Some(door) = &cell.door {
+            lines.push(format!(
+                "You see {} {} (#{}), at offset ({}, {}, {}).{}",
+                if door.open { "an open" } else { "a closed" },
+                safe(&door.name),
+                door.id,
+                cell.position.x,
+                cell.position.y,
+                cell.position.z,
+                if door.reachable { " Within reach." } else { "" }
+            ));
+        }
         if cell.stairs_up || cell.stairs_down {
             lines.push(format!(
                 "Stairs {} at offset ({}, {}, {}).",

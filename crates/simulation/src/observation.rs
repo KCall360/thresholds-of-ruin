@@ -39,8 +39,11 @@ pub struct ExitView {
     pub direction: Direction,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub door: Option<tor_world::Door>,
+    pub door_reachable: bool,
+    pub door_approaches: Vec<Location>,
     pub material: &'static str,
     pub location: Location,
     pub wall: bool,
@@ -63,7 +66,7 @@ pub struct Observation {
 }
 
 impl Game {
-    /// A free read of current perception. New games use bounded cell-centre rays,
+    /// A free read of current perception. New games use bounded symmetric shadowcasting,
     /// including rotated portals. Legacy saves retain whole-room perception.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
@@ -89,8 +92,7 @@ impl Game {
                 .collect::<BTreeSet<_>>()
         } else {
             if self.scene_rules {
-                self.world
-                    .scene(actor.location, actor.orientation, 8)
+                self.scene(id)?
                     .into_iter()
                     .map(|cell| cell.location)
                     .collect()
@@ -134,6 +136,14 @@ impl Game {
             visible_cells: cells
                 .iter()
                 .map(|&location| CellView {
+                    door: self.world.door(location),
+                    door_reachable: self.world.door(location).is_some()
+                        && self.door_reachable_from(actor.location, location),
+                    door_approaches: if self.world.door(location).is_some() {
+                        self.disclosed_door_approaches(id, location)
+                    } else {
+                        vec![]
+                    },
                     material: "stone",
                     location,
                     wall: self.world.is_wall(location),
@@ -188,6 +198,42 @@ impl Game {
         })
     }
 
+    fn disclosed_door_approaches(&self, actor: ActorId, door: Location) -> Vec<Location> {
+        let scene = self.scene(actor).expect("observed actor");
+        let mut approaches = BTreeSet::new();
+        for from in &scene {
+            if !self.world.walkable(from.location) {
+                continue;
+            }
+            for (direction, dx, dy) in [
+                (Direction::North, 0, -1),
+                (Direction::East, 1, 0),
+                (Direction::South, 0, 1),
+                (Direction::West, -1, 0),
+            ] {
+                let local = direction.rotated(from.rotation);
+                if self.world.adjacent(from.location, local) != Some(door) {
+                    continue;
+                }
+                let rotation =
+                    (from.rotation + self.world.crossing_rotation(from.location, local)) % 4;
+                if scene.iter().any(|target| {
+                    target.location == door
+                        && target.rotation == rotation
+                        && target.offset
+                            == Position {
+                                x: from.offset.x + dx,
+                                y: from.offset.y + dy,
+                                z: from.offset.z,
+                            }
+                }) {
+                    approaches.insert(from.location);
+                }
+            }
+        }
+        approaches.into_iter().collect()
+    }
+
     /// Backend-resolved view occurrences. A location may be seen at several offsets.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
@@ -207,6 +253,11 @@ impl Game {
                     wall: cell.wall,
                 })
                 .collect());
+        }
+        if self.shadowcasting {
+            return Ok(self
+                .world
+                .shadow_scene(actor.location, actor.orientation, 8));
         }
         Ok(self.world.scene(
             actor.location,

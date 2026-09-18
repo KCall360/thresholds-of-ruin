@@ -98,3 +98,42 @@ fn the_same_cell_can_have_multiple_visible_appearances_without_unbounded_cycles(
     assert!(appearances.len() >= 3);
     assert!(seen.len() <= 145 + 16);
 }
+#[test]
+fn a_door_on_a_wide_join_matches_an_interior_door_without_becoming_a_wall() {
+    let mut whole = World::new(vec![room(1, 10, 5, 1)], vec![]).unwrap();
+    let mut split = World::new(vec![room(1, 5, 5, 1), room(2, 5, 5, 1)], vec![]).unwrap();
+    split
+        .connect_area(
+            Passage {
+                from: at(1, 4, 0, 0),
+                direction: Direction::East,
+                to: at(2, 0, 0, 0),
+            },
+            0,
+            5,
+            1,
+        )
+        .unwrap();
+    whole.place_door(at(1, 5, 2, 0), 1, false).unwrap();
+    split.place_door(at(2, 0, 2, 0), 1, false).unwrap();
+    let projection = |world: &World| {
+        world
+            .scene(at(1, 3, 2, 0), 0, 8)
+            .iter()
+            .map(|c| (c.offset, c.wall, world.door(c.location)))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(projection(&whole), projection(&split));
+    assert_eq!(split.step(at(1, 4, 2, 0), Direction::East), None);
+    assert!(split.passage(at(1, 4, 2, 0), Direction::East).is_some());
+    assert!(projection(&split)
+        .iter()
+        .any(|(_, wall, door)| door.is_some() && !wall));
+    whole.set_door(at(1, 5, 2, 0), true);
+    split.set_door(at(2, 0, 2, 0), true);
+    assert_eq!(projection(&whole), projection(&split));
+    assert_eq!(
+        split.step(at(1, 4, 2, 0), Direction::East),
+        Some(at(2, 0, 2, 0))
+    );
+}

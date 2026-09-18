@@ -167,7 +167,7 @@ impl Canvas {
             self.text(
                 44,
                 468,
-                "@ YOU   ! ITEM   & ACTOR   # WALL   . FLOOR   < > STAIRS",
+                "@ YOU  ! ITEM  & ACTOR  # WALL  . FLOOR  <> STAIRS  + CLOSED / OPEN DOOR",
                 MUTED,
                 1,
                 84,
@@ -247,7 +247,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F2 history   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "ARROWS/HJKL move  U/D level  _/CLICK travel  G pickup  SPACE wait  C/R control  N note  F2 history  ESC cancel/quit"
+            "ARROWS/HJKL move  U/D level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  N note  F2 history  ESC quit/cancel"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -273,6 +273,23 @@ impl Canvas {
             for (i, line) in lines.iter().skip(start).enumerate() {
                 self.text(84, 274 + i * 26, line, TEXT, 2, 64);
             }
+        }
+        if let Some(open) = app.door_direction {
+            self.panel(160, 176, 880, 160);
+            self.text(
+                188,
+                204,
+                if open {
+                    "OPEN IN WHICH DIRECTION?"
+                } else {
+                    "CLOSE IN WHICH DIRECTION?"
+                },
+                ACCENT,
+                2,
+                50,
+            );
+            self.text(188, 250, "Arrow keys or H/J/K/L", TEXT, 2, 50);
+            self.text(188, 292, "ESC cancels without taking a turn", MUTED, 1, 80);
         }
         if !app.pickup.is_empty() {
             self.panel(160, 176, 880, 428);

@@ -5,7 +5,7 @@ use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
 
-pub const HELP: &str = "look (l), examine <thing> (x), inventory (i), get <thing>, go to <thing>, north/east/south/west/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
+pub const HELP: &str = "look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
 pub const SESSION_HELP: &str = "control, release, sync, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,6 +16,7 @@ pub enum Intent {
     Travel {
         destination: String,
         take: Option<u64>,
+        door: Option<(u64, bool)>,
         label: String,
         direction: Option<Direction>,
     },
@@ -28,12 +29,14 @@ struct Choice {
     label: String,
     intent: Intent,
     item: Option<u64>,
+    door: Option<u64>,
 }
 
 #[derive(Default)]
 pub struct Dialogue {
     choices: Option<(u64, Vec<Choice>)>,
     item: Option<u64>,
+    door: Option<u64>,
 }
 
 impl Dialogue {
@@ -57,6 +60,7 @@ impl Dialogue {
                     .collect();
                 if matches.len() == 1 {
                     self.item = matches[0].item;
+                    self.door = matches[0].door;
                     return matches[0].intent.clone();
                 }
             }
@@ -74,6 +78,7 @@ impl Dialogue {
             },
             ("examine" | "x" | "inspect", noun) => self.object(noun, state, "examine"),
             ("look", noun) if noun.starts_with("at ") => self.object(&noun[3..], state, "examine"),
+            ("open" | "close", noun) => self.object(noun, state, verb),
             ("take" | "get", noun) => self.object(noun, state, "take"),
             ("go" | "approach", noun) if parse_direction(noun).is_err() => {
                 self.object(noun.strip_prefix("to ").unwrap_or(noun), state, "go")
@@ -92,9 +97,11 @@ impl Dialogue {
                         .map(|d| Choice {
                             label: d.label.clone(),
                             item: None,
+                            door: None,
                             intent: Intent::Travel {
                                 destination: d.key,
                                 take: None,
+                                door: None,
                                 label: d.label,
                                 direction: Some(direction),
                             },
@@ -122,6 +129,7 @@ impl Dialogue {
             [] => Intent::Say(missing.into()),
             [choice] => {
                 self.item = choice.item;
+                self.door = choice.door;
                 choice.intent.clone()
             }
             _ => {
@@ -172,6 +180,9 @@ impl Dialogue {
         }
         let mut choices = Vec::new();
         for (id, item) in items {
+            if matches!(verb, "open" | "close") {
+                continue;
+            }
             if !(noun.is_empty()
                 || noun_matches(noun, &item.name)
                 || noun == "it" && self.item == Some(id))
@@ -214,6 +225,7 @@ impl Dialogue {
                     Intent::Travel {
                         destination: cell.key.clone(),
                         take: (verb == "take").then_some(id),
+                        door: None,
                         label: format!("the {}", safe(&item.name)),
                         direction: None,
                     }
@@ -223,6 +235,68 @@ impl Dialogue {
                 label: item.name.clone(),
                 intent,
                 item: Some(id),
+                door: None,
+            });
+        }
+        let mut doors = BTreeSet::new();
+        for cell in &state.observation.visible_cells {
+            let Some(door) = &cell.door else {
+                continue;
+            };
+            let label = format!("{} {}", door.name, whereabouts(cell.position));
+            if !doors.insert(door.id)
+                || !(noun.is_empty()
+                    || noun_matches(noun, &label)
+                    || noun == "it" && self.door == Some(door.id))
+            {
+                continue;
+            }
+            let target_open = verb == "open";
+            let intent = match verb {
+                "examine" => Intent::Say(format!(
+                    "{} It is {}.",
+                    safe(&door.description),
+                    if door.open { "open" } else { "closed" }
+                )),
+                "take" => Intent::Say("You cannot pick up a door.".into()),
+                "open" | "close" if door.open == target_open => Intent::Say(format!(
+                    "It is already {}.",
+                    if target_open { "open" } else { "closed" }
+                )),
+                "open" | "close" if door.reachable => Intent::Action(Action::SetDoor {
+                    door: door.id,
+                    open: target_open,
+                }),
+                "go" if door.reachable => Intent::Say("You are already beside it.".into()),
+                _ => {
+                    let destination = state
+                        .observation
+                        .visible_cells
+                        .iter()
+                        .filter(|c| {
+                            door.approaches.contains(&c.key)
+                                && !c.wall
+                                && c.door.as_ref().is_none_or(|d| d.open)
+                        })
+                        .min_by_key(|c| (distance(c.position), &c.key));
+                    match destination {
+                        Some(c) => Intent::Travel {
+                            destination: c.key.clone(),
+                            take: None,
+                            door: matches!(verb, "open" | "close")
+                                .then_some((door.id, target_open)),
+                            label: format!("the {}", safe(&door.name)),
+                            direction: None,
+                        },
+                        None => Intent::Say("You cannot see a place to approach it from.".into()),
+                    }
+                }
+            };
+            choices.push(Choice {
+                label,
+                intent,
+                item: None,
+                door: Some(door.id),
             });
         }
         if verb == "examine" {
@@ -233,6 +307,7 @@ impl Dialogue {
                         label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
                         intent: Intent::Say(safe(&actor.description)),
                         item: None,
+                        door: None,
                     });
                 }
             }
@@ -460,6 +535,22 @@ pub fn describe(state: &StateView) -> String {
             ));
         }
     }
+    let mut doors = BTreeSet::new();
+    for cell in &o.visible_cells {
+        if let Some(door) = &cell.door {
+            if doors.insert(door.id) {
+                lines.push(format!(
+                    "You see {} {}.",
+                    indefinite(&format!(
+                        "{} {}",
+                        if door.open { "open" } else { "closed" },
+                        door.name
+                    )),
+                    whereabouts(cell.position)
+                ));
+            }
+        }
+    }
     let mut actors = BTreeSet::new();
     for actor in &o.visible_actors {
         if actors.insert(actor.id) {
@@ -518,6 +609,13 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn event(entry: &HistoryEntry, state: &StateView) -> String {
     match &entry.content {
+        HistoryContent::Action {
+            event: Event::DoorChanged { open, .. },
+            ..
+        } => format!(
+            "You {} the wooden door.",
+            if *open { "open" } else { "close" }
+        ),
         HistoryContent::Action {
             event: Event::Taken { item },
             ..

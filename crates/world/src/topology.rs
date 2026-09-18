@@ -78,6 +78,7 @@ pub enum WorldError {
 /// Validated region topology with stable iteration order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct World {
+    doors: BTreeMap<Location, Door>,
     regions: BTreeMap<RegionId, Region>,
     passages: BTreeMap<(Location, Direction), Passage>,
     rotations: BTreeMap<(Location, Direction), u8>,
@@ -85,9 +86,51 @@ pub struct World {
     place_hints: BTreeSet<Location>,
 }
 
+/// A cell-sized barrier entity, unrelated to portal identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Door {
+    pub id: u64,
+    pub open: bool,
+}
+
 impl World {
+    pub fn door(&self, location: Location) -> Option<Door> {
+        self.doors.get(&location).copied()
+    }
+    pub fn door_location(&self, id: u64) -> Option<Location> {
+        self.doors
+            .iter()
+            .find_map(|(location, door)| (door.id == id).then_some(*location))
+    }
+    pub fn place_door(
+        &mut self,
+        location: Location,
+        id: u64,
+        open: bool,
+    ) -> Result<(), WorldError> {
+        if !self.walkable(location)
+            || self.doors.contains_key(&location)
+            || self.door_location(id).is_some()
+        {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.doors.insert(location, Door { id, open });
+        Ok(())
+    }
+    pub fn set_door(&mut self, location: Location, open: bool) {
+        self.doors.get_mut(&location).expect("validated door").open = open;
+    }
+    pub fn opaque(&self, location: Location) -> bool {
+        self.is_wall(location) || self.door(location).is_some_and(|d| !d.open)
+    }
+    /// The perceived adjacent cell, including a closed barrier at the destination.
+    pub fn adjacent(&self, from: Location, direction: Direction) -> Option<Location> {
+        self.sight_step(from, direction).map(|(to, _)| to)
+    }
+
     pub fn new(regions: Vec<Region>, passages: Vec<Passage>) -> Result<Self, WorldError> {
         let mut world = Self {
+            doors: BTreeMap::new(),
             regions: BTreeMap::new(),
             passages: BTreeMap::new(),
             rotations: BTreeMap::new(),
@@ -217,7 +260,7 @@ impl World {
     }
 
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), WorldError> {
-        if !self.contains(location) {
+        if !self.contains(location) || (wall && self.doors.contains_key(&location)) {
             return Err(WorldError::InvalidEndpoint);
         }
         if wall {
@@ -251,7 +294,7 @@ impl World {
     }
 
     pub fn walkable(&self, location: Location) -> bool {
-        self.contains(location) && !self.is_wall(location)
+        self.contains(location) && !self.opaque(location)
     }
 
     pub fn passage(&self, from: Location, direction: Direction) -> Option<&Passage> {
@@ -266,6 +309,15 @@ impl World {
         if !self.walkable(from) {
             return None;
         }
+        self.geometry_step(from, direction)
+    }
+
+    /// Topology only: opaque cells still have geometric neighbors.
+    pub(crate) fn geometry_step(
+        &self,
+        from: Location,
+        direction: Direction,
+    ) -> Option<(Location, u8)> {
         if let Some(passage) = self.passage(from, direction) {
             return Some((passage.to, self.rotations[&(from, direction)]));
         }

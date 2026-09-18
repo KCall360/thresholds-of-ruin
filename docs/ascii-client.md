@@ -14,14 +14,14 @@ cargo run -p tor-client-ascii -- --connect 127.0.0.1:4000 --actor 1
 ```
 
 Use `--observe` to attach without requesting control. Another client's ownership
-does not prevent observation; press C once that client releases control. The
+does not prevent observation; press F3 once that client releases control. The
 server address must be a numeric loopback socket address (IPv4 or IPv6).
 Automatic server launch and packaged builds are planned for a later milestone.
 
 The window shows the complete disclosed scene, simulation tick, inventory, visible
 items, recent history, and control status. The map uses `@` for your actor, `&`
 for another visible actor, `!` for an item, `<`/`>` for stairs, `#` for walls,
-and `.` for visible floor. Undisclosed cells are blank.
+`+` for closed doors, `/` for open doors, and `.` for visible floor. Undisclosed cells are blank.
 An actor glyph takes precedence over items/stairs on the same cell; visible
 items are also listed in the side panel. North is toward the top of the map.
 Items elsewhere in the room remain out of reach until you move onto their cell.
@@ -31,10 +31,11 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | Arrow keys, H/J/K/L | Move west/south/north/east by one cell |
 | U / D | Request movement up/down; the current fixture has no vertical route |
 | Space or period | Wait one action |
+| O / C, then a direction | Open / close the adjacent door using arrows or H/J/K/L; no door means a local message and no ticks |
 | G | Pick up an item at your feet; choose with Up/Down and Enter if several match |
 | `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
 | Escape during travel | Cancel at the next action boundary |
-| C / R | Acquire / release actor control |
+| F3 / R | Acquire / release actor control |
 | N | Compose a note anchored to the state where composition began |
 | Tab in note editor | Switch between private and actor-visible audience; defaults to private |
 | Enter / Backspace in note editor | Save / edit the note |
@@ -133,7 +134,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 8. Real process tests cover live spectator
+clients must all use protocol version 9. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -142,9 +143,9 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 8.
+and selections from an abandoned branch. Server and clients must use protocol 9.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`travel-v5`; earlier saves retain their original rules.
+`doorway-v8`; earlier saves retain their original rules.
