@@ -2,7 +2,7 @@
 
 New `travel-v5` games support travel to an actor's known cell, identified by its
 opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 7 is required. Save format remains 3.
+region names, and frontend language. Protocol 8 is required. Save format remains 3.
 
 ## ASCII controls
 
@@ -16,15 +16,14 @@ Walls, undisclosed cells, and panels outside the map are not destinations.
 During active travel, Escape requests cancellation instead of quitting. The map
 shows travel status and the number of completed steps. Selecting with `_` again
 requires cancelling the active trip first; a new valid click can replace it.
-Spectators can observe progress but cannot start or cancel travel. The existing
-text command parser is unchanged: `east` still moves one cell. Text clients can
-observe the completed movement and browse travel requests in history, but there
-is no text travel command, location grouping, or automatic pickup sequence yet.
+Spectators can observe progress but cannot start or cancel travel. The [text adventure interface](text-adventure.md) now interprets directions and
+object intentions through this backend travel. Its explicit `--script` mode
+preserves one-cell commands and diagnostic output.
 
 ASCII selects currently visible cells. The backend also accepts previously
-perceived cell keys, so future frontends can use travel underneath higher-level
-intentions such as going east to a location or approaching a key. Arrival never
-performs another action automatically.
+perceived cell keys, so frontends can use travel underneath higher-level
+intentions such as going east to a location or approaching a key. The travel service itself never performs a manipulation on arrival; the text
+client can issue a separately validated pickup after checking interruption state.
 
 ## Knowledge and routing
 

@@ -5,12 +5,14 @@ use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemView {
+    pub description: String,
     pub id: ItemId,
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroundItemView {
+    pub description: String,
     pub id: ItemId,
     pub name: String,
     pub location: Location,
@@ -24,6 +26,8 @@ pub struct KnownPlace {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActorView {
+    pub name: &'static str,
+    pub description: &'static str,
     pub id: ActorId,
     pub location: Location,
 }
@@ -37,6 +41,7 @@ pub struct ExitView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub material: &'static str,
     pub location: Location,
     pub wall: bool,
     pub place_hint: bool,
@@ -100,6 +105,7 @@ impl Game {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
+                        description: item_description(&item.name),
                         id: item_id,
                         name: item.name.clone(),
                         location,
@@ -107,6 +113,7 @@ impl Game {
                 }
                 ItemLocation::Carried(owner) if owner == id => {
                     inventory.push(ItemView {
+                        description: item_description(&item.name),
                         id: item_id,
                         name: item.name.clone(),
                     });
@@ -127,6 +134,7 @@ impl Game {
             visible_cells: cells
                 .iter()
                 .map(|&location| CellView {
+                    material: "stone",
                     location,
                     wall: self.world.is_wall(location),
                     place_hint: self.world.has_place_hint(location),
@@ -138,6 +146,8 @@ impl Game {
                 .iter()
                 .filter(|(other_id, other)| **other_id != id && visible(other.location))
                 .map(|(&id, other)| ActorView {
+                    name: "figure",
+                    description: "An unremarkable figure stands here.",
                     id,
                     location: other.location,
                 })
@@ -204,4 +214,16 @@ impl Game {
             if self.scene_rules { 8 } else { 4 },
         ))
     }
+}
+
+/// Initial authored appearance catalog. These cosmetic stubs do not add item rules.
+fn item_description(name: &str) -> String {
+    match name {
+        "copper token" => "A small copper disc, stamped with a worn spiral.",
+        "silver token" => "A small silver disc, stamped with a worn spiral.",
+        "iron token" => "A small iron disc, stamped with a worn spiral.",
+        "stone tablet" => "A weathered slab of stone. Shallow marks run across its surface.",
+        _ => "You notice no further distinguishing details.",
+    }
+    .into()
 }

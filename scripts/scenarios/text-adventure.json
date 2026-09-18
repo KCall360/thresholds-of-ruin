@@ -1,0 +1,20 @@
+{
+  "hazard": [
+    "wizard room 3 20 1 1 Text hazard corridor",
+    "wizard place 3 0 0 0 on",
+    "wizard place 3 7 0 0 on",
+    "wizard item tablet 3 7 0 0",
+    "wizard actor 100 3 9 0 0",
+    "wizard teleport 1 3 0 0 0"
+  ],
+  "arrival_hazard": [
+    "wizard room 3 20 1 1 Text arrival corridor",
+    "wizard item tablet 3 1 0 0",
+    "wizard actor 100 3 9 0 0",
+    "wizard teleport 1 3 0 0 0"
+  ],
+  "clarification": [
+    "wizard item token 1 1 1 0",
+    "wizard wall 1 1 0 0 closed"
+  ]
+}

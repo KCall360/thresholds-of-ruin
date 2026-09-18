@@ -126,6 +126,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        material: "stone".into(),
         key: "wall".into(),
         stairs_up: false,
         stairs_down: false,
@@ -196,6 +197,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .push(GroundItemView {
             reachable: true,
             item: ItemView {
+                description: String::new(),
                 id: 4,
                 name: "another token".into(),
             },

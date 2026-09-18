@@ -31,8 +31,10 @@ New maps also carry [unnamed place hints](docs/place-hints.md) for future text
 location organization; hints are disclosed only with perceived cells.
 [Backend travel](docs/travel.md) now moves toward known cells through ordinary
 saved actions. ASCII exposes `_` destination selection, mouse-click travel, and
-Escape cancellation; text commands remain unchanged. New saves use `travel-v5`.
-Existing saves retain their original rules. Server and clients use protocol 7.
+Escape cancellation. The [text adventure interface](docs/text-adventure.md) adds
+prose, examination, conversational clarification, travel and approach-then-pickup.
+New saves use `travel-v5`.
+Existing saves retain their original rules. Server and clients use protocol 8.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

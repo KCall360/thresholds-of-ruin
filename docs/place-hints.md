@@ -13,7 +13,7 @@ hint at each space's center. There is no procedural generator yet.
 
 ## Disclosure and memory
 
-Protocol **7** retains the protocol-6 requirement for `place_hint` on each disclosed `visible_cells` entry.
+Protocol **8** retains the protocol-6 requirement for `place_hint` on each disclosed `visible_cells` entry.
 Only perceived cells carry hints; there is no dungeon-wide marker list. The
 existing opaque cell key identifies the location, and the existing relative
 position locates each visible occurrence. Repeated views of the same cell through
@@ -23,9 +23,9 @@ No region identities, transforms, labels, or unseen connections are disclosed.
 Shared client memory retains the last perceived value. An unseen removal stays
 stale until that cell is perceived again. A fresh observation replaces the value,
 including `false`; rewind clears abandoned-future memory. Headless JSON exposes
-current hints and remembered hints. Text and ASCII receive and retain them without
-rendering markers or changing navigation. Text grouping and location-based travel
-are future work; this slice establishes their input.
+current hints and remembered hints. ASCII retains them without rendering markers.
+The [text adventure interface](text-adventure.md) uses visible hints for a
+conservative destination heuristic; persistent named places remain future work.
 
 ## Dynamic authoring
 
@@ -55,7 +55,7 @@ selects the authored hints and supports journaled hint edits. Older servers reje
 the unknown rules version. Existing `two-room-v1`, `portal-sight-v2`, and
 `observer-scene-v3` games retain their original fixture, replay, and rules, expose
 `place_hint: false`, and reject wizard hint edits. All connected binaries must
-use protocol 7. Normal games are never implicitly promoted to wizard mode.
+use protocol 8. Normal games are never implicitly promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale
 memory and refresh, permissions, invalid setup, replay, and rewind. The versioned
@@ -64,4 +64,5 @@ native ASCII processes. Existing Windows/Linux debug and release CI discovery
 includes these tests.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
-Earlier rules retain their behavior; text has no travel commands in this slice.
+Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
+now adds text travel and approach-then-pickup.

@@ -233,14 +233,20 @@ fn repeated_views_of_self_are_not_potential_hazards() {
     let mut observation = service.engine.observation(ActorId(1)).unwrap();
     observation.visible_actors = vec![
         ActorView {
+            name: "figure".into(),
+            description: "A figure.".into(),
             id: ActorId(1),
             position: Position { x: 1, y: 0, z: 0 },
         },
         ActorView {
+            name: "figure".into(),
+            description: "A figure.".into(),
             id: ActorId(2),
             position: Position { x: 2, y: 0, z: 0 },
         },
         ActorView {
+            name: "figure".into(),
+            description: "A figure.".into(),
             id: ActorId(2),
             position: Position { x: 3, y: 0, z: 0 },
         },

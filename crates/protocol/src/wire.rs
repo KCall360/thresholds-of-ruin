@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +67,9 @@ pub struct Position {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemView {
+    /// Perceived appearance only; never hidden properties.
+    #[serde(default)]
+    pub description: String,
     pub id: u64,
     pub name: String,
 }
@@ -80,6 +83,10 @@ pub struct GroundItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorView {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub id: ActorId,
     pub position: Position,
 }
@@ -98,6 +105,9 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellView {
+    /// Cosmetic surface material, not a physical interaction rule.
+    #[serde(default)]
+    pub material: String,
     /// Stable opaque identity for remembering a disclosed cell.
     pub key: String,
     pub stairs_up: bool,

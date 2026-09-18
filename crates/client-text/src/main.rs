@@ -8,6 +8,8 @@ use tor_client_common::Connection;
 use tor_client_text::{describe, history, inventory, parse, safe, Input, HELP};
 use tor_protocol::*;
 
+mod adventure_ui;
+
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[tokio::main]
@@ -22,22 +24,27 @@ async fn run() -> Result<(), Error> {
     let mut address: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut actor = ActorId(1);
     let mut observe = false;
+    let mut script = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-text [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server's token. Enter one command per line.\n{HELP}");
+                println!("tor-client-text [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--script]\nSet TOR_SERVER_TOKEN to the server's token. Enter one command per line.\n{}\n\n--script selects the development scripting interface. Use help session in the game for connection and history tools.", tor_client_text::adventure::HELP);
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
             "--actor" => actor = ActorId(args.next().ok_or("Missing --actor ID")?.parse()?),
             "--observe" => observe = true,
+            "--script" => script = true,
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
     let token = std::env::var("TOR_SERVER_TOKEN")
         .map_err(|_| "Set TOR_SERVER_TOKEN before starting the client")?;
     let mut connection = Connection::connect(address, token, actor, "text").await?;
+    if !script {
+        return adventure_ui::run(connection, observe).await;
+    }
     println!("Attached to actor {}. Type help for commands.", actor.0);
     println!("{}", describe(connection.state.state()));
     println!("{}", inventory(connection.state.state()));
