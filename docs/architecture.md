@@ -138,11 +138,32 @@ and checksums. A seed alone is insufficient. Saves need atomic replacement and
 recovery from interrupted writes. Exact replay requires compatible simulation
 and content versions; arbitrary cross-version replay is not promised.
 
-Developer undo reconstructs an earlier state; a new action preserves the old
-branch and creates a new one. Retained history is limited by available storage,
+Wizard-mode developer undo reconstructs an earlier state; a new action preserves
+the old branch and creates a new one. Retained history is limited by available storage,
 not held entirely in memory. Player-facing time travel is deferred. Normal play
 enforces persistent permadeath and exposes no undo. Local file manipulation is
 outside that guarantee.
+
+## Wizard mode (planned)
+
+[Wizard mode](wizard-mode.md) is a server-enabled development capability for
+placing mobs, objects, and rooms, teleporting actors, and rewinding turns. The
+server owns authorization and validates privileged commands; clients only expose
+the capabilities granted to their connection. Wizard operations remain explicit
+structured requests, separate from ordinary actor actions and annotations.
+
+Enabling wizard mode permanently marks the entire game lineage as a wizard game.
+The marker is durable before privileged commands can execute and survives replay,
+restart, save copies, rewinds, and forks, including rewinds before enablement.
+Disabling privileged access never restores normal-game status. Every frontend
+displays this status, and normal-play results exclude wizard games.
+
+Privileged mutations must preserve world invariants and deterministic replay.
+The server records their inputs and results, rebuilds affected observations, and
+publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
+observers keep actor-specific disclosure; privileged inspection, if added, needs
+its own authorized response rather than widening normal observations. Protocol
+and save version changes will be designed when this plan is implemented.
 
 ## Initial content and deferred decisions
 

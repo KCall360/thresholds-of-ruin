@@ -36,12 +36,37 @@ compare their disclosed state to the resumed authoritative state. Exercise the
 actual client processes as well as shared adapters. Reconnection and stale or
 duplicate commands must not corrupt the game.
 
+## 1a: Wizard mode development foundation (planned)
+
+Add server-enabled wizard mode early so later milestones can use it to construct
+scenarios and verify behavior. This is planned work, not an available server flag
+or client command. See [the wizard mode plan](wizard-mode.md) for requirements.
+
+- Server-controlled enablement and authorization; permanent wizard-game identity
+  across saves, restarts, replay, copies, and all history branches.
+- Explicit privileged protocol commands and visible wizard-game indicators in
+  every frontend, including for observers without command privileges.
+- Initial placement of supported objects/actors, teleportation, and bounded turn
+  rewind to recorded decision boundaries, with deterministic journaling and
+  preservation of the abandoned future. Never expose rewind in normal games.
+- Scriptable text commands and actual server/client process tests for reproducible
+  development scenarios; extend other frontends as they become available.
+
+Acceptance: explicitly enable wizard mode on the server; place an object,
+teleport an actor, perform ordinary actions, rewind, and take a different action.
+Restart the server and verify state, annotations, retained branches, and the
+permanent wizard marker. Reject the same privileged requests in a normal game
+and from an unauthorized observer without changing state or disclosing hidden
+facts. Turning off privileged access must not remove the marker.
+
 ## 2: Geometry and perception
 
 Stairs/elevations, rotated portal, portal-aware visibility, knowledge and memory.
 Test an interior door unrelated to a portal, portal orientation transforms,
 vertical movement, cycles, and hidden-information disclosure. Test one action
 producing several ordered updates before the next player decision.
+Extend wizard commands with room placement and explicit passage connections as
+the geometry model supports them; use these to reproduce perception edge cases.
 
 ## 3: Interactions and travel
 
@@ -49,16 +74,21 @@ Doors, locks, keys, containers, clarification, named places and interrupted trav
 Both clients complete the same manipulation scenarios. Unknown map regions must
 not influence travel. Ambiguity consumes no time; threats interrupt before another
 automatic movement action. Test cancellation and slow-client resynchronization.
+Extend wizard object placement with supported container, door, lock, and item
+properties so interaction/travel failures can be reproduced without manual setup.
 
 ## 4: Dungeon gameplay
 
 Equipment, melee, two enemy types, different action durations/speeds, death and
 exit objective. Add seeded generation after hand-authored fixtures are reliable.
 Test deterministic combat, victory and persistent permadeath through both clients.
+Add wizard mob placement with explicit supported archetypes and behavior settings;
+use placement, teleportation, and rewind to verify combat and death scenarios.
 
 ## 5: History and release preparation
 
-Developer undo/branching, replay checksums, save-write recovery and packaged builds.
+Scale wizard rewind/branching beyond the initial bounded implementation; add
+replay checksums, save-write recovery and packaged builds.
 Verify retained branches, replay with compatible versions, and packaged client
 launches that automatically start a local backend or attach to an existing one.
 
