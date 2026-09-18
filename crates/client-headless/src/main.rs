@@ -142,6 +142,7 @@ fn emit(
         "cursor": connection.state.cursor(),
         "has_control": connection.state.has_control(),
         "history": connection.state.history(),
+        "travel": connection.state.travel(),
         "memory": connection.state.memory().collect::<Vec<_>>(),
         "message": message,
         "error": error,

@@ -131,6 +131,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
 fn present(connection: &Connection, message: &ServerMessage) {
     match message {
         ServerMessage::Update { update } => match &update.body {
+            UpdateBody::Travel { .. } => {}
             UpdateBody::Observation { event, .. } => {
                 if let Some(entry) = event {
                     println!("{}", history(entry));

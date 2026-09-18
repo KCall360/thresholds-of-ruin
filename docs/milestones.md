@@ -95,7 +95,7 @@ of portals and richer multi-event perception remain pending.
 Implemented: [unnamed place hints](place-hints.md), authored cell anchors
 independent of regions and portals. Protocol 6 discloses hints only with perceived
 cells; shared memory retains potentially stale values. Wizard set/clear supports
-dynamic maps, restart and rewind. New saves use place-hints-v4; older rules remain
+dynamic maps, restart and rewind. That slice introduced place-hints-v4; older rules remain
 unchanged. Actual text/headless/native ASCII acceptance covers disclosure and
 memory. Client location grouping and navigation are not implemented by this slice.
 
@@ -115,6 +115,18 @@ visibility separately from retained client memory, including portal views and
 hidden-information boundaries.
 
 ## 3: Interactions and travel
+
+Implemented first travel slice: [backend travel to known cells](travel.md), ASCII
+`_` selection and mouse clicks, ordered completed-step updates, cancellation,
+potential-hazard/obstruction/control interruptions, replayed navigation knowledge, and
+restart/rewind behavior. Protocol 7 and new rules `travel-v5` preserve legacy
+saves. Actual server/text observer/headless/native ASCII acceptance includes
+native underscore and mouse input, normal play, wizard scenarios and persistence.
+Text exposes no travel command yet; higher-level intentions, location grouping,
+and automatic approach-then-manipulate sequences remain future work. Doors,
+locks, containers, richer threat/damage interruptions and the remaining work below are
+still pending.
+
 
 Doors, locks, keys, containers, clarification, named places and interrupted travel.
 Both clients complete the same manipulation scenarios. Unknown map regions must

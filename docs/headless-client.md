@@ -101,4 +101,7 @@ text/ASCII process coverage remains required alongside this headless frontend.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; text
 and ASCII do not render them or use them for navigation yet. New saves use
-`place-hints-v4`; earlier saves retain their original rules.
+`travel-v5`; earlier saves retain their original rules.
+
+[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
+Earlier rules retain their behavior; text has no travel commands in this slice.

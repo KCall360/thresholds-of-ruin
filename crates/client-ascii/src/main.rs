@@ -78,7 +78,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL: move; U/D: up/down; Space: wait; G: pickup; C/R: acquire/release control.\nN: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: close modal or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL: move; U/D: up/down; Space: wait; G: pickup; _: select travel destination; left click: travel; C/R: acquire/release control.\nN: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -151,6 +151,7 @@ fn window_loop(
     let mut frame = 0u64;
     let mut pending_input = None;
     let mut failed = false;
+    let mut mouse_down = false;
     while window.is_open() {
         let mut dirty = frame == 0;
         loop {
@@ -188,8 +189,23 @@ fn window_loop(
         if input.is_none() {
             // Consume text before Enter, but not the N that opens a new note.
             if app.note.is_some() && !typed.is_empty() {
-                inputs.push(Input::Text { text: typed });
+                inputs.push(Input::Text {
+                    text: typed.clone(),
+                });
             }
+            if app.note.is_none() && typed.contains('_') {
+                inputs.push(Input::Key { key: Key::Travel });
+            }
+            let pressed = window.get_mouse_down(minifb::MouseButton::Left);
+            if pressed && !mouse_down {
+                if let Some((x, y)) = window.get_unscaled_mouse_pos(minifb::MouseMode::Discard) {
+                    let (w, h) = window.get_size();
+                    if let Some((x, y)) = tor_client_ascii::render::logical_mouse(x, y, w, h) {
+                        inputs.push(Input::Click { x, y });
+                    }
+                }
+            }
+            mouse_down = pressed;
             inputs.extend(
                 window
                     .get_keys_pressed(KeyRepeat::No)
@@ -252,7 +268,7 @@ fn window_loop(
                 "{}",
                 serde_json::json!({"type":"frame","frame":frame,"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
-                "role":app.role,
+                "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
             );

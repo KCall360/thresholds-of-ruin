@@ -253,6 +253,7 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn history(entry: &HistoryEntry) -> String {
     let content = match &entry.content {
+        HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => safe(summary),
         HistoryContent::Action { event, .. } => format!("{event:?}"),
         HistoryContent::Annotation {

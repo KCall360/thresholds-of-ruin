@@ -9,7 +9,7 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `place-hints-v4`, with deterministic integer cell-centre rays
+New games use `travel-v5`, with deterministic integer cell-centre rays
 within eight Manhattan steps. Clockwise quarter turns around z and translation
 map a ray across a join. Crossing consumes distance, including self-links and
 cycles. A physical cell may have multiple visible occurrences in non-Euclidean
@@ -74,7 +74,7 @@ the same identity. Wide joins require the new ruleset.
 
 ## Protocol and memory
 
-Protocol **6** sends positions as relative x/y/z offsets, with the actor at zero.
+Protocol **7** sends positions as relative x/y/z offsets, with the actor at zero.
 Each visible cell carries an opaque key, position, wall flag, and semantic stair
 flags. Items carry `reachable`; sight does not grant pickup reach. Movement
 history reports the chosen direction. Observations and history contain no region
@@ -114,4 +114,7 @@ memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; text
 and ASCII do not render them or use them for navigation yet. New saves use
-`place-hints-v4`; earlier saves retain their original rules.
+`travel-v5`; earlier saves retain their original rules.
+
+[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
+Earlier rules retain their behavior; text has no travel commands in this slice.

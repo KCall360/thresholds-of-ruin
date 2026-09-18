@@ -32,6 +32,8 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | U / D | Request movement up/down; the current fixture has no vertical route |
 | Space or period | Wait one action |
 | G | Pick up an item at your feet; choose with Up/Down and Enter if several match |
+| `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
+| Escape during travel | Cancel at the next action boundary |
 | C / R | Acquire / release actor control |
 | N | Compose a note anchored to the state where composition began |
 | Tab in note editor | Switch between private and actor-visible audience; defaults to private |
@@ -47,6 +49,9 @@ history displays server-stamped source/audience metadata. The bitmap renderer
 displays Basic Latin; other characters appear as `?` while the original Unicode
 text is preserved in the protocol and save. Long overview labels end with `~`;
 the history panel wraps full note text for scrolling.
+
+See [backend travel](travel.md) for destination selection, progress, interruptions,
+and compatibility. Text commands remain unchanged.
 
 Only one request is in flight at a time. Movement does not auto-repeat from
 holding a key, and gameplay input while a request is pending is discarded rather
@@ -127,7 +132,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 6. Real process tests cover live spectator
+clients must all use protocol version 7. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -136,9 +141,9 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 6.
+and selections from an abandoned branch. Server and clients must use protocol 7.
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
+[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; text
 and ASCII do not render them or use them for navigation yet. New saves use
-`place-hints-v4`; earlier saves retain their original rules.
+`travel-v5`; earlier saves retain their original rules.

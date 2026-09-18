@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,6 +161,10 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    Travel {
+        expected_revision: u64,
+        destination: String,
+    },
     Wizard {
         expected_revision: u64,
         operation: String,
@@ -194,6 +198,9 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    Travel {
+        destination: String,
+    },
     Wizard {
         summary: String,
         rewind: bool,
@@ -257,6 +264,10 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    CancelTravel {
+        branch: BranchId,
+        travel_id: EntryId,
+    },
     HistoryBranch {
         branch: BranchId,
         before: Option<EntryId>,
@@ -280,6 +291,7 @@ pub enum Request {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    pub travel: Option<TravelStatus>,
     pub actor: ActorId,
     pub branch: BranchId,
     pub cursor: StreamCursor,
@@ -291,6 +303,10 @@ pub struct Snapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpdateBody {
+    Travel {
+        status: TravelStatus,
+        entry: Option<Box<HistoryEntry>>,
+    },
     Observation {
         state: Box<StateView>,
         event: Option<Box<HistoryEntry>>,
@@ -360,4 +376,26 @@ pub enum ServerMessage {
         code: ErrorCode,
         message: String,
     },
+}
+
+/// Session travel state contains no planned route or undisclosed geometry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TravelStatus {
+    pub id: EntryId,
+    pub destination: String,
+    pub completed_steps: u64,
+    pub phase: TravelPhase,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TravelPhase {
+    Active,
+    Arrived,
+    Cancelled,
+    Blocked,
+    Hazard,
+    DecisionRequired,
+    ControlLost,
+    WorldChanged,
+    Failed,
 }

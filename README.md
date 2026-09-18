@@ -29,7 +29,10 @@ including wide joins, rotated connections, opaque walls, explicit stairs, and wi
 Clients receive one actor-relative scene with no internal region or portal metadata.
 New maps also carry [unnamed place hints](docs/place-hints.md) for future text
 location organization; hints are disclosed only with perceived cells.
-Existing saves retain their original rules. Server and clients use protocol 6.
+[Backend travel](docs/travel.md) now moves toward known cells through ordinary
+saved actions. ASCII exposes `_` destination selection, mouse-click travel, and
+Escape cancellation; text commands remain unchanged. New saves use `travel-v5`.
+Existing saves retain their original rules. Server and clients use protocol 7.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

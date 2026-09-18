@@ -58,7 +58,6 @@ pub fn observation(
     salt: &str,
     ready: bool,
 ) -> p::Observation {
-    use sha1::{Digest, Sha1};
     let offset = |position: w::Position| p::Position {
         x: position.x,
         y: position.y,
@@ -75,24 +74,8 @@ pub fn observation(
         else {
             continue;
         };
-        let mut digest = Sha1::new();
-        digest.update(salt.as_bytes());
-        digest.update(view.actor.0.to_le_bytes());
-        digest.update(cell.location.region.0.to_le_bytes());
-        for coordinate in [
-            cell.location.position.x,
-            cell.location.position.y,
-            cell.location.position.z,
-        ] {
-            digest.update(coordinate.to_le_bytes());
-        }
-        digest.update(salt.as_bytes());
         visible_cells.push(p::CellView {
-            key: digest
-                .finalize()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
+            key: cell_key(salt, view.actor.0, cell.location),
             position: offset(cell.offset),
             wall: cell.wall,
             place_hint: visible.place_hint,
@@ -153,4 +136,25 @@ pub fn observation(
             })
             .collect(),
     }
+}
+
+pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
+    use sha1::{Digest, Sha1};
+    let mut digest = Sha1::new();
+    digest.update(salt.as_bytes());
+    digest.update(actor.to_le_bytes());
+    digest.update(location.region.0.to_le_bytes());
+    for coordinate in [
+        location.position.x,
+        location.position.y,
+        location.position.z,
+    ] {
+        digest.update(coordinate.to_le_bytes());
+    }
+    digest.update(salt.as_bytes());
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }

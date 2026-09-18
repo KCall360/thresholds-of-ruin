@@ -90,67 +90,79 @@ impl Canvas {
             let o = &state.state().observation;
             self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
             self.text(44, 140, &format!("TICK {}", o.tick), MUTED, 1, 84);
-            let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
-            levels.sort_unstable();
-            levels.dedup();
-            levels.sort_by_key(|z| (z.abs(), *z));
-            let panels = levels.len().max(1);
-            for (index, z) in levels.into_iter().enumerate() {
-                // The main plane keeps the full map width; linked landings get a
-                // separate strip so many heights cannot squeeze or overlap it.
-                let (panel_x, panel_y, panel_w, panel_h): (usize, usize, usize, usize) =
-                    if index == 0 {
-                        (44, 166, 704, if panels == 1 { 292 } else { 236 })
-                    } else {
-                        let width = 704 / (panels - 1);
-                        (44 + (index - 1) * width, 402, width, 56)
-                    };
-                let cells: Vec<_> = o
-                    .visible_cells
-                    .iter()
-                    .filter(|c| c.position.z == z)
-                    .collect();
-                let x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
-                let x1 = cells.iter().map(|c| c.position.x).max().unwrap_or(0);
-                let y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
-                let y1 = cells.iter().map(|c| c.position.y).max().unwrap_or(0);
-                let cols = (x1 - x0 + 1) as usize;
-                let rows = (y1 - y0 + 1) as usize;
-                let step = (panel_w / cols)
-                    .min(panel_h.saturating_sub(16) / rows)
-                    .clamp(8, 52);
-                let left = panel_x + (panel_w - cols * step) / 2;
-                let top = panel_y + 16;
-                if panels > 1 {
-                    self.text(left, top - 14, &format!("Z {z:+}"), MUTED, 1, 18);
+            for panel in map_panels(o) {
+                if panel.label {
+                    self.text(
+                        panel.left,
+                        panel.top - 14,
+                        &format!("Z {:+}", panel.z),
+                        MUTED,
+                        1,
+                        18,
+                    );
                 }
-                let scale = (step / 12).clamp(1, 3);
-                for row in 0..rows {
-                    for col in 0..cols {
-                        let glyph = glyph_at_level(o, x0 + col as i32, y0 + row as i32, z);
-                        if glyph == ' ' {
+                for row in 0..panel.rows {
+                    for col in 0..panel.cols {
+                        let position = tor_protocol::Position {
+                            x: panel.x0 + col as i32,
+                            y: panel.y0 + row as i32,
+                            z: panel.z,
+                        };
+                        let glyph = glyph_at_level(o, position.x, position.y, position.z);
+                        let selected = app.travel_cursor == Some(position);
+                        if glyph == ' ' && !selected {
                             continue;
                         }
-                        let x = left + col * step;
-                        let y = top + row * step;
+                        let x = panel.left + col * panel.step;
+                        let y = panel.top + row * panel.step;
                         self.rect(
                             x,
                             y,
-                            step - 1,
-                            step - 1,
-                            if glyph == '@' { 0x203f41 } else { 0x192733 },
+                            panel.step - 1,
+                            panel.step - 1,
+                            if selected {
+                                GOLD
+                            } else if glyph == '@' {
+                                0x203f41
+                            } else {
+                                0x192733
+                            },
                         );
-                        let color = match glyph {
-                            '@' => ACCENT,
-                            '!' => GOLD,
-                            '<' | '>' => 0x8cbafa,
-                            '&' => 0xef958c,
-                            _ => 0x7890a2,
+                        let color = if selected {
+                            BG
+                        } else {
+                            match glyph {
+                                '@' => ACCENT,
+                                '!' => GOLD,
+                                '<' | '>' => 0x8cbafa,
+                                '&' => 0xef958c,
+                                _ => 0x7890a2,
+                            }
                         };
-                        let pad = (step - 8 * scale) / 2;
+                        let scale = (panel.step / 12).clamp(1, 3);
+                        let pad = (panel.step - 8 * scale) / 2;
                         self.text(x + pad, y + pad, &glyph.to_string(), color, scale, 1);
                     }
                 }
+            }
+            if let Some(travel) = state.travel() {
+                self.text(
+                    220,
+                    140,
+                    &format!(
+                        "TRAVEL: {} / {} STEPS{}",
+                        travel_label(travel.phase),
+                        travel.completed_steps,
+                        if travel.phase == tor_protocol::TravelPhase::Active {
+                            " / ESC CANCEL"
+                        } else {
+                            ""
+                        }
+                    ),
+                    GOLD,
+                    1,
+                    64,
+                );
             }
             self.text(
                 44,
@@ -235,7 +247,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F2 history   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "ARROWS/HJKL move  U/D level  SPACE wait  G pickup  C control  R release  N note  F2 history  ESC quit"
+            "ARROWS/HJKL move  U/D level  _/CLICK travel  G pickup  SPACE wait  C/R control  N note  F2 history  ESC cancel/quit"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -312,5 +324,133 @@ impl Canvas {
                 self.text(72, 180, "No history entries yet.", MUTED, 2, 60);
             }
         }
+    }
+}
+
+struct MapPanel {
+    z: i32,
+    x0: i32,
+    y0: i32,
+    rows: usize,
+    cols: usize,
+    step: usize,
+    left: usize,
+    top: usize,
+    label: bool,
+}
+fn map_panels(o: &tor_protocol::Observation) -> Vec<MapPanel> {
+    let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
+    levels.sort_unstable();
+    levels.dedup();
+    levels.sort_by_key(|z| (z.abs(), *z));
+    let panels = levels.len().max(1);
+    levels
+        .into_iter()
+        .enumerate()
+        .map(|(index, z)| {
+            let (panel_x, panel_y, panel_w, panel_h): (usize, usize, usize, usize) = if index == 0 {
+                (44, 166, 704, if panels == 1 { 292 } else { 236 })
+            } else {
+                let width = 704 / (panels - 1);
+                (44 + (index - 1) * width, 402, width, 56)
+            };
+            let cells: Vec<_> = o
+                .visible_cells
+                .iter()
+                .filter(|c| c.position.z == z)
+                .collect();
+            let x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
+            let x1 = cells.iter().map(|c| c.position.x).max().unwrap_or(0);
+            let y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
+            let y1 = cells.iter().map(|c| c.position.y).max().unwrap_or(0);
+            let cols = (x1 - x0 + 1) as usize;
+            let rows = (y1 - y0 + 1) as usize;
+            let step = (panel_w / cols)
+                .min(panel_h.saturating_sub(16) / rows)
+                .clamp(8, 52);
+            MapPanel {
+                z,
+                x0,
+                y0,
+                rows,
+                cols,
+                step,
+                left: panel_x + (panel_w - cols * step) / 2,
+                top: panel_y + 16,
+                label: panels > 1,
+            }
+        })
+        .collect()
+}
+
+/// Hit testing shares the exact layout used to draw cells, including stair panels.
+pub fn cell_at(
+    o: &tor_protocol::Observation,
+    x: usize,
+    y: usize,
+) -> Option<tor_protocol::Position> {
+    for panel in map_panels(o) {
+        if x >= panel.left
+            && y >= panel.top
+            && x < panel.left + panel.cols * panel.step
+            && y < panel.top + panel.rows * panel.step
+        {
+            let position = tor_protocol::Position {
+                x: panel.x0 + ((x - panel.left) / panel.step) as i32,
+                y: panel.y0 + ((y - panel.top) / panel.step) as i32,
+                z: panel.z,
+            };
+            return o
+                .visible_cells
+                .iter()
+                .find(|c| c.position == position)
+                .map(|c| c.position);
+        }
+    }
+    None
+}
+
+pub fn cell_center(
+    o: &tor_protocol::Observation,
+    position: tor_protocol::Position,
+) -> Option<(usize, usize)> {
+    if !o.visible_cells.iter().any(|c| c.position == position) {
+        return None;
+    }
+    map_panels(o)
+        .into_iter()
+        .find(|p| p.z == position.z)
+        .map(|p| {
+            (
+                p.left + (position.x - p.x0) as usize * p.step + p.step / 2,
+                p.top + (position.y - p.y0) as usize * p.step + p.step / 2,
+            )
+        })
+}
+
+/// Convert native mouse pixels through the window's aspect-ratio letterboxing.
+pub fn logical_mouse(x: f32, y: f32, width: usize, height: usize) -> Option<(usize, usize)> {
+    let scale = (width as f32 / WIDTH as f32).min(height as f32 / HEIGHT as f32);
+    if scale <= 0.0 {
+        return None;
+    }
+    let x = (x - (width as f32 - WIDTH as f32 * scale) / 2.0) / scale;
+    let y = (y - (height as f32 - HEIGHT as f32 * scale) / 2.0) / scale;
+    (x >= 0.0 && y >= 0.0 && x < WIDTH as f32 && y < HEIGHT as f32)
+        .then_some((x as usize, y as usize))
+}
+
+fn travel_label(phase: tor_protocol::TravelPhase) -> &'static str {
+    use tor_protocol::TravelPhase::*;
+    match phase {
+        Active => "MOVING",
+        Arrived => "ARRIVED",
+        Cancelled => "CANCELLED",
+        Blocked => "PATH BLOCKED",
+        Hazard => "POTENTIAL HAZARD IN SIGHT",
+        DecisionRequired => "ANOTHER ACTOR NEEDS INPUT",
+        ControlLost => "CONTROL RELEASED",
+        WorldChanged => "WORLD CHANGED",
+        Failed => "COULD NOT SAVE OR MOVE",
     }
 }

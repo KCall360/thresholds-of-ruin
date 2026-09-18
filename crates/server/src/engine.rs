@@ -17,7 +17,8 @@ use crate::journal::{
 
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "place-hints-v4";
+const RULESET: &str = "travel-v5";
+const PLACES_V4_RULESET: &str = "place-hints-v4";
 const SCENE_V3_RULESET: &str = "observer-scene-v3";
 const PORTAL_V2_RULESET: &str = "portal-sight-v2";
 const LEGACY_RULESET: &str = "two-room-v1";
@@ -139,7 +140,7 @@ impl Engine {
     }
 
     fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = if ruleset == RULESET {
+        let mut game = if matches!(ruleset, RULESET | PLACES_V4_RULESET) {
             Game::two_room_with_place_hints(scenario.seed)
         } else {
             Game::two_room(scenario.seed)
@@ -160,6 +161,9 @@ impl Engine {
                 .spawn_actor(adapt::location(actor.position), ticks)
                 .map_err(|_| invalid_archive())?;
             revisions.insert(ActorId(id.0), 0);
+        }
+        if ruleset == RULESET {
+            game.refresh_navigation();
         }
         let branch = BranchId(Uuid::new_v4().to_string());
         let initial = Arc::new(Boundary {
@@ -213,7 +217,7 @@ impl Engine {
             || (archive.version == ARCHIVE_VERSION && Uuid::parse_str(&archive.view_salt).is_err())
             || !matches!(
                 archive.ruleset.as_str(),
-                RULESET | SCENE_V3_RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
+                RULESET | PLACES_V4_RULESET | SCENE_V3_RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
             )
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
@@ -323,6 +327,30 @@ impl Engine {
             Vec::new()
         };
         Ok((view, scene))
+    }
+
+    pub fn travel_route(
+        &self,
+        actor: ActorId,
+        destination: &str,
+    ) -> Result<Vec<tor_simulation::TravelStep>, Failure> {
+        let unavailable = || {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Travel destination or known route is unavailable",
+            )
+        };
+        if self.archive.ruleset != RULESET {
+            return Err(unavailable());
+        }
+        let location = self
+            .game
+            .known_cells(SimActor(actor.0))
+            .find(|&cell| adapt::cell_key(&self.archive.view_salt, actor.0, cell) == destination)
+            .ok_or_else(unavailable)?;
+        self.game
+            .travel_route(SimActor(actor.0), location)
+            .map_err(|_| unavailable())
     }
 
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
@@ -473,6 +501,31 @@ impl Engine {
         let mut tick = candidate.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
+            Command::Travel {
+                expected_revision,
+                destination,
+            } => {
+                if *expected_revision != revision {
+                    return Err(Failure::new(
+                        ErrorCode::StaleRevision,
+                        "Refresh before travelling",
+                    ));
+                }
+                self.travel_route(receipt.actor, destination)?;
+                if self.game.next_actor() != Some(SimActor(receipt.actor.0)) {
+                    return Err(Failure::new(ErrorCode::InvalidAction, "Actor is not ready"));
+                }
+                (
+                    Author::User {
+                        user: receipt.user.clone(),
+                    },
+                    Audience::Actor,
+                    HistoryContent::Travel {
+                        destination: destination.clone(),
+                    },
+                )
+            }
+
             Command::Wizard {
                 expected_revision,
                 operation,
@@ -562,6 +615,9 @@ impl Engine {
                 )
             }
         };
+        if candidate.archive.ruleset == RULESET {
+            candidate.game.refresh_navigation();
+        }
         let entry = HistoryEntry {
             id: entry_id,
             branch: candidate.branch().clone(),
@@ -689,7 +745,7 @@ impl Engine {
                 WizardResult::Connected
             }
             WizardOperation::SetPlaceHint { position, present } => {
-                if self.archive.ruleset != RULESET {
+                if !matches!(self.archive.ruleset.as_str(), RULESET | PLACES_V4_RULESET) {
                     return Err(invalid());
                 }
                 self.game

@@ -62,9 +62,13 @@ pub async fn serve(
     let capacity = Arc::new(Semaphore::new(128));
     let mut tasks = JoinSet::new();
     tokio::pin!(shutdown);
+    // Delivery pacing only: simulation time still advances solely through actions.
+    let mut travel_pump = tokio::time::interval(Duration::from_millis(75));
+    travel_pump.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         tokio::select! {
             _ = &mut shutdown => break Ok(()),
+            _ = travel_pump.tick() => service.lock().await.advance_travel(),
             accepted = listener.accept() => {
                 let (socket, _) = match accepted { Ok(value) => value, Err(error) => break Err(error) };
                 if let Ok(permit) = capacity.clone().try_acquire_owned() {
