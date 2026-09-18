@@ -12,3 +12,8 @@ workspace = true
 [dependencies]
 tor-client-common.workspace = true
 tor-protocol.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+minifb = { version = "0.28", default-features = false, features = ["x11"] }
+font8x8 = "0.3"

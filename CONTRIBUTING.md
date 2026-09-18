@@ -1,5 +1,15 @@
 # Development practices
 
+Accumulate small project-plan, strategy, and documentation updates locally.
+Publish them to GitHub at meaningful checkpoints, such as a completed feature or
+milestone or a consolidated strategy revision, or when the user explicitly asks.
+Do not create or push a separate PR for every planning clarification. A request
+to update the plan alone does not require immediate publication.
+
+When publishing, use a feature branch and PR; require Windows and Linux CI to
+pass before merging. Keep this publication cadence separate from the testing
+requirements below: delaying a push does not postpone feature verification.
+
 Use test-driven development for simulation rules, protocol behavior, and client
 interactions: write a failing behavior test, implement it, then refactor with
 the tests passing. Prefer assertions about outcomes to copies of implementation

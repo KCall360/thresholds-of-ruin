@@ -104,5 +104,5 @@ builds and launches the actual server and client binaries with temporary saves,
 bounded output waits, and cleanup of child processes. It drives gameplay, idle
 observer updates, control switching, history pagination, entry anchors, bad
 authentication, EOF, disconnects, and server restart persistence. CI runs this
-suite in debug and release on Windows and Linux. Graphical launch tests will be
-added with the graphical client.
+suite in debug and release on Windows and Linux. The [graphical ASCII client](ascii-client.md)
+adds native-window tests and text-to-ASCII control-transfer/save-resume acceptance.

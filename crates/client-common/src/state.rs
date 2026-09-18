@@ -36,6 +36,9 @@ impl ClientState {
     pub fn history(&self) -> &[HistoryEntry] {
         &self.snapshot.history.entries
     }
+    pub fn older_before(&self) -> Option<&EntryId> {
+        self.snapshot.history.older_before.as_ref()
+    }
     pub fn has_control(&self) -> bool {
         self.snapshot.has_control
     }

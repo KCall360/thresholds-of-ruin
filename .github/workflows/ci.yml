@@ -27,12 +27,22 @@ jobs:
           persist-credentials: false
       - name: Install stable Rust with formatting and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Configure Linux graphical test display
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+      - name: Verify Windows graphical test desktop
+        if: runner.os == 'Windows'
+        run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Lint all targets
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test dependency checker and actual text/server processes
+      - name: Test dependency checker and actual frontend/server processes (Windows desktop)
+        if: runner.os == 'Windows'
         run: python -m unittest discover -s scripts -p "test_*.py" -v
+      - name: Test dependency checker and actual frontend/server processes (Linux Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" python -m unittest discover -s scripts -p "test_*.py" -v
       - name: Enforce workspace dependency boundaries
         run: python scripts/check_architecture.py
       - name: Build documentation without warnings
@@ -43,7 +53,13 @@ jobs:
         run: cargo test --workspace --locked
       - name: Unit and integration tests (release)
         run: cargo test --workspace --release --locked
-      - name: Actual text/server process tests (release)
+      - name: Actual frontend/server process tests (release, Windows desktop)
+        if: runner.os == 'Windows'
         env:
           TOR_TEST_PROFILE: release
-        run: python -m unittest discover -s scripts -p "test_text_process.py" -v
+        run: python -m unittest discover -s scripts -p "test_*process.py" -v
+      - name: Actual frontend/server process tests (release, Linux Xvfb)
+        if: runner.os == 'Linux'
+        env:
+          TOR_TEST_PROFILE: release
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" python -m unittest discover -s scripts -p "test_*process.py" -v

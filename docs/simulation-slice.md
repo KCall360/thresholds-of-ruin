@@ -79,10 +79,11 @@ multiple actors, stable scheduling, seed-selected content, reproducible state an
 event traces, hidden information, reach, duplicate pickup, occupied cells,
 invalid requests, and numeric boundaries.
 
-The existing protocol's actor ID is a separate wire type. A future server adapter
-will explicitly translate between protocol and simulation types. Clients must
+The protocol's actor ID is a separate wire type. The server adapter explicitly
+translates between protocol and simulation types. Clients must
 continue to depend on the protocol, never on world or simulation crates.
 
 The [server/protocol slice](protocol.md) implements attachment, commands, streamed
-updates, and durable action/annotation history. Actual frontend applications and
-their end-to-end switching/save acceptance remain subsequent parts of Milestone 1.
+updates, and durable action/annotation history. The [text](text-client.md) and
+[graphical ASCII](ascii-client.md) frontends now exercise this slice through actual
+process tests, including cross-frontend control transfer and save/resume.

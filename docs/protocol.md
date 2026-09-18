@@ -4,7 +4,8 @@ The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
 internals. `tor-client-common::ClientState` validates ordered updates and keeps
 the current disclosed state plus a bounded recent history. The shared `Connection`
-transport applies validated snapshots/updates for the [playable text client](text-client.md).
+transport applies validated snapshots/updates for the [text client](text-client.md)
+and [graphical ASCII client](ascii-client.md).
 
 ## Run locally
 
@@ -203,4 +204,7 @@ A process test launches the actual server, commits an action and note, terminate
 it, and verifies both after restart. CI runs these in debug and release builds on
 Windows and Linux. The text frontend additionally has actual process tests for
 interactive input/output, annotation commands, control transfer, and restart
-persistence. The graphical ASCII frontend remains upcoming Milestone 1 work.
+persistence. Graphical ASCII process tests launch real native windows, exercise
+native keyboard events, transfer control between text and ASCII, and compare
+disclosed state/history after server restart. Linux uses Xvfb; Windows uses a
+native desktop. Both debug and release profiles run on both platforms.

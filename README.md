@@ -12,11 +12,15 @@ and actor-specific observations. The local WebSocket server supports pushed
 updates, client control transfer, and durable action history with user, frontend,
 and backend annotations. A playable text client now supports movement, pickup,
 live observation, control transfer, annotations, and paginated history.
-The graphical ASCII client is next.
+The graphical ASCII client now presents a native window with a disclosed-room
+map, inventory, notes, history, and explicit control transfer. Both clients can
+continue the same saved game.
 The [wizard mode plan](docs/wizard-mode.md) adds server-enabled development tools
 and permanently marked wizard games to the roadmap; it is not implemented yet.
 
 Start playing with [the text client guide](docs/text-client.md).
+For the windowed frontend and text-to-ASCII switching, see
+[the graphical ASCII guide](docs/ascii-client.md).
 
 See [the simulation slice](docs/simulation-slice.md) for its rules and limitations.
 See [the protocol guide](docs/protocol.md) to run the server and understand messages,
@@ -40,13 +44,18 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_architecture.py
 ```
 
+Graphical process tests require a desktop. On Linux install X11 development
+libraries, Xvfb, xauth, and xdotool, then run Python discovery under
+`xvfb-run -a -s "-screen 0 1280x1024x24"` (see the ASCII guide). Windows tests use
+the native desktop. Missing displays are errors, not skipped graphical tests.
+
 Python 3 is used only for development checks; the game remains Rust. The boundary
 checker reads Cargo metadata, including optional and platform-specific edges.
 GitHub Actions runs these checks on Windows and Linux and builds Rust documentation
-with warnings treated as errors. Python discovery includes actual server/text
-process tests and builds both binaries. To run those process tests against optimized
+with warnings treated as errors. Python discovery includes actual server/text/ASCII
+process tests and builds all binaries. To run those process tests against optimized
 binaries, set `TOR_TEST_PROFILE=release` before running
-`python scripts/test_text_process.py -v` (PowerShell:
+`python -m unittest discover -s scripts -p "test_*process.py" -v` (PowerShell:
 `$env:TOR_TEST_PROFILE = 'release'`). CI runs both profiles on both platforms.
 
 Dependabot checks weekly for Rust dependency and GitHub Actions updates and
