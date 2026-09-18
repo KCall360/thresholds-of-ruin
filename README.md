@@ -6,13 +6,15 @@ Working title; original code and content inspired by NetHack.
 
 ## Status
 
-The first simulation slice is implemented: a seeded two-room fixture, explicit
-actors, deterministic action timing, movement, inventory pickup, and actor-specific
-observations. It includes validated region connections and observation-stream
-ordering primitives. It does not yet contain a playable client, network server,
-or persistent saves.
+The simulation and server/protocol slices are implemented: a seeded two-room
+fixture, explicit actors, deterministic action timing, movement, inventory pickup,
+and actor-specific observations. The local WebSocket server supports pushed
+updates, client control transfer, and durable action history with user, frontend,
+and backend annotations. Playable text and graphical ASCII clients are next.
 
 See [the simulation slice](docs/simulation-slice.md) for its rules and limitations.
+See [the protocol guide](docs/protocol.md) to run the server and understand messages,
+annotation audiences, and save/replay behavior.
 
 Windows is the primary platform; Linux is tested from the beginning.
 

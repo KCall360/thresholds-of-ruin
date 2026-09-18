@@ -12,3 +12,11 @@ workspace = true
 [dependencies]
 tor-simulation.workspace = true
 tor-protocol.workspace = true
+tor-world.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+uuid.workspace = true
+tempfile.workspace = true

@@ -8,8 +8,8 @@ switches. Initial gameplay is single player, with explicit actor identities and
 controllers so multiplayer can be designed later. Windows first; Linux portable.
 
 This document records intended architecture. Implemented behavior is described in
-[the simulation slice](simulation-slice.md); networking, richer perception, and
-the remaining milestones are still planned.
+[the simulation slice](simulation-slice.md) and [the server protocol](protocol.md).
+Richer perception, playable frontends, and the remaining milestones are planned.
 
 ## Workspace boundaries
 
@@ -100,6 +100,15 @@ Entity references are stable for disclosed entities. Names, properties, contents
 interaction affordances, and events must not reveal undiscovered facts. Clients
 never receive a serialization of the whole world. Both clients can observe, with
 one active controller per actor initially; control transfer is explicit and atomic.
+
+## Annotations
+
+The action/event history also contains sparse, non-simulating annotations from
+users, frontends, and trusted backend components. Notes have server-stamped
+provenance, branch identity, actor scope, a state or history-entry anchor, and
+an explicit private or actor-visible audience. Notes do not advance time or action
+revisions. Live updates, history pagination, and durable replay preserve the same
+visibility rules. See [protocol version 1](protocol.md) for the implemented format.
 
 ## Language and interactions
 

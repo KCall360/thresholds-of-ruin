@@ -1,0 +1,203 @@
+# Server protocol and annotations (version 1)
+
+The `tor-server` executable serves the two-room simulation over JSON WebSockets.
+`tor-protocol` defines the wire types without depending on world or simulation
+internals. `tor-client-common::ClientState` validates ordered updates and keeps
+the current disclosed state plus a bounded recent history for future frontends.
+
+## Run locally
+
+In PowerShell, generate a token for this terminal session and start the server:
+
+```powershell
+$env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
+cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.json
+```
+
+Clients need that token. Do not put it in a URL or save it in the repository.
+The server prints one JSON readiness line containing its address and protocol
+version, never the token. Port 0 chooses an available port for tests or launchers.
+The seed only applies when creating a save. Existing saves retain their scenario.
+
+This executable configures one identity, `local`, authorized for the scenario's
+actors. The library accepts explicit accounts with different tokens and actor
+permissions; there is no account-registration API. Loopback binding and native
+clients are supported now. Browser origins are rejected. Remote TLS deployment
+and account administration remain future work; a secure tunnel can carry the
+same protocol to a loopback server.
+
+## Connection and control
+
+The first frame authenticates and declares a frontend label:
+
+```json
+{"type":"hello","protocol":1,"token":"<session token>","frontend":"text"}
+```
+
+The server sends `welcome` with the authenticated user and authorized actor IDs.
+It rejects bad tokens, unsupported versions, and unknown request fields before
+disclosing game state. Attach once per connection:
+
+```json
+{"type":"request","request_id":"attach-1","request":{"type":"attach","actor":1}}
+```
+
+The response is a snapshot containing the actor's observation, action revision,
+branch ID, stream cursor, control status, and recent visible history. A client can
+observe without controlling the actor. `acquire_control` and `release_control`
+transfer exclusive control; acquisition fails while another connection controls
+the actor. Disconnecting releases control. Switching actors requires reconnecting.
+
+An action uses the branch and revision from the latest observation:
+
+```json
+{
+  "type":"request",
+  "request_id":"move-1",
+  "request":{
+    "type":"command",
+    "branch":"<branch from snapshot>",
+    "command":{"type":"act","expected_revision":0,"action":{"type":"move","direction":"east"}}
+  }
+}
+```
+
+Requests require unique IDs per authenticated user for accepted actions and
+annotations. Retry the exact same command and ID to recover its original receipt,
+including after reconnect or restart. Reusing an accepted ID for different
+content is an error. Failed commands are not committed. A duplicate successful
+command is acknowledged without applying or broadcasting it again, even after
+control has moved to another client.
+
+## Pushed updates
+
+Clients receive `update` messages without polling:
+
+| Update body | Meaning |
+| --- | --- |
+| `observation` | New disclosed state, its revision, and an optional actor action/event entry |
+| `annotation` | A visible note was committed; game state is unchanged |
+| `control` | This connection gained or lost control |
+
+Every update has actor and branch identities, a connection-scoped sequence, and
+simulation tick. Multiple updates can share a tick. The stream sequence increments
+for every delivered update; the action revision increments only when that actor's
+disclosed observation changes. A private note neither advances another user's
+sequence nor invalidates anyone's pending action revision.
+
+Actions currently have one semantic result. Their history timestamp is when the
+action took effect; the accompanying observation reflects the next decision
+time. The transport supports multiple updates between user decisions as richer
+simulation mechanics are introduced. Other actors can receive changed observations
+without receiving the acting actor's private command details. Richer cross-actor
+event descriptions still belong to the perception work.
+
+Snapshot generation, persistence, control changes, and update publication are
+serialized. Queries can request a fresh `snapshot` at any point. Reconnecting
+starts a new sequence at zero and always provides a fresh snapshot; resuming an
+old transport sequence is not implemented. Durable history IDs remain unchanged.
+
+Each connection has a 64-message output queue. A client that cannot keep up is
+disconnected and releases control instead of silently missing updates. It must
+reconnect and rebuild from a snapshot. Handshakes and socket writes have deadlines;
+incoming messages are capped at 16 KiB, and there are at most 128 connections.
+
+## Annotations
+
+Annotations are explicit plain-text history entries, not actions, queries, or
+commands embedded in prose. They never enter `Game::act`, consume a turn, alter
+the seed, or use simulation randomness. Routine activity remains ordinary events;
+this slice does not generate automatic commentary.
+
+```json
+{
+  "type":"request",
+  "request_id":"note-1",
+  "request":{
+    "type":"command",
+    "branch":"<branch from snapshot>",
+    "command":{
+      "type":"annotate",
+      "anchor":{"type":"state","revision":0},
+      "text":"Return here after exploring the gallery.",
+      "source":"user",
+      "category":"bookmark",
+      "audience":"private"
+    }
+  }
+}
+```
+
+`source`, `category`, and `audience` default to `user`, `note`, and `private`.
+The text must contain non-whitespace content, occupy at most 4096 UTF-8 bytes,
+and exclude control characters other than newline and tab. Frontends should render
+it as text, not HTML, terminal control sequences, or executable instructions.
+
+Sources and authors:
+
+- User notes receive `Author::User` with the authenticated user ID.
+- Frontend notes receive `Author::Frontend` with that user and the connection's
+  declared component label. The label is descriptive, not software attestation.
+- Backend notes use a trusted `Service::annotate_backend` API and receive
+  `Author::Backend`. Client inputs cannot specify this source or supply an author.
+
+The user/frontend distinction expresses the client's intent; the server verifies
+the account identity, not whether a human physically typed the text. Backend
+producers must write from disclosed actor facts and use annotations sparingly.
+The API validates the actor and anchor but cannot infer whether arbitrary prose
+contains a spoiler.
+
+Anchors identify either a disclosed state revision (a decision/observation point)
+or a visible history entry ID. An action and its current single semantic event
+share one entry ID. Notes can also reference earlier notes. Past state revisions
+remain valid; future revisions, inaccessible entries, and another branch are
+rejected. A shared note cannot reference a private entry and expose its identity.
+
+Audience `private` means only the authenticated author, across their authorized
+frontends. Audience `actor` means all authorized observers of that actor. Neither
+scope publishes a note to unrelated actors. Backend annotations are actor-scoped.
+Both live delivery and history queries apply the same audience rules.
+
+Each record has an opaque UUID, branch ID, actor, creation tick, author, audience,
+and content. These server-generated identities use system entropy outside the
+simulation. Branch IDs survive replay, and notes keep their original attachments.
+Timeline creation and undo are not implemented in this version.
+
+## History and persistence
+
+Snapshots contain up to 100 recent visible entries in chronological order.
+`history` requests accept `limit` (1–100) and an optional `before` entry ID.
+`older_before` provides the next pagination cursor. Filtering happens before
+pagination, so private entries do not create visible gaps or total-count leaks.
+
+```json
+{"type":"request","request_id":"history-1","request":{"type":"history","before":null,"limit":50}}
+```
+
+The versioned journal stores scenario inputs, branch identity, actions, annotations,
+and accepted-command receipts. Replay applies actions to the deterministic
+simulation and restores notes as metadata, checking the recorded results and
+timestamps. Unknown format/rules versions and inconsistent journals fail to load;
+they are never replaced with an empty game. Tokens and live connection ownership
+are not saved.
+
+Every accepted action or note is committed by writing a same-directory temporary
+file, flushing its contents, then replacing the journal before publishing updates
+or acknowledging success. A failed write leaves in-memory state and history
+unchanged. A sidecar `.lock` file prevents concurrent writers and remains on disk
+after shutdown; the OS lock is released when the process exits.
+
+This first implementation rewrites and replays the complete journal, making it
+suitable for the small scenario. Periodic snapshots and more efficient long-history
+storage are still planned. Process-termination recovery is tested; hardware power
+loss durability also depends on the filesystem and operating system.
+
+## Validation
+
+Tests cover real WebSocket connections, two observing frontends, control transfer,
+authentication/version rejection, private and shared annotations, reconnects,
+durable retries, all three annotation sources, anchor validation, pagination,
+failed writes, save locking, corrupt saves, slow clients, and client-state ordering.
+A process test launches the actual server, commits an action and note, terminates
+it, and verifies both after restart. CI runs these in debug and release builds on
+Windows and Linux. Playable text/ASCII frontends remain the next Milestone 1 work.

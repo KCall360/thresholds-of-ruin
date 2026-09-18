@@ -55,7 +55,8 @@ wrapping. Positive action durations prevent a zero-cost action loop.
 
 `ActionOutcome` reports authoritative action facts and the next actor/time. It is
 not a wire message: the server must filter events for each observer before
-publishing them. Streaming and controller ownership are not implemented yet.
+publishing them. The [server layer](protocol.md) now handles streaming and
+controller ownership without changing these simulation rules.
 
 ## Perception and inventory
 
@@ -82,6 +83,6 @@ The existing protocol's actor ID is a separate wire type. A future server adapte
 will explicitly translate between protocol and simulation types. Clients must
 continue to depend on the protocol, never on world or simulation crates.
 
-The next PR implements the protocol/server attachment and command path, with
-per-actor snapshots and streamed updates. Actual frontend applications and
-save/resume remain subsequent parts of Milestone 1.
+The [server/protocol slice](protocol.md) implements attachment, commands, streamed
+updates, and durable action/annotation history. Actual frontend applications and
+their end-to-end switching/save acceptance remain subsequent parts of Milestone 1.
