@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 1)
+# Server protocol and annotations (version 2)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -21,22 +21,65 @@ The server prints one JSON readiness line containing its address and protocol
 version, never the token. Port 0 chooses an available port for tests or launchers.
 The seed only applies when creating a save. Existing saves retain their scenario.
 
-This executable configures one identity, `local`, authorized for the scenario's
-actors. The library accepts explicit accounts with different tokens and actor
-permissions; there is no account-registration API. Loopback binding and native
+This executable configures a player identity, `local`, authorized for the scenario's
+actors. An optional spectator identity is described below. The library accepts
+explicit accounts with different tokens, roles, and actor permissions; there is no account-registration API. Loopback binding and native
 clients are supported now. Browser origins are rejected. Remote TLS deployment
 and account administration remain future work; a secure tunnel can carry the
 same protocol to a loopback server.
+
+## Read-only spectators
+
+Before starting the server, optionally set `TOR_SPECTATOR_TOKEN` to a separate
+random token (for example, another `[guid]::NewGuid().ToString('N')` in PowerShell).
+It must differ from `TOR_SERVER_TOKEN` and contain 16-1024 non-control characters.
+Omitting it disables spectator login. Invalid configuration fails before opening
+or creating a save. Keep both credentials out of URLs, arguments, and source control.
+
+In a spectator's client terminal, set **`TOR_SERVER_TOKEN` to the spectator token**,
+then launch either frontend normally. No `--observe` flag is needed. The server
+assigns this credential the `spectator` role and identity, authorized for the
+scenario's actors. Only share this credential with someone who should watch;
+the player credential continues to allow control and annotations.
+
+Spectators may attach, request snapshots, and browse permitted history. All other
+requests are rejected with `Unauthorized`, before receipt lookup or mutation,
+even when an actor has no controller. Changing frontend labels, retrying an
+accepted command, or sending protocol requests outside the official clients does
+not elevate access. The role is fixed for the authenticated connection. New
+request variants are denied to spectators unless explicitly added to the read
+allowlist after review; future wizard mutations must remain denied.
+
+An attached spectator receives every accepted action and result for their actor,
+plus the same disclosed state that a controlling client receives. This includes
+pickup, movement, and wait; rejected commands and local UI inputs are not gameplay
+history. The current game has no combat or autonomous mobs. As these systems are
+added, their perceived actions/events must enter this stream with integration
+coverage. This is an actor-perspective view: hidden rooms and other actors' private
+commands are not exposed. Spectators cannot write even private annotations.
+
+Annotation privacy still follows authenticated identity and audience. The built-in
+`spectator` user sees actor-visible notes, not `local`'s private notes. The library
+can configure read-only and player credentials for the same user; those credentials
+share private-note visibility but have independent write authority. Actor allowlists
+apply to both roles. The existing `--observe` option merely skips a player client's
+initial control request and is not an access restriction.
+
+Protocol version 2 requires the role in `welcome`; version 1 clients are rejected
+and must be upgraded with the server. The save format and simulation rules remain
+version 1: role and credentials are startup/session configuration, never journaled.
+Restarting requires supplying the desired credentials again.
 
 ## Connection and control
 
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":1,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":2,"token":"<session token>","frontend":"text"}
 ```
 
-The server sends `welcome` with the authenticated user and authorized actor IDs.
+The server sends `welcome` with the authenticated user, authorized actor IDs, and
+server-granted `role` (`player` or `spectator`).
 It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 
@@ -68,8 +111,9 @@ Requests require unique IDs per authenticated user for accepted actions and
 annotations. Retry the exact same command and ID to recover its original receipt,
 including after reconnect or restart. Reusing an accepted ID for different
 content is an error. Failed commands are not committed. A duplicate successful
-command is acknowledged without applying or broadcasting it again, even after
-control has moved to another client.
+command from a player account is acknowledged without applying or broadcasting
+it again, even after control has moved to another client. Spectator accounts
+cannot submit commands, including receipt retries.
 
 ## Pushed updates
 
@@ -208,3 +252,10 @@ persistence. Graphical ASCII process tests launch real native windows, exercise
 native keyboard events, transfer control between text and ASCII, and compare
 disclosed state/history after server restart. Linux uses Xvfb; Windows uses a
 native desktop. Both debug and release profiles run on both platforms.
+
+Spectator tests send raw WebSocket mutations (including same-user receipt retries),
+check actor authorization and privacy, compare each action/result and disclosed
+state, verify pagination and reconnection, and reject old protocol handshakes.
+Actual text and native ASCII processes additionally test spectator credentials,
+read-only inputs, live gameplay, unchanged saves on denied inputs, and restart.
+The server configuration tests cover absent, duplicate, and invalid spectator tokens.

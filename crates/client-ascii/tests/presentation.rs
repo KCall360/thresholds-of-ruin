@@ -19,6 +19,7 @@ fn state() -> ClientState {
 #[test]
 fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(state());
     app.ready();
     assert_eq!(
@@ -68,6 +69,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
 #[test]
 fn notes_are_modal_and_do_not_turn_typed_movement_letters_into_actions() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(state());
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Note }), Effect::None);
@@ -86,6 +88,7 @@ fn notes_are_modal_and_do_not_turn_typed_movement_letters_into_actions() {
 #[test]
 fn losing_control_or_disconnect_prevents_actions() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     let mut state = state();
     state
         .apply(StreamUpdate {
@@ -126,6 +129,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
             position: snapshot.state.observation.position,
         });
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Pickup }), Effect::None);
@@ -153,6 +157,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
 #[test]
 fn note_audience_unicode_limits_and_cancel_do_not_change_state() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(state());
     app.ready();
     app.input(Input::Key { key: Key::Note });
@@ -186,6 +191,7 @@ fn note_audience_unicode_limits_and_cancel_do_not_change_state() {
 #[test]
 fn history_scroll_is_local_and_does_not_move_the_actor() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     app.set_state(state());
     app.ready();
     app.history_page = Some(HistoryPage {
@@ -210,6 +216,7 @@ fn history_scroll_is_local_and_does_not_move_the_actor() {
 #[test]
 fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state() {
     let mut app = App::new();
+    app.role = AccessRole::Player;
     let original = state();
     let mut view = original.state().clone();
     view.observation.region.width = i32::MAX;
@@ -246,4 +253,41 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
         text: "long text".repeat(500),
     });
     canvas.draw(&app);
+}
+
+#[test]
+fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
+    let mut app = App::new();
+    app.set_state(state());
+    app.ready();
+    for key in [
+        Key::Up,
+        Key::Down,
+        Key::Left,
+        Key::Right,
+        Key::Ascend,
+        Key::Descend,
+        Key::Wait,
+        Key::Pickup,
+        Key::Control,
+        Key::Release,
+        Key::Note,
+    ] {
+        assert_eq!(app.input(Input::Key { key }), Effect::None);
+        assert!(app.status.contains("read-only"));
+        assert!(app.note.is_none());
+        assert!(!app.busy);
+    }
+    assert!(matches!(
+        app.input(Input::Key { key: Key::History }),
+        Effect::Request(Request::History { .. })
+    ));
+    app.history_page = Some(HistoryPage {
+        entries: vec![],
+        older_before: None,
+    });
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
 }

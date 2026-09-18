@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
-                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOnly loopback connections are supported. Existing saves retain their original seed.");
+                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
             }
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
@@ -33,12 +33,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if token.trim().len() < 16 || token.len() > 1024 || token.chars().any(char::is_control) {
         return Err("TOR_SERVER_TOKEN must contain 16–1024 non-control characters".into());
     }
+    let spectator_token = match std::env::var("TOR_SPECTATOR_TOKEN") {
+        Ok(value) => {
+            if value.trim().len() < 16 || value.len() > 1024 || value.chars().any(char::is_control)
+            {
+                return Err(
+                    "TOR_SPECTATOR_TOKEN must contain 16-1024 non-control characters".into(),
+                );
+            }
+            if value == token {
+                return Err("Player and spectator tokens must differ".into());
+            }
+            Some(value)
+        }
+        Err(std::env::VarError::NotPresent) => None,
+        Err(_) => return Err("TOR_SPECTATOR_TOKEN must be Unicode".into()),
+    };
     let engine = Engine::open(save, Scenario::two_room(seed))?;
     let account = Account {
+        role: tor_protocol::AccessRole::Player,
         user: "local".into(),
         token,
         actors: engine.actors().into_iter().collect::<BTreeSet<_>>(),
     };
+    let mut accounts = vec![account];
+    if let Some(token) = spectator_token {
+        accounts.push(Account {
+            role: tor_protocol::AccessRole::Spectator,
+            user: "spectator".into(),
+            token,
+            actors: accounts[0].actors.clone(),
+        });
+    }
     let service = Arc::new(Mutex::new(Service::new(engine)));
     let listener = TcpListener::bind(listen).await?;
     println!(
@@ -46,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::json!({ "address": listener.local_addr()?.to_string(), "protocol": tor_protocol::PROTOCOL_VERSION })
     );
     io::stdout().flush()?;
-    serve(listener, service, vec![account], async {
+    serve(listener, service, accounts, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;

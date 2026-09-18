@@ -21,6 +21,7 @@ fn launch(path: &Path) -> (ChildGuard, String) {
         ProcessCommand::new(env!("CARGO_BIN_EXE_tor-server"))
             .args(["--listen", "127.0.0.1:0", "--seed", "42", "--save"])
             .arg(path)
+            .env_remove("TOR_SPECTATOR_TOKEN")
             .env("TOR_SERVER_TOKEN", "process-test-token-not-a-real-secret")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

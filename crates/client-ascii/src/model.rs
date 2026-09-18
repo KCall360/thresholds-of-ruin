@@ -47,6 +47,7 @@ pub struct NoteDraft {
 }
 
 pub struct App {
+    pub role: AccessRole,
     pub state: Option<ClientState>,
     pub connected: bool,
     pub busy: bool,
@@ -67,6 +68,7 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            role: AccessRole::Spectator,
             state: None,
             connected: false,
             busy: true,
@@ -174,6 +176,12 @@ impl App {
                 Key::OlderHistory | Key::RecentHistory | Key::History => {}
                 _ => return Effect::None,
             }
+        }
+        if self.role == AccessRole::Spectator
+            && !matches!(key, Key::History | Key::OlderHistory | Key::RecentHistory)
+        {
+            self.status = "Spectator access is read-only.".into();
+            return Effect::None;
         }
         if !self.pickup.is_empty() {
             match key {

@@ -14,7 +14,9 @@ and backend annotations. A playable text client now supports movement, pickup,
 live observation, control transfer, annotations, and paginated history.
 The graphical ASCII client now presents a native window with a disclosed-room
 map, inventory, notes, history, and explicit control transfer. Both clients can
-continue the same saved game.
+continue the same saved game. Both support server-enforced read-only spectators
+who follow live actions and results and browse permitted history. Enable a separate
+spectator credential as described in [the protocol guide](docs/protocol.md#read-only-spectators).
 The [wizard mode plan](docs/wizard-mode.md) adds server-enabled development tools
 and permanently marked wizard games to the roadmap; it is not implemented yet.
 

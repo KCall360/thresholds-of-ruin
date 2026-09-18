@@ -11,13 +11,16 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "text-process-test-token-not-a-secret"
+SPECTATOR_TOKEN = "spectator-process-test-token-not-a-secret"
 
 
 class Process:
-    def __init__(self, executable, args, token=TOKEN):
+    def __init__(self, executable, args, token=TOKEN, extra_env=None):
+        environment = {k: v for k, v in os.environ.items() if k != "TOR_SPECTATOR_TOKEN"}
+        environment.update(extra_env or {})
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,
-            env={**os.environ, "TOR_SERVER_TOKEN": token},
+            env={**environment, "TOR_SERVER_TOKEN": token},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", bufsize=1,
         )
@@ -89,8 +92,9 @@ class TextProcesses(unittest.TestCase):
         self.addCleanup(process.stop)
         return process
 
-    def start_server(self):
-        server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42", "--save", self.save])
+    def start_server(self, spectator=False):
+        server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42", "--save", self.save],
+                             extra_env={"TOR_SPECTATOR_TOKEN": SPECTATOR_TOKEN} if spectator else {})
         ready = json.loads(server.until(lambda line: line.startswith("{")))
         return server, ready["address"]
 
@@ -99,6 +103,58 @@ class TextProcesses(unittest.TestCase):
         welcome = client.until(lambda line: line == "Ready.")
         self.assertNotIn(TOKEN, welcome)
         return client, welcome
+
+    def test_spectator_watches_actions_and_history_but_cannot_mutate_even_after_restart(self):
+        self.server.stop()
+        self.server, self.address = self.start_server(spectator=True)
+        player, _ = self.client()
+        spectator = self.launch("tor-client-text", ["--connect", self.address], token=SPECTATOR_TOKEN)
+        welcome = spectator.until(lambda line: line == "Ready.")
+        self.assertIn("Spectator access is read-only", welcome)
+        self.assertNotIn("stone tablet", welcome)
+        self.assertNotIn(SPECTATOR_TOKEN, welcome)
+        for revision, (action, event) in enumerate([("take token", "Taken"), ("wait", "Waited"), ("east", "Moved")], 1):
+            player.command(action)
+            seen = spectator.until(lambda line: f"revision {revision}" in line)
+            self.assertIn(event, seen)  # The result is presented as well as the new state.
+        player.command("note Private player plan")
+        player.command("annotate user actor note here Shared progress")
+        shared = spectator.until(lambda line: "Shared progress" in line)
+        self.assertNotIn("Private player plan", shared)
+        before = self.save.read_bytes()
+        for command in ["control", "release", "wait", "east", "note No writes",
+                        "annotate frontend actor note here No shared writes"]:
+            self.assertIn("read-only", spectator.command(command))
+        self.assertEqual(self.save.read_bytes(), before)
+        self.assertIn("revision 3", spectator.command("sync"))
+        history = spectator.command("history")
+        self.assertIn("Shared progress", history)
+        self.assertNotIn("Private player plan", history)
+        player.command("release")
+        self.assertIn("read-only", spectator.command("control"))
+        self.assertIn("Control: yours", player.command("control"))
+        player.stop()
+        spectator.stop()
+        self.server.stop()
+        self.server, self.address = self.start_server(spectator=True)
+        resumed = self.launch("tor-client-text", ["--connect", self.address], token=SPECTATOR_TOKEN)
+        welcome = resumed.until(lambda line: line == "Ready.")
+        self.assertIn("read-only", welcome)
+        self.assertIn("revision 3", welcome)
+        self.assertIn("Shared progress", welcome)
+        self.assertNotIn("Private player plan", welcome)
+        self.assertIn("read-only", resumed.command("control"))
+        self.assertEqual(self.save.read_bytes(), before)
+
+    def test_spectator_credentials_are_optional_distinct_and_validated_before_save_creation(self):
+        disabled = self.launch("tor-client-text", ["--connect", self.address], token=SPECTATOR_TOKEN)
+        self.assertNotEqual(disabled.child.wait(timeout=15), 0)
+        for index, token in enumerate([TOKEN, "", "short", "x" * 1025, "contains-control\ncharacters"]):
+            path = self.save.parent / f"invalid-{index}.json"
+            invalid = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--save", path],
+                                  extra_env={"TOR_SPECTATOR_TOKEN": token})
+            self.assertNotEqual(invalid.child.wait(timeout=15), 0)
+            self.assertFalse(path.exists())
 
     def test_play_notes_and_real_restart(self):
         client, welcome = self.client()

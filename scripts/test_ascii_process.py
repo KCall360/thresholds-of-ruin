@@ -9,7 +9,7 @@ import subprocess
 import unittest
 
 import test_text_process as text_support
-from test_text_process import TOKEN
+from test_text_process import TOKEN, SPECTATOR_TOKEN
 
 
 class AsciiProcesses(unittest.TestCase):
@@ -48,6 +48,53 @@ class AsciiProcesses(unittest.TestCase):
         process.child.stdin.write(json.dumps({"type":"key", "key":key}) + "\n")
         process.child.stdin.flush()
         return self.frame(process, lambda f: f.get("input_done") == key and not f["busy"])
+
+    def test_read_only_spectator_window_streams_actions_and_resumes(self):
+        self.server.stop()
+        self.server, self.address = self.start_server(spectator=True)
+        player, _ = self.client()
+        spectator = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
+        initial = self.frame(spectator, lambda f: f["state"] is not None and not f["busy"])
+        self.assertEqual(initial["role"], "spectator")
+        self.assertFalse(initial["has_control"])
+        self.assertIn("read-only", initial["status"])
+        self.assertNotIn("stone tablet", str(initial))
+        actions = ["take token", "wait", "east", "east", "east", "east"]
+        for revision, action in enumerate(actions, 1):
+            player.command(action)
+            watched = self.frame(spectator, lambda f: f["state"]["revision"] == revision)
+            entries = [e for e in watched["history"] if e["content"]["type"] == "action"]
+            self.assertEqual(len(entries), revision)
+            self.assertIn("event", entries[-1]["content"])
+            self.assertFalse(watched["has_control"])
+        self.assertEqual(watched["state"]["observation"]["region"]["name"], "Gallery")
+        player.command("note Secret")
+        player.command("annotate user actor note here Public progress")
+        shared = self.frame(spectator, lambda f: "Public progress" in str(f["history"]))
+        self.assertNotIn("Secret", str(shared))
+        before = self.save.read_bytes()
+        for key in ["control", "release", "right", "pickup", "wait", "note"]:
+            denied = self.key(spectator, key)
+            self.assertIn("read-only", denied["status"])
+            self.assertFalse(denied["has_control"])
+            self.assertIsNone(denied["note"])
+            self.assertEqual(denied["state"], watched["state"])
+        history = self.key(spectator, "history")
+        self.assertIn("Public progress", str(history))
+        self.assertNotIn("Secret", str(history))
+        self.key(spectator, "escape")
+        self.key(spectator, "escape")
+        self.assertEqual(spectator.child.wait(timeout=10), 0)
+        self.assertEqual(self.save.read_bytes(), before)
+        player.stop()
+        self.server.stop()
+        self.server, self.address = self.start_server(spectator=True)
+        resumed = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
+        restored = self.frame(resumed, lambda f: f["state"] is not None and not f["busy"])
+        self.assertEqual(restored["role"], "spectator")
+        self.assertEqual(restored["state"], watched["state"])
+        self.assertEqual(restored["history"], shared["history"])
+        self.assertIn("read-only", self.key(resumed, "control")["status"])
 
     def test_text_to_window_control_transfer_and_save_resume(self):
         text, _ = self.client()

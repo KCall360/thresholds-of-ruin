@@ -44,7 +44,9 @@ async fn run() -> Result<(), Error> {
     for entry in connection.state.history() {
         println!("{}", history(entry));
     }
-    if !observe {
+    if connection.role() == AccessRole::Spectator {
+        println!("Spectator access is read-only. Live actions, look, inventory, sync and history are available.");
+    } else if !observe {
         transact(&mut connection, Request::AcquireControl).await?;
     }
     ready()?;
@@ -77,7 +79,9 @@ async fn run() -> Result<(), Error> {
                     Ok(Input::Help) => println!("{HELP}"),
                     Ok(Input::Request(request)) => transact(&mut connection, request).await?,
                     Ok(Input::Command(command)) => {
-                        if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
+                        if connection.role() == AccessRole::Spectator {
+                            println!("Spectator access is read-only.");
+                        } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
                             println!("You are observing. Use control to request control.");
                         } else {
                             let request = Request::Command { branch: connection.state.branch().clone(), command };
@@ -102,6 +106,10 @@ fn ready() -> io::Result<()> {
 }
 
 async fn transact(connection: &mut Connection, request: Request) -> Result<(), Error> {
+    if !connection.role().permits(&request) {
+        println!("Spectator access is read-only.");
+        return Ok(());
+    }
     let id = connection.request(request).await?;
     timeout(Duration::from_secs(10), async {
         loop {

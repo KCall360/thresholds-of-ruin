@@ -10,6 +10,7 @@ use tor_protocol::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 pub enum Event {
+    Role(AccessRole),
     State(Box<ClientState>),
     Status(String),
     Ready,
@@ -66,8 +67,14 @@ async fn run(
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "ascii").await?;
+    publish(tx, Event::Role(connection.role()))?;
     publish(tx, Event::State(Box::new(connection.state.clone())))?;
-    if !observe {
+    if connection.role() == AccessRole::Spectator {
+        publish(
+            tx,
+            Event::Status("Spectator access is read-only. F2: history; Esc: close.".into()),
+        )?;
+    } else if !observe {
         transact(&mut connection, Request::AcquireControl, tx).await?;
     } else {
         publish(

@@ -101,6 +101,10 @@ Entity references are stable for disclosed entities. Names, properties, contents
 interaction affordances, and events must not reveal undiscovered facts. Clients
 never receive a serialization of the whole world. Both clients can observe, with
 one active controller per actor initially; control transfer is explicit and atomic.
+Server-granted spectator accounts are restricted to attachment, snapshots, and
+permitted history. They receive live actor-perspective actions/results but cannot
+control, act, annotate, or invoke future wizard mutations. A player's `--observe`
+startup option is separate from this enforced permission boundary.
 
 ## Annotations
 
@@ -109,7 +113,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 1](protocol.md) for the implemented format.
+visibility rules. See [protocol version 2](protocol.md) for the implemented format.
 
 ## Language and interactions
 

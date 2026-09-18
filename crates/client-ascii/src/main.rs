@@ -158,6 +158,7 @@ fn window_loop(
                 Ok(event) => {
                     dirty = true;
                     match event {
+                        Event::Role(role) => app.role = role,
                         Event::State(state) => app.set_state(*state),
                         Event::Status(status) => app.status = status,
                         Event::Ready => app.ready(),
@@ -251,6 +252,7 @@ fn window_loop(
                 "{}",
                 serde_json::json!({"type":"frame","frame":frame,"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
+                "role":app.role,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
             );

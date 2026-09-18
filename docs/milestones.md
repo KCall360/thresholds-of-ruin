@@ -29,6 +29,12 @@ token, transfers control to the graphical window, traverses the passage, restart
 the server, and compares resumed state and history. Native keyboard-event and
 window-launch tests run on Windows and Linux Xvfb. See [the ASCII guide](ascii-client.md).
 
+Completed: server-enforced spectator credentials for both frontends, live
+actor-perspective actions/results, read-only snapshots/history, and unchanged
+annotation privacy. Raw WebSocket tests reject forged mutation requests and
+receipt retries; actual text/ASCII process tests verify live observation, denied
+inputs, and save/resume. See [spectator access](protocol.md#read-only-spectators).
+
 The slice includes a seeded two-space scenario, an object, actor control,
 streaming server, both frontends, and save/resume. This is not the full dungeon
 gameplay milestone; reconnects currently require relaunching the clients.
