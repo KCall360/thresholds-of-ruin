@@ -460,7 +460,9 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let mut spectator = connect(&address, "bob-test-token", "ascii").await;
     let seen = attach(&mut spectator).await;
     assert_eq!(seen.state, initial.state);
-    assert_eq!(seen.state.observation.known_places.len(), 1);
+    assert!(!serde_json::to_string(&seen)
+        .unwrap()
+        .contains("known_places"));
     request(&mut player, "control", Request::AcquireControl).await;
     receive(&mut player).await;
     receive(&mut player).await;

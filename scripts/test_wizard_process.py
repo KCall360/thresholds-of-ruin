@@ -64,13 +64,13 @@ class WizardProcesses(unittest.TestCase):
             self.assertNotIn("Server error", output)
             if not step["command"].startswith("note"):
                 seen = self.frame(spectator, lambda f: f["state"]["revision"] == step["revision"])
-                self.assertEqual(seen["state"]["observation"]["position"]["region"], step["region"])
+                self.assertEqual(seen["state"]["observation"]["position"], {"x":0,"y":0,"z":0})
                 self.assertEqual(seen["state"]["observation"]["tick"], step["tick"])
                 self.assertTrue(seen["state"]["wizard_game"])
         old_branch = seen["branch"]
         self.assertNotIn("Private abandoned future", str(seen))
         self.assertFalse(any(e["content"]["type"] == "wizard" for e in seen["history"]))
-        self.assertIn("Gallery", text_spectator.command("sync"))
+        self.assertIn("Your surroundings", text_spectator.command("sync"))
         for command in ["wizard rewind initial", "wizard item tablet 1 1 1 0", "note Forbidden"]:
             self.assertIn("read-only", text_spectator.command(command))
         self.assertIn("read-only", self.key(spectator, "control")["status"])
@@ -81,7 +81,7 @@ class WizardProcesses(unittest.TestCase):
         rewound = self.frame(spectator, lambda f: f["branch"] != old_branch)
         self.assertEqual(rewound["state"]["observation"]["tick"], 0)
         self.assertEqual(rewound["state"]["observation"]["inventory"], [])
-        self.assertEqual(len(rewound["state"]["observation"]["known_places"]), 1)
+        self.assertNotIn("known_places", rewound["state"]["observation"])
         self.assertIn("Private abandoned future", wizard.command(f"branch-history {old_branch}"))
         self.assertNotIn("Private abandoned future", text_spectator.command(f"branch-history {old_branch}"))
         wizard.command("take token")

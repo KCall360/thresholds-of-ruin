@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,21 +57,12 @@ pub enum Action {
     Wait,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Offset in the backend-resolved observer frame, never a world coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Position {
-    pub region: u64,
     pub x: i32,
     pub y: i32,
     pub z: i32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RegionView {
-    pub id: u64,
-    pub name: String,
-    pub width: i32,
-    pub depth: i32,
-    pub height: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +73,7 @@ pub struct ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroundItemView {
+    pub reachable: bool,
     pub item: ItemView,
     pub position: Position,
 }
@@ -93,29 +85,25 @@ pub struct ActorView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExitView {
-    pub position: Position,
-    pub direction: Direction,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Place {
-    pub id: u64,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     pub actor: ActorId,
     pub tick: u64,
     pub position: Position,
-    pub region: RegionView,
+    pub visible_cells: Vec<CellView>,
     pub ground_items: Vec<GroundItemView>,
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
-    pub exits: Vec<ExitView>,
-    pub known_places: Vec<Place>,
     pub ready: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellView {
+    /// Stable opaque identity for remembering a disclosed cell.
+    pub key: String,
+    pub stairs_up: bool,
+    pub stairs_down: bool,
+    pub position: Position,
+    pub wall: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,7 +161,7 @@ pub enum Anchor {
 pub enum Command {
     Wizard {
         expected_revision: u64,
-        operation: WizardOperation,
+        operation: String,
     },
     Act {
         expected_revision: u64,
@@ -194,66 +182,19 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Moved { from: Position, to: Position },
+    Moved { direction: Direction },
     Taken { item: u64 },
     Waited,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WizardItem {
-    Token,
-    Tablet,
-}
-
 /// Validated development inputs, never arbitrary world-state edits.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WizardOperation {
-    PlaceItem {
-        kind: WizardItem,
-        position: Position,
-    },
-    SpawnActor {
-        position: Position,
-        turn_ticks: u64,
-    },
-    Teleport {
-        actor: ActorId,
-        position: Position,
-    },
-    /// Restore the state after this retained action/setup entry; None is the initial state.
-    Rewind {
-        target: Option<EntryId>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WizardResult {
-    ItemPlaced {
-        item: u64,
-    },
-    ActorSpawned {
-        actor: ActorId,
-    },
-    Teleported {
-        actor: ActorId,
-    },
-    Rewound {
-        from_branch: BranchId,
-        branch: BranchId,
-        tick: u64,
-        next_actor: ActorId,
-    },
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
     Wizard {
-        operation: WizardOperation,
-        result: WizardResult,
+        summary: String,
+        rewind: bool,
     },
     Action {
         action: Action,

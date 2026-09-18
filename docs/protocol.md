@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 3)
+# Server protocol and annotations (version 5)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -7,7 +7,7 @@ the current disclosed state plus a bounded recent history. The shared `Connectio
 transport applies validated snapshots/updates for the [text client](text-client.md)
 and [graphical ASCII client](ascii-client.md).
 The [headless client](headless-client.md) uses the same transport and exposes
-current state and local last-seen room memory separately for scripted acceptance.
+current state and local last-seen cell memory separately for scripted acceptance.
 
 ## Run locally
 
@@ -67,9 +67,15 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 3 requires the role in `welcome` and the wizard marker in state.
-Older clients are rejected and must be upgraded with the server. Save format 2
-migrates normal format-1 saves on open; simulation rules remain `two-room-v1`.
+Protocol version 5 requires a backend-resolved observer-relative scene. Positions
+are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
+opaque `key`, `position`, `wall`, `stairs_up`, and `stairs_down`. Items include a
+`reachable` flag. The client receives no region IDs, bounds, names, portal links,
+transforms, or visited-region list. Move events report the chosen direction.
+The role in `welcome` and permanent wizard marker remain required. Old clients
+must upgrade. Save format 3 adds a private stable view-identity salt; format 1/2
+saves migrate while retaining their original rules. New saves use
+`observer-scene-v3`. See [geometry and compatibility](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
@@ -78,7 +84,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":3,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":5,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -276,14 +282,14 @@ Spectators can also use `history_branch` to read permitted abandoned history.
 Example payload inside a branch-checked `command` request:
 
 ```json
-{"type":"wizard","expected_revision":0,"operation":{"type":"teleport","actor":1,"position":{"region":2,"x":1,"y":1,"z":0}}}
+{"type":"wizard","expected_revision":0,"operation":"teleport 1 2 1 1 0"}
 ```
 
-Operations are `place_item` (kind `token` or `tablet`, position), `spawn_actor`
-(position, positive `turn_ticks`), `teleport` (actor, position), and `rewind`
-(`target`: a retained entry ID, or null for the initial boundary). Each records
-private authenticated wizard history with structured inputs/results, separate
-from annotations. Setup preserves ordinary action time and validates invariants.
+`operation` is opaque developer text: only the server parses geometry commands.
+See [wizard commands](wizard-mode.md) and [wide joins](portal-geometry.md).
+The server's private journal stores structured inputs/results for deterministic
+replay. Public wizard history contains only a summary and a rewind flag, even
+for its author. Setup consumes no action time and validates world invariants.
 
 After setup, affected clients receive a `snapshot` with empty `request_id`; rewind
 sends new-branch snapshots to all surviving attachments. Such snapshots establish

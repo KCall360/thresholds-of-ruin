@@ -48,7 +48,7 @@ Every stdout line is a JSON frame containing:
 - `state`: the current validated disclosed state; `branch`, `cursor`, `role`,
   and `has_control` describe this attachment.
 - `history`: up to 100 recent entries disclosed to this identity.
-- `memory`: local last-seen room-elevation views, described below.
+- `memory`: local last-seen cell contents, described below.
 - `message`: the received protocol message, or null. History query pages and
   accepted action results are available here; no hidden state is added.
 - `error`: an input/request error on `ready`, otherwise null.
@@ -61,17 +61,18 @@ user's private notes, according to the server's normal audience rules.
 
 ## Current observations and memory
 
-All clients now retain last-seen room views in their shared `ClientState`.
+All clients now retain last-seen cells in their shared `ClientState`.
 Only the headless frontend exposes that memory for inspection in this slice;
 text and ASCII still present current observations as before.
 
-Each memory entry holds a disclosed region, elevation, ground items, actors,
-exits, and last-seen tick/revision. Entries are ordered by region ID and elevation.
-An unseen room stays unknown even if its name appears in `known_places` or history.
-Leaving a room keeps its last disclosed contents; changes outside the current
-view do not refresh those memories. Revisiting replaces that elevation's view,
-including removing objects no longer seen. Stale actors/items can appear in more
-than one remembered view: these are historical sightings, not current locations.
+Each memory entry holds an opaque cell key, last-seen relative position, wall and
+stair facts, contents, and last-seen tick/revision. Entries are ordered by opaque
+key. A remembered offset is historical, not a current map coordinate. Unseen
+cells stay unknown; history never manufactures sightings.
+Changes outside the current visible cells do not refresh memory. Observing a cell
+again replaces its remembered contents, including removing absent objects; other
+cells in the same room can remain stale. Stale actors/items can appear in more
+than one remembered cell: these are historical sightings, not current locations.
 Inventory remains in current state and is not inferred from remembered objects.
 
 Same-branch snapshots refresh the current view and retain other memories.
@@ -79,11 +80,11 @@ Rewind changes branch and clears abandoned-future memory, starting with the
 restored snapshot. Memory is local to a connection and is not saved or recovered
 from history: restarting a client starts with its attachment snapshot only.
 
-This is a foundation for the existing fully disclosed room-elevation rule.
-It does not implement occlusion, portal views, rotated portals, or stairs.
-Partial visibility will require explicit disclosed cells before unseen areas can
-be retained or refreshed correctly. Protocol version 3 and save format 2 remain
-unchanged. Wizard operations still advance their author's actor revision even
+The [portal-geometry slice](portal-geometry.md) introduces explicit visible cells,
+bounded portal sight, rotations, walls and stairs for new games. Protocol version
+5 requires observer-relative disclosure; save format 3 retains old saves’ original
+rules. Memory output now describes individual cells rather than room elevations.
+Wizard operations still advance their author's actor revision even
 when the changed room is hidden; command details remain private.
 
 ## Verification

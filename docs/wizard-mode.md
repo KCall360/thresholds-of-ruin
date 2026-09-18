@@ -5,8 +5,9 @@ wizard authority, ground-item and actor placement, teleportation, and bounded
 rewind with retained futures. Scriptable commands are available in the text
 client. Both frontends display the marker and follow setup/rewind snapshots;
 the graphical ASCII client currently uses text alongside it for wizard commands.
-Room placement, richer item properties, enemy archetypes, and scalable history
-remain later milestones.
+[Geometry setup](portal-geometry.md) now adds room placement, rotated passages,
+wall terrain and explicit vertical links. Richer item properties, enemy archetypes,
+and scalable history remain later milestones.
 
 ## Start or promote a wizard game
 
@@ -39,7 +40,8 @@ the service; session accounts must separately have `AccessRole::Wizard`.
 
 ## Text commands
 
-Coordinates are region-local integers, with north decreasing y. The fixture has
+The client forwards developer text without interpreting its geometry; only the
+server parses these commands. Coordinates in this developer console are region-local integers, with north decreasing y. The fixture has
 regions 1 and 2, each 5 by 3 by 1. Supported commands are:
 
 | Command | Behavior |
@@ -50,8 +52,11 @@ regions 1 and 2, each 5 by 3 by 1. Supported commands are:
 | `wizard teleport 1 2 1 1 0` | Teleport actor 1 to region 2, position (1,1,0) |
 | `wizard rewind initial` | Fork from the initial scenario, while that boundary is retained |
 | `wizard rewind <entry-id>` | Fork from the state immediately after a retained action/setup entry |
-| `history [before-id]` | Current branch history, including this user's wizard results |
+| `history [before-id]` | Current branch history, including this user's wizard summaries |
 | `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
+
+New-rule games also support `wizard room`, `wizard connect` and `wizard wall`;
+see [geometry setup](portal-geometry.md#geometry-setup) for arguments and examples.
 
 Placement/teleportation consume no ordinary action time. Teleport preserves
 recovery times and reveals the destination to the relocated actor. New actors
@@ -68,19 +73,20 @@ as one boundary until evicted; notes do not consume boundaries. Targets are the
 state after an accepted ordinary action or wizard setup/rewind command, not a
 wall-clock interval. An entry target must be visible to the attached actor/user.
 Rewind cannot remove the requesting actor. Other clients attached to removed
-actors disconnect explicitly. The result records old/new branch, restored tick,
+actors disconnect explicitly. The private journal result records old/new branch, restored tick,
 and next scheduled actor. History remains stored after a boundary expires, but
 rewinding to that expired state is rejected. No travel system exists yet.
 
 Every rewind creates a fresh branch; it never erases the abandoned future or
 changes existing note anchors. Current-branch history starts at the fork; use
-`branch-history` for previous branches. Wizard results and command parameters
-are private to their authenticated author and actor, preventing hidden setup
-coordinates from leaking to other observers. Ordinary action/result disclosure
-and note audiences retain their normal rules on every branch.
+`branch-history` for previous branches. Wizard entries are private to their
+authenticated author and actor, and public history contains only a sanitized
+summary and rewind flag. Full parameters/results remain in the backend journal.
+Ordinary action/result disclosure and note audiences retain their normal rules.
 
-Protocol version **3** adds role `wizard`, required `state.wizard_game`, structured
-wizard commands/results, and `history_branch` queries. Automatic snapshots use
+Protocol version **5** retains role `wizard`, required `state.wizard_game`, and
+`history_branch`. Developer input is opaque text parsed only by the server;
+observations are backend-resolved scenes without internal geometry. Snapshots use
 an empty request ID and establish an explicit stream boundary after setup/rewind;
 they are not acknowledgements for an outstanding request. Clients rebuild their
 state from these snapshots, including decreasing ticks/revisions after rewind.
@@ -89,11 +95,12 @@ expected actor revisions, and branch checks prevent stale or duplicate mutations
 Denied roles are checked before receipt lookup. Exact authorized retries return
 the original receipt without replaying the operation.
 
-Save format **2** preserves the root branch, permanent marker, and chronological
+Save format **3** preserves the root branch, permanent marker, and chronological
 records with authenticated receipts. Replaying the records reconstructs all
 branches and the bounded decision cache; the final branch is determined by the
-rewind records. Normal format-1 saves migrate on successful open; rules remain
-`two-room-v1`. Older servers cannot load format-2 saves. Rewind restores complete
+rewind records. Normal format-1 saves migrate on successful open while retaining
+`two-room-v1`. New games use `observer-scene-v3`; wide joins require these rules.
+Legacy rules remain unchanged. Older servers cannot load the new ruleset. Rewind restores complete
 simulation state, including scheduler, knowledge, inventory, and ID allocation.
 The fixture has no evolving RNG; future RNG state belongs in these boundaries.
 
@@ -156,7 +163,7 @@ the current connection's privileges.
 | --- | --- | --- |
 | Objects | Place supported items at an explicit location or in supported containment; specify supported properties | Basic items in the foundation; richer properties with interactions |
 | Mobs/actors | Spawn supported actor or creature archetypes at explicit locations with validated settings | Existing actor types first; enemy archetypes with combat |
-| Rooms | Place room geometry and explicitly connect passages/portals | Geometry milestone; validate bounds and topology atomically |
+| Rooms | Place bounded rooms, walls and rotated passages/stair links | Implemented with observer-scene-v3 wide joins; validate bounds and topology atomically |
 | Teleport | Relocate an explicit actor to a valid region-local position, including across rooms/elevations | Foundation for existing geometry; extend with geometry features |
 | Turn rewind | Restore a recorded decision boundary and continue on a new branch while preserving the abandoned future | Bounded initial history in the foundation; scalable storage later |
 
@@ -166,8 +173,9 @@ occupancy where forbidden, or inconsistent scheduler state. Reject unsupported
 archetypes/properties and invalid destinations atomically. These tools are not
 arbitrary code execution or raw edits to serialized world internals.
 
-Implement structured, versioned protocol requests and server-side capability
-checks before adding frontend shortcuts. Define actor scope and control policy
+Implement versioned request envelopes and server-side capability checks before
+adding frontend shortcuts. Geometry parameters stay inside opaque developer
+text, with structured operations confined to backend parsing and replay. Define actor scope and control policy
 explicitly for each operation; observing or controlling an actor does not itself
 grant wizard authority. Server-granted spectator accounts must remain read-only,
 including in wizard games: the existing request allowlist must reject all wizard

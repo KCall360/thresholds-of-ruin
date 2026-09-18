@@ -1,10 +1,30 @@
 {
   "seed": 42,
   "steps": [
-    {"command": "wizard item tablet 1 1 1 0", "region": 1, "tick": 0, "revision": 1},
-    {"command": "take tablet", "region": 1, "tick": 50, "revision": 2},
-    {"command": "note Private abandoned future", "region": 1, "tick": 50, "revision": 2},
-    {"command": "wizard teleport 1 2 1 1 0", "region": 2, "tick": 50, "revision": 3},
-    {"command": "wait", "region": 2, "tick": 150, "revision": 4}
+    {
+      "command": "wizard item tablet 1 1 1 0",
+      "tick": 0,
+      "revision": 1
+    },
+    {
+      "command": "take #3",
+      "tick": 50,
+      "revision": 2
+    },
+    {
+      "command": "note Private abandoned future",
+      "tick": 50,
+      "revision": 2
+    },
+    {
+      "command": "wizard teleport 1 2 1 1 0",
+      "tick": 50,
+      "revision": 3
+    },
+    {
+      "command": "wait",
+      "tick": 150,
+      "revision": 4
+    }
   ]
 }

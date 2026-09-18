@@ -18,11 +18,12 @@ use checked coordinates. Crossing a passage changes the region-local position;
 it does not require a global spatial embedding. Passages can also loop back to
 the same cell. Occupancy only blocks another actor.
 
-Regions are unobstructed volumes at this stage. Single-cell passages translate
-positions; rotated orientation, larger apertures, interior terrain, gravity,
-support, stairs, and door entities still need their own rules. The geometric
-vertical-step primitive is not yet a walking/climbing/falling simulation. Passages
-are not door entities and do not constrain where future doors can be placed.
+The [portal-geometry slice](portal-geometry.md) adds clockwise passage rotations,
+opaque wall terrain and explicit up/down links for stairs. Horizontal connections
+must exit a boundary; vertical links may start in the interior. Gravity, support,
+and interactive door entities remain pending. Rectangular joins can cover multiple cells. Passages are not door entities
+and do not constrain where future doors can be placed. Old-rule saves retain
+the original vertical-step behavior.
 
 ## Actors and time
 
@@ -61,16 +62,21 @@ controller ownership without changing these simulation rules.
 
 ## Perception and inventory
 
-The temporary perception rule reveals the current fully lit room on the actor's
-elevation, visible actors, local exits, their own inventory, and visited place
-names. Exits do not reveal unvisited destination IDs or contents. Inventory is
-represented by item ownership, so one item cannot appear in two inventories.
+New games compute cells within eight Manhattan steps using integer rays through
+rotated, potentially multi-cell joins. Walls stop movement and sight; vertical
+sight follows explicit links. The backend projects visible occurrences into the
+actor’s frame. Clients receive relative positions and opaque cell keys, never
+internal region coordinates, names, bounds, or links. Orientation follows the
+actor through rotated crossings, preserving input and presentation axes.
+Inventory is represented by ownership, so an item cannot be in two inventories.
 
 Seeing an item elsewhere in a room does not make it reachable. Taking hidden,
 unknown, already carried, and out-of-reach items produces the same unavailable
 error. Visited place knowledge changes when an actor enters a room, not when a
-client decides to query it. Visibility across portals, occlusion, sound, and
-remembered object locations belong to the perception milestone.
+client decides to query it. Looking through a portal does not mark a place visited.
+Clients retain separate last-seen cell contents, which may be stale. Existing
+`two-room-v1` saves retain original whole-room perception; new saves use
+`observer-scene-v3`. Sound and interactive doors remain later work.
 
 ## Validation and remaining work
 

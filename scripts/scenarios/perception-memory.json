@@ -1,5 +1,9 @@
 {
-  "visit_and_leave": ["wizard teleport 1 2 1 1 0", "wizard teleport 1 1 1 1 0"],
+  "visit_and_leave": [
+    "wizard teleport 1 2 1 1 0",
+    "wizard wall 1 4 1 0 closed",
+    "wizard teleport 1 1 1 1 0"
+  ],
   "hidden_change": "wizard item tablet 2 2 1 0",
   "revisit": "wizard teleport 1 2 1 1 0"
 }

@@ -1,7 +1,7 @@
 //! Deterministic commands and prose derived exclusively from disclosed state.
 use tor_protocol::*;
 
-pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Input {
@@ -52,7 +52,7 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         ("take" | "get", noun) if !noun.is_empty() => {
             let noun = noun.to_lowercase();
             let noun = noun.strip_prefix("the ").unwrap_or(&noun);
-            let matches: Vec<_> = state
+            let mut matches: Vec<_> = state
                 .observation
                 .ground_items
                 .iter()
@@ -64,6 +64,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                     !noun.is_empty() && (name == noun || name.ends_with(&format!(" {noun}")))
                 })
                 .collect();
+            matches.sort_by_key(|item| item.item.id);
+            matches.dedup_by_key(|item| item.item.id);
             match matches.as_slice() {
                 [item] => action(Action::Take { item: item.item.id }),
                 [] => Err("No disclosed ground item matches that name.".into()),
@@ -185,13 +187,8 @@ pub fn safe(text: &str) -> String {
 pub fn describe(state: &StateView) -> String {
     let o = &state.observation;
     let mut lines = vec![format!(
-        "{} — position ({}, {}, {}); tick {}; revision {}. {}",
-        safe(&o.region.name),
-        o.position.x,
-        o.position.y,
-        o.position.z,
+        "Your surroundings - tick {}. {}",
         o.tick,
-        state.revision,
         if o.ready {
             "Ready to act."
         } else {
@@ -200,24 +197,37 @@ pub fn describe(state: &StateView) -> String {
     )];
     for item in &o.ground_items {
         lines.push(format!(
-            "You see {} (#{}), at ({}, {}, {}).{}",
+            "You see {} (#{}), at offset ({}, {}, {}).{}",
             safe(&item.item.name),
             item.item.id,
             item.position.x,
             item.position.y,
             item.position.z,
-            if item.position == o.position {
-                " Within reach."
-            } else {
-                ""
-            }
+            if item.reachable { " Within reach." } else { "" }
         ));
     }
-    for exit in &o.exits {
+    for actor in &o.visible_actors {
         lines.push(format!(
-            "Passage {:?} at ({}, {}, {}).",
-            exit.direction, exit.position.x, exit.position.y, exit.position.z
+            "You see actor #{} at offset ({}, {}, {}).",
+            actor.id.0, actor.position.x, actor.position.y, actor.position.z
         ));
+    }
+    for cell in &o.visible_cells {
+        if cell.stairs_up || cell.stairs_down {
+            lines.push(format!(
+                "Stairs {} at offset ({}, {}, {}).",
+                if cell.stairs_up && cell.stairs_down {
+                    "up and down"
+                } else if cell.stairs_up {
+                    "up"
+                } else {
+                    "down"
+                },
+                cell.position.x,
+                cell.position.y,
+                cell.position.z
+            ));
+        }
     }
     if state.wizard_game {
         lines.insert(0, "*** WIZARD GAME — permanently marked ***".into());
@@ -243,7 +253,7 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn history(entry: &HistoryEntry) -> String {
     let content = match &entry.content {
-        HistoryContent::Wizard { operation, result } => format!("Wizard {operation:?}: {result:?}"),
+        HistoryContent::Wizard { summary, .. } => safe(summary),
         HistoryContent::Action { event, .. } => format!("{event:?}"),
         HistoryContent::Annotation {
             anchor,
@@ -258,40 +268,11 @@ pub fn history(entry: &HistoryEntry) -> String {
 }
 
 fn parse_wizard(text: &str, expected_revision: u64) -> Result<Input, String> {
-    let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>";
-    let position = |v: &[&str]| -> Result<Position, String> {
-        Ok(Position {
-            region: v[0].parse().map_err(|_| usage)?,
-            x: v[1].parse().map_err(|_| usage)?,
-            y: v[2].parse().map_err(|_| usage)?,
-            z: v[3].parse().map_err(|_| usage)?,
-        })
-    };
-    let operation = match words.as_slice() {
-        ["item", kind, r, x, y, z] => WizardOperation::PlaceItem {
-            kind: match *kind {
-                "token" => WizardItem::Token,
-                "tablet" => WizardItem::Tablet,
-                _ => return Err(usage.into()),
-            },
-            position: position(&[r, x, y, z])?,
-        },
-        ["actor", ticks, r, x, y, z] => WizardOperation::SpawnActor {
-            turn_ticks: ticks.parse().map_err(|_| usage)?,
-            position: position(&[r, x, y, z])?,
-        },
-        ["teleport", actor, r, x, y, z] => WizardOperation::Teleport {
-            actor: ActorId(actor.parse().map_err(|_| usage)?),
-            position: position(&[r, x, y, z])?,
-        },
-        ["rewind", target] => WizardOperation::Rewind {
-            target: (*target != "initial").then(|| EntryId((*target).into())),
-        },
-        _ => return Err(usage.into()),
-    };
+    if text.trim().is_empty() {
+        return Err("Enter a developer command after wizard.".into());
+    }
     Ok(Input::Command(Command::Wizard {
         expected_revision,
-        operation,
+        operation: text.into(),
     }))
 }

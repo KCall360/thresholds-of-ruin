@@ -1,6 +1,9 @@
 //! Region-local geometry, independent of rendering and transport.
 
+mod scene;
 mod topology;
+pub use scene::SightCell;
+mod visibility;
 
 pub use topology::{Direction, Location, Passage, Region, RegionId, World, WorldError};
 

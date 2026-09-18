@@ -58,7 +58,7 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(initial["role"], "spectator")
         self.assertFalse(initial["has_control"])
         self.assertIn("read-only", initial["status"])
-        self.assertNotIn("stone tablet", str(initial))
+        self.assertIn("stone tablet", str(initial))
         actions = ["take token", "wait", "east", "east", "east", "east"]
         for revision, action in enumerate(actions, 1):
             player.command(action)
@@ -67,7 +67,7 @@ class AsciiProcesses(unittest.TestCase):
             self.assertEqual(len(entries), revision)
             self.assertIn("event", entries[-1]["content"])
             self.assertFalse(watched["has_control"])
-        self.assertEqual(watched["state"]["observation"]["region"]["name"], "Gallery")
+        self.assertEqual(next(i["position"] for i in watched["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         player.command("note Secret")
         player.command("annotate user actor note here Public progress")
         shared = self.frame(spectator, lambda f: "Public progress" in str(f["history"]))
@@ -99,7 +99,7 @@ class AsciiProcesses(unittest.TestCase):
     def test_text_to_window_control_transfer_and_save_resume(self):
         text, _ = self.client()
         ascii_client, initial = self.ascii()
-        self.assertNotIn("stone tablet", str(initial))
+        self.assertIn("stone tablet", str(initial))
         self.assertFalse(initial["has_control"])
         text.command("take token")
         self.frame(ascii_client, lambda f: f["state"]["revision"] == 1)
@@ -111,12 +111,12 @@ class AsciiProcesses(unittest.TestCase):
         self.assertTrue(self.key(ascii_client, "control")["has_control"])
         for _ in range(4):
             moved = self.key(ascii_client, "right")
-        self.assertEqual(moved["state"]["observation"]["region"]["name"], "Gallery")
+        self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         self.assertEqual(moved["state"]["observation"]["tick"], 450)
         self.assertIn("stone tablet", str(moved))
         self.assertIn("token", str(moved["state"]["observation"]["inventory"]))
         # Sync is a protocol barrier after all pushes to the observing text client.
-        self.assertIn("Gallery", text.command("sync"))
+        self.assertIn("Your surroundings", text.command("sync"))
         before = moved["state"]
         self.key(ascii_client, "release")
         self.assertIn("Control: yours", text.command("control"))
@@ -130,8 +130,8 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(restored["state"], before)
         self.assertEqual(restored["history"], moved["history"])
         self.assertEqual(restored["branch"], moved["branch"])
-        self.assertIn("Gallery", welcome)
-        self.assertIn("tick 450; revision 5", welcome)
+        self.assertIn("Your surroundings", welcome)
+        self.assertIn("tick 450.", welcome)
         self.assertIn("token", resumed_text.command("inventory"))
         self.assertIn("Return through the entry.", resumed_text.command("history"))
         self.assertTrue(self.key(resumed_ascii, "control")["has_control"])

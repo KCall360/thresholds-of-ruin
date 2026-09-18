@@ -1,5 +1,6 @@
 use tempfile::tempdir;
 use tor_protocol::*;
+use tor_server::journal::Command;
 use tor_server::{Engine, Scenario};
 
 fn note(anchor: Anchor, text: &str, audience: Audience) -> Command {
