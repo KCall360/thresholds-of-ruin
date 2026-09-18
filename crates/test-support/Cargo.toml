@@ -13,3 +13,4 @@ workspace = true
 tor-world.workspace = true
 tor-protocol.workspace = true
 tor-client-common.workspace = true
+tor-simulation.workspace = true

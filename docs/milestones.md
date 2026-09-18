@@ -1,13 +1,21 @@
 # Milestones
 
-## 0: Foundation (current)
+## 0: Foundation (complete)
 
 - Public GitHub repository, GPL-3.0-only license, workspace and architecture.
 - Windows and Linux formatting, lint, unit and cross-crate integration checks.
 - Foundational region bounds and observation-stream ordering tests.
 - No playable application or frontend launch-test claim at this stage.
 
-## 1: Shared playable slice
+## 1: Shared playable slice (in progress)
+
+Completed: deterministic in-memory simulation of two connected rooms, actor IDs,
+movement/pickup/wait actions, variable recovery times, room-level observations,
+and integration acceptance tests. See [implementation details](simulation-slice.md).
+
+Remaining PRs: network protocol/server and streamed observations; the text client;
+the graphical ASCII client and control transfer; persistent save/resume. The
+simulation tests do not stand in for future server or frontend process tests.
 
 Write the acceptance scenario first, then implement a seeded two-space scenario,
 an object, actor control, streaming server, text client, graphical ASCII client,

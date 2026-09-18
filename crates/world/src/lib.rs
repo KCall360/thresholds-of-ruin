@@ -1,7 +1,11 @@
 //! Region-local geometry, independent of rendering and transport.
 
+mod topology;
+
+pub use topology::{Direction, Location, Passage, Region, RegionId, World, WorldError};
+
 /// Integer position in a region's local coordinate system.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -17,6 +21,11 @@ pub struct Extent {
 }
 
 impl Extent {
+    /// Returns width (x), depth (y), and height (z).
+    pub fn dimensions(self) -> (i32, i32, i32) {
+        (self.width, self.depth, self.height)
+    }
+
     pub fn new(width: i32, depth: i32, height: i32) -> Option<Self> {
         (width > 0 && depth > 0 && height > 0).then_some(Self {
             width,

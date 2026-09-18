@@ -50,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "tor-client-common",
  "tor-protocol",
+ "tor-simulation",
  "tor-world",
 ]
 

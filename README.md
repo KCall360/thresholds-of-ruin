@@ -6,9 +6,13 @@ Working title; original code and content inspired by NetHack.
 
 ## Status
 
-Foundation stage. This repository contains the architecture, Rust workspace,
-foundational geometry and observation-stream code, and automated tests. It does
-not yet contain a playable game, network server, or runnable frontends.
+The first simulation slice is implemented: a seeded two-room fixture, explicit
+actors, deterministic action timing, movement, inventory pickup, and actor-specific
+observations. It includes validated region connections and observation-stream
+ordering primitives. It does not yet contain a playable client, network server,
+or persistent saves.
+
+See [the simulation slice](docs/simulation-slice.md) for its rules and limitations.
 
 Windows is the primary platform; Linux is tested from the beginning.
 
