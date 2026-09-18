@@ -23,6 +23,34 @@ fn travel_selection_is_free_and_submits_an_opaque_cell_key() {
 }
 
 #[test]
+fn diagonal_cursor_and_actions_use_current_disclosed_state() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    app.input(Input::Key { key: Key::Travel });
+    app.input(Input::Key {
+        key: Key::NorthEast,
+    });
+    assert_eq!(app.travel_cursor, Some(Position { x: 2, y: 0, z: 0 }));
+    assert!(
+        matches!(app.input(Input::Key {key:Key::Enter}),Effect::Request(Request::Command {command:Command::Travel {destination,..},..}) if destination=="2:0")
+    );
+    app.ready();
+    for (key, direction) in [
+        (Key::NorthEast, Direction::NorthEast),
+        (Key::SouthEast, Direction::SouthEast),
+        (Key::SouthWest, Direction::SouthWest),
+        (Key::NorthWest, Direction::NorthWest),
+    ] {
+        assert!(
+            matches!(app.input(Input::Key {key}),Effect::Request(Request::Command {command:Command::Act { action:Action::Move {direction:d}, expected_revision:3 },..}) if d==direction)
+        );
+        app.ready();
+    }
+}
+
+#[test]
 fn travel_clicks_ignore_unknown_cells_and_spectators() {
     let mut app = App::new();
     app.set_state(state());

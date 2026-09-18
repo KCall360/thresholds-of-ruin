@@ -13,7 +13,7 @@ hint at each space's center. There is no procedural generator yet.
 
 ## Disclosure and memory
 
-Protocol **10** retains the protocol-6 requirement for `place_hint` on each disclosed `visible_cells` entry.
+Protocol **11** retains the protocol-6 requirement for `place_hint` on each disclosed `visible_cells` entry.
 Only perceived cells carry hints; there is no dungeon-wide marker list. The
 existing opaque cell key identifies the location, and the existing relative
 position locates each visible occurrence. Repeated views of the same cell through
@@ -50,12 +50,12 @@ Public wizard history retains sanitized summaries, not hidden marker locations.
 
 ## Compatibility and verification
 
-New games use `material-rims-v10`. Save format remains **3**: the new rules version
+New games use `diagonal-v11`. Save format remains **3**: the new rules version
 selects the authored hints and supports journaled hint edits. Older servers reject
 the unknown rules version. Existing `two-room-v1`, `portal-sight-v2`, and
 `observer-scene-v3` games retain their original fixture, replay, and rules, expose
 `place_hint: false`, and reject wizard hint edits. All connected binaries must
-use protocol 10. Normal games are never implicitly promoted to wizard mode.
+use protocol 11. Normal games are never implicitly promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale
 memory and refresh, permissions, invalid setup, replay, and rewind. The versioned

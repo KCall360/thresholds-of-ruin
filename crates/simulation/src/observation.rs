@@ -238,18 +238,46 @@ impl Game {
             if !self.world.walkable(from.location) {
                 continue;
             }
-            for (direction, dx, dy) in [
-                (Direction::North, 0, -1),
-                (Direction::East, 1, 0),
-                (Direction::South, 0, 1),
-                (Direction::West, -1, 0),
-            ] {
+            for direction in Direction::HORIZONTAL {
+                let (dx, dy, _) = direction.delta();
                 let local = direction.rotated(from.rotation);
-                if self.world.adjacent(from.location, local) != Some(door) {
+                let reach = if let Some((a, b)) = direction.components() {
+                    if !self.diagonals {
+                        continue;
+                    }
+                    self.world.diagonal_reach(from.location, local, |side| {
+                        !self.occupied(side)
+                            && [a, b].into_iter().any(|first| {
+                                let Some((next, turns)) = self
+                                    .world
+                                    .movement_neighbor(from.location, first.rotated(from.rotation))
+                                else {
+                                    return false;
+                                };
+                                let (sx, sy, _) = first.delta();
+                                next == side
+                                    && scene.iter().any(|seen| {
+                                        seen.location == side
+                                            && seen.rotation == (from.rotation + turns) % 4
+                                            && seen.offset
+                                                == Position {
+                                                    x: from.offset.x + sx,
+                                                    y: from.offset.y + sy,
+                                                    z: from.offset.z,
+                                                }
+                                    })
+                            })
+                    })
+                } else {
+                    self.reach(from.location, local)
+                };
+                let Some((to, turns)) = reach else {
+                    continue;
+                };
+                if to != door {
                     continue;
                 }
-                let rotation =
-                    (from.rotation + self.world.crossing_rotation(from.location, local)) % 4;
+                let rotation = (from.rotation + turns) % 4;
                 if scene.iter().any(|target| {
                     target.location == door
                         && target.rotation == rotation

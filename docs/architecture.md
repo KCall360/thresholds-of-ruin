@@ -77,10 +77,14 @@ The [client-memory slice](headless-client.md) retains received cell
 views in `tor-client-common`, separate from current state. Same-branch snapshots
 preserve memory; new branches clear it. It lasts only for the connection and
 does not infer views from known place names or history. [Portal sight](portal-geometry.md)
-refreshes only currently visible cells; memory presentation in text/ASCII remains
-later work.
+refreshes only currently visible cells. ASCII now displays an aligned
+[remembered map](ascii-memory.md); text memory presentation remains later work.
 
 ## Time and actions
+
+[Diagonal movement](diagonal-movement.md) uses exact integer `ceil(base × √2)`
+recovery and permits a clear diagonal destination when at least one side is clear.
+Door manipulation supports the same diagonal reach at its normal action cost.
 
 Integer simulation time and a deterministic scheduler support variable action
 costs and actor speeds. Equal-time outcomes have stable ordering. The world
@@ -136,7 +140,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 10](protocol.md) for the implemented format.
+visibility rules. See [protocol version 11](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -203,8 +207,8 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 10 and save format 3 support the current interface; normal format-1 saves migrate
-on open. New games use material-rims-v10; existing saves retain their ruleset.
+version 11 and save format 3 support the current interface; normal format-1 saves migrate
+on open. New games use diagonal-v11; existing saves retain their ruleset.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII

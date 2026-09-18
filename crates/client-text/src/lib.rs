@@ -3,7 +3,7 @@ use tor_protocol::*;
 
 pub mod adventure;
 
-pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -137,6 +137,10 @@ fn parse_direction(text: &str) -> Result<Direction, String> {
         "east" | "e" => Ok(Direction::East),
         "south" | "s" => Ok(Direction::South),
         "west" | "w" => Ok(Direction::West),
+        "northeast" | "ne" => Ok(Direction::NorthEast),
+        "southeast" | "se" => Ok(Direction::SouthEast),
+        "southwest" | "sw" => Ok(Direction::SouthWest),
+        "northwest" | "nw" => Ok(Direction::NorthWest),
         "up" | "u" => Ok(Direction::Up),
         "down" | "d" => Ok(Direction::Down),
         _ => Err("Unknown command or direction. Type help for commands.".into()),

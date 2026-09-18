@@ -18,20 +18,53 @@ pub enum Direction {
     East,
     South,
     West,
+    NorthEast,
+    SouthEast,
+    SouthWest,
+    NorthWest,
     Up,
     Down,
 }
 
 impl Direction {
-    pub(crate) fn offset(self, position: Position) -> Option<Position> {
-        let (x, y, z) = match self {
+    pub const HORIZONTAL: [Self; 8] = [
+        Self::North,
+        Self::East,
+        Self::South,
+        Self::West,
+        Self::NorthEast,
+        Self::SouthEast,
+        Self::SouthWest,
+        Self::NorthWest,
+    ];
+
+    pub fn components(self) -> Option<(Self, Self)> {
+        match self {
+            Self::NorthEast => Some((Self::North, Self::East)),
+            Self::SouthEast => Some((Self::South, Self::East)),
+            Self::SouthWest => Some((Self::South, Self::West)),
+            Self::NorthWest => Some((Self::North, Self::West)),
+            _ => None,
+        }
+    }
+
+    pub fn delta(self) -> (i32, i32, i32) {
+        match self {
+            Self::NorthEast => (1, -1, 0),
+            Self::SouthEast => (1, 1, 0),
+            Self::SouthWest => (-1, 1, 0),
+            Self::NorthWest => (-1, -1, 0),
             Self::North => (0, -1, 0),
             Self::East => (1, 0, 0),
             Self::South => (0, 1, 0),
             Self::West => (-1, 0, 0),
             Self::Up => (0, 0, 1),
             Self::Down => (0, 0, -1),
-        };
+        }
+    }
+
+    pub(crate) fn offset(self, position: Position) -> Option<Position> {
+        let (x, y, z) = self.delta();
         Some(Position {
             x: position.x.checked_add(x)?,
             y: position.y.checked_add(y)?,
@@ -40,7 +73,16 @@ impl Direction {
     }
 
     pub fn rotated(self, turns: u8) -> Self {
-        let directions = [Self::North, Self::East, Self::South, Self::West];
+        let directions = if self.components().is_some() {
+            [
+                Self::NorthEast,
+                Self::SouthEast,
+                Self::SouthWest,
+                Self::NorthWest,
+            ]
+        } else {
+            [Self::North, Self::East, Self::South, Self::West]
+        };
         match directions.iter().position(|d| *d == self) {
             Some(index) => directions[(index + usize::from(turns)) % 4],
             None => self,
@@ -128,6 +170,11 @@ impl World {
     }
     /// The perceived adjacent cell, including a closed barrier at the destination.
     pub fn adjacent(&self, from: Location, direction: Direction) -> Option<Location> {
+        if direction.components().is_some() {
+            return self
+                .diagonal_reach(from, direction, |_| true)
+                .map(|(to, _)| to);
+        }
         self.sight_step(from, direction).map(|(to, _)| to)
     }
 
@@ -226,6 +273,9 @@ impl World {
     /// Clockwise quarter turns about z transform sight after crossing. Connections
     /// are directed: callers must explicitly construct and validate reverse links.
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), WorldError> {
+        if passage.direction.components().is_some() {
+            return Err(WorldError::InvalidEndpoint);
+        }
         if quarter_turns > 3
             || (matches!(passage.direction, Direction::Up | Direction::Down) && quarter_turns != 0)
         {
@@ -277,6 +327,7 @@ impl World {
                     Direction::East | Direction::West => (0, u, v),
                     Direction::North | Direction::South => (u, 0, v),
                     Direction::Up | Direction::Down => (u, v, 0),
+                    _ => return Err(WorldError::InvalidEndpoint),
                 };
                 let (rx, ry) = match turns {
                     0 => (x, y),
@@ -323,6 +374,11 @@ impl World {
     }
 
     pub fn crossing_rotation(&self, from: Location, direction: Direction) -> u8 {
+        if direction.components().is_some() {
+            return self
+                .diagonal_reach(from, direction, |_| true)
+                .map_or(0, |(_, turns)| turns);
+        }
         self.rotations.get(&(from, direction)).copied().unwrap_or(0)
     }
 
@@ -417,6 +473,7 @@ impl World {
                 Direction::East | Direction::West => a.x == b.x,
                 Direction::North | Direction::South => a.y == b.y,
                 Direction::Up | Direction::Down => a.z == b.z,
+                _ => return None,
             };
             if !same_plane {
                 continue;
@@ -526,9 +583,55 @@ impl World {
             .filter(move |passage| passage.from.region == region)
     }
 
+    /// Actual movement topology, excluding sight-only material rim projection.
+    pub fn movement_neighbor(
+        &self,
+        from: Location,
+        direction: Direction,
+    ) -> Option<(Location, u8)> {
+        if direction.components().is_some() || !self.walkable(from) {
+            return None;
+        }
+        if let Some(passage) = self.passage(from, direction) {
+            return Some((passage.to, self.crossing_rotation(from, direction)));
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
+
+    /// Resolve diagonal reach through at least one clear side. Destination may
+    /// contain a closed door; callers validate destination occupancy separately.
+    pub fn diagonal_reach(
+        &self,
+        from: Location,
+        direction: Direction,
+        clear: impl Fn(Location) -> bool,
+    ) -> Option<(Location, u8)> {
+        let (a, b) = direction.components()?;
+        let route = |first, second: Direction| {
+            let (side, r1) = self.movement_neighbor(from, first)?;
+            if !self.walkable(side) || !clear(side) {
+                return None;
+            }
+            let (to, r2) = self.movement_neighbor(side, second.rotated(r1))?;
+            if self.is_wall(to) {
+                return None;
+            }
+            Some((to, (r1 + r2) % 4))
+        };
+        match (route(a, b), route(b, a)) {
+            (Some(a), Some(b)) if a == b => Some(a),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            _ => None,
+        }
+    }
+
     /// Resolve geometry only. Occupancy and action costs belong to simulation.
     pub fn step(&self, from: Location, direction: Direction) -> Option<Location> {
-        let (to, _) = self.sight_step(from, direction)?;
+        let to = self.adjacent(from, direction)?;
         self.walkable(to).then_some(to)
     }
 }

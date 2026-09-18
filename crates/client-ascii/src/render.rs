@@ -11,6 +11,118 @@ const TEXT: u32 = 0xd9e3e9;
 const MUTED: u32 = 0x869ba9;
 const ACCENT: u32 = 0x67d8bd;
 const GOLD: u32 = 0xedc579;
+pub const MEMORY_COLOR: u32 = 0x626262;
+
+/// The same tiles drive native painting and opt-in presentation diagnostics.
+#[derive(serde::Serialize)]
+pub struct MapTile {
+    pub position: tor_protocol::Position,
+    pub glyph: char,
+    pub remembered: bool,
+    pub color: u32,
+    pub center: (usize, usize),
+    step: usize,
+}
+
+fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::Observation {
+    let mut view = state.state().observation.clone();
+    let visible: std::collections::BTreeSet<_> = view
+        .visible_cells
+        .iter()
+        .map(|c| (c.position.x, c.position.y, c.position.z))
+        .collect();
+    for cell in state.map_memory() {
+        let p = cell.position;
+        // Keep a readable local viewport. Distant chart cells remain in memory.
+        if !(-8..=8).contains(&p.z)
+            || !(-24..=24).contains(&p.x)
+            || !(-12..=12).contains(&p.y)
+            || visible.contains(&(p.x, p.y, p.z))
+        {
+            continue;
+        }
+        view.visible_cells.push(tor_protocol::CellView {
+            key: cell.key.clone(),
+            position: p,
+            wall: cell.wall,
+            stairs_up: cell.stairs_up,
+            stairs_down: cell.stairs_down,
+            place_hint: cell.place_hint,
+            door: cell.door.clone(),
+            material: cell.material.clone(),
+            floor: cell.floor.clone(),
+            ceiling: cell.ceiling.clone(),
+        });
+        view.ground_items.extend(cell.ground_items.iter().cloned());
+    }
+    view
+}
+
+pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
+    let display = display_observation(state);
+    let current: std::collections::BTreeSet<_> = state
+        .state()
+        .observation
+        .visible_cells
+        .iter()
+        .map(|c| (c.position.x, c.position.y, c.position.z))
+        .collect();
+    let mut tiles = Vec::new();
+    for panel in map_panels(&display) {
+        for row in 0..panel.rows {
+            for col in 0..panel.cols {
+                let position = tor_protocol::Position {
+                    x: panel.x0 + col as i32,
+                    y: panel.y0 + row as i32,
+                    z: panel.z,
+                };
+                let glyph = glyph_at_level(&display, position.x, position.y, position.z);
+                if glyph == ' ' {
+                    continue;
+                }
+                let remembered = !current.contains(&(position.x, position.y, position.z));
+                let color = if remembered {
+                    MEMORY_COLOR
+                } else {
+                    match glyph {
+                        '@' => ACCENT,
+                        '!' => GOLD,
+                        '<' | '>' => 0x8cbafa,
+                        '&' => 0xef958c,
+                        _ => 0x7890a2,
+                    }
+                };
+                tiles.push(MapTile {
+                    position,
+                    glyph,
+                    remembered,
+                    color,
+                    center: (
+                        panel.left + col * panel.step + panel.step / 2,
+                        panel.top + row * panel.step + panel.step / 2,
+                    ),
+                    step: panel.step,
+                });
+            }
+        }
+    }
+    tiles
+}
+
+pub fn visible_cell_at(
+    state: &tor_client_common::ClientState,
+    x: usize,
+    y: usize,
+) -> Option<tor_protocol::Position> {
+    let position = cell_at(&display_observation(state), x, y)?;
+    state
+        .state()
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| c.position == position)
+        .map(|c| c.position)
+}
 
 pub struct Canvas {
     pub pixels: Vec<u32>,
@@ -90,7 +202,7 @@ impl Canvas {
             let o = &state.state().observation;
             self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
             self.text(44, 140, &format!("TICK {}", o.tick), MUTED, 1, 84);
-            for panel in map_panels(o) {
+            for panel in map_panels(&display_observation(state)) {
                 if panel.label {
                     self.text(
                         panel.left,
@@ -101,50 +213,38 @@ impl Canvas {
                         18,
                     );
                 }
-                for row in 0..panel.rows {
-                    for col in 0..panel.cols {
-                        let position = tor_protocol::Position {
-                            x: panel.x0 + col as i32,
-                            y: panel.y0 + row as i32,
-                            z: panel.z,
-                        };
-                        let glyph = glyph_at_level(o, position.x, position.y, position.z);
-                        let selected = app.travel_cursor == Some(position);
-                        if glyph == ' ' && !selected {
-                            continue;
-                        }
-                        let x = panel.left + col * panel.step;
-                        let y = panel.top + row * panel.step;
-                        self.rect(
-                            x,
-                            y,
-                            panel.step - 1,
-                            panel.step - 1,
-                            if selected {
-                                GOLD
-                            } else if glyph == '@' {
-                                0x203f41
-                            } else {
-                                0x192733
-                            },
-                        );
-                        let color = if selected {
-                            BG
-                        } else {
-                            match glyph {
-                                '@' => ACCENT,
-                                '!' => GOLD,
-                                '<' | '>' => 0x8cbafa,
-                                '&' => 0xef958c,
-                                _ => 0x7890a2,
-                            }
-                        };
-                        let scale = (panel.step / 12).clamp(1, 3);
-                        let pad = (panel.step - 8 * scale) / 2;
-                        self.text(x + pad, y + pad, &glyph.to_string(), color, scale, 1);
-                    }
-                }
             }
+            for tile in map_tiles(state) {
+                let selected = app.travel_cursor == Some(tile.position);
+                let x = tile.center.0 - tile.step / 2;
+                let y = tile.center.1 - tile.step / 2;
+                self.rect(
+                    x,
+                    y,
+                    tile.step - 1,
+                    tile.step - 1,
+                    if selected {
+                        GOLD
+                    } else if tile.remembered {
+                        0x171b20
+                    } else if tile.glyph == '@' {
+                        0x203f41
+                    } else {
+                        0x192733
+                    },
+                );
+                let scale = (tile.step / 12).clamp(1, 3);
+                let pad = (tile.step - 8 * scale) / 2;
+                self.text(
+                    x + pad,
+                    y + pad,
+                    &tile.glyph.to_string(),
+                    if selected { BG } else { tile.color },
+                    scale,
+                    1,
+                );
+            }
+            self.text(44, 154, "GREY: LAST SEEN", MEMORY_COLOR, 1, 30);
             if let Some(travel) = state.travel() {
                 self.text(
                     220,
@@ -247,7 +347,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F2 history   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "ARROWS/HJKL move  U/D level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  N note  F2 history  ESC quit/cancel"
+            "HJKL/YUBN move  </> level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  F4 note  F2 history  ESC quit/cancel"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -288,7 +388,7 @@ impl Canvas {
                 2,
                 50,
             );
-            self.text(188, 250, "Arrow keys or H/J/K/L", TEXT, 2, 50);
+            self.text(188, 250, "Arrows or HJKL/YUBN", TEXT, 2, 50);
             self.text(188, 292, "ESC cancels without taking a turn", MUTED, 1, 80);
         }
         if !app.pickup.is_empty() {
@@ -386,7 +486,8 @@ fn map_panels(o: &tor_protocol::Observation) -> Vec<MapPanel> {
     let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
     levels.sort_unstable();
     levels.dedup();
-    levels.sort_by_key(|z| (z.abs(), *z));
+    levels.sort_by_key(|z| (i64::from(*z).abs(), *z));
+    levels.truncate(5);
     let panels = levels.len().max(1);
     levels
         .into_iter()
@@ -403,12 +504,16 @@ fn map_panels(o: &tor_protocol::Observation) -> Vec<MapPanel> {
                 .iter()
                 .filter(|c| c.position.z == z)
                 .collect();
-            let x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
+            let mut x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
             let x1 = cells.iter().map(|c| c.position.x).max().unwrap_or(0);
-            let y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
+            let mut y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
             let y1 = cells.iter().map(|c| c.position.y).max().unwrap_or(0);
-            let cols = (x1 - x0 + 1) as usize;
-            let rows = (y1 - y0 + 1) as usize;
+            let cols = (i64::from(x1) - i64::from(x0) + 1).min((panel_w / 8) as i64) as usize;
+            let rows = (i64::from(y1) - i64::from(y0) + 1)
+                .min((panel_h.saturating_sub(16) / 8) as i64) as usize;
+            // Crop large remembered charts around the observer, never overflow panels.
+            x0 = (-(cols as i64) / 2).clamp(i64::from(x0), i64::from(x1) - cols as i64 + 1) as i32;
+            y0 = (-(rows as i64) / 2).clamp(i64::from(y0), i64::from(y1) - rows as i64 + 1) as i32;
             let step = (panel_w / cols)
                 .min(panel_h.saturating_sub(16) / rows)
                 .clamp(8, 52);
@@ -463,7 +568,13 @@ pub fn cell_center(
     }
     map_panels(o)
         .into_iter()
-        .find(|p| p.z == position.z)
+        .find(|p| {
+            p.z == position.z
+                && i64::from(position.x) >= i64::from(p.x0)
+                && i64::from(position.x) < i64::from(p.x0) + p.cols as i64
+                && i64::from(position.y) >= i64::from(p.y0)
+                && i64::from(position.y) < i64::from(p.y0) + p.rows as i64
+        })
         .map(|p| {
             (
                 p.left + (position.x - p.x0) as usize * p.step + p.step / 2,

@@ -1,6 +1,6 @@
 # Doors
 
-Doors were introduced in **doors-v6**. New games use **material-rims-v10**, with an
+Doors were introduced in **doors-v6**. New games use **diagonal-v11**, with an
 initially open wooden door in a 1x1 hall between two 5x3 rooms. The hall has no
 place hint; each room retains its own interior anchor for text navigation.
 
@@ -13,7 +13,7 @@ place hint; each room retains its own interior anchor for text navigation.
 Here `/` is the open door and `#` the walls flanking its one-cell hall. Doors
 remain independent, cell-sized world entities: interior doors and doors on join
 endpoints obey the same rules. Opening or closing does not change topology.
-Protocol **10** adds surface facts; save format **3** is unchanged.
+Protocol **11** retains surface facts and adds diagonal directions; save format **3** is unchanged.
 
 ## Playing
 
@@ -26,7 +26,7 @@ rewind, replacement intentions, or disconnect discard the follow-up. Reach and
 state are rechecked on arrival. Restart never resumes an intention.
 
 ASCII displays `+` for closed doors and `/` for open doors. Press **O** to open
-or **C** to close, then an arrow key or **H/J/K/L** to choose the adjacent cell.
+or **C** to close, then an arrow key or **HJKL/YUBN** to choose the adjacent cell.
 The client says "There is no door in that direction." if no reachable door is
 there, sending no action and consuming no ticks. Escape cancels the direction
 prompt for free. The prompt clears when the observation changes or control is
@@ -45,8 +45,9 @@ without approaching. Headless clients submit ordinary actions:
 ## Rules and perception
 
 - Open and close each cost the acting actor's normal movement/wait recovery time.
-- Reach is one horizontal cardinal connection, resolved by the backend, including
-  rotated joins. Standing in a doorway is not standing beside it.
+- New diagonal-v11 games allow cardinal and diagonal reach, using the same
+  one-clear-side corner rule as movement. Older games retain cardinal reach.
+  The backend resolves rotated joins. Standing in a doorway is not standing beside it.
 - Closed doors block movement and sight but are not walls. The door itself is
   visible; cells, objects, and actors beyond it are disclosed only if another
   unobstructed sightline exists. New games use [symmetric shadowcasting](shadowcasting.md),
@@ -88,7 +89,7 @@ Existing `two-room-v1`, `portal-sight-v2`, `observer-scene-v3`, `place-hints-v4`
 `travel-v5` saves retain their original fixture, replay, and rules, with no doors.
 They reject door placement and manipulation; travel-v5 continues supporting
 travel. The doors-v6 and shadowcasting-v7 fixtures retain their original interior door.
-No existing game is silently upgraded. All clients must use protocol 10.
+No existing game is silently upgraded. All clients must use protocol 11.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 

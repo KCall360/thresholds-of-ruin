@@ -17,6 +17,35 @@ fn state() -> StateView {
 }
 
 #[test]
+fn diagonal_steps_and_visible_destination_bearings() {
+    let mut s = state();
+    let mut dialogue = Dialogue::default();
+    for (short, long, direction) in [
+        ("ne", "northeast", Direction::NorthEast),
+        ("se", "southeast", Direction::SouthEast),
+        ("sw", "southwest", Direction::SouthWest),
+        ("nw", "northwest", Direction::NorthWest),
+    ] {
+        for name in [short, long] {
+            assert_eq!(
+                dialogue.interpret(&format!("step {name}"), &s),
+                Intent::Action(Action::Move { direction })
+            );
+        }
+    }
+    s.observation.visible_cells.last_mut().unwrap().position = Position { x: 3, y: -3, z: 0 };
+    s.observation.ground_items[1].position = Position { x: 3, y: -3, z: 0 };
+    assert!(describe(&s).contains("northeast"));
+    assert!(matches!(
+        dialogue.interpret("ne", &s),
+        Intent::Travel {
+            direction: Some(Direction::NorthEast),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn ordinary_prose_has_objects_and_ways_without_debug_metadata() {
     let prose = describe(&state());
     assert!(prose.contains("stone"));

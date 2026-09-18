@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 10)
+# Server protocol and annotations (version 11)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -67,7 +67,7 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 10 requires a backend-resolved observer-relative scene. Positions
+Protocol version 11 requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
 Cells also carry terrain `material` (empty for carved voids) and nullable
@@ -78,7 +78,7 @@ transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
 must upgrade. Save format 3 adds a private stable view-identity salt; format 1/2
 saves migrate while retaining their original rules. New saves use
-`material-rims-v10`. See [geometry and compatibility](portal-geometry.md).
+`diagonal-v11`. See [geometry and compatibility](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
@@ -87,7 +87,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":10,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":11,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -326,3 +326,8 @@ door_changed events, privileged placement, and doors-v6 compatibility.
 `ceiling` surface facts (material and distance in cells), with new
 `material-rims-v10` games. Earlier saves keep their rules and no physical
 surface facts. Wizard `chamber` creates a carved interior with a finite shell.
+
+[Diagonal movement](diagonal-movement.md) adds `north_east`, `south_east`,
+`south_west`, and `north_west` directions in protocol 11. New diagonal-v11 games
+support diagonal actions and door reach; all ten earlier rulesets reject diagonal
+movement and retain their original door reach. Save format remains 3.

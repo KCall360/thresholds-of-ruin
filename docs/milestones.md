@@ -151,6 +151,22 @@ explicit flush, disk sync, and atomic replacement. A diagnostic benchmark separa
 perception costs from save costs; long-history storage improvements remain deferred.
 Richer perceived events are still pending in milestone 2.
 
+Implemented client presentation refinement: [ASCII map memory](ascii-memory.md)
+renders remembered terrain, doors, stairs, and items in grey while hiding unseen
+actors. Shared clients align received sightings without backend geometry, retain
+a bounded local chart, and reset uncertain alignments or abandoned branches.
+Actual native acceptance covers occlusion, movement, item refresh, rotated joins,
+spectators, hidden changes, rewind and fresh-session resume. No protocol, save,
+or gameplay-rules change; richer perceived events remain pending in milestone 2.
+
+Implemented: [diagonal movement](diagonal-movement.md), exact rounded-up √2 tick
+costs, one-clear-side corner traversal, rotated portal resolution, diagonal door
+reach, and minimum-tick travel. ASCII uses Y/U/B/N with `<`/`>` stairs and F4 notes;
+text supports diagonal steps and destination bearings. Protocol 11 and diagonal-v11
+preserve all ten earlier rulesets. Behavior tests and actual native/text/headless
+scenarios cover movement, corners, doors, travel, spectators, restart and rewind.
+Richer perceived events remain pending.
+
 ## 3: Interactions and travel
 
 Implemented first travel slice: [backend travel to known cells](travel.md), ASCII

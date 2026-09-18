@@ -18,7 +18,8 @@ use crate::journal::{
 
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "material-rims-v10";
+const RULESET: &str = "diagonal-v11";
+const MATERIAL_V10_RULESET: &str = "material-rims-v10";
 const MATERIAL_V9_RULESET: &str = "material-volumes-v9";
 const DOORWAY_V8_RULESET: &str = "doorway-v8";
 const SHADOW_V7_RULESET: &str = "shadowcasting-v7";
@@ -146,7 +147,10 @@ impl Engine {
     }
 
     fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = if matches!(ruleset, RULESET | MATERIAL_V9_RULESET) {
+        let mut game = if matches!(
+            ruleset,
+            RULESET | MATERIAL_V10_RULESET | MATERIAL_V9_RULESET
+        ) {
             Game::two_room_in_stone(scenario.seed)
         } else if ruleset == DOORWAY_V8_RULESET {
             Game::two_room_with_doorway(scenario.seed)
@@ -160,7 +164,11 @@ impl Engine {
         };
         if !matches!(
             ruleset,
-            RULESET | MATERIAL_V9_RULESET | DOORWAY_V8_RULESET | SHADOW_V7_RULESET
+            RULESET
+                | MATERIAL_V10_RULESET
+                | MATERIAL_V9_RULESET
+                | DOORWAY_V8_RULESET
+                | SHADOW_V7_RULESET
         ) {
             game.use_ray_perception();
         }
@@ -185,6 +193,9 @@ impl Engine {
         if ruleset == MATERIAL_V9_RULESET {
             game.use_initial_material_rims();
         }
+        if ruleset == RULESET {
+            game.enable_diagonals();
+        }
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
@@ -199,6 +210,7 @@ impl Engine {
         if matches!(
             ruleset,
             RULESET
+                | MATERIAL_V10_RULESET
                 | MATERIAL_V9_RULESET
                 | DOORWAY_V8_RULESET
                 | SHADOW_V7_RULESET
@@ -260,6 +272,7 @@ impl Engine {
             || !matches!(
                 archive.ruleset.as_str(),
                 RULESET
+                    | MATERIAL_V10_RULESET
                     | MATERIAL_V9_RULESET
                     | DOORWAY_V8_RULESET
                     | SHADOW_V7_RULESET
@@ -394,6 +407,7 @@ impl Engine {
         if !matches!(
             self.archive.ruleset.as_str(),
             RULESET
+                | MATERIAL_V10_RULESET
                 | MATERIAL_V9_RULESET
                 | DOORWAY_V8_RULESET
                 | SHADOW_V7_RULESET
@@ -622,6 +636,7 @@ impl Engine {
                     && !matches!(
                         self.archive.ruleset.as_str(),
                         RULESET
+                            | MATERIAL_V10_RULESET
                             | MATERIAL_V9_RULESET
                             | DOORWAY_V8_RULESET
                             | SHADOW_V7_RULESET
@@ -692,6 +707,7 @@ impl Engine {
         if matches!(
             candidate.archive.ruleset.as_str(),
             RULESET
+                | MATERIAL_V10_RULESET
                 | MATERIAL_V9_RULESET
                 | DOORWAY_V8_RULESET
                 | SHADOW_V7_RULESET
@@ -768,6 +784,7 @@ impl Engine {
                 if !matches!(
                     self.archive.ruleset.as_str(),
                     RULESET
+                        | MATERIAL_V10_RULESET
                         | MATERIAL_V9_RULESET
                         | DOORWAY_V8_RULESET
                         | SHADOW_V7_RULESET
@@ -811,7 +828,10 @@ impl Engine {
             WizardOperation::PlaceRoom { region } | WizardOperation::PlaceChamber { region } => {
                 let chamber = matches!(operation, WizardOperation::PlaceChamber { .. });
                 if chamber
-                    && !matches!(self.archive.ruleset.as_str(), RULESET | MATERIAL_V9_RULESET)
+                    && !matches!(
+                        self.archive.ruleset.as_str(),
+                        RULESET | MATERIAL_V10_RULESET | MATERIAL_V9_RULESET
+                    )
                 {
                     return Err(invalid());
                 }
@@ -862,6 +882,7 @@ impl Engine {
                 if !matches!(
                     self.archive.ruleset.as_str(),
                     RULESET
+                        | MATERIAL_V10_RULESET
                         | MATERIAL_V9_RULESET
                         | DOORWAY_V8_RULESET
                         | SHADOW_V7_RULESET

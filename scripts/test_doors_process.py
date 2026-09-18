@@ -184,8 +184,8 @@ class DoorProcesses(unittest.TestCase):
 
     def test_arrival_revealing_an_actor_does_not_open_the_door(self):
         self.server(wizard=True)
-        # The south approach is walled off: the first step must reveal the actor
-        # to the east, independent of randomly salted opaque-key tie breaking.
+        # The door is beyond diagonal reach. The south approach is walled off;
+        # the first eastward step reveals the actor before manipulation.
         self.setup_wizard("arrival_hazard")
         player, _ = self.adventure()
         output = self.say(player, "open door")
@@ -216,7 +216,7 @@ class DoorProcesses(unittest.TestCase):
             user32.EnumWindows(find, 0)
             self.assertEqual(len(handles), 1)
             def key(name, down):
-                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B}[name]
+                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B,"y":0x59,"u":0x55,"b":0x42,"n":0x4E,"F4":0x73,"Shift_L":0x10,"comma":0xBC,"period":0xBE}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, 1 | (scan << 16) | (0x01000000 if name in ("Up", "Right") else 0) | (0 if down else 0xC0000000)))
             return key

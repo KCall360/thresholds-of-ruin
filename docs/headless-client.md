@@ -62,8 +62,9 @@ user's private notes, according to the server's normal audience rules.
 ## Current observations and memory
 
 All clients now retain last-seen cells in their shared `ClientState`.
-Only the headless frontend exposes that memory for inspection in this slice;
-text and ASCII still present current observations as before.
+The headless frontend exposes this historical memory for inspection. ASCII now
+uses a separate aligned [map cache](ascii-memory.md) to display dimmed remembered
+areas; text continues to describe current observations.
 
 Each memory entry holds an opaque cell key, last-seen relative position, wall and
 stair facts, contents, and last-seen tick/revision. Entries are ordered by opaque
@@ -101,7 +102,7 @@ text/ASCII process coverage remains required alongside this headless frontend.
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`material-rims-v10`; earlier saves retain their original rules.
+`diagonal-v11`; earlier saves retain their original rules.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

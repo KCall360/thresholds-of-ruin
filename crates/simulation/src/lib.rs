@@ -92,6 +92,7 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    diagonals: bool,
     material_surfaces: bool,
     navigation: BTreeMap<ActorId, travel::Navigation>,
     world: World,
@@ -107,9 +108,41 @@ pub struct Game {
     next_door_id: u64,
 }
 
+/// Exact ceil(sqrt(2) * base), with checked integer arithmetic.
+fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
+    if direction.components().is_none() {
+        return Ok(base);
+    }
+    let squared = u128::from(base)
+        .pow(2)
+        .checked_mul(2)
+        .ok_or(GameError::TimeExhausted)?;
+    let root = squared.isqrt();
+    u64::try_from(root + u128::from(root * root != squared)).map_err(|_| GameError::TimeExhausted)
+}
+
 impl Game {
+    pub fn enable_diagonals(&mut self) {
+        self.diagonals = true;
+    }
+
+    fn reach(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
+        if direction.components().is_some() {
+            if !self.diagonals {
+                return None;
+            }
+            self.world
+                .diagonal_reach(from, direction, |side| side == from || !self.occupied(side))
+        } else {
+            self.world
+                .adjacent(from, direction)
+                .map(|to| (to, self.world.crossing_rotation(from, direction)))
+        }
+    }
+
     pub fn new(world: World, seed: u64) -> Self {
         Self {
+            diagonals: false,
             material_surfaces: false,
             navigation: BTreeMap::new(),
             world,
@@ -203,14 +236,10 @@ impl Game {
                 .any(|i| i.location == ItemLocation::Ground(location))
     }
     pub fn door_reachable_from(&self, from: Location, door: Location) -> bool {
-        [
-            Direction::North,
-            Direction::East,
-            Direction::South,
-            Direction::West,
-        ]
-        .into_iter()
-        .any(|direction| self.world.adjacent(from, direction) == Some(door))
+        Direction::HORIZONTAL.into_iter().any(|direction| {
+            self.reach(from, direction)
+                .is_some_and(|(to, _)| to == door)
+        })
     }
 
     pub fn tick(&self) -> u64 {
@@ -386,10 +415,12 @@ impl Game {
                 {
                     return Err(GameError::Blocked);
                 }
-                let to = self
-                    .world
-                    .step(actor.location, direction)
+                let (to, _) = self
+                    .reach(actor.location, direction)
                     .ok_or(GameError::Blocked)?;
+                if !self.world.walkable(to) {
+                    return Err(GameError::Blocked);
+                }
                 if self
                     .actors
                     .iter()
@@ -402,7 +433,7 @@ impl Game {
                         from: actor.location,
                         to,
                     },
-                    actor.turn_ticks.get(),
+                    movement_cost(actor.turn_ticks.get(), direction)?,
                 )
             }
             Action::Take(item) => {
@@ -423,8 +454,9 @@ impl Game {
             Action::Move(direction) if self.scene_rules => {
                 (actor.orientation
                     + self
-                        .world
-                        .crossing_rotation(actor.location, direction.rotated(actor.orientation)))
+                        .reach(actor.location, direction.rotated(actor.orientation))
+                        .expect("validated move")
+                        .1)
                     % 4
             }
             _ => actor.orientation,

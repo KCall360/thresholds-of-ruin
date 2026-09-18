@@ -28,6 +28,11 @@ pub fn direction(direction: p::Direction) -> w::Direction {
         p::Direction::East => w::Direction::East,
         p::Direction::South => w::Direction::South,
         p::Direction::West => w::Direction::West,
+        p::Direction::NorthEast => w::Direction::NorthEast,
+        p::Direction::SouthEast => w::Direction::SouthEast,
+        p::Direction::SouthWest => w::Direction::SouthWest,
+        p::Direction::NorthWest => w::Direction::NorthWest,
+
         p::Direction::Up => w::Direction::Up,
         p::Direction::Down => w::Direction::Down,
     }

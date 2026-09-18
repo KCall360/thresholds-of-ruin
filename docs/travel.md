@@ -1,12 +1,12 @@
 # Backend travel and ASCII destinations
 
-`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`, and new `material-rims-v10` games support travel to an actor's known cell,
+`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`, `material-rims-v10`, and new `diagonal-v11` games support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 10 is required. Save format remains 3.
+region names, and frontend language. Protocol 11 is required. Save format remains 3.
 
 ## ASCII controls
 
-Press `_` to select a destination. Arrows/HJKL move the cursor, U/D change its
+Press `_` to select a destination. Arrows/HJKL/YUBN move the cursor, `<`/`>` change its
 relative height, Enter starts travel, and Escape cancels selection. Selection is
 free and clears on a changed observation, branch, or lost control. Alternatively,
 left-click a visible floor cell to travel immediately. Clicks use the same map
@@ -35,8 +35,12 @@ Opaque keys are stable across restart; physical locations and transforms stay
 private. Navigation memory is reconstructed by deterministic journal replay and
 restored by rewind. It is distinct from connection-local frontend display memory.
 
-Deterministic breadth-first search uses only that remembered graph and remembered
-terrain. Ties follow north/east/south/west/up/down order in the actor's frame.
+Deterministic minimum-tick search uses only the remembered graph and terrain.
+In diagonal-v11 games, diagonals are composed from disclosed cardinal connections
+through at least one remembered clear side. Their cost is `ceil(base × √2)`.
+Ties use stable discovery order: north/east/south/west/up/down, then
+northeast/southeast/southwest/northwest in the actor's frame. Earlier rulesets
+retain cardinal/vertical routes and their original tie order.
 Orientation is part of the search state, including rotated joins and self-loops.
 Stairs require a disclosed explicit connection. Neither hidden current terrain
 nor unknown connections can supply a shortcut. Stale routes are validated through
@@ -109,7 +113,7 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-New saves use `material-rims-v10`; `travel-v5` retains travel support. The four earlier
+New saves use `diagonal-v11`; `travel-v5` retains travel support. The four earlier
 rulesets retain their original behavior and reject travel. `place-hints-v4`
 continues supporting authored hints and edits.
 No existing save is silently upgraded to new gameplay rules or wizard mode.
