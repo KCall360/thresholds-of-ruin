@@ -1,7 +1,7 @@
 # Symmetric shadowcasting
 
 Symmetric shadowcasting was introduced in **shadowcasting-v7**. New games use
-**material-rims-v10**, which keeps that perception and adds finite stone
+**diagonal-v11**, which keeps that perception and adds finite stone
 enclosure to the doorway-v8 fixture. Protocol 10 adds floor/ceiling surfaces;
 save format 3 is unchanged. See [material volumes](material-volumes.md).
 The six earlier rulesets retain their original behavior, including doors-v6's

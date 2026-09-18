@@ -38,10 +38,19 @@ movement obstruction, text approach intentions, and ASCII O/C then direction con
 games include an open wooden door in an unhinted 1x1 hall between the rooms.
 [Symmetric shadowcasting](docs/shadowcasting.md) allows sight around door corners
 while preserving shadows behind closed doors. Existing saves retain their original
-rules. Server and clients use protocol 10.
+rules. Server and clients use protocol 11.
 New games now use [finite material volumes](docs/material-volumes.md): 5-foot
 cubes, 10-foot room interiors, and actual stone walls, floors, and ceilings.
-New saves use `material-rims-v10`; existing saves keep their original rules.
+New saves use `diagonal-v11`; existing saves keep their original rules.
+
+The ASCII client now shows [remembered areas in grey](docs/ascii-memory.md),
+including last-seen items, doors, and stairs. Unseen actors disappear. This uses
+only client-held observations and refreshes cells when they become visible again.
+
+[Diagonal movement](docs/diagonal-movement.md) adds eight-way movement and door
+reach. Diagonal moves cost `ceil(cardinal ticks × √2)`; travel minimizes total ticks.
+ASCII uses HJKL/YUBN, `<`/`>` for stairs, and F4 for notes. New games use
+diagonal-v11; old games keep their original rules.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

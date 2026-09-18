@@ -1,7 +1,7 @@
 //! Actor knowledge is refreshed only at authoritative perception boundaries.
 //! Planning never reads current terrain or undiscovered topology.
-use crate::{ActorId, Game, GameError};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::{movement_cost, ActorId, Game, GameError};
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::{Direction, Location, Position};
 
 const DIRECTIONS: [Direction; 6] = [
@@ -54,14 +54,7 @@ impl Game {
                         continue;
                     };
                     let turns = self.world.crossing_rotation(cell.location, local);
-                    let (dx, dy, dz) = match direction {
-                        Direction::North => (0, -1, 0),
-                        Direction::East => (1, 0, 0),
-                        Direction::South => (0, 1, 0),
-                        Direction::West => (-1, 0, 0),
-                        Direction::Up => (0, 0, 1),
-                        Direction::Down => (0, 0, -1),
-                    };
+                    let (dx, dy, dz) = direction.delta();
                     let offset = Position {
                         x: cell.offset.x + dx,
                         y: cell.offset.y + dy,
@@ -87,7 +80,7 @@ impl Game {
             .flat_map(|n| n.cells.keys().copied())
     }
 
-    /// Stable breadth-first search in remembered topology, including orientation.
+    /// Stable minimum-tick search in remembered topology, including orientation.
     pub fn travel_route(
         &self,
         actor: ActorId,
@@ -99,10 +92,14 @@ impl Game {
             return Err(GameError::Blocked);
         }
         let start = (actor_state.location, actor_state.orientation);
-        let mut queue = VecDeque::from([start]);
-        let mut seen = BTreeSet::from([start]);
+        let mut queue = BTreeSet::from([(0u128, 0u64, start)]);
+        let mut distances = BTreeMap::from([(start, 0u128)]);
+        let mut order = 0u64;
         let mut previous = BTreeMap::new();
-        while let Some(node) = queue.pop_front() {
+        while let Some((cost, _, node)) = queue.pop_first() {
+            if distances[&node] != cost {
+                continue;
+            }
             if node.0 == destination {
                 let mut route = Vec::new();
                 let mut cursor = node;
@@ -117,16 +114,44 @@ impl Game {
                 route.reverse();
                 return Ok(route);
             }
-            for direction in DIRECTIONS {
+            for direction in DIRECTIONS.into_iter().chain(
+                Direction::HORIZONTAL
+                    .into_iter()
+                    .filter(|d| self.diagonals && d.components().is_some()),
+            ) {
                 let local = direction.rotated(node.1);
-                if let Some(&(to, rotation)) = knowledge.edges.get(&(node.0, local)) {
+                let edge = if let Some((a, b)) = local.components() {
+                    let path = |first, second: Direction| {
+                        let &(side, r1) = knowledge.edges.get(&(node.0, first))?;
+                        if knowledge.cells.get(&side) != Some(&false) {
+                            return None;
+                        }
+                        let &(to, r2) = knowledge.edges.get(&(side, second.rotated(r1)))?;
+                        Some((to, (r1 + r2) % 4))
+                    };
+                    match (path(a, b), path(b, a)) {
+                        (Some(a), Some(b)) if a == b => Some(a),
+                        (Some(a), None) | (None, Some(a)) => Some(a),
+                        _ => None,
+                    }
+                } else {
+                    knowledge.edges.get(&(node.0, local)).copied()
+                };
+                if let Some((to, rotation)) = edge {
                     if knowledge.cells.get(&to) != Some(&false) {
                         continue;
                     }
                     let next = (to, (node.1 + rotation) % 4);
-                    if seen.insert(next) {
+                    let Ok(duration) = movement_cost(actor_state.turn_ticks.get(), direction)
+                    else {
+                        continue;
+                    };
+                    let next_cost = cost + u128::from(duration);
+                    if distances.get(&next).is_none_or(|old| next_cost < *old) {
+                        distances.insert(next, next_cost);
                         previous.insert(next, (node, direction));
-                        queue.push_back(next);
+                        order += 1;
+                        queue.insert((next_cost, order, next));
                     }
                 }
             }

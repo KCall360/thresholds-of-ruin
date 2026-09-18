@@ -500,6 +500,11 @@ impl Service {
                 tor_world::Direction::East => Direction::East,
                 tor_world::Direction::South => Direction::South,
                 tor_world::Direction::West => Direction::West,
+                tor_world::Direction::NorthEast => Direction::NorthEast,
+                tor_world::Direction::SouthEast => Direction::SouthEast,
+                tor_world::Direction::SouthWest => Direction::SouthWest,
+                tor_world::Direction::NorthWest => Direction::NorthWest,
+
                 tor_world::Direction::Up => Direction::Up,
                 tor_world::Direction::Down => Direction::Down,
             };

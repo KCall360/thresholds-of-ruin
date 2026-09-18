@@ -5,7 +5,7 @@ use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
 
-pub const HELP: &str = "look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
+pub const HELP: &str = "look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
 pub const SESSION_HELP: &str = "control, release, sync, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -359,6 +359,10 @@ pub fn direction_name(d: Direction) -> &'static str {
         Direction::East => "east",
         Direction::South => "south",
         Direction::West => "west",
+        Direction::NorthEast => "northeast",
+        Direction::SouthEast => "southeast",
+        Direction::SouthWest => "southwest",
+        Direction::NorthWest => "northwest",
         Direction::Up => "up",
         Direction::Down => "down",
     }
@@ -373,6 +377,15 @@ fn bearing(p: Position) -> Option<Direction> {
         })
     } else if p.x == 0 && p.y == 0 {
         None
+    } else if u64::from(p.x.unsigned_abs()) * 2 >= u64::from(p.y.unsigned_abs())
+        && u64::from(p.y.unsigned_abs()) * 2 >= u64::from(p.x.unsigned_abs())
+    {
+        Some(match (p.x > 0, p.y > 0) {
+            (true, false) => Direction::NorthEast,
+            (true, true) => Direction::SouthEast,
+            (false, true) => Direction::SouthWest,
+            (false, false) => Direction::NorthWest,
+        })
     } else if p.x.unsigned_abs() > p.y.unsigned_abs() {
         Some(if p.x > 0 {
             Direction::East
@@ -606,6 +619,10 @@ pub fn describe(state: &StateView) -> String {
         Direction::East,
         Direction::South,
         Direction::West,
+        Direction::NorthEast,
+        Direction::SouthEast,
+        Direction::SouthWest,
+        Direction::NorthWest,
         Direction::Up,
         Direction::Down,
     ]

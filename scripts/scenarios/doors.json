@@ -15,7 +15,7 @@
   ],
   "arrival_hazard": [
     "wizard room 3 12 2 1 Private hazard",
-    "wizard door 3 1 1 0 closed",
+    "wizard door 3 2 1 0 closed",
     "wizard wall 3 0 1 0 closed",
     "wizard actor 100 3 9 0 0",
     "wizard teleport 1 3 0 0 0"

@@ -31,6 +31,7 @@ pub struct ClientState {
     snapshot: Snapshot,
     stream: ObservationStream,
     memory: BTreeMap<String, RememberedCell>,
+    map_memory: crate::map_memory::MapMemory,
 }
 
 impl ClientState {
@@ -52,6 +53,7 @@ impl ClientState {
             stream: ObservationStream::from_snapshot(snapshot.actor, snapshot.cursor),
             snapshot,
             memory: BTreeMap::new(),
+            map_memory: Default::default(),
         };
         client.remember_view();
         Ok(client)
@@ -63,6 +65,12 @@ impl ClientState {
         self.memory.values()
     }
 
+    /// Disclosed sightings aligned to the current view, without remembered actors.
+    /// Ambiguous/disconnected views start a new chart; at most 4096 cells are kept.
+    pub fn map_memory(&self) -> impl Iterator<Item = &RememberedCell> {
+        self.map_memory.cells.values()
+    }
+
     /// A validated snapshot establishes a new stream boundary atomically.
     pub fn replace_snapshot(&mut self, snapshot: Snapshot) -> Result<(), StreamError> {
         if snapshot.actor != self.snapshot.actor {
@@ -71,6 +79,7 @@ impl ClientState {
         let mut candidate = Self::from_snapshot(snapshot)?;
         if candidate.branch() == self.branch() {
             candidate.memory = self.memory.clone();
+            candidate.map_memory = self.map_memory.clone();
             candidate.remember_view();
         }
         *self = candidate;
@@ -110,6 +119,7 @@ impl ClientState {
                 },
             );
         }
+        self.map_memory.observe(observation, &self.memory);
     }
 
     pub fn travel(&self) -> Option<&TravelStatus> {

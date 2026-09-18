@@ -84,6 +84,8 @@ invent enclosed walls or use internal region names.
 - `examine <thing>` / `x <thing>` / `look at <thing>`: inspect disclosed appearance;
   `examine walls` and `examine floor` describe visible surface material.
 - `inventory` / `i`: list carried names.
+- Diagonal names and `ne`/`se`/`sw`/`nw` work with travel and `step`; descriptions
+  use eight horizontal bearings (diagonal sectors cover ratios from 1:2 to 2:1).
 - Directions / `go east`: travel to a visible destination as described above.
 - `go to tablet` / `approach tablet`: travel to a visible ground item, without
   manipulating it on arrival.
@@ -152,7 +154,7 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. New saves use material-rims-v10; old saves keep their rules.
+automatically opens a door. New saves use diagonal-v11; old saves keep their rules.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling

@@ -1,6 +1,7 @@
 //! Client-side validation of server-pushed observation ordering.
 
 mod connection;
+mod map_memory;
 mod state;
 pub use connection::Connection;
 pub use state::{ClientState, RememberedCell};

@@ -29,13 +29,24 @@ impl InputCallback for TextInput {
     }
 }
 
+fn native_key_with_shift(key: NativeKey, shift: bool) -> Option<Key> {
+    match (key, shift) {
+        (NativeKey::Comma, true) => Some(Key::Ascend),
+        (NativeKey::Period, true) => Some(Key::Descend),
+        _ => native_key(key),
+    }
+}
+
 fn native_key(key: NativeKey) -> Option<Key> {
     Some(match key {
         NativeKey::Up | NativeKey::K => Key::Up,
         NativeKey::Down | NativeKey::J => Key::Down,
         NativeKey::Left | NativeKey::H => Key::Left,
         NativeKey::Right | NativeKey::L => Key::Right,
-        NativeKey::U => Key::Ascend,
+        NativeKey::Y => Key::NorthWest,
+        NativeKey::U => Key::NorthEast,
+        NativeKey::B => Key::SouthWest,
+        NativeKey::N => Key::SouthEast,
         NativeKey::D => Key::Descend,
         NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
@@ -43,7 +54,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
         NativeKey::R => Key::Release,
-        NativeKey::N => Key::Note,
+        NativeKey::F4 => Key::Note,
         NativeKey::Enter => Key::Enter,
         NativeKey::Escape => Key::Escape,
         NativeKey::Backspace => Key::Backspace,
@@ -80,7 +91,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL: move; U/D: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nN: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -189,7 +200,7 @@ fn window_loop(
         let mut inputs = Vec::new();
         let typed = std::mem::take(&mut *text.borrow_mut());
         if input.is_none() {
-            // Consume text before Enter, but not the N that opens a new note.
+            // Send typed text only to an already-open note editor.
             if app.note.is_some() && !typed.is_empty() {
                 inputs.push(Input::Text {
                     text: typed.clone(),
@@ -212,7 +223,13 @@ fn window_loop(
                 window
                     .get_keys_pressed(KeyRepeat::No)
                     .into_iter()
-                    .filter_map(native_key)
+                    .filter_map(|key| {
+                        native_key_with_shift(
+                            key,
+                            window.is_key_down(NativeKey::LeftShift)
+                                || window.is_key_down(NativeKey::RightShift),
+                        )
+                    })
                     .map(|key| Input::Key { key }),
             );
         } else if let Some(input) = input.as_ref().filter(|_| !app.busy) {
@@ -270,6 +287,7 @@ fn window_loop(
                 "{}",
                 serde_json::json!({"type":"frame","frame":frame,"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
+                "map_tiles":state.map(tor_client_ascii::render::map_tiles),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
@@ -311,9 +329,25 @@ mod tests {
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
-        assert_eq!(native_key(NativeKey::N), Some(Key::Note));
+        assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
+        assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
         assert_eq!(native_key(NativeKey::Escape), Some(Key::Escape));
         assert_eq!(native_key(NativeKey::F2), Some(Key::History));
         assert_eq!(native_key(NativeKey::LeftShift), None);
+        assert_eq!(native_key(NativeKey::Y), Some(Key::NorthWest));
+        assert_eq!(native_key(NativeKey::U), Some(Key::NorthEast));
+        assert_eq!(native_key(NativeKey::B), Some(Key::SouthWest));
+        assert_eq!(
+            native_key_with_shift(NativeKey::Comma, true),
+            Some(Key::Ascend)
+        );
+        assert_eq!(
+            native_key_with_shift(NativeKey::Period, true),
+            Some(Key::Descend)
+        );
+        assert_eq!(
+            native_key_with_shift(NativeKey::Period, false),
+            Some(Key::Wait)
+        );
     }
 }

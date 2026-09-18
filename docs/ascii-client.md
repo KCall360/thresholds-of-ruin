@@ -21,7 +21,9 @@ Automatic server launch and packaged builds are planned for a later milestone.
 The window shows the complete disclosed scene, simulation tick, inventory, visible
 items, recent history, and control status. The map uses `@` for your actor, `&`
 for another visible actor, `!` for an item, `<`/`>` for stairs, `#` for walls,
-`+` for closed doors, `/` for open doors, and `.` for visible floor. Undisclosed cells are blank.
+`+` for closed doors, `/` for open doors, and `.` for floor. Previously seen areas
+and items remain grey when out of sight; unseen actors disappear. Never-seen cells
+are blank. See [map memory](ascii-memory.md) for alignment and lifetime limits.
 An actor glyph takes precedence over items/stairs on the same cell; visible
 items are also listed in the side panel. North is toward the top of the map.
 Items elsewhere in the room remain out of reach until you move onto their cell.
@@ -29,14 +31,15 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | Key | Behavior |
 | --- | --- |
 | Arrow keys, H/J/K/L | Move west/south/north/east by one cell |
-| U / D | Request movement up/down; the current fixture has no vertical route |
+| Y/U/B/N | Move northwest/northeast/southwest/southeast by one cell |
+| `<` / `>` (D also descends) | Request movement up/down; the current fixture has no vertical route |
 | Space or period | Wait one action |
-| O / C, then a direction | Open / close the adjacent door using arrows or H/J/K/L; no door means a local message and no ticks |
+| O / C, then a direction | Open / close the adjacent door using arrows or HJKL/YUBN; no door means a local message and no ticks |
 | G | Pick up an item at your feet; choose with Up/Down and Enter if several match |
 | `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
 | Escape during travel | Cancel at the next action boundary |
 | F3 / R | Acquire / release actor control |
-| N | Compose a note anchored to the state where composition began |
+| F4 | Compose a note anchored to the state where composition began |
 | Tab in note editor | Switch between private and actor-visible audience; defaults to private |
 | Enter / Backspace in note editor | Save / edit the note |
 | F2 | Open the latest history page |
@@ -59,9 +62,9 @@ Only one request is in flight at a time. Movement does not auto-repeat from
 holding a key, and gameplay input while a request is pending is discarded rather
 than queued into accidental extra turns. Invalid actions and unresolved pickup
 choices consume no time. Window resizing and redraws never advance simulation.
-The map fits the entire current scene into the panel, including visible cells
+The map fits the current scene and nearby remembered cells into the panel, including visible cells
 across internal boundaries. Separate visible heights get adjacent panels. The
-actor remains at the view origin; cells outside sight are blank. `#` is wall,
+actor remains at the view origin; cells outside sight use grey last-seen facts. `#` is wall,
 `.` floor, `!` item, `&` actor, and `<`/`>` stairs. No portal markers or region
 labels are shown. See [observer scenes](portal-geometry.md).
 Overview lists currently show up to five inventory items and four visible items;
@@ -134,7 +137,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 10. Real process tests cover live spectator
+clients must all use protocol version 11. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -143,12 +146,12 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 10.
+and selections from an abandoned branch. Server and clients must use protocol 11.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). New saves use
-`material-rims-v10`; earlier saves retain their original rules.
+`diagonal-v11`; earlier saves retain their original rules.
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.

@@ -1,6 +1,6 @@
 # Material volumes and enclosed rooms
 
-New games use **material-rims-v10** and protocol **10**. Rooms and passages are
+New games use **diagonal-v11** and protocol **11**. Rooms and passages are
 empty cells carved inside finite solid stone. Each cell is a **5-foot cube**.
 The two starting rooms retain their 5-by-3-cell interiors and one-cell connecting
 hall; both rooms and the hall have two empty vertical layers (10-foot clearance).
@@ -86,7 +86,7 @@ cell, including shell cells. Ordinary play has no digging command. Removing a
 shell cell does not allocate space beyond it. Placement rejects solid cells;
 solid edits reject occupied actors, items, and doors. Commands consume no ordinary
 action time and retain existing authority, revision, branch, receipt, replay, and
-rewind checks. Chamber authoring is supported by material-volumes-v9 and material-rims-v10;
+rewind checks. Chamber authoring is supported by material-volumes-v9 and material-rims-v10 and diagonal-v11;
 rulesets predating material volumes reject it.
 
 ## Timing, compatibility, and verification
@@ -96,12 +96,12 @@ interactions remain deferred. Actor position is the cell containing their feet;
 ordinary vertical movement still requires an explicit stair/link. Empty headroom
 does not grant upward movement, and removing support does not cause a fall.
 
-Save format remains **3**. All nine earlier rulesets retain their original layout and perception during
-replay. In particular, **material-volumes-v9** keeps its original corner behavior
+Save format remains **3**. The material-rims-v10 feature preserved all nine earlier
+rulesets; diagonal-v11 additionally preserves material-rims-v10. In particular, **material-volumes-v9** keeps its original corner behavior
 and surface facts; the eight rulesets preceding it have no physical surface
 facts. Existing saves never silently upgrade. Start a new game for the corrected
 doorway corners. All connected
-clients must use protocol 10. Existing launchers use `target/doors/debug` and
+clients must use protocol 11. Existing launchers use `target/doors/debug` and
 continue creating fresh normal saves.
 
 World tests cover finite shells, unallocated space, vertical probe limits and

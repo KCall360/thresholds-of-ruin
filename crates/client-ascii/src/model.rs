@@ -10,6 +10,10 @@ pub enum Key {
     Down,
     Left,
     Right,
+    NorthEast,
+    SouthEast,
+    SouthWest,
+    NorthWest,
     Ascend,
     Descend,
     Wait,
@@ -218,7 +222,7 @@ impl App {
             if let Some(position) = self
                 .state
                 .as_ref()
-                .and_then(|s| crate::render::cell_at(&s.state().observation, x, y))
+                .and_then(|s| crate::render::visible_cell_at(s, x, y))
             {
                 return self.travel_to(position);
             }
@@ -259,6 +263,23 @@ impl App {
                 Key::Down => target.y += 1,
                 Key::Left => target.x -= 1,
                 Key::Right => target.x += 1,
+                Key::NorthEast => {
+                    target.x += 1;
+                    target.y += -1;
+                }
+                Key::SouthEast => {
+                    target.x += 1;
+                    target.y += 1;
+                }
+                Key::SouthWest => {
+                    target.x += -1;
+                    target.y += 1;
+                }
+                Key::NorthWest => {
+                    target.x += -1;
+                    target.y += -1;
+                }
+
                 Key::Ascend => target.z += 1,
                 Key::Descend => target.z -= 1,
                 _ => return Effect::None,
@@ -297,6 +318,23 @@ impl App {
                 Key::Down => cursor.y += 1,
                 Key::Left => cursor.x -= 1,
                 Key::Right => cursor.x += 1,
+                Key::NorthEast => {
+                    cursor.x += 1;
+                    cursor.y += -1;
+                }
+                Key::SouthEast => {
+                    cursor.x += 1;
+                    cursor.y += 1;
+                }
+                Key::SouthWest => {
+                    cursor.x += -1;
+                    cursor.y += 1;
+                }
+                Key::NorthWest => {
+                    cursor.x += -1;
+                    cursor.y += -1;
+                }
+
                 Key::Ascend => cursor.z += 1,
                 Key::Descend => cursor.z -= 1,
                 Key::Enter => return self.travel_to(cursor),
@@ -322,8 +360,7 @@ impl App {
                 if let Some(state) = self.state.as_ref().filter(|s| s.has_control()) {
                     self.travel_cursor = Some(state.state().observation.position);
                     self.status =
-                        "Travel: arrows/HJKL select, U/D height, Enter confirms, Esc cancels."
-                            .into();
+                        "Travel: HJKL/YUBN select, </> height, Enter confirms, Esc cancels.".into();
                 } else {
                     self.status = "Acquire control before travelling.".into();
                 }
@@ -340,6 +377,18 @@ impl App {
             }),
             Key::Right => self.act(Action::Move {
                 direction: Direction::East,
+            }),
+            Key::NorthEast => self.act(Action::Move {
+                direction: Direction::NorthEast,
+            }),
+            Key::SouthEast => self.act(Action::Move {
+                direction: Direction::SouthEast,
+            }),
+            Key::SouthWest => self.act(Action::Move {
+                direction: Direction::SouthWest,
+            }),
+            Key::NorthWest => self.act(Action::Move {
+                direction: Direction::NorthWest,
             }),
             Key::Ascend => self.act(Action::Move {
                 direction: Direction::Up,
@@ -367,7 +416,7 @@ impl App {
                     let open = key == Key::OpenDoor;
                     self.door_direction = Some(open);
                     self.status = format!(
-                        "{} in which direction? Arrows/HJKL; Esc cancels.",
+                        "{} in which direction? HJKL/YUBN; Esc cancels.",
                         if open { "Open" } else { "Close" }
                     );
                 }
