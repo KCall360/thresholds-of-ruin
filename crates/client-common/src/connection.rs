@@ -14,6 +14,7 @@ const DEADLINE: Duration = Duration::from_secs(10);
 pub struct Connection {
     socket: Socket,
     pub state: ClientState,
+    role: AccessRole,
 }
 
 impl Connection {
@@ -36,15 +37,18 @@ impl Connection {
             },
         )
         .await?;
-        match timeout(DEADLINE, receive(&mut socket)).await?? {
+        let role = match timeout(DEADLINE, receive(&mut socket)).await?? {
             ServerMessage::Welcome {
-                protocol, actors, ..
-            } if protocol == PROTOCOL_VERSION && actors.contains(&actor) => {}
+                protocol,
+                actors,
+                role,
+                ..
+            } if protocol == PROTOCOL_VERSION && actors.contains(&actor) => role,
             ServerMessage::Error { code, .. } => {
                 return Err(format!("Authentication failed: {code:?}").into())
             }
             _ => return Err("Incompatible welcome or unauthorized actor".into()),
-        }
+        };
         send(
             &mut socket,
             ClientMessage::Request {
@@ -62,7 +66,15 @@ impl Connection {
         };
         let state =
             ClientState::from_snapshot(snapshot).map_err(|e| format!("Invalid snapshot: {e:?}"))?;
-        Ok(Self { socket, state })
+        Ok(Self {
+            socket,
+            state,
+            role,
+        })
+    }
+
+    pub fn role(&self) -> AccessRole {
+        self.role
     }
 
     pub async fn request(&mut self, request: Request) -> Result<String, ConnectionError> {

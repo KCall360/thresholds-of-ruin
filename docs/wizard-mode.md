@@ -58,7 +58,10 @@ arbitrary code execution or raw edits to serialized world internals.
 Implement structured, versioned protocol requests and server-side capability
 checks before adding frontend shortcuts. Define actor scope and control policy
 explicitly for each operation; observing or controlling an actor does not itself
-grant wizard authority. Keep requests uniquely identified and revision/branch
+grant wizard authority. Server-granted spectator accounts must remain read-only,
+including in wizard games: the existing request allowlist must reject all wizard
+mutations. Test this through raw requests as well as frontend inputs.
+Keep requests uniquely identified and revision/branch
 checked so stale or duplicate placement commands cannot corrupt a scenario.
 
 State-changing wizard operations are deterministic external inputs recorded in

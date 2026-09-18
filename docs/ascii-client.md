@@ -109,3 +109,18 @@ options expose only the connected actor's disclosed state/history, which may
 include that user's private notes. `--capture file.ppm` with either option writes
 the last presented framebuffer for visual review. They never bypass server
 authentication, actor control, revisions, or action validation.
+
+## Enforced spectator access
+
+Configure `TOR_SPECTATOR_TOKEN` on the server, then set the client's
+`TOR_SERVER_TOKEN` to that spectator credential and launch normally. See the
+[server configuration and permission rules](protocol.md#read-only-spectators).
+The client automatically stays read-only and displays spectator status. It follows
+every accepted actor action/result and disclosed state, with the existing privacy
+rules for notes. History remains available; control, gameplay, and note-writing
+inputs are blocked locally and independently rejected by the server.
+
+`--observe` with a player credential remains useful for switching frontends; it
+does not restrict that credential. Existing saves are compatible, but server and
+clients must all use protocol version 2. Real process tests cover live spectator
+updates, denied inputs, note privacy, and read-only access after save/resume.

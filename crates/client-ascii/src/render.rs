@@ -64,6 +64,8 @@ impl Canvas {
         self.text(28, 54, "ASCII / TWO-ROOM EXPEDITION", MUTED, 1, 60);
         let control = if !app.connected {
             "DISCONNECTED"
+        } else if app.role == tor_protocol::AccessRole::Spectator {
+            "SPECTATOR"
         } else if app.state.as_ref().is_some_and(|s| s.has_control()) {
             "IN CONTROL"
         } else {
@@ -162,7 +164,9 @@ impl Canvas {
                         item.position.x,
                         item.position.y,
                         item.position.z,
-                        if item.position == o.position {
+                        if item.position == o.position
+                            && app.role == tor_protocol::AccessRole::Player
+                        {
                             "  [G] PICK UP"
                         } else {
                             ""
@@ -203,7 +207,12 @@ impl Canvas {
             1,
             142,
         );
-        self.text(28,768,"ARROWS/HJKL move  U/D level  SPACE wait  G pickup  C control  R release  N note  F2 history  ESC quit",MUTED,1,142);
+        let help = if app.role == tor_protocol::AccessRole::Spectator {
+            "READ-ONLY   F2 history   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
+        } else {
+            "ARROWS/HJKL move  U/D level  SPACE wait  G pickup  C control  R release  N note  F2 history  ESC quit"
+        };
+        self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
             self.panel(60, 180, 1080, 424);
             self.text(

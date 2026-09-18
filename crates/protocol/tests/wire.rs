@@ -24,3 +24,13 @@ fn user_notes_default_to_private_and_round_trip_as_plain_text() {
     let encoded = serde_json::to_string(&command).unwrap();
     assert_eq!(serde_json::from_str::<Command>(&encoded).unwrap(), command);
 }
+
+#[test]
+fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
+    let forged = serde_json::json!({"type":"hello", "protocol":PROTOCOL_VERSION,
+        "token":"spectator", "frontend":"text", "role":"player"});
+    assert!(serde_json::from_value::<ClientMessage>(forged).is_err());
+    let old = serde_json::json!({"type":"welcome", "protocol":PROTOCOL_VERSION,
+        "user":"test", "actors":[1]});
+    assert!(serde_json::from_value::<ServerMessage>(old).is_err());
+}

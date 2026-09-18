@@ -1,7 +1,27 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
+/// Server-granted session authority; never selected by the client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessRole {
+    Player,
+    Spectator,
+}
+
+impl AccessRole {
+    /// Only explicitly enumerated reads are available to spectators. New requests
+    /// stay denied until their disclosure and side effects have been reviewed.
+    pub fn permits(self, request: &Request) -> bool {
+        self == Self::Player
+            || matches!(
+                request,
+                Request::Attach { .. } | Request::Snapshot | Request::History { .. }
+            )
+    }
+}
+
 pub const MAX_NOTE_BYTES: usize = 4096;
 pub const MAX_HISTORY_PAGE: usize = 100;
 
@@ -300,6 +320,7 @@ pub enum ServerMessage {
         protocol: u32,
         user: String,
         actors: Vec<ActorId>,
+        role: AccessRole,
     },
     Snapshot {
         request_id: String,

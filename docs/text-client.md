@@ -106,3 +106,18 @@ observer updates, control switching, history pagination, entry anchors, bad
 authentication, EOF, disconnects, and server restart persistence. CI runs this
 suite in debug and release on Windows and Linux. The [graphical ASCII client](ascii-client.md)
 adds native-window tests and text-to-ASCII control-transfer/save-resume acceptance.
+
+## Enforced spectator access
+
+Configure `TOR_SPECTATOR_TOKEN` on the server, then set the client's
+`TOR_SERVER_TOKEN` to that spectator credential and launch normally. See the
+[server configuration and permission rules](protocol.md#read-only-spectators).
+The client automatically stays read-only and displays spectator status. It follows
+every accepted actor action/result and disclosed state, with the existing privacy
+rules for notes. History remains available; control, gameplay, and note-writing
+inputs are blocked locally and independently rejected by the server.
+
+`--observe` with a player credential remains useful for switching frontends; it
+does not restrict that credential. Existing saves are compatible, but server and
+clients must all use protocol version 2. Real process tests cover live spectator
+updates, denied inputs, note privacy, and read-only access after save/resume.

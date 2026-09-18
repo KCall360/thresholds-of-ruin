@@ -9,10 +9,12 @@ use tor_protocol::*;
 pub struct Account {
     pub user: String,
     pub token: String,
+    pub role: AccessRole,
     pub actors: BTreeSet<ActorId>,
 }
 
 struct Client {
+    role: AccessRole,
     user: String,
     frontend: String,
     allowed: BTreeSet<ActorId>,
@@ -74,6 +76,7 @@ impl Service {
         self.clients.insert(
             id,
             Client {
+                role: account.role,
                 user: account.user.clone(),
                 frontend,
                 allowed: actors.iter().copied().collect(),
@@ -90,6 +93,7 @@ impl Service {
                 protocol: PROTOCOL_VERSION,
                 user: account.user.clone(),
                 actors,
+                role: account.role,
             },
         );
         Ok(Connection {
@@ -124,6 +128,13 @@ impl Service {
     }
 
     fn process(&mut self, id: u64, request_id: &str, request: Request) -> Result<(), Failure> {
+        // Check authority before attachment, receipt lookup, or any mutation.
+        if !self.clients[&id].role.permits(&request) {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Spectator access is read-only",
+            ));
+        }
         if let Request::Attach { actor } = request {
             let client = self.clients.get_mut(&id).expect("connected client");
             if client.actor.is_some() {
@@ -416,6 +427,7 @@ mod tests {
     fn disconnect_during_action_broadcast_keeps_control_tick_at_last_disclosed_state() {
         let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
         let account = Account {
+            role: tor_protocol::AccessRole::Player,
             user: "alice".into(),
             token: "test-only".into(),
             actors: BTreeSet::from([ActorId(1)]),
@@ -469,6 +481,7 @@ mod tests {
     fn slow_client_is_disconnected_and_releases_control_instead_of_losing_updates() {
         let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
         let account = Account {
+            role: tor_protocol::AccessRole::Player,
             user: "alice".into(),
             token: "test-only".into(),
             actors: BTreeSet::from([ActorId(1)]),
