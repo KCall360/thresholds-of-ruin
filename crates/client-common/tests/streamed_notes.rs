@@ -5,7 +5,7 @@ fn snapshot() -> Snapshot {
     serde_json::from_str(r#"{
         "actor":1,"branch":"branch-1","cursor":{"sequence":0,"tick":0},"has_control":false,
         "history":{"entries":[],"older_before":null},
-        "state":{"revision":0,"observation":{
+        "state":{"wizard_game":false,"revision":0,"observation":{
             "actor":1,"tick":0,"position":{"region":1,"x":1,"y":1,"z":0},
             "region":{"id":1,"name":"Entry","width":5,"depth":3,"height":1},
             "ground_items":[],"inventory":[],"visible_actors":[],"exits":[],"known_places":[],"ready":true

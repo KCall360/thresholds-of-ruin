@@ -1,7 +1,7 @@
 //! Deterministic commands and prose derived exclusively from disclosed state.
 use tor_protocol::*;
 
-pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q).\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Input {
@@ -23,6 +23,18 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         }))
     };
     match (verb.as_str(), rest) {
+        ("wizard", rest) => parse_wizard(rest, state.revision),
+        ("branch-history", rest) => {
+            let (branch, before) = word(rest);
+            if branch.is_empty() || before.chars().any(char::is_whitespace) {
+                return Err("Use branch-history <branch> [before-id]".into());
+            }
+            Ok(Input::Request(Request::HistoryBranch {
+                branch: BranchId(branch.into()),
+                before: (!before.is_empty()).then(|| EntryId(before.into())),
+                limit: 50,
+            }))
+        }
         ("look" | "l", "") => Ok(Input::Look),
         ("inventory" | "i", "") => Ok(Input::Inventory),
         ("help" | "?", "") => Ok(Input::Help),
@@ -207,6 +219,9 @@ pub fn describe(state: &StateView) -> String {
             exit.direction, exit.position.x, exit.position.y, exit.position.z
         ));
     }
+    if state.wizard_game {
+        lines.insert(0, "*** WIZARD GAME — permanently marked ***".into());
+    }
     lines.join("\n")
 }
 
@@ -228,6 +243,7 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn history(entry: &HistoryEntry) -> String {
     let content = match &entry.content {
+        HistoryContent::Wizard { operation, result } => format!("Wizard {operation:?}: {result:?}"),
         HistoryContent::Action { event, .. } => format!("{event:?}"),
         HistoryContent::Annotation {
             anchor,
@@ -236,7 +252,46 @@ pub fn history(entry: &HistoryEntry) -> String {
         } => format!("{category:?} {anchor:?}: {}", safe(text)),
     };
     safe(&format!(
-        "[{}] tick {} {:?} {:?}: {content}",
-        entry.id.0, entry.tick, entry.audience, entry.author
+        "[{}] tick {} {:?} {:?}: {content} (branch {})",
+        entry.id.0, entry.tick, entry.audience, entry.author, entry.branch.0
     ))
+}
+
+fn parse_wizard(text: &str, expected_revision: u64) -> Result<Input, String> {
+    let words: Vec<_> = text.split_whitespace().collect();
+    let usage = "Wizard commands: wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>";
+    let position = |v: &[&str]| -> Result<Position, String> {
+        Ok(Position {
+            region: v[0].parse().map_err(|_| usage)?,
+            x: v[1].parse().map_err(|_| usage)?,
+            y: v[2].parse().map_err(|_| usage)?,
+            z: v[3].parse().map_err(|_| usage)?,
+        })
+    };
+    let operation = match words.as_slice() {
+        ["item", kind, r, x, y, z] => WizardOperation::PlaceItem {
+            kind: match *kind {
+                "token" => WizardItem::Token,
+                "tablet" => WizardItem::Tablet,
+                _ => return Err(usage.into()),
+            },
+            position: position(&[r, x, y, z])?,
+        },
+        ["actor", ticks, r, x, y, z] => WizardOperation::SpawnActor {
+            turn_ticks: ticks.parse().map_err(|_| usage)?,
+            position: position(&[r, x, y, z])?,
+        },
+        ["teleport", actor, r, x, y, z] => WizardOperation::Teleport {
+            actor: ActorId(actor.parse().map_err(|_| usage)?),
+            position: position(&[r, x, y, z])?,
+        },
+        ["rewind", target] => WizardOperation::Rewind {
+            target: (*target != "initial").then(|| EntryId((*target).into())),
+        },
+        _ => return Err(usage.into()),
+    };
+    Ok(Input::Command(Command::Wizard {
+        expected_revision,
+        operation,
+    }))
 }

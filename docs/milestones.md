@@ -45,11 +45,13 @@ compare their disclosed state to the resumed authoritative state. Exercise the
 actual client processes as well as shared adapters. Reconnection and stale or
 duplicate commands must not corrupt the game.
 
-## 1a: Wizard mode development foundation (planned)
+## 1a: Wizard mode development foundation (complete)
 
-Add server-enabled wizard mode early so later milestones can use it to construct
-scenarios and verify behavior. This is planned work, not an available server flag
-or client command. See [the wizard mode plan](wizard-mode.md) for requirements.
+Implemented server-enabled wizard mode with separate developer credentials and
+a durable permanent marker. Text commands provide item/actor placement, teleport,
+and rewind across the last 128 recorded decision boundaries. Both frontends
+follow fresh snapshots and display wizard status. See [wizard mode](wizard-mode.md)
+for commands, authorization, format migration, limits, and acceptance coverage.
 
 - Server-controlled enablement and authorization; permanent wizard-game identity
   across saves, restarts, replay, copies, and all history branches.
@@ -59,7 +61,8 @@ or client command. See [the wizard mode plan](wizard-mode.md) for requirements.
   rewind to recorded decision boundaries, with deterministic journaling and
   preservation of the abandoned future. Never expose rewind in normal games.
 - Scriptable text commands and actual server/client process tests for reproducible
-  development scenarios; extend other frontends as they become available.
+  development scenarios; ASCII currently uses the text client alongside it for
+  privileged commands.
 
 Acceptance: explicitly enable wizard mode on the server; place an object,
 teleport an actor, perform ordinary actions, rewind, and take a different action.

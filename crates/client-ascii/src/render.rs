@@ -62,6 +62,9 @@ impl Canvas {
         self.pixels.fill(BG);
         self.text(28, 24, "THRESHOLDS OF RUIN", TEXT, 2, 35);
         self.text(28, 54, "ASCII / TWO-ROOM EXPEDITION", MUTED, 1, 60);
+        if app.state.as_ref().is_some_and(|s| s.state().wizard_game) {
+            self.text(560, 30, "WIZARD GAME", GOLD, 2, 20);
+        }
         let control = if !app.connected {
             "DISCONNECTED"
         } else if app.role == tor_protocol::AccessRole::Spectator {
@@ -165,7 +168,7 @@ impl Canvas {
                         item.position.y,
                         item.position.z,
                         if item.position == o.position
-                            && app.role == tor_protocol::AccessRole::Player
+                            && app.role != tor_protocol::AccessRole::Spectator
                         {
                             "  [G] PICK UP"
                         } else {

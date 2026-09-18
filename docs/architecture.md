@@ -113,7 +113,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 2](protocol.md) for the implemented format.
+visibility rules. See [protocol version 3](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -148,10 +148,11 @@ not held entirely in memory. Player-facing time travel is deferred. Normal play
 enforces persistent permadeath and exposes no undo. Local file manipulation is
 outside that guarantee.
 
-## Wizard mode (planned)
+## Wizard mode
 
 [Wizard mode](wizard-mode.md) is a server-enabled development capability for
-placing mobs, objects, and rooms, teleporting actors, and rewinding turns. The
+placing basic actors and ground objects, teleporting actors, and bounded rewind.
+Room placement and richer creature/object archetypes remain future work. The
 server owns authorization and validates privileged commands; clients only expose
 the capabilities granted to their connection. Wizard operations remain explicit
 structured requests, separate from ordinary actor actions and annotations.
@@ -167,7 +168,11 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-and save version changes will be designed when this plan is implemented.
+version 3 and save format 2 implement this foundation; normal format-1 saves migrate
+on open. The last 128 chronological decision boundaries are rewindable; older
+branch history remains readable. Wizard authority is global to the game and uses
+a distinct server-configured credential. Text provides privileged commands; ASCII
+displays wizard status and follows explicit setup/rewind snapshots.
 
 ## Initial content and deferred decisions
 

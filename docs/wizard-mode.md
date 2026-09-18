@@ -1,10 +1,122 @@
-# Wizard mode development plan
+# Wizard mode
 
-Status: planned, not implemented. Introduce the foundation after the shared
-playable slice and before the geometry and interaction milestones. Grow commands
-alongside the systems they exercise. Wizard mode should make it easy to construct
-small scenarios, reproduce failures, and verify future features through the same
-authoritative backend used for normal play.
+The foundation is implemented: permanent game marking, separately authenticated
+wizard authority, ground-item and actor placement, teleportation, and bounded
+rewind with retained futures. Scriptable commands are available in the text
+client. Both frontends display the marker and follow setup/rewind snapshots;
+the graphical ASCII client currently uses text alongside it for wizard commands.
+Room placement, richer item properties, enemy archetypes, and scalable history
+remain later milestones.
+
+## Start or promote a wizard game
+
+Set distinct credentials in the server's PowerShell session:
+
+```powershell
+$env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
+$env:TOR_WIZARD_TOKEN = [guid]::NewGuid().ToString('N')
+cargo run -p tor-server -- --wizard --listen 127.0.0.1:4000 --seed 42 --save saves/wizard.json
+```
+
+`--wizard` is an explicit server administration operation: it creates a marked
+game or permanently promotes the existing save at that path, even if no command
+is used. The marker commits before the listener opens. Both the flag and a valid,
+distinct `TOR_WIZARD_TOKEN` are required. An optional `TOR_SPECTATOR_TOKEN` must
+also differ. Invalid credential configuration fails before opening the save.
+
+In the text client's terminal, set `TOR_SERVER_TOKEN` to the **wizard credential**
+and start the client normally. The server grants role `wizard`; a player token
+cannot gain wizard authority through control ownership or a frontend label.
+Wizard authority covers the whole game, including all actors and rewind of the
+whole simulation. It does not require ordinary control; ordinary actions still
+do. Only grant the wizard credential to a trusted developer of this game.
+Spectators remain read-only, including same-user retries of privileged requests.
+
+Restart without `--wizard` and without `TOR_WIZARD_TOKEN` to disable privileged
+access. The save remains a wizard game and both frontends continue showing it.
+The trusted library equivalent is `Engine::enable_wizard()` before constructing
+the service; session accounts must separately have `AccessRole::Wizard`.
+
+## Text commands
+
+Coordinates are region-local integers, with north decreasing y. The fixture has
+regions 1 and 2, each 5 by 3 by 1. Supported commands are:
+
+| Command | Behavior |
+| --- | --- |
+| `wizard item token 1 1 1 0` | Place a copper token on the ground |
+| `wizard item tablet 1 1 1 0` | Place a stone tablet on the ground |
+| `wizard actor 75 1 2 1 0` | Spawn an ordinary actor with base recovery 75 ticks |
+| `wizard teleport 1 2 1 1 0` | Teleport actor 1 to region 2, position (1,1,0) |
+| `wizard rewind initial` | Fork from the initial scenario, while that boundary is retained |
+| `wizard rewind <entry-id>` | Fork from the state immediately after a retained action/setup entry |
+| `history [before-id]` | Current branch history, including this user's wizard results |
+| `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
+
+Placement/teleportation consume no ordinary action time. Teleport preserves
+recovery times and reveals the destination to the relocated actor. New actors
+are ready at the current tick and participate in stable scheduling; they are not
+autonomous mobs. A wizard client can reconnect with `--actor <id>` to control
+them. Ordinary accounts retain their configured actor allowlists.
+Item properties and containment other than ground placement are not supported.
+Unknown item kinds, zero recovery durations, invalid coordinates, and forbidden
+actor overlap are rejected atomically.
+
+The server retains the most recent **128 decision boundaries across the entire
+chronological journal**, including abandoned branches. The initial state counts
+as one boundary until evicted; notes do not consume boundaries. Targets are the
+state after an accepted ordinary action or wizard setup/rewind command, not a
+wall-clock interval. An entry target must be visible to the attached actor/user.
+Rewind cannot remove the requesting actor. Other clients attached to removed
+actors disconnect explicitly. The result records old/new branch, restored tick,
+and next scheduled actor. History remains stored after a boundary expires, but
+rewinding to that expired state is rejected. No travel system exists yet.
+
+Every rewind creates a fresh branch; it never erases the abandoned future or
+changes existing note anchors. Current-branch history starts at the fork; use
+`branch-history` for previous branches. Wizard results and command parameters
+are private to their authenticated author and actor, preventing hidden setup
+coordinates from leaking to other observers. Ordinary action/result disclosure
+and note audiences retain their normal rules on every branch.
+
+Protocol version **3** adds role `wizard`, required `state.wizard_game`, structured
+wizard commands/results, and `history_branch` queries. Automatic snapshots use
+an empty request ID and establish an explicit stream boundary after setup/rewind;
+they are not acknowledgements for an outstanding request. Clients rebuild their
+state from these snapshots, including decreasing ticks/revisions after rewind.
+ASCII clears old branch drafts, pickup choices, and history panels. Request IDs,
+expected actor revisions, and branch checks prevent stale or duplicate mutations.
+Denied roles are checked before receipt lookup. Exact authorized retries return
+the original receipt without replaying the operation.
+
+Save format **2** preserves the root branch, permanent marker, and chronological
+records with authenticated receipts. Replaying the records reconstructs all
+branches and the bounded decision cache; the final branch is determined by the
+rewind records. Normal format-1 saves migrate on successful open; rules remain
+`two-room-v1`. Older servers cannot load format-2 saves. Rewind restores complete
+simulation state, including scheduler, knowledge, inventory, and ID allocation.
+The fixture has no evolving RNG; future RNG state belongs in these boundaries.
+
+## Verification
+
+Behavior tests cover atomic setup, duration/knowledge preservation, failed marker
+commits, permanent promotion with no commands, copies, disabled restart, migration,
+corrupt replay, bounded targets, privacy, retained annotations, and deterministic
+identity restoration. Raw WebSocket tests exercise every command with wizard,
+player, and spectator roles, disabled mode, same-user retry bypasses, stale branch
+requests, and snapshots. A slow-controller regression verifies rewind snapshots
+precede new-branch control updates.
+
+`scripts/scenarios/wizard-foundation.json` drives the actual server, text client,
+text spectator, and native ASCII spectator in `scripts/test_wizard_process.py`.
+It verifies ordinary pickup/wait actions, setup, rewind, branch history, spawned
+actor scheduling, control transfer, denied inputs, and marked save/resume with
+privileged access disabled. These tests run in debug/release on Windows and Linux
+with the existing desktop/Xvfb CI configuration.
+
+## Design requirements and later extensions
+
+The following requirements govern this foundation and its future extensions.
 
 ## Enablement and permanent game identity
 
@@ -12,8 +124,7 @@ Wizard mode must be explicitly enabled on the server, disabled by default. A
 frontend option, command name, or claimed identity cannot enable it. Support
 creating a wizard game and explicitly promoting an existing game through a
 server administration operation; client access alone cannot promote a game.
-The precise configuration and administration interface will be chosen during
-implementation, not added to the current protocol implicitly.
+The implemented interface is the startup administration flag described above.
 
 Persist an irreversible wizard-game marker before acknowledging enablement or
 accepting any privileged mutation. If persistence fails, enablement fails without

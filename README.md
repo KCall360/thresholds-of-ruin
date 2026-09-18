@@ -17,8 +17,9 @@ map, inventory, notes, history, and explicit control transfer. Both clients can
 continue the same saved game. Both support server-enforced read-only spectators
 who follow live actions and results and browse permitted history. Enable a separate
 spectator credential as described in [the protocol guide](docs/protocol.md#read-only-spectators).
-The [wizard mode plan](docs/wizard-mode.md) adds server-enabled development tools
-and permanently marked wizard games to the roadmap; it is not implemented yet.
+The [wizard mode foundation](docs/wizard-mode.md) provides server-authorized item
+and actor placement, teleportation, and bounded rewind with retained branches.
+Wizard games are permanently marked in both frontends.
 
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see

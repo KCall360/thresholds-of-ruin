@@ -16,7 +16,7 @@ SPECTATOR_TOKEN = "spectator-process-test-token-not-a-secret"
 
 class Process:
     def __init__(self, executable, args, token=TOKEN, extra_env=None):
-        environment = {k: v for k, v in os.environ.items() if k != "TOR_SPECTATOR_TOKEN"}
+        environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,

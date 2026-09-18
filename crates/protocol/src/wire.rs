@@ -1,23 +1,27 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessRole {
     Player,
     Spectator,
+    Wizard,
 }
 
 impl AccessRole {
     /// Only explicitly enumerated reads are available to spectators. New requests
     /// stay denied until their disclosure and side effects have been reviewed.
     pub fn permits(self, request: &Request) -> bool {
-        self == Self::Player
+        matches!(self, Self::Player | Self::Wizard)
             || matches!(
                 request,
-                Request::Attach { .. } | Request::Snapshot | Request::History { .. }
+                Request::Attach { .. }
+                    | Request::Snapshot
+                    | Request::History { .. }
+                    | Request::HistoryBranch { .. }
             )
     }
 }
@@ -116,6 +120,7 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateView {
+    pub wizard_game: bool,
     pub revision: u64,
     pub observation: Observation,
 }
@@ -166,6 +171,10 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    Wizard {
+        expected_revision: u64,
+        operation: WizardOperation,
+    },
     Act {
         expected_revision: u64,
         action: Action,
@@ -190,9 +199,62 @@ pub enum Event {
     Waited,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WizardItem {
+    Token,
+    Tablet,
+}
+
+/// Validated development inputs, never arbitrary world-state edits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WizardOperation {
+    PlaceItem {
+        kind: WizardItem,
+        position: Position,
+    },
+    SpawnActor {
+        position: Position,
+        turn_ticks: u64,
+    },
+    Teleport {
+        actor: ActorId,
+        position: Position,
+    },
+    /// Restore the state after this retained action/setup entry; None is the initial state.
+    Rewind {
+        target: Option<EntryId>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WizardResult {
+    ItemPlaced {
+        item: u64,
+    },
+    ActorSpawned {
+        actor: ActorId,
+    },
+    Teleported {
+        actor: ActorId,
+    },
+    Rewound {
+        from_branch: BranchId,
+        branch: BranchId,
+        tick: u64,
+        next_actor: ActorId,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    Wizard {
+        operation: WizardOperation,
+        result: WizardResult,
+    },
     Action {
         action: Action,
         event: Event,
@@ -252,12 +314,25 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    Attach { actor: ActorId },
+    HistoryBranch {
+        branch: BranchId,
+        before: Option<EntryId>,
+        limit: u16,
+    },
+    Attach {
+        actor: ActorId,
+    },
     AcquireControl,
     ReleaseControl,
     Snapshot,
-    Command { branch: BranchId, command: Command },
-    History { before: Option<EntryId>, limit: u16 },
+    Command {
+        branch: BranchId,
+        command: Command,
+    },
+    History {
+        before: Option<EntryId>,
+        limit: u16,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

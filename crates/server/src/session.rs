@@ -33,6 +33,7 @@ pub(crate) struct Connection {
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    resetting_streams: bool,
     engine: Engine,
     clients: BTreeMap<u64, Client>,
     controllers: BTreeMap<ActorId, u64>,
@@ -42,6 +43,7 @@ pub struct Service {
 impl Service {
     pub fn new(engine: Engine) -> Self {
         Self {
+            resetting_streams: false,
             engine,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
@@ -71,7 +73,7 @@ impl Service {
             .engine
             .actors()
             .into_iter()
-            .filter(|actor| account.actors.contains(actor))
+            .filter(|actor| account.role == AccessRole::Wizard || account.actors.contains(actor))
             .collect();
         self.clients.insert(
             id,
@@ -128,6 +130,19 @@ impl Service {
     }
 
     fn process(&mut self, id: u64, request_id: &str, request: Request) -> Result<(), Failure> {
+        if matches!(
+            &request,
+            Request::Command {
+                command: Command::Wizard { .. },
+                ..
+            }
+        ) && (self.clients[&id].role != AccessRole::Wizard || !self.engine.wizard_enabled())
+        {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Wizard authority is required",
+            ));
+        }
         // Check authority before attachment, receipt lookup, or any mutation.
         if !self.clients[&id].role.permits(&request) {
             return Err(Failure::new(
@@ -192,6 +207,26 @@ impl Service {
                 self.ack(id, request_id, None);
             }
             Request::Snapshot => return self.snapshot(id, request_id),
+            Request::HistoryBranch {
+                branch,
+                before,
+                limit,
+            } => {
+                let page = self.engine.history_branch(
+                    actor,
+                    &user,
+                    &branch,
+                    before.as_ref(),
+                    usize::from(limit),
+                )?;
+                self.send(
+                    id,
+                    ServerMessage::History {
+                        request_id: request_id.into(),
+                        page,
+                    },
+                );
+            }
             Request::History { before, limit } => {
                 let page =
                     self.engine
@@ -230,6 +265,43 @@ impl Service {
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
                 match result.entry.content {
+                    HistoryContent::Wizard { ref result, .. } => {
+                        // A committed setup/rewind establishes an explicit stream boundary.
+                        // Clients attached to actors removed by rewind must reattach.
+                        let recipients: Vec<_> = self
+                            .clients
+                            .iter()
+                            .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
+                            .collect();
+                        let previous_controllers = self.controllers.clone();
+                        let actors = self.engine.actors();
+                        self.controllers.retain(|actor, _| actors.contains(actor));
+                        self.resetting_streams = true;
+                        for (recipient, observer) in recipients {
+                            if !self.clients.contains_key(&recipient) {
+                                continue;
+                            }
+                            let disconnect = match self.engine.revision(observer) {
+                                Err(_) => true,
+                                Ok(revision) => {
+                                    (matches!(result, WizardResult::Rewound { .. })
+                                        || revisions.get(&observer) != Some(&revision))
+                                        && self.snapshot(recipient, "").is_err()
+                                }
+                            };
+                            if disconnect {
+                                self.disconnect(recipient);
+                            }
+                        }
+                        self.resetting_streams = false;
+                        for (actor, owner) in previous_controllers {
+                            if self.controllers.get(&actor) != Some(&owner)
+                                && actors.contains(&actor)
+                            {
+                                self.control_update(actor);
+                            }
+                        }
+                    }
                     HistoryContent::Annotation { .. } => self.annotation_update(&result.entry),
                     HistoryContent::Action { .. } => {
                         let recipients: Vec<_> = self
@@ -406,7 +478,9 @@ impl Service {
         if let Some(actor) = client.actor {
             if self.controllers.get(&actor) == Some(&id) {
                 self.controllers.remove(&actor);
-                self.control_update(actor);
+                if !self.resetting_streams {
+                    self.control_update(actor);
+                }
             }
         }
     }
@@ -422,6 +496,58 @@ impl Service {
 mod tests {
     use super::*;
     use crate::Scenario;
+
+    #[test]
+    fn slow_controller_during_rewind_cannot_send_control_into_the_old_branch() {
+        let mut engine = Engine::memory(Scenario::two_room(0)).unwrap();
+        engine.enable_wizard().unwrap();
+        let mut service = Service::new(engine);
+        let account = Account {
+            role: AccessRole::Wizard,
+            user: "wizard".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut controller = service.connect(&account, "text".into()).unwrap();
+        let mut observer = service.connect(&account, "ascii".into()).unwrap();
+        for c in [&mut controller, &mut observer] {
+            c.messages.try_recv().unwrap();
+            service.handle(c.id, "attach".into(), Request::Attach { actor: ActorId(1) });
+            c.messages.try_recv().unwrap();
+        }
+        service.handle(controller.id, "control".into(), Request::AcquireControl);
+        controller.messages.try_recv().unwrap();
+        controller.messages.try_recv().unwrap();
+        observer.messages.try_recv().unwrap();
+        for i in 0..64 {
+            service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
+        }
+        let branch = service.engine.branch().clone();
+        service.handle(
+            observer.id,
+            "rewind".into(),
+            Request::Command {
+                branch: branch.clone(),
+                command: Command::Wizard {
+                    expected_revision: 0,
+                    operation: WizardOperation::Rewind { target: None },
+                },
+            },
+        );
+        assert!(*controller.close.borrow());
+        let ServerMessage::Snapshot { snapshot, .. } = observer.messages.try_recv().unwrap() else {
+            panic!("snapshot must precede control transition")
+        };
+        assert_ne!(snapshot.branch, branch);
+        let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
+            panic!("control")
+        };
+        assert_eq!(update.branch, snapshot.branch);
+        assert!(matches!(
+            update.body,
+            UpdateBody::Control { has_control: false }
+        ));
+    }
 
     #[test]
     fn disconnect_during_action_broadcast_keeps_control_tick_at_last_disclosed_state() {

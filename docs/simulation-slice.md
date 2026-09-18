@@ -28,8 +28,9 @@ are not door entities and do not constrain where future doors can be placed.
 
 No actor exists until `spawn_actor` is called. Each has a stable ID, position,
 visited-region set, readiness time, and positive base action duration. Scenario
-setup methods are backend operations and must not be exposed as player commands.
-If actors are added during a run, replay must record those external inputs too.
+setup methods are backend operations; [wizard mode](wizard-mode.md) exposes only
+validated privileged operations through separate server authority and records
+their inputs/results for replay. Ordinary player commands cannot invoke setup.
 
 `next_actor` selects the earliest readiness time, breaking ties by actor ID.
 `act` rejects requests from any other actor. All actors share these rules; there
