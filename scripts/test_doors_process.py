@@ -220,8 +220,8 @@ class DoorProcesses(unittest.TestCase):
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, 1 | (scan << 16) | (0x01000000 if name in ("Up", "Right") else 0) | (0 if down else 0xC0000000)))
             return key
-        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--pid", str(client.child.pid)], text=True, timeout=10).split()
-        self.assertTrue(windows)
+        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", r"^Thresholds of Ruin \| ASCII$"], text=True, timeout=10).split()
+        self.assertEqual(len(windows), 1)
         def key(name, down):
             subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], name], check=True, timeout=10)
         return key
