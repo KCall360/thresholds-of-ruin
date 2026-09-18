@@ -2,7 +2,10 @@
 
 The `tor-client-text` executable connects to the existing loopback WebSocket
 server. It only uses disclosed protocol observations; rules remain on the server.
-This is the two-room movement/pickup slice, not yet a full dungeon adventure.
+The default interface now supports prose, examination, conversational clarification,
+and text intentions backed by travel. See [the adventure slice](text-adventure.md)
+for commands, place heuristics, interruptions and limitations. It is not yet a full
+dungeon adventure.
 
 ## Start a game
 
@@ -23,36 +26,23 @@ On Linux, use `export TOR_SERVER_TOKEN=...` in both terminals; the Cargo command
 are identical. Keep the token out of URLs, command arguments, and committed files.
 The client accepts a numeric loopback socket address, including `[::1]:4000`.
 
-The client attaches, describes the room, shows inventory and recent history, and
-requests control. `--observe` skips that control request. If control is occupied,
-the client stays connected as an observer. Enter one command per line; `Ready.`
-marks completion of each input. Piped command sequences work too. Live updates
-are printed even while waiting for terminal input. There is no full-screen UI.
+The client attaches and requests control. `--observe` skips that request. If control
+is occupied, the client stays connected as an observer. The normal prompt is `>`.
+Try `examine token`, `take it`, `east`, and `take tablet`. Directions use backend
+travel; `stop` cancels, and `step east` requests one careful step. Read
+[adventure commands and behavior](text-adventure.md) before scripting this mode.
 
-Try `take token`, `inventory`, and four `east` commands to reach the Gallery.
-Positions and passage locations are shown because movement is cell-based.
-`north` decreases y; `south` increases y. Seeing an item does not make it reachable.
+## Development scripting interface
 
-## Commands
-
-| Command | Behavior |
-| --- | --- |
-| `look`, `l` | Describe the latest disclosed state without advancing time |
-| `inventory`, `i` | List carried items |
-| `north/east/south/west/up/down`, `n/e/s/w/u/d`, `go east` | Request one movement action |
-| `take token`, `take the copper token`, `take #3` | Resolve a disclosed ground item and request pickup |
-| `wait`, `.` | Spend one wait action |
-| `control`, `release` | Acquire or release exclusive actor control |
-| `sync` | Obtain a fresh snapshot |
-| `history`, `history <before-id>` | Show up to 50 visible history entries and the next older-page command |
-| `note <text>`, `bookmark <text>` | Private user annotation anchored to the current revision |
-| `help`, `?` | List commands |
-| `quit`, `q`, EOF, Ctrl+C | Disconnect; the server releases control |
-
-Names are case-insensitive and may be a full name or trailing noun phrase. If
-several disclosed items match, the client lists their names and IDs and asks for
-`take #id`; this clarification does not send an action or advance time. Arbitrary
-undisclosed IDs are rejected locally. The backend still validates reach and rules.
+Pass `--script` to preserve the original line-oriented diagnostic interface.
+It prints coordinates, ticks, IDs, inventory, and history; `Ready.` marks completion
+of each input. Directions (`east`, `go east`, `e`) move **one cell**. `take token`
+requests **immediate** pickup and fails when out of reach. `look`, `inventory`,
+`wait`, `control`, `release`, `sync`, `history [before-id]`, `note`, `bookmark`,
+`help`, `quit`, and opaque `wizard` commands retain their original behavior.
+Names may be full names or trailing noun phrases; ambiguity asks for `take #id`.
+This explicit mode keeps existing development scenarios reproducible. The normal
+adventure interface is tested separately through actual client processes.
 
 ## Annotation commands
 
@@ -88,7 +78,7 @@ that user's private notes. Other-user privacy is enforced by the server.
 
 The server commits accepted actions and notes automatically. Restart it with the
 same save path, then relaunch the text client to restore position, inventory, and
-visible history. No protocol or save version change is needed for this frontend.
+visible history. Protocol 8 is required; save format 3 and existing rules are unchanged.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
 reconnect/retry is not implemented. If a command's response is lost, inspect history
@@ -119,7 +109,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 7. Real process tests cover live spectator
+clients must all use protocol version 8. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -128,12 +118,8 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 7.
+and selections from an abandoned branch. Server and clients must use protocol 8.
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
-They carry no labels or boundaries. Shared memory retains last-seen hints; text
-and ASCII do not render them or use them for navigation yet. New saves use
-`travel-v5`; earlier saves retain their original rules.
-
-[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
-Earlier rules retain their behavior; text has no travel commands in this slice.
+[Unnamed place hints](place-hints.md) now support the initial text place heuristic.
+[Text travel](text-adventure.md) composes backend travel with optional pickup on
+arrival. Existing saves retain their original rules; only travel-v5 supports travel.

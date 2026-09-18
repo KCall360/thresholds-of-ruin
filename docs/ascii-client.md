@@ -51,7 +51,8 @@ text is preserved in the protocol and save. Long overview labels end with `~`;
 the history panel wraps full note text for scrolling.
 
 See [backend travel](travel.md) for destination selection, progress, interruptions,
-and compatibility. Text commands remain unchanged.
+and compatibility. Text now supports [adventure intentions](text-adventure.md); `--script` preserves
+the original one-cell interface.
 
 Only one request is in flight at a time. Movement does not auto-repeat from
 holding a key, and gameplay input while a request is pending is discarded rather
@@ -132,7 +133,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 7. Real process tests cover live spectator
+clients must all use protocol version 8. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -141,9 +142,9 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 7.
+and selections from an abandoned branch. Server and clients must use protocol 8.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
-They carry no labels or boundaries. Shared memory retains last-seen hints; text
-and ASCII do not render them or use them for navigation yet. New saves use
+They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
+[the adventure slice](text-adventure.md). New saves use
 `travel-v5`; earlier saves retain their original rules.

@@ -1,9 +1,11 @@
 //! Deterministic commands and prose derived exclusively from disclosed state.
 use tor_protocol::*;
 
+pub mod adventure;
+
 pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/up/down (n/e/s/w/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Look,
     Inventory,

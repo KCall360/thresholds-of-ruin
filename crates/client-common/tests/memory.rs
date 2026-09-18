@@ -73,6 +73,7 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            description: String::new(),
             id: 7,
             name: "token".into(),
         },
@@ -144,6 +145,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     let mut first = snapshot(1, 0, 0);
     let distant = Position { x: 4, y: 1, z: 0 };
     first.state.observation.visible_cells.push(CellView {
+        material: "stone".into(),
         key: "distant".into(),
         stairs_up: false,
         stairs_down: false,
@@ -154,6 +156,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            description: String::new(),
             id: 8,
             name: "distant token".into(),
         },
@@ -169,6 +172,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     assert_eq!(memory.ground_items.len(), 1);
     let mut revisit = snapshot(1, 200, 2);
     revisit.state.observation.visible_cells.push(CellView {
+        material: "stone".into(),
         key: "distant".into(),
         stairs_up: false,
         stairs_down: false,

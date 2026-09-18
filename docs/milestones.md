@@ -122,8 +122,14 @@ potential-hazard/obstruction/control interruptions, replayed navigation knowledg
 restart/rewind behavior. Protocol 7 and new rules `travel-v5` preserve legacy
 saves. Actual server/text observer/headless/native ASCII acceptance includes
 native underscore and mouse input, normal play, wizard scenarios and persistence.
-Text exposes no travel command yet; higher-level intentions, location grouping,
-and automatic approach-then-manipulate sequences remain future work. Doors,
+Implemented [the first text adventure slice](text-adventure.md): backend-provided
+cosmetic appearances, prose and examination, conversational item clarification,
+visible-anchor directional travel, and approach-then-pickup. Place exits exclude
+ordinary floor within the current place; compound intentions have one narrative
+response and a completion prompt. Protocol 8 leaves
+travel-v5 and save format 3 unchanged. Generic descriptions and a conservative
+visible-place heuristic are initial foundations; persistent named places, richer
+spatial descriptions, and broader compound interactions remain future work. Doors,
 locks, containers, richer threat/damage interruptions and the remaining work below are
 still pending.
 

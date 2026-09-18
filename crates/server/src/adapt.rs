@@ -75,6 +75,7 @@ pub fn observation(
             continue;
         };
         visible_cells.push(p::CellView {
+            material: visible.material.into(),
             key: cell_key(salt, view.actor.0, cell.location),
             position: offset(cell.offset),
             wall: cell.wall,
@@ -95,6 +96,7 @@ pub fn observation(
         {
             ground_items.push(p::GroundItemView {
                 item: p::ItemView {
+                    description: item.description.clone(),
                     id: item.id.0,
                     name: item.name.clone(),
                 },
@@ -108,12 +110,16 @@ pub fn observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::ActorView {
+                name: actor.name.into(),
+                description: actor.description.into(),
                 id: p::ActorId(actor.id.0),
                 position: offset(cell.offset),
             });
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
             visible_actors.push(p::ActorView {
+                name: "yourself".into(),
+                description: "You recognize your own appearance from another angle.".into(),
                 id: p::ActorId(view.actor.0),
                 position: offset(cell.offset),
             });
@@ -131,6 +137,7 @@ pub fn observation(
             .inventory
             .into_iter()
             .map(|item| p::ItemView {
+                description: item.description,
                 id: item.id.0,
                 name: item.name,
             })

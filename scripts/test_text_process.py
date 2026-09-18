@@ -88,7 +88,7 @@ class TextProcesses(unittest.TestCase):
         self.server, self.address = self.start_server()
 
     def launch(self, name, args, **kwargs):
-        process = Process(self.bin / (name + self.suffix), args, **kwargs)
+        process = Process(self.bin / (name + self.suffix), (["--script", *args] if name == "tor-client-text" else args), **kwargs)
         self.addCleanup(process.stop)
         return process
 
@@ -233,7 +233,7 @@ class TextProcesses(unittest.TestCase):
 
     def test_piped_commands_wait_for_authoritative_updates(self):
         result = subprocess.run(
-            [str(self.bin / ("tor-client-text" + self.suffix)), "--connect", self.address],
+            [str(self.bin / ("tor-client-text" + self.suffix)), "--script", "--connect", self.address],
             env={**os.environ, "TOR_SERVER_TOKEN": TOKEN},
             input="east\ntake token\nwest\ntake token\nnote piped note\nlook\ninventory\n",
             text=True, encoding="utf-8", capture_output=True, timeout=15,
