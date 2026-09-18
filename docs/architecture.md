@@ -38,6 +38,11 @@ Cells are square horizontally; elevations use an integer z coordinate. Separate
 regions make sparse allocation natural. Dense, chunked, or sparse cell storage
 within a region is an implementation choice to measure later.
 
+Clients know nothing about regions, portals, or their transforms. The backend
+projects all visible occurrences into one actor-relative scene, including when
+they span several regions. Opaque cell keys support memory without exposing
+geometry identity. Movement uses the same observer axes across rotated joins.
+
 Portals connect apertures and transform coordinates and orientation. Initial
 transforms allow translation and quarter-turn rotations around the vertical
 axis. The world needs no consistent global embedding: overlapping regions and
@@ -60,11 +65,12 @@ information. Clients retain their own prior disclosed observations as remembered
 knowledge, separately from the backend's current world truth; that memory can be
 incomplete or stale. Exact sound propagation rules are deferred.
 
-The first [client-memory slice](headless-client.md) retains received room-elevation
+The [client-memory slice](headless-client.md) retains received cell
 views in `tor-client-common`, separate from current state. Same-branch snapshots
 preserve memory; new branches clear it. It lasts only for the connection and
-does not infer views from known place names or history. Partial-cell visibility
-and memory presentation in text/ASCII remain later perception work.
+does not infer views from known place names or history. [Portal sight](portal-geometry.md)
+refreshes only currently visible cells; memory presentation in text/ASCII remains
+later work.
 
 ## Time and actions
 
@@ -122,7 +128,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 3](protocol.md) for the implemented format.
+visibility rules. See [protocol version 5](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -163,10 +169,13 @@ outside that guarantee.
 
 [Wizard mode](wizard-mode.md) is a server-enabled development capability for
 placing basic actors and ground objects, teleporting actors, and bounded rewind.
-Room placement and richer creature/object archetypes remain future work. The
+[Geometry setup](portal-geometry.md) adds rooms, rotated passages, walls and explicit
+vertical links. Richer creature/object archetypes remain future work. The
 server owns authorization and validates privileged commands; clients only expose
-the capabilities granted to their connection. Wizard operations remain explicit
-structured requests, separate from ordinary actor actions and annotations.
+the capabilities granted to their connection. Wizard commands use opaque text
+interpreted only by the
+server, separate from ordinary actor actions and annotations. The private journal
+retains structured operations; public history contains sanitized summaries.
 
 Enabling wizard mode permanently marks the entire game lineage as a wizard game.
 The marker is durable before privileged commands can execute and survives replay,
@@ -179,8 +188,9 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 3 and save format 2 implement this foundation; normal format-1 saves migrate
-on open. The last 128 chronological decision boundaries are rewindable; older
+version 5 and save format 3 support this foundation; normal format-1 saves migrate
+on open. New games use observer-scene-v3; existing saves retain their ruleset.
+The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII
 displays wizard status and follows explicit setup/rewind snapshots.

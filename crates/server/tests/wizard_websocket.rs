@@ -7,6 +7,7 @@ use tokio::{
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
+use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOperation};
 use tor_server::{serve, Account, Engine, Scenario, Service};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -88,14 +89,58 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
         let (mut spectator, _) = connect(&address, AccessRole::Spectator).await;
         assert_eq!(initial.state.wizard_game, enabled);
         let operations = [
+            WizardOperation::PlaceRoom {
+                region: RegionView {
+                    id: 3,
+                    name: "Room".into(),
+                    width: 5,
+                    depth: 5,
+                    height: 2,
+                },
+            },
+            WizardOperation::Connect {
+                from: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
+                direction: Direction::Up,
+                to: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
+                quarter_turns: 0,
+            },
+            WizardOperation::SetWall {
+                position: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
+                wall: true,
+            },
             WizardOperation::PlaceItem {
                 kind: WizardItem::Tablet,
-                position: initial.state.observation.position,
+                position: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
             },
             WizardOperation::SpawnActor {
                 position: Position {
                     x: 2,
-                    ..initial.state.observation.position
+                    ..Position {
+                        region: 1,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    }
                 },
                 turn_ticks: 100,
             },
@@ -103,7 +148,12 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                 actor: ActorId(1),
                 position: Position {
                     region: 2,
-                    ..initial.state.observation.position
+                    ..Position {
+                        region: 1,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    }
                 },
             },
             WizardOperation::Rewind { target: None },
@@ -114,7 +164,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                 command: Command::Wizard {
                     expected_revision: 0,
                     operation,
-                },
+                }
+                .into(),
             };
             for client in [&mut player, &mut spectator] {
                 request(client, &format!("denied-{index}"), command.clone()).await;
@@ -146,17 +197,29 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                         actor: ActorId(1),
                         position: Position {
                             region: 2,
-                            ..initial.state.observation.position
+                            ..Position {
+                                region: 1,
+                                x: 1,
+                                y: 1,
+                                z: 0,
+                            }
                         },
                     },
-                },
+                }
+                .into(),
             };
             request(&mut wizard, "accepted", teleport.clone()).await;
             for client in [&mut wizard, &mut player, &mut spectator] {
                 let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
                     panic!("new snapshot")
                 };
-                assert_eq!(snapshot.state.observation.position.region, 2);
+                assert!(snapshot
+                    .state
+                    .observation
+                    .ground_items
+                    .iter()
+                    .any(|i| i.item.name == "stone tablet"
+                        && i.position == tor_protocol::Position { x: 1, y: 0, z: 0 }));
                 assert!(snapshot.state.wizard_game);
             }
             assert!(matches!(
@@ -186,7 +249,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                     command: Command::Wizard {
                         expected_revision: 1,
                         operation: WizardOperation::Rewind { target: None },
-                    },
+                    }
+                    .into(),
                 },
             )
             .await;
@@ -194,7 +258,12 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                 let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
                     panic!("rewind snapshot")
                 };
-                assert_eq!(snapshot.state.observation.position.region, 1);
+                assert!(snapshot
+                    .state
+                    .observation
+                    .ground_items
+                    .iter()
+                    .any(|i| i.item.name == "copper token" && i.reachable));
                 assert_ne!(snapshot.branch, initial.branch);
                 assert!(snapshot.state.wizard_game);
             }
@@ -210,7 +279,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                     command: Command::Wizard {
                         expected_revision: 0,
                         operation: WizardOperation::Rewind { target: None },
-                    },
+                    }
+                    .into(),
                 },
             )
             .await;

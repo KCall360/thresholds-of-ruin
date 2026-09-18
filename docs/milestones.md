@@ -73,12 +73,23 @@ facts. Turning off privileged access must not remove the marker.
 
 ## 2: Geometry and perception
 
-First slice complete locally: a JSON-lines headless frontend uses the shared
+First slice complete (PR #10): a JSON-lines headless frontend uses the shared
 connection and exposes current disclosed state separately from last-seen room
 memory. Same-branch snapshots preserve memory; rewind resets it. Actual process
 tests cover player/spectator access, stale hidden-room contents, revisit refresh,
 and save/resume. See [the headless guide](headless-client.md). Geometry and richer
 perception below remain pending; this does not complete milestone 2.
+
+This slice implements [portal geometry](portal-geometry.md) adds bounded
+cell visibility through rotated passages, elevation offsets, wall occlusion,
+explicit stair links, and wizard room/link/terrain setup. Memory now refreshes
+individual visible cells by opaque keys. The backend resolves one actor-relative
+scene; clients never receive region or portal geometry. Rectangular multi-cell
+joins are atomic, and orientation stays consistent through crossings. Protocol 5,
+save format 3, and observer-scene-v3 preserve older rules during replay.
+Actual server/text/headless/native ASCII acceptance covers sight, stale memory,
+movement, pickup, stairs, save/resume and rewind. Interactive doors independent
+of portals and richer multi-event perception remain pending.
 
 Stairs/elevations, rotated portal, portal-aware visibility, knowledge and memory.
 Test an interior door unrelated to a portal, portal orientation transforms,

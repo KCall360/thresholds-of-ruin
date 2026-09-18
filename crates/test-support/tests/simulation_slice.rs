@@ -18,7 +18,7 @@ fn seeded_actor_can_observe_take_and_cross_between_rooms() {
         .unwrap();
     let initial = game.observe(actor).unwrap();
     assert_eq!(initial.region.name, "Entry chamber");
-    assert_eq!(initial.ground_items.len(), 1);
+    assert_eq!(initial.ground_items.len(), 2);
     assert!(initial.inventory.is_empty());
     assert_eq!(initial.known_places.len(), 1);
     let item = initial.ground_items[0].id;
@@ -26,7 +26,12 @@ fn seeded_actor_can_observe_take_and_cross_between_rooms() {
     assert_eq!(taken.kind, OutcomeKind::Taken { item });
     assert_eq!((taken.at_tick, taken.next_tick), (0, 50));
     assert_eq!(game.observe(actor).unwrap().inventory[0].id, item);
-    assert!(game.observe(actor).unwrap().ground_items.is_empty());
+    assert!(game
+        .observe(actor)
+        .unwrap()
+        .ground_items
+        .iter()
+        .all(|i| i.id != item));
 
     let mut event_times = vec![taken.at_tick];
     for _ in 0..4 {
@@ -118,7 +123,12 @@ fn actors_have_independent_inventories_and_deterministic_variable_timing() {
     let pickup = game.act(first, Action::Take(item)).unwrap();
     assert_eq!((pickup.next_actor, pickup.next_tick), (second, 0));
     assert!(game.observe(second).unwrap().inventory.is_empty());
-    assert!(game.observe(second).unwrap().ground_items.is_empty());
+    assert!(game
+        .observe(second)
+        .unwrap()
+        .ground_items
+        .iter()
+        .all(|i| i.id != item));
     let wait = game.act(second, Action::Wait).unwrap();
     assert_eq!((wait.next_actor, wait.next_tick), (second, 40));
     let wait = game.act(second, Action::Wait).unwrap();
@@ -194,7 +204,7 @@ fn visible_items_still_require_reach_and_cannot_be_taken_twice() {
 }
 
 #[test]
-fn each_actor_only_observes_their_current_room_and_visited_places() {
+fn actors_can_see_across_boundaries_without_counting_them_as_visits() {
     let mut game = Game::two_room(0);
     let pace = NonZeroU64::new(100).unwrap();
     let entry = game.spawn_actor(start(), pace).unwrap();
@@ -209,8 +219,8 @@ fn each_actor_only_observes_their_current_room_and_visited_places() {
         .unwrap();
     let left = game.observe(entry).unwrap();
     let right = game.observe(gallery).unwrap();
-    assert!(left.visible_actors.is_empty());
-    assert!(right.visible_actors.is_empty());
+    assert_eq!(left.visible_actors[0].id, gallery);
+    assert_eq!(right.visible_actors[0].id, entry);
     assert_eq!(
         left.known_places
             .iter()
@@ -231,7 +241,7 @@ fn each_actor_only_observes_their_current_room_and_visited_places() {
             .iter()
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>(),
-        ["copper token"]
+        ["copper token", "stone tablet"]
     );
     assert_eq!(
         right
@@ -239,7 +249,7 @@ fn each_actor_only_observes_their_current_room_and_visited_places() {
             .iter()
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>(),
-        ["stone tablet"]
+        ["copper token", "stone tablet"]
     );
     let mut other_seed = Game::two_room(1);
     let actor = other_seed.spawn_actor(start(), pace).unwrap();

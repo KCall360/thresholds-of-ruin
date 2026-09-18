@@ -1,0 +1,26 @@
+{
+  "setup": [
+    "wizard room 3 5 5 2 Upper gallery",
+    "wizard wall 1 4 1 0 closed",
+    "wizard connect 1 1 0 0 north 3 0 2 1 1",
+    "wizard connect 3 0 2 1 west 1 1 0 0 3",
+    "wizard item tablet 3 1 2 1",
+    "wizard item token 3 4 4 1",
+    "wizard connect 3 1 2 1 down 3 1 2 0 0",
+    "wizard connect 3 1 2 0 up 3 1 2 1 0"
+  ],
+  "walk": [
+    "north",
+    "north",
+    "north",
+    "take tablet",
+    "down",
+    "up"
+  ],
+  "destination": {
+    "x": 0,
+    "y": 0,
+    "z": 0
+  },
+  "tick": 550
+}

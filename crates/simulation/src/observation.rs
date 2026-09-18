@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use tor_world::{Direction, Location, Position, Region, RegionId};
 
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
@@ -12,7 +13,7 @@ pub struct ItemView {
 pub struct GroundItemView {
     pub id: ItemId,
     pub name: String,
-    pub position: Position,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,14 +25,20 @@ pub struct KnownPlace {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActorView {
     pub id: ActorId,
-    pub position: Position,
+    pub location: Location,
 }
 
 /// An observable exit, without the unexplored destination's identity or contents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitView {
-    pub position: Position,
+    pub location: Location,
     pub direction: Direction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellView {
+    pub location: Location,
+    pub wall: bool,
 }
 
 /// Disclosed facts for one actor, separate from the authoritative game.
@@ -41,6 +48,7 @@ pub struct Observation {
     pub tick: u64,
     pub location: Location,
     pub region: Region,
+    pub visible_cells: Vec<CellView>,
     pub ground_items: Vec<GroundItemView>,
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
@@ -49,16 +57,42 @@ pub struct Observation {
 }
 
 impl Game {
-    /// A free read of perceived state. The initial policy reveals the actor's
-    /// fully lit room on the current elevation, plus visited place names and
-    /// their own inventory. Portal sight, occlusion, and remembered items follow
-    /// in the perception milestone. This query does not change knowledge or time.
+    /// A free read of current perception. New games use bounded cell-centre rays,
+    /// including rotated portals. Legacy saves retain whole-room perception.
+    /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        let visible = |location: Location| {
-            location.region == actor.location.region
-                && location.position.z == actor.location.position.z
+        let cells = if self.legacy_perception {
+            let (width, depth, _) = self
+                .world
+                .region(actor.location.region)
+                .expect("actor region")
+                .bounds
+                .dimensions();
+            (0..width)
+                .flat_map(|x| {
+                    (0..depth).map(move |y| Location {
+                        region: actor.location.region,
+                        position: Position {
+                            x,
+                            y,
+                            z: actor.location.position.z,
+                        },
+                    })
+                })
+                .collect::<BTreeSet<_>>()
+        } else {
+            if self.scene_rules {
+                self.world
+                    .scene(actor.location, actor.orientation, 8)
+                    .into_iter()
+                    .map(|cell| cell.location)
+                    .collect()
+            } else {
+                self.world.visible_cells(actor.location, 4)
+            }
         };
+        let visible = |location: Location| cells.contains(&location);
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         for (&item_id, item) in &self.items {
@@ -67,7 +101,7 @@ impl Game {
                     ground_items.push(GroundItemView {
                         id: item_id,
                         name: item.name.clone(),
-                        position: location.position,
+                        location,
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
@@ -89,6 +123,13 @@ impl Game {
                 .expect("validated actor location")
                 .clone(),
             ground_items,
+            visible_cells: cells
+                .iter()
+                .map(|&location| CellView {
+                    location,
+                    wall: self.world.is_wall(location),
+                })
+                .collect(),
             inventory,
             visible_actors: self
                 .actors
@@ -96,15 +137,26 @@ impl Game {
                 .filter(|(other_id, other)| **other_id != id && visible(other.location))
                 .map(|(&id, other)| ActorView {
                     id,
-                    position: other.location.position,
+                    location: other.location,
                 })
                 .collect(),
-            exits: self
-                .world
-                .exits(actor.location.region)
-                .filter(|exit| visible(exit.from))
+            exits: cells
+                .iter()
+                .flat_map(|&location| {
+                    [
+                        Direction::North,
+                        Direction::East,
+                        Direction::South,
+                        Direction::West,
+                        Direction::Up,
+                        Direction::Down,
+                    ]
+                    .into_iter()
+                    .filter_map(move |direction| self.world.passage(location, direction))
+                })
+                .filter(|exit| !self.world.is_wall(exit.from))
                 .map(|exit| ExitView {
-                    position: exit.from.position,
+                    location: exit.from,
                     direction: exit.direction,
                 })
                 .collect(),
@@ -122,5 +174,32 @@ impl Game {
                 })
                 .collect(),
         })
+    }
+
+    /// Backend-resolved view occurrences. A location may be seen at several offsets.
+    pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        if self.legacy_perception {
+            return Ok(self
+                .observe(id)?
+                .visible_cells
+                .into_iter()
+                .map(|cell| tor_world::SightCell {
+                    location: cell.location,
+                    offset: Position {
+                        x: cell.location.position.x - actor.location.position.x,
+                        y: cell.location.position.y - actor.location.position.y,
+                        z: 0,
+                    },
+                    rotation: 0,
+                    wall: cell.wall,
+                })
+                .collect());
+        }
+        Ok(self.world.scene(
+            actor.location,
+            actor.orientation,
+            if self.scene_rules { 8 } else { 4 },
+        ))
     }
 }

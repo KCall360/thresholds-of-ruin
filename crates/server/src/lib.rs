@@ -1,7 +1,9 @@
 //! Authoritative sessions, durable action/annotation history, and WebSocket transport.
 
 mod adapt;
+mod developer;
 mod engine;
+pub mod journal;
 mod session;
 mod transport;
 pub use engine::{ActorSetup, CommandResult, Engine, Failure, Scenario};

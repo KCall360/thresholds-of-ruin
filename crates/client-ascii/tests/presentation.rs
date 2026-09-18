@@ -30,11 +30,12 @@ fn state() -> ClientState {
         "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":3,"observation":{
-            "actor":1,"tick":0,"position":{"region":1,"x":1,"y":1,"z":0},
-            "region":{"id":1,"name":"Entry","width":5,"depth":3,"height":1},
-            "ground_items":[{"item":{"id":3,"name":"token"},"position":{"region":1,"x":1,"y":1,"z":0}}],
-            "inventory":[],"visible_actors":[],"exits":[{"position":{"region":1,"x":4,"y":1,"z":0},"direction":"east"}],
-            "known_places":[{"id":1,"name":"Entry"}],"ready":true
+            "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
+
+            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false}))).collect::<Vec<_>>(),
+            "ground_items":[{"reachable":true,"item":{"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "inventory":[],"visible_actors":[],
+            "ready":true
         }}
     })).unwrap()).unwrap()
 }
@@ -76,17 +77,26 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
     let state = state();
     let o = &state.state().observation;
     assert_eq!(glyph_at(o, 1, 1), '@');
-    assert_eq!(glyph_at(o, 4, 1), '+');
+    assert_eq!(glyph_at(o, 4, 1), '.');
     assert_eq!(glyph_at(o, 2, 1), '.');
     assert_eq!(glyph_at(o, 99, 1), ' ');
     let mut other_level = o.clone();
-    other_level.ground_items[0].position = Position {
-        region: 1,
-        x: 2,
-        y: 1,
-        z: 1,
-    };
+    other_level.ground_items[0].position = Position { x: 2, y: 1, z: 1 };
     assert_eq!(glyph_at(&other_level, 2, 1), '.');
+    other_level
+        .visible_cells
+        .retain(|cell| cell.position.x != 2);
+    assert_eq!(glyph_at(&other_level, 2, 1), ' ');
+    other_level.visible_cells.push(CellView {
+        key: "wall".into(),
+        stairs_up: false,
+        stairs_down: false,
+        position: Position { x: 2, y: 1, z: 0 },
+        wall: true,
+    });
+    assert_eq!(glyph_at(&other_level, 2, 1), '#');
+    other_level.ground_items[0].position = Position { x: 3, y: 1, z: 0 };
+    assert_eq!(glyph_at(&other_level, 3, 1), '!');
 }
 
 #[test]
@@ -145,6 +155,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .observation
         .ground_items
         .push(GroundItemView {
+            reachable: true,
             item: ItemView {
                 id: 4,
                 name: "another token".into(),
@@ -242,11 +253,8 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
     app.role = AccessRole::Player;
     let original = state();
     let mut view = original.state().clone();
-    view.observation.region.width = i32::MAX;
-    view.observation.region.depth = i32::MAX;
     view.observation.position.x = i32::MAX - 1;
     view.observation.position.y = i32::MAX - 1;
-    view.observation.region.name = "Room\u{1b}[2J".repeat(1000);
     app.set_state(
         ClientState::from_snapshot(Snapshot {
             actor: ActorId(1),

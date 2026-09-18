@@ -1,5 +1,6 @@
 use tempfile::tempdir;
 use tor_protocol::*;
+use tor_server::journal::{Command, Position, WizardItem, WizardOperation};
 use tor_server::{Engine, Scenario};
 
 fn wizard(
@@ -46,7 +47,13 @@ fn wizard_marker_rewind_and_retained_future_survive_restart() {
     engine.enable_wizard().unwrap();
     let original = engine.branch().clone();
     let placed = wizard(&mut engine, "teleport", operation).unwrap();
-    assert_eq!(engine.observation(ActorId(1)).unwrap().position.region, 2);
+    assert!(engine
+        .observation(ActorId(1))
+        .unwrap()
+        .ground_items
+        .iter()
+        .any(|i| i.item.name == "stone tablet"
+            && i.position == tor_protocol::Position { x: 1, y: 0, z: 0 }));
     wizard(
         &mut engine,
         "rewind",
@@ -54,13 +61,18 @@ fn wizard_marker_rewind_and_retained_future_survive_restart() {
     )
     .unwrap();
     assert_ne!(engine.branch(), &original);
-    assert_eq!(engine.observation(ActorId(1)).unwrap().position.region, 1);
+    assert!(engine
+        .observation(ActorId(1))
+        .unwrap()
+        .ground_items
+        .iter()
+        .any(|i| i.item.name == "copper token" && i.reachable));
     assert!(engine.state(ActorId(1)).unwrap().wizard_game);
     assert!(engine
         .history_branch(ActorId(1), "wizard", &original, None, 100)
         .unwrap()
         .entries
-        .contains(&placed.entry));
+        .contains(&placed.entry.disclosed()));
     let state = engine.state(ActorId(1)).unwrap();
     let branch = engine.branch().clone();
     drop(engine);
@@ -95,7 +107,12 @@ fn invalid_placement_is_atomic_and_successful_placement_is_idempotent() {
         expected_revision: before.revision,
         operation: WizardOperation::PlaceItem {
             kind: WizardItem::Tablet,
-            position: before.observation.position,
+            position: Position {
+                region: 1,
+                x: 1,
+                y: 1,
+                z: 0,
+            },
         },
     };
     let first = engine
@@ -115,7 +132,7 @@ fn invalid_placement_is_atomic_and_successful_placement_is_idempotent() {
     assert_eq!(first.entry, second.entry);
     assert_eq!(
         engine.observation(ActorId(1)).unwrap().ground_items.len(),
-        2
+        before.observation.ground_items.len() + 1
     );
     assert_eq!(engine.observation(ActorId(1)).unwrap().tick, 0);
 }

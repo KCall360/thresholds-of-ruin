@@ -1,5 +1,5 @@
 //! Fixed logical canvas, scaled by the native window without changing game state.
-use crate::{glyph_at, history_lines, history_text, App};
+use crate::{glyph_at_level, history_lines, history_text, App};
 use font8x8::{UnicodeFonts, BASIC_FONTS};
 
 pub const WIDTH: usize = 1200;
@@ -61,7 +61,7 @@ impl Canvas {
     pub fn draw(&mut self, app: &App) {
         self.pixels.fill(BG);
         self.text(28, 24, "THRESHOLDS OF RUIN", TEXT, 2, 35);
-        self.text(28, 54, "ASCII / TWO-ROOM EXPEDITION", MUTED, 1, 60);
+        self.text(28, 54, "ASCII / EXPEDITION", MUTED, 1, 60);
         if app.state.as_ref().is_some_and(|s| s.state().wizard_game) {
             self.text(560, 30, "WIZARD GAME", GOLD, 2, 20);
         }
@@ -88,50 +88,74 @@ impl Canvas {
         self.text(44, 532, "RECENT HISTORY", MUTED, 1, 70);
         if let Some(state) = &app.state {
             let o = &state.state().observation;
-            self.text(44, 110, &o.region.name, TEXT, 2, 40);
-            self.text(
-                44,
-                140,
-                &format!(
-                    "POSITION ({}, {}, {})   TICK {}   REV {}",
-                    o.position.x,
-                    o.position.y,
-                    o.position.z,
-                    o.tick,
-                    state.state().revision
-                ),
-                MUTED,
-                1,
-                84,
-            );
-            // A bounded viewport prevents large disclosed rooms allocating large
-            // buffers; center on the actor when a future room exceeds the view.
-            let cols = o.region.width.clamp(1, 11);
-            let rows = o.region.depth.clamp(1, 5);
-            let x0 = (o.position.x - cols / 2).clamp(0, (o.region.width - cols).max(0));
-            let y0 = (o.position.y - rows / 2).clamp(0, (o.region.depth - rows).max(0));
-            let left = 396 - cols as usize * 28;
-            let top = 302 - rows as usize * 28;
-            for row in 0..rows {
-                for col in 0..cols {
-                    let x = left + col as usize * 56;
-                    let y = top + row as usize * 56;
-                    let glyph = glyph_at(o, x0 + col, y0 + row);
-                    self.rect(x, y, 52, 52, if glyph == '@' { 0x203f41 } else { 0x192733 });
-                    let color = match glyph {
-                        '@' => ACCENT,
-                        '!' => GOLD,
-                        '+' => 0x8cbafa,
-                        '&' => 0xef958c,
-                        _ => 0x546c7e,
+            self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
+            self.text(44, 140, &format!("TICK {}", o.tick), MUTED, 1, 84);
+            let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
+            levels.sort_unstable();
+            levels.dedup();
+            levels.sort_by_key(|z| (z.abs(), *z));
+            let panels = levels.len().max(1);
+            for (index, z) in levels.into_iter().enumerate() {
+                // The main plane keeps the full map width; linked landings get a
+                // separate strip so many heights cannot squeeze or overlap it.
+                let (panel_x, panel_y, panel_w, panel_h): (usize, usize, usize, usize) =
+                    if index == 0 {
+                        (44, 166, 704, if panels == 1 { 292 } else { 236 })
+                    } else {
+                        let width = 704 / (panels - 1);
+                        (44 + (index - 1) * width, 402, width, 56)
                     };
-                    self.text(x + 14, y + 14, &glyph.to_string(), color, 3, 1);
+                let cells: Vec<_> = o
+                    .visible_cells
+                    .iter()
+                    .filter(|c| c.position.z == z)
+                    .collect();
+                let x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
+                let x1 = cells.iter().map(|c| c.position.x).max().unwrap_or(0);
+                let y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
+                let y1 = cells.iter().map(|c| c.position.y).max().unwrap_or(0);
+                let cols = (x1 - x0 + 1) as usize;
+                let rows = (y1 - y0 + 1) as usize;
+                let step = (panel_w / cols)
+                    .min(panel_h.saturating_sub(16) / rows)
+                    .clamp(8, 52);
+                let left = panel_x + (panel_w - cols * step) / 2;
+                let top = panel_y + 16;
+                if panels > 1 {
+                    self.text(left, top - 14, &format!("Z {z:+}"), MUTED, 1, 18);
+                }
+                let scale = (step / 12).clamp(1, 3);
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let glyph = glyph_at_level(o, x0 + col as i32, y0 + row as i32, z);
+                        if glyph == ' ' {
+                            continue;
+                        }
+                        let x = left + col * step;
+                        let y = top + row * step;
+                        self.rect(
+                            x,
+                            y,
+                            step - 1,
+                            step - 1,
+                            if glyph == '@' { 0x203f41 } else { 0x192733 },
+                        );
+                        let color = match glyph {
+                            '@' => ACCENT,
+                            '!' => GOLD,
+                            '<' | '>' => 0x8cbafa,
+                            '&' => 0xef958c,
+                            _ => 0x7890a2,
+                        };
+                        let pad = (step - 8 * scale) / 2;
+                        self.text(x + pad, y + pad, &glyph.to_string(), color, scale, 1);
+                    }
                 }
             }
             self.text(
                 44,
                 468,
-                "@ YOU   ! ITEM   + PASSAGE   & ACTOR   . FLOOR",
+                "@ YOU   ! ITEM   & ACTOR   # WALL   . FLOOR   < > STAIRS",
                 MUTED,
                 1,
                 84,
@@ -153,7 +177,7 @@ impl Canvas {
                     40,
                 );
             }
-            self.text(804, 280, "IN THIS ROOM", ACCENT, 2, 22);
+            self.text(804, 280, "IN SIGHT", ACCENT, 2, 22);
             if o.ground_items.is_empty() {
                 self.text(804, 316, "No items in sight.", MUTED, 2, 22);
             }
@@ -163,13 +187,11 @@ impl Canvas {
                     804,
                     337 + i * 36,
                     &format!(
-                        "({}, {}, {}){}",
+                        "OFFSET ({}, {}, {}){}",
                         item.position.x,
                         item.position.y,
                         item.position.z,
-                        if item.position == o.position
-                            && app.role != tor_protocol::AccessRole::Spectator
-                        {
+                        if item.reachable && app.role != tor_protocol::AccessRole::Spectator {
                             "  [G] PICK UP"
                         } else {
                             ""

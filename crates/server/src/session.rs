@@ -240,6 +240,7 @@ impl Service {
                 );
             }
             Request::Command { branch, command } => {
+                let command = crate::journal::Command::from_wire(&command)?;
                 if let Some(previous) = self
                     .engine
                     .retry(&user, actor, request_id, &branch, &command)?
@@ -247,7 +248,7 @@ impl Service {
                     self.ack(id, request_id, Some(previous.entry.id));
                     return Ok(());
                 }
-                if matches!(command, Command::Act { .. })
+                if matches!(command, crate::journal::Command::Act { .. })
                     && self.controllers.get(&actor) != Some(&id)
                 {
                     return Err(Failure::new(
@@ -264,8 +265,9 @@ impl Service {
                 let result = self
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
-                match result.entry.content {
-                    HistoryContent::Wizard { ref result, .. } => {
+                let visible_entry = result.entry.disclosed();
+                match visible_entry.content {
+                    HistoryContent::Wizard { rewind, .. } => {
                         // A committed setup/rewind establishes an explicit stream boundary.
                         // Clients attached to actors removed by rewind must reattach.
                         let recipients: Vec<_> = self
@@ -284,8 +286,7 @@ impl Service {
                             let disconnect = match self.engine.revision(observer) {
                                 Err(_) => true,
                                 Ok(revision) => {
-                                    (matches!(result, WizardResult::Rewound { .. })
-                                        || revisions.get(&observer) != Some(&revision))
+                                    (rewind || revisions.get(&observer) != Some(&revision))
                                         && self.snapshot(recipient, "").is_err()
                                 }
                             };
@@ -302,7 +303,7 @@ impl Service {
                             }
                         }
                     }
-                    HistoryContent::Annotation { .. } => self.annotation_update(&result.entry),
+                    HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
                     HistoryContent::Action { .. } => {
                         let recipients: Vec<_> = self
                             .clients
@@ -313,7 +314,7 @@ impl Service {
                             let state = self.engine.state(observer)?;
                             if revisions.get(&observer) != Some(&state.revision) {
                                 let event = (observer == result.entry.actor)
-                                    .then(|| Box::new(result.entry.clone()));
+                                    .then(|| Box::new(visible_entry.clone()));
                                 self.update(
                                     recipient,
                                     UpdateBody::Observation {
@@ -377,6 +378,7 @@ impl Service {
         let entry = self
             .engine
             .annotate_backend(actor, component, anchor, category, text)?;
+        let entry = entry.disclosed();
         self.annotation_update(&entry);
         Ok(entry)
     }
@@ -530,7 +532,7 @@ mod tests {
                 branch: branch.clone(),
                 command: Command::Wizard {
                     expected_revision: 0,
-                    operation: WizardOperation::Rewind { target: None },
+                    operation: "rewind initial".into(),
                 },
             },
         );

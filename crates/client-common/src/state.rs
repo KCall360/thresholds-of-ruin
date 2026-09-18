@@ -3,18 +3,20 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use tor_protocol::*;
 
-/// Last disclosed contents of one room elevation, not current world truth.
-/// This matches the current whole-room perception rule. Partial visibility will
-/// require explicit visible cells before unseen cells can be refreshed safely.
+/// Last disclosed contents of one cell, not current world truth. Only a fresh
+/// observation of this exact cell can replace its remembered contents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RememberedView {
-    pub region: RegionView,
-    pub elevation: i32,
+pub struct RememberedCell {
+    pub key: String,
+    /// Relative offset at the last sighting, not a current map location.
+    pub position: Position,
+    pub wall: bool,
     pub last_seen_tick: u64,
     pub last_seen_revision: u64,
     pub ground_items: Vec<GroundItemView>,
     pub visible_actors: Vec<ActorView>,
-    pub exits: Vec<ExitView>,
+    pub stairs_up: bool,
+    pub stairs_down: bool,
 }
 
 /// Shared presentation state for all frontends. Older history pages can be
@@ -23,7 +25,7 @@ pub struct RememberedView {
 pub struct ClientState {
     snapshot: Snapshot,
     stream: ObservationStream,
-    memory: BTreeMap<(u64, i32), RememberedView>,
+    memory: BTreeMap<String, RememberedCell>,
 }
 
 impl ClientState {
@@ -52,7 +54,7 @@ impl ClientState {
 
     /// Local observations only; place names and history never manufacture views.
     /// Memory lasts for this connection and is cleared on a branch change.
-    pub fn memory(&self) -> impl Iterator<Item = &RememberedView> {
+    pub fn memory(&self) -> impl Iterator<Item = &RememberedCell> {
         self.memory.values()
     }
 
@@ -72,18 +74,32 @@ impl ClientState {
 
     fn remember_view(&mut self) {
         let observation = &self.snapshot.state.observation;
-        self.memory.insert(
-            (observation.region.id, observation.position.z),
-            RememberedView {
-                region: observation.region.clone(),
-                elevation: observation.position.z,
-                last_seen_tick: observation.tick,
-                last_seen_revision: self.snapshot.state.revision,
-                ground_items: observation.ground_items.clone(),
-                visible_actors: observation.visible_actors.clone(),
-                exits: observation.exits.clone(),
-            },
-        );
+        for cell in &observation.visible_cells {
+            self.memory.insert(
+                cell.key.clone(),
+                RememberedCell {
+                    key: cell.key.clone(),
+                    position: cell.position,
+                    wall: cell.wall,
+                    last_seen_tick: observation.tick,
+                    last_seen_revision: self.snapshot.state.revision,
+                    ground_items: observation
+                        .ground_items
+                        .iter()
+                        .filter(|item| item.position == cell.position)
+                        .cloned()
+                        .collect(),
+                    visible_actors: observation
+                        .visible_actors
+                        .iter()
+                        .filter(|actor| actor.position == cell.position)
+                        .cloned()
+                        .collect(),
+                    stairs_up: cell.stairs_up,
+                    stairs_down: cell.stairs_down,
+                },
+            );
+        }
     }
 
     pub fn state(&self) -> &StateView {

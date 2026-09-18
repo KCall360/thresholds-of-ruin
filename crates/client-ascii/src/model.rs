@@ -237,10 +237,11 @@ impl App {
                 let mut items: Vec<_> = o
                     .ground_items
                     .iter()
-                    .filter(|i| i.position == o.position)
+                    .filter(|i| i.reachable)
                     .map(|i| i.item.clone())
                     .collect();
                 items.sort_by_key(|item| item.id);
+                items.dedup_by_key(|item| item.id);
                 match items.as_slice() {
                     [] => {
                         self.status = "There is nothing at your feet to pick up.".into();
@@ -328,18 +329,23 @@ impl App {
     }
 }
 
-/// Only the currently disclosed room/elevation is rendered. No remembered or
-/// undiscovered geometry is inferred from place names or connection metadata.
+/// Render only cells disclosed in the observer's scene.
 pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
-    if x < 0 || y < 0 || x >= o.region.width || y >= o.region.depth {
+    glyph_at_level(o, x, y, 0)
+}
+
+pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
+    let position = Position { x, y, z };
+    let Some(cell) = o
+        .visible_cells
+        .iter()
+        .find(|cell| cell.position == position)
+    else {
         return ' ';
-    }
-    let position = Position {
-        region: o.region.id,
-        x,
-        y,
-        z: o.position.z,
     };
+    if cell.wall {
+        return '#';
+    }
     if position == o.position {
         return '@';
     }
@@ -349,17 +355,20 @@ pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
     if o.ground_items.iter().any(|i| i.position == position) {
         return '!';
     }
-    if o.exits.iter().any(|e| e.position == position) {
-        return '+';
+    if cell.stairs_up {
+        return '<';
+    }
+    if cell.stairs_down {
+        return '>';
     }
     '.'
 }
 
 pub fn history_text(entry: &HistoryEntry) -> String {
     match &entry.content {
-        HistoryContent::Wizard { result, .. } => format!("Wizard: {result:?}"),
+        HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {
-            Event::Moved { to, .. } => format!("Moved to ({}, {}, {}).", to.x, to.y, to.z),
+            Event::Moved { direction } => format!("Moved {direction:?}."),
             Event::Taken { item } => format!("Picked up item #{item}."),
             Event::Waited => "Waited.".into(),
         },

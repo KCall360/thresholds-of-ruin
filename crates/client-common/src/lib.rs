@@ -3,7 +3,7 @@
 mod connection;
 mod state;
 pub use connection::Connection;
-pub use state::{ClientState, RememberedView};
+pub use state::{ClientState, RememberedCell};
 
 use tor_protocol::{ActorId, StreamCursor};
 

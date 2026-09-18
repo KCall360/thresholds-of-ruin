@@ -6,12 +6,14 @@
 mod fixture;
 mod observation;
 
-pub use observation::{ActorView, ExitView, GroundItemView, ItemView, KnownPlace, Observation};
+pub use observation::{
+    ActorView, CellView, ExitView, GroundItemView, ItemView, KnownPlace, Observation,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 
-use tor_world::{Direction, Location, RegionId, World};
+use tor_world::{Direction, Location, Passage, Region, RegionId, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ActorId(pub u64);
@@ -63,6 +65,7 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Actor {
     location: Location,
+    orientation: u8,
     turn_ticks: NonZeroU64,
     ready_at: u64,
     visited: BTreeSet<RegionId>,
@@ -85,6 +88,8 @@ struct Item {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     world: World,
+    legacy_perception: bool,
+    scene_rules: bool,
     seed: u64,
     tick: u64,
     actors: BTreeMap<ActorId, Actor>,
@@ -97,6 +102,8 @@ impl Game {
     pub fn new(world: World, seed: u64) -> Self {
         Self {
             world,
+            legacy_perception: false,
+            scene_rules: true,
             seed,
             tick: 0,
             actors: BTreeMap::new(),
@@ -113,7 +120,7 @@ impl Game {
         location: Location,
         turn_ticks: NonZeroU64,
     ) -> Result<ActorId, GameError> {
-        if !self.world.contains(location) {
+        if !self.world.walkable(location) {
             return Err(GameError::InvalidLocation);
         }
         if self.occupied(location) {
@@ -128,6 +135,7 @@ impl Game {
             id,
             Actor {
                 location,
+                orientation: 0,
                 turn_ticks,
                 ready_at: self.tick,
                 visited: BTreeSet::from([location.region]),
@@ -139,7 +147,7 @@ impl Game {
 
     /// Scenario setup operation, distinct from player inventory manipulation.
     pub fn place_item(&mut self, location: Location, name: String) -> Result<ItemId, GameError> {
-        if !self.world.contains(location) {
+        if !self.world.walkable(location) {
             return Err(GameError::InvalidLocation);
         }
         let next = self
@@ -167,7 +175,7 @@ impl Game {
         if !self.actors.contains_key(&id) {
             return Err(GameError::UnknownActor);
         }
-        if !self.world.contains(location) {
+        if !self.world.walkable(location) {
             return Err(GameError::InvalidLocation);
         }
         if self
@@ -179,12 +187,75 @@ impl Game {
         }
         let actor = self.actors.get_mut(&id).expect("validated actor");
         actor.location = location;
+        actor.orientation = 0;
         actor.visited.insert(location.region);
         Ok(())
     }
 
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// Legacy save replay retains the original observation and vertical-step rules.
+    pub fn use_legacy_perception(&mut self) {
+        self.legacy_perception = true;
+        self.scene_rules = false;
+    }
+
+    pub fn use_portal_v2_rules(&mut self) {
+        self.scene_rules = false;
+    }
+    pub fn uses_scene_rules(&self) -> bool {
+        self.scene_rules
+    }
+
+    pub fn connect_area(
+        &mut self,
+        passage: Passage,
+        turns: u8,
+        width: u16,
+        height: u16,
+    ) -> Result<(), GameError> {
+        if !self.scene_rules {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .connect_area(passage, turns, width, height)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn add_region(&mut self, region: Region) -> Result<(), GameError> {
+        if self.legacy_perception {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .add_region(region)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), GameError> {
+        if self.legacy_perception {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .connect(passage, quarter_turns)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), GameError> {
+        if self.legacy_perception
+            || (wall
+                && (self.occupied(location)
+                    || self
+                        .items
+                        .values()
+                        .any(|item| item.location == ItemLocation::Ground(location))))
+        {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .set_wall(location, wall)
+            .map_err(|_| GameError::InvalidLocation)
     }
 
     /// Stable ordering: earliest ready time, then actor identity.
@@ -208,6 +279,17 @@ impl Game {
         }
         let (kind, duration) = match action {
             Action::Move(direction) => {
+                let direction = if self.scene_rules {
+                    direction.rotated(actor.orientation)
+                } else {
+                    direction
+                };
+                if !self.legacy_perception
+                    && matches!(direction, Direction::Up | Direction::Down)
+                    && self.world.passage(actor.location, direction).is_none()
+                {
+                    return Err(GameError::Blocked);
+                }
                 let to = self
                     .world
                     .step(actor.location, direction)
@@ -241,12 +323,23 @@ impl Game {
             Action::Wait => (OutcomeKind::Waited, actor.turn_ticks.get()),
         };
         let at_tick = self.tick;
+        let new_orientation = match action {
+            Action::Move(direction) if self.scene_rules => {
+                (actor.orientation
+                    + self
+                        .world
+                        .crossing_rotation(actor.location, direction.rotated(actor.orientation)))
+                    % 4
+            }
+            _ => actor.orientation,
+        };
         let ready_at = at_tick
             .checked_add(duration)
             .ok_or(GameError::TimeExhausted)?;
 
         // Everything that can fail has been validated before mutation.
         let actor = self.actors.get_mut(&id).expect("actor validated above");
+        actor.orientation = new_orientation;
         match kind {
             OutcomeKind::Moved { to, .. } => {
                 actor.location = to;

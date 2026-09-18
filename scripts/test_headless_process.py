@@ -56,8 +56,8 @@ class HeadlessProcesses(unittest.TestCase):
         self.assertTrue(initial["has_control"])
         self.assertFalse(observing["has_control"])
         self.assertEqual(observing["role"], "spectator")
-        self.assertEqual(len(initial["memory"]), 1)
-        self.assertNotIn("stone tablet", json.dumps(initial))
+        self.assertEqual(len(initial["memory"]), len(initial["state"]["observation"]["visible_cells"]))
+        self.assertIn("stone tablet", json.dumps(initial))
         token = initial["state"]["observation"]["ground_items"][0]["item"]["id"]
         taken = self.act(player, {"type": "take", "item": token})
         seen = self.frame(spectator, lambda f: f["state"]["revision"] == taken["state"]["revision"])
@@ -71,8 +71,8 @@ class HeadlessProcesses(unittest.TestCase):
         self.assertEqual(self.save.read_bytes(), before)
         for _ in range(4):
             moved = self.act(player, {"type": "move", "direction": "east"})
-        self.assertEqual(moved["state"]["observation"]["position"]["region"], 2)
-        self.assertEqual(len(moved["memory"]), 2)
+        self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
+        self.assertGreater(len(moved["memory"]), len(initial["memory"]))
         synced = self.request(player, {"type": "snapshot"})
         self.assertEqual(synced["memory"], moved["memory"])
         history = self.request(spectator, {"type": "history", "limit": 50, "before": None})
@@ -83,8 +83,7 @@ class HeadlessProcesses(unittest.TestCase):
         self.server()
         resumed, state = self.client()
         self.assertEqual(state["state"], moved["state"])
-        self.assertEqual(len(state["memory"]), 1)
-        self.assertEqual(state["memory"][0]["region"]["id"], 2)
+        self.assertEqual(len(state["memory"]), len(state["state"]["observation"]["visible_cells"]))
         resumed.child.stdin.close()
         self.assertEqual(resumed.child.wait(timeout=10), 0)
 
@@ -98,25 +97,24 @@ class HeadlessProcesses(unittest.TestCase):
         for command in fixture["visit_and_leave"]:
             self.assertNotIn("Server error", wizard.command(command))
         before = self.request(observer, {"type": "snapshot"})
-        gallery = next(view for view in before["memory"] if view["region"]["id"] == 2)
+        gallery = next(view for view in before["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"]))
         self.assertEqual(len(gallery["ground_items"]), 1)
         wizard.command(fixture["hidden_change"])
         after = self.request(observer, {"type": "snapshot"})
         # Wizard receipts advance their author's actor revision, even when the
         # command changes a hidden room. The disclosed scene stays unchanged.
-        self.assertEqual(next(view for view in after["memory"] if view["region"]["id"] == 2), gallery)
+        self.assertEqual(next(view for view in after["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"])), gallery)
         self.assertEqual(after["state"]["observation"], before["state"]["observation"])
         self.assertFalse(any(entry["content"]["type"] == "wizard" for entry in after["history"]))
         wizard.command(fixture["revisit"])
         refreshed = self.request(observer, {"type": "snapshot"})
-        gallery = next(view for view in refreshed["memory"] if view["region"]["id"] == 2)
+        gallery = next(view for view in refreshed["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"]))
         self.assertEqual(len(gallery["ground_items"]), 2)
         wizard.command("wizard rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], initial["branch"])
-        self.assertEqual(len(rewound["memory"]), 1)
-        self.assertEqual(rewound["memory"][0]["region"]["id"], 1)
-        self.assertNotIn("stone tablet", json.dumps(rewound))
+        self.assertEqual(len(rewound["memory"]), len(rewound["state"]["observation"]["visible_cells"]))
+        self.assertIn("stone tablet", json.dumps(rewound))
 
     def test_invalid_input_failed_actions_control_transfer_and_authentication(self):
         self.server()

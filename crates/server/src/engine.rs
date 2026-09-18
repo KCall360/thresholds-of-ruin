@@ -11,10 +11,15 @@ use tor_simulation::{ActorId as SimActor, Game};
 use uuid::Uuid;
 
 use crate::adapt;
+use crate::journal::{
+    Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
+};
 
-const ARCHIVE_VERSION: u32 = 2;
+const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "two-room-v1";
+const RULESET: &str = "observer-scene-v3";
+const PORTAL_V2_RULESET: &str = "portal-sight-v2";
+const LEGACY_RULESET: &str = "two-room-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
@@ -90,6 +95,8 @@ struct Record {
 #[serde(deny_unknown_fields)]
 struct Archive {
     #[serde(default)]
+    view_salt: String,
+    #[serde(default)]
     wizard_game: Option<bool>,
     version: u32,
     ruleset: String,
@@ -127,7 +134,17 @@ pub struct Engine {
 
 impl Engine {
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
+        Self::memory_rules(scenario, RULESET)
+    }
+
+    fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
         let mut game = Game::two_room(scenario.seed);
+        if ruleset == PORTAL_V2_RULESET {
+            game.use_portal_v2_rules();
+        }
+        if ruleset == LEGACY_RULESET {
+            game.use_legacy_perception();
+        }
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
@@ -155,9 +172,10 @@ impl Engine {
             path: None,
             lock: None,
             archive: Archive {
+                view_salt: Uuid::new_v4().to_string(),
                 wizard_game: Some(false),
                 version: ARCHIVE_VERSION,
-                ruleset: RULESET.into(),
+                ruleset: ruleset.into(),
                 scenario,
                 branch,
                 records: Vec::new(),
@@ -184,15 +202,22 @@ impl Engine {
     }
 
     fn replay(archive: Archive) -> Result<Self, Failure> {
-        if !matches!(archive.version, 1 | ARCHIVE_VERSION)
+        if !matches!(archive.version, 1 | 2 | ARCHIVE_VERSION)
             || (archive.version == 1 && archive.wizard_game == Some(true))
-            || (archive.version == ARCHIVE_VERSION && archive.wizard_game.is_none())
-            || archive.ruleset != RULESET
+            || (archive.version >= 2 && archive.wizard_game.is_none())
+            || (archive.version == ARCHIVE_VERSION && Uuid::parse_str(&archive.view_salt).is_err())
+            || !matches!(
+                archive.ruleset.as_str(),
+                RULESET | PORTAL_V2_RULESET | LEGACY_RULESET
+            )
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
             return Err(invalid_archive());
         }
-        let mut engine = Self::memory(archive.scenario)?;
+        let mut engine = Self::memory_rules(archive.scenario, &archive.ruleset)?;
+        if !archive.view_salt.is_empty() {
+            engine.archive.view_salt = archive.view_salt;
+        }
         engine.current_branch = archive.branch.clone();
         engine.archive.wizard_game = Some(archive.wizard_game.unwrap_or(false));
         engine.wizard_enabled = archive.wizard_game.unwrap_or(false);
@@ -270,9 +295,31 @@ impl Engine {
             .map_err(|_| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))?;
         Ok(adapt::observation(
             view,
+            self.game
+                .scene(SimActor(actor.0))
+                .map_err(|_| invalid_archive())?,
+            &self.archive.view_salt,
             self.game.next_actor() == Some(SimActor(actor.0)),
         ))
     }
+    fn revision_view(
+        &self,
+        actor: ActorId,
+    ) -> Result<(tor_simulation::Observation, Vec<tor_world::SightCell>), Failure> {
+        let view = self
+            .game
+            .observe(SimActor(actor.0))
+            .map_err(|_| invalid_archive())?;
+        let scene = if self.game.uses_scene_rules() {
+            self.game
+                .scene(SimActor(actor.0))
+                .map_err(|_| invalid_archive())?
+        } else {
+            Vec::new()
+        };
+        Ok((view, scene))
+    }
+
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
         Ok(StateView {
             wizard_game: self.archive.wizard_game.unwrap_or(false),
@@ -324,7 +371,7 @@ impl Engine {
         Ok(HistoryPage {
             entries: visible[start..end]
                 .iter()
-                .map(|entry| (*entry).clone())
+                .map(|entry| entry.disclosed())
                 .collect(),
             older_before: (start > 0).then(|| visible[start].id.clone()),
         })
@@ -457,14 +504,14 @@ impl Engine {
                 let before: BTreeMap<_, _> = self
                     .actors()
                     .into_iter()
-                    .map(|actor| Ok((actor, self.observation(actor)?)))
+                    .map(|actor| Ok((actor, self.revision_view(actor)?)))
                     .collect::<Result<_, Failure>>()?;
                 let outcome = candidate
                     .game
                     .act(SimActor(receipt.actor.0), adapt::action(action))
                     .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?;
                 for (actor, old) in before {
-                    if candidate.observation(actor)? != old {
+                    if candidate.revision_view(actor)? != old {
                         let revision = candidate.revisions.get_mut(&actor).expect("known actor");
                         *revision = revision.checked_add(1).ok_or_else(|| {
                             Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
@@ -571,9 +618,77 @@ impl Engine {
         let before: BTreeMap<_, _> = self
             .actors()
             .into_iter()
-            .map(|actor| Ok((actor, self.observation(actor)?)))
+            .map(|actor| Ok((actor, self.revision_view(actor)?)))
             .collect::<Result<_, Failure>>()?;
         let result = match operation {
+            WizardOperation::ConnectArea {
+                from,
+                direction,
+                to,
+                quarter_turns,
+                width,
+                height,
+            } => {
+                self.game
+                    .connect_area(
+                        tor_world::Passage {
+                            from: adapt::location(*from),
+                            direction: adapt::direction(*direction),
+                            to: adapt::location(*to),
+                        },
+                        *quarter_turns,
+                        *width,
+                        *height,
+                    )
+                    .map_err(|_| invalid())?;
+                WizardResult::Connected
+            }
+            WizardOperation::PlaceRoom { region } => {
+                // Bound setup and disclosure work independently of wire limits.
+                if region.id == 0
+                    || region.name.is_empty()
+                    || region.name.len() > 80
+                    || region.name.chars().any(char::is_control)
+                    || !(1..=32).contains(&region.width)
+                    || !(1..=32).contains(&region.depth)
+                    || !(1..=8).contains(&region.height)
+                {
+                    return Err(invalid());
+                }
+                self.game
+                    .add_region(tor_world::Region {
+                        id: tor_world::RegionId(region.id),
+                        name: region.name.clone(),
+                        bounds: tor_world::Extent::new(region.width, region.depth, region.height)
+                            .ok_or_else(invalid)?,
+                    })
+                    .map_err(|_| invalid())?;
+                WizardResult::RoomPlaced { region: region.id }
+            }
+            WizardOperation::Connect {
+                from,
+                direction,
+                to,
+                quarter_turns,
+            } => {
+                self.game
+                    .connect(
+                        tor_world::Passage {
+                            from: adapt::location(*from),
+                            direction: adapt::direction(*direction),
+                            to: adapt::location(*to),
+                        },
+                        *quarter_turns,
+                    )
+                    .map_err(|_| invalid())?;
+                WizardResult::Connected
+            }
+            WizardOperation::SetWall { position, wall } => {
+                self.game
+                    .set_wall(adapt::location(*position), *wall)
+                    .map_err(|_| invalid())?;
+                WizardResult::WallSet
+            }
             WizardOperation::PlaceItem { kind, position } => {
                 let name = match kind {
                     WizardItem::Token => "copper token",
@@ -635,7 +750,7 @@ impl Engine {
             }
         };
         for (actor, old) in before {
-            if actor == receipt.actor || self.observation(actor)? != old {
+            if actor == receipt.actor || self.revision_view(actor)? != old {
                 let revision = self.revisions.get_mut(&actor).expect("existing actor");
                 *revision = revision.checked_add(1).ok_or_else(invalid)?;
             }

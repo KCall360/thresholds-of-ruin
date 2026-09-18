@@ -18,10 +18,11 @@ does not prevent observation; press C once that client releases control. The
 server address must be a numeric loopback socket address (IPv4 or IPv6).
 Automatic server launch and packaged builds are planned for a later milestone.
 
-The window shows the current room, position, simulation tick, inventory, visible
+The window shows the complete disclosed scene, simulation tick, inventory, visible
 items, recent history, and control status. The map uses `@` for your actor, `&`
-for another visible actor, `!` for an item, `+` for a passage, and `.` for floor.
-An actor glyph takes precedence over items/passages on the same cell; visible
+for another visible actor, `!` for an item, `<`/`>` for stairs, `#` for walls,
+and `.` for visible floor. Undisclosed cells are blank.
+An actor glyph takes precedence over items/stairs on the same cell; visible
 items are also listed in the side panel. North is toward the top of the map.
 Items elsewhere in the room remain out of reach until you move onto their cell.
 
@@ -51,7 +52,11 @@ Only one request is in flight at a time. Movement does not auto-repeat from
 holding a key, and gameplay input while a request is pending is discarded rather
 than queued into accidental extra turns. Invalid actions and unresolved pickup
 choices consume no time. Window resizing and redraws never advance simulation.
-The map uses a bounded viewport centered on the actor for larger future rooms.
+The map fits the entire current scene into the panel, including visible cells
+across internal boundaries. Separate visible heights get adjacent panels. The
+actor remains at the view origin; cells outside sight are blank. `#` is wall,
+`.` floor, `!` item, `&` actor, and `<`/`>` stairs. No portal markers or region
+labels are shown. See [observer scenes](portal-geometry.md).
 Overview lists currently show up to five inventory items and four visible items;
 the present fixture has only two items. Richer item inspection is future work.
 
@@ -122,13 +127,13 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 3. Real process tests cover live spectator
+clients must all use protocol version 5. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
 
 Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
-actors. The text client provides the structured development commands described
+actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 3.
+and selections from an abandoned branch. Server and clients must use protocol 5.
