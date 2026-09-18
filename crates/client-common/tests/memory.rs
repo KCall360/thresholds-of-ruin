@@ -7,7 +7,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "has_control":false,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
             "actor":1,"tick":tick,"position":{"x":1,"y":1,"z":0},
-            "visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false}],"ground_items":[],"inventory":[],"visible_actors":[],
+            "visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
             "ready":true
         }}
     }))
@@ -27,6 +27,44 @@ fn update(next: Snapshot, sequence: u64) -> StreamUpdate {
             event: None,
         },
     }
+}
+
+#[test]
+fn place_hints_stay_stale_until_seen_again_and_do_not_survive_rewind() {
+    let mut first = snapshot(1, 0, 0);
+    first.state.observation.visible_cells[0].place_hint = true;
+    let mut client = ClientState::from_snapshot(first).unwrap();
+    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    assert!(
+        client
+            .memory()
+            .find(|cell| cell.key == "1")
+            .unwrap()
+            .place_hint
+    );
+    client.replace_snapshot(snapshot(2, 100, 1)).unwrap();
+    assert!(
+        client
+            .memory()
+            .find(|cell| cell.key == "1")
+            .unwrap()
+            .place_hint
+    );
+    client.apply(update(snapshot(1, 200, 2), 1)).unwrap();
+    assert!(
+        !client
+            .memory()
+            .find(|cell| cell.key == "1")
+            .unwrap()
+            .place_hint
+    );
+    let mut marked = snapshot(1, 300, 3);
+    marked.state.observation.visible_cells[0].place_hint = true;
+    client.apply(update(marked, 2)).unwrap();
+    let mut rewind = snapshot(2, 0, 0);
+    rewind.branch = BranchId("new".into());
+    client.replace_snapshot(rewind).unwrap();
+    assert!(client.memory().all(|cell| !cell.place_hint));
 }
 
 #[test]
@@ -111,6 +149,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         stairs_down: false,
         position: distant,
         wall: false,
+        place_hint: false,
     });
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
@@ -135,6 +174,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         stairs_down: false,
         position: distant,
         wall: false,
+        place_hint: false,
     });
     client.apply(update(revisit, 2)).unwrap();
     let memory = client

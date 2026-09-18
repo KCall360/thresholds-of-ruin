@@ -39,6 +39,7 @@ pub struct ExitView {
 pub struct CellView {
     pub location: Location,
     pub wall: bool,
+    pub place_hint: bool,
 }
 
 /// Disclosed facts for one actor, separate from the authoritative game.
@@ -128,6 +129,7 @@ impl Game {
                 .map(|&location| CellView {
                     location,
                     wall: self.world.is_wall(location),
+                    place_hint: self.world.has_place_hint(location),
                 })
                 .collect(),
             inventory,

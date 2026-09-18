@@ -82,6 +82,7 @@ pub struct World {
     passages: BTreeMap<(Location, Direction), Passage>,
     rotations: BTreeMap<(Location, Direction), u8>,
     walls: BTreeSet<Location>,
+    place_hints: BTreeSet<Location>,
 }
 
 impl World {
@@ -91,6 +92,7 @@ impl World {
             passages: BTreeMap::new(),
             rotations: BTreeMap::new(),
             walls: BTreeSet::new(),
+            place_hints: BTreeSet::new(),
         };
         for region in regions {
             if world.regions.insert(region.id, region).is_some() {
@@ -224,6 +226,24 @@ impl World {
             self.walls.remove(&location);
         }
         Ok(())
+    }
+
+    /// Unnamed spatial anchors, independent of region boundaries and topology.
+    /// Terrain edits retain authored hints; solid cells suppress their disclosure.
+    pub fn set_place_hint(&mut self, location: Location, present: bool) -> Result<(), WorldError> {
+        if !self.contains(location) {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        if present {
+            self.place_hints.insert(location);
+        } else {
+            self.place_hints.remove(&location);
+        }
+        Ok(())
+    }
+
+    pub fn has_place_hint(&self, location: Location) -> bool {
+        self.place_hints.contains(&location) && self.walkable(location)
     }
 
     pub fn is_wall(&self, location: Location) -> bool {

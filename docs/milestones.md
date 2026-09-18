@@ -77,19 +77,27 @@ First slice complete (PR #10): a JSON-lines headless frontend uses the shared
 connection and exposes current disclosed state separately from last-seen room
 memory. Same-branch snapshots preserve memory; rewind resets it. Actual process
 tests cover player/spectator access, stale hidden-room contents, revisit refresh,
-and save/resume. See [the headless guide](headless-client.md). Geometry and richer
-perception below remain pending; this does not complete milestone 2.
+and save/resume. See [the headless guide](headless-client.md). Later slices extend geometry and
+perception below; this foundation does not complete milestone 2.
 
-This slice implements [portal geometry](portal-geometry.md) adds bounded
+Completed (PR #11): [portal geometry](portal-geometry.md) adds bounded
 cell visibility through rotated passages, elevation offsets, wall occlusion,
 explicit stair links, and wizard room/link/terrain setup. Memory now refreshes
 individual visible cells by opaque keys. The backend resolves one actor-relative
 scene; clients never receive region or portal geometry. Rectangular multi-cell
-joins are atomic, and orientation stays consistent through crossings. Protocol 5,
-save format 3, and observer-scene-v3 preserve older rules during replay.
+joins are atomic, and orientation stays consistent through crossings. That slice
+introduced protocol 5, save format 3, and observer-scene-v3 while preserving older
+rules during replay.
 Actual server/text/headless/native ASCII acceptance covers sight, stale memory,
 movement, pickup, stairs, save/resume and rewind. Interactive doors independent
 of portals and richer multi-event perception remain pending.
+
+Implemented: [unnamed place hints](place-hints.md), authored cell anchors
+independent of regions and portals. Protocol 6 discloses hints only with perceived
+cells; shared memory retains potentially stale values. Wizard set/clear supports
+dynamic maps, restart and rewind. New saves use place-hints-v4; older rules remain
+unchanged. Actual text/headless/native ASCII acceptance covers disclosure and
+memory. Client location grouping and navigation are not implemented by this slice.
 
 Stairs/elevations, rotated portal, portal-aware visibility, knowledge and memory.
 Test an interior door unrelated to a portal, portal orientation transforms,
@@ -98,7 +106,7 @@ producing several ordered updates before the next player decision.
 Extend wizard commands with room placement and explicit passage connections as
 the geometry model supports them; use these to reproduce perception edge cases.
 
-Headless-client requirements (foundation implemented; portal coverage pending):
+Headless-client requirements (foundation and portal coverage implemented):
 
 Add a thin headless client built on `tor-client-common`. It must connect as a
 player or authorized spectator, issue scripted actions where permitted, and

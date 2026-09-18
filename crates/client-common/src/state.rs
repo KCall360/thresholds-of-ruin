@@ -11,6 +11,7 @@ pub struct RememberedCell {
     /// Relative offset at the last sighting, not a current map location.
     pub position: Position,
     pub wall: bool,
+    pub place_hint: bool,
     pub last_seen_tick: u64,
     pub last_seen_revision: u64,
     pub ground_items: Vec<GroundItemView>,
@@ -81,6 +82,7 @@ impl ClientState {
                     key: cell.key.clone(),
                     position: cell.position,
                     wall: cell.wall,
+                    place_hint: cell.place_hint,
                     last_seen_tick: observation.tick,
                     last_seen_revision: self.snapshot.state.revision,
                     ground_items: observation

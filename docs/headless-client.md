@@ -97,3 +97,8 @@ input, authentication, save/resume, and wizard-based hidden changes and rewind.
 The versioned wizard script is `scripts/scenarios/perception-memory.json`.
 These tests join existing Windows/Linux discovery in debug and release; native
 text/ASCII process coverage remains required alongside this headless frontend.
+
+[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
+They carry no labels or boundaries. Shared memory retains last-seen hints; text
+and ASCII do not render them or use them for navigation yet. New saves use
+`place-hints-v4`; earlier saves retain their original rules.

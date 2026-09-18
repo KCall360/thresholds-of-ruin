@@ -242,6 +242,13 @@ impl Game {
             .map_err(|_| GameError::InvalidLocation)
     }
 
+    /// Map-authoring metadata; no action time, names, boundaries or travel rules.
+    pub fn set_place_hint(&mut self, location: Location, present: bool) -> Result<(), GameError> {
+        self.world
+            .set_place_hint(location, present)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), GameError> {
         if self.legacy_perception
             || (wall

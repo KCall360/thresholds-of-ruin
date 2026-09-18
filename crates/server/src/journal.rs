@@ -171,6 +171,10 @@ pub enum WizardOperation {
         to: Position,
         quarter_turns: u8,
     },
+    SetPlaceHint {
+        position: Position,
+        present: bool,
+    },
     SetWall {
         position: Position,
         wall: bool,
@@ -201,6 +205,7 @@ pub enum WizardResult {
     },
     Connected,
     WallSet,
+    PlaceHintSet,
     ItemPlaced {
         item: u64,
     },
