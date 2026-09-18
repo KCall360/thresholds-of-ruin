@@ -6,6 +6,8 @@ internals. `tor-client-common::ClientState` validates ordered updates and keeps
 the current disclosed state plus a bounded recent history. The shared `Connection`
 transport applies validated snapshots/updates for the [text client](text-client.md)
 and [graphical ASCII client](ascii-client.md).
+The [headless client](headless-client.md) uses the same transport and exposes
+current state and local last-seen room memory separately for scripted acceptance.
 
 ## Run locally
 

@@ -21,6 +21,10 @@ The [wizard mode foundation](docs/wizard-mode.md) provides server-authorized ite
 and actor placement, teleportation, and bounded rewind with retained branches.
 Wizard games are permanently marked in both frontends.
 
+A [headless JSON-lines client](docs/headless-client.md) supports scripted play
+and perception tests. Shared clients retain disclosed room views separately from
+current state; the headless output exposes this potentially stale local memory.
+
 Start playing with [the text client guide](docs/text-client.md).
 For the windowed frontend and text-to-ASCII switching, see
 [the graphical ASCII guide](docs/ascii-client.md).

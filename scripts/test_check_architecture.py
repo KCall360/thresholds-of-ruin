@@ -55,6 +55,14 @@ class ArchitectureTests(unittest.TestCase):
             ["tor-new-helper has no dependency policy"],
         )
 
+    def test_headless_client_cannot_import_authoritative_state(self):
+        for backend in ("tor-world", "tor-simulation", "tor-server"):
+            graph = metadata([
+                package("tor-client-headless", [dependency(backend)]),
+                package(backend),
+            ])
+            self.assertEqual(violations(graph), [f"tor-client-headless -> {backend} is forbidden"])
+
     def test_unreviewed_local_dependency_is_rejected_but_registry_crates_are_not(self):
         graph = metadata([
             package("tor-protocol", [

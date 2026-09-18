@@ -8,6 +8,7 @@ members = [
     "crates/client-common",
     "crates/client-ascii",
     "crates/client-text",
+    "crates/client-headless",
     "crates/test-support",
 ]
 

@@ -103,7 +103,8 @@ impl Connection {
                 if snapshot.actor != self.state.state().observation.actor {
                     return Err("Snapshot changed attached actor".into());
                 }
-                self.state = ClientState::from_snapshot(*snapshot.clone())
+                self.state
+                    .replace_snapshot(*snapshot.clone())
                     .map_err(|e| format!("Invalid snapshot: {e:?}"))?;
             }
             _ => {}

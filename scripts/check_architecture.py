@@ -15,6 +15,7 @@ ALLOWED = {
     "tor-client-common": {"tor-protocol"},
     "tor-client-ascii": {"tor-client-common", "tor-protocol"},
     "tor-client-text": {"tor-client-common", "tor-protocol"},
+    "tor-client-headless": {"tor-client-common", "tor-protocol"},
     "tor-test-support": {
         "tor-world", "tor-simulation", "tor-protocol", "tor-server",
         "tor-client-common", "tor-client-ascii", "tor-client-text",

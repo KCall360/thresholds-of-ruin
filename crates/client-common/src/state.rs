@@ -1,5 +1,21 @@
 use crate::{ObservationStream, StreamError};
+use serde::Serialize;
+use std::collections::BTreeMap;
 use tor_protocol::*;
+
+/// Last disclosed contents of one room elevation, not current world truth.
+/// This matches the current whole-room perception rule. Partial visibility will
+/// require explicit visible cells before unseen cells can be refreshed safely.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RememberedView {
+    pub region: RegionView,
+    pub elevation: i32,
+    pub last_seen_tick: u64,
+    pub last_seen_revision: u64,
+    pub ground_items: Vec<GroundItemView>,
+    pub visible_actors: Vec<ActorView>,
+    pub exits: Vec<ExitView>,
+}
 
 /// Shared presentation state for all frontends. Older history pages can be
 /// requested separately; this model retains at most the latest 100 entries.
@@ -7,6 +23,7 @@ use tor_protocol::*;
 pub struct ClientState {
     snapshot: Snapshot,
     stream: ObservationStream,
+    memory: BTreeMap<(u64, i32), RememberedView>,
 }
 
 impl ClientState {
@@ -24,10 +41,49 @@ impl ClientState {
                 snapshot.cursor.tick,
             )?;
         }
-        Ok(Self {
+        let mut client = Self {
             stream: ObservationStream::from_snapshot(snapshot.actor, snapshot.cursor),
             snapshot,
-        })
+            memory: BTreeMap::new(),
+        };
+        client.remember_view();
+        Ok(client)
+    }
+
+    /// Local observations only; place names and history never manufacture views.
+    /// Memory lasts for this connection and is cleared on a branch change.
+    pub fn memory(&self) -> impl Iterator<Item = &RememberedView> {
+        self.memory.values()
+    }
+
+    /// A validated snapshot establishes a new stream boundary atomically.
+    pub fn replace_snapshot(&mut self, snapshot: Snapshot) -> Result<(), StreamError> {
+        if snapshot.actor != self.snapshot.actor {
+            return Err(StreamError::WrongActor);
+        }
+        let mut candidate = Self::from_snapshot(snapshot)?;
+        if candidate.branch() == self.branch() {
+            candidate.memory = self.memory.clone();
+            candidate.remember_view();
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    fn remember_view(&mut self) {
+        let observation = &self.snapshot.state.observation;
+        self.memory.insert(
+            (observation.region.id, observation.position.z),
+            RememberedView {
+                region: observation.region.clone(),
+                elevation: observation.position.z,
+                last_seen_tick: observation.tick,
+                last_seen_revision: self.snapshot.state.revision,
+                ground_items: observation.ground_items.clone(),
+                visible_actors: observation.visible_actors.clone(),
+                exits: observation.exits.clone(),
+            },
+        );
     }
 
     pub fn state(&self) -> &StateView {
@@ -70,6 +126,7 @@ impl ClientState {
                     candidate.remember(*entry, update.cursor.tick)?;
                 }
                 candidate.snapshot.state = *state;
+                candidate.remember_view();
             }
             UpdateBody::Annotation { entry } => {
                 if update.cursor.tick != candidate.snapshot.state.observation.tick
