@@ -1,0 +1,508 @@
+use crate::engine::valid_label;
+use crate::{Engine, Failure};
+use std::collections::{BTreeMap, BTreeSet};
+use tokio::sync::{mpsc, watch};
+use tor_protocol::*;
+
+/// Trusted startup configuration. Tokens are never put into game history.
+#[derive(Clone)]
+pub struct Account {
+    pub user: String,
+    pub token: String,
+    pub actors: BTreeSet<ActorId>,
+}
+
+struct Client {
+    user: String,
+    frontend: String,
+    allowed: BTreeSet<ActorId>,
+    actor: Option<ActorId>,
+    sequence: u64,
+    observation_tick: u64,
+    messages: mpsc::Sender<ServerMessage>,
+    close: watch::Sender<bool>,
+}
+
+pub(crate) struct Connection {
+    pub id: u64,
+    pub messages: mpsc::Receiver<ServerMessage>,
+    pub close: watch::Receiver<bool>,
+}
+
+/// Serialized session operations keep snapshots and streamed updates consistent.
+pub struct Service {
+    engine: Engine,
+    clients: BTreeMap<u64, Client>,
+    controllers: BTreeMap<ActorId, u64>,
+    next_client: u64,
+}
+
+impl Service {
+    pub fn new(engine: Engine) -> Self {
+        Self {
+            engine,
+            clients: BTreeMap::new(),
+            controllers: BTreeMap::new(),
+            next_client: 1,
+        }
+    }
+
+    pub(crate) fn connect(
+        &mut self,
+        account: &Account,
+        frontend: String,
+    ) -> Result<Connection, Failure> {
+        if !valid_label(&frontend) || self.clients.len() >= 128 {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Connection is unavailable",
+            ));
+        }
+        let next = self.next_client.checked_add(1).ok_or_else(|| {
+            Failure::new(ErrorCode::InvalidRequest, "Connection identity exhausted")
+        })?;
+        let id = self.next_client;
+        self.next_client = next;
+        let (messages, receiver) = mpsc::channel(64);
+        let (close, closing) = watch::channel(false);
+        let actors: Vec<_> = self
+            .engine
+            .actors()
+            .into_iter()
+            .filter(|actor| account.actors.contains(actor))
+            .collect();
+        self.clients.insert(
+            id,
+            Client {
+                user: account.user.clone(),
+                frontend,
+                allowed: actors.iter().copied().collect(),
+                actor: None,
+                sequence: 0,
+                observation_tick: 0,
+                messages,
+                close,
+            },
+        );
+        self.send(
+            id,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                user: account.user.clone(),
+                actors,
+            },
+        );
+        Ok(Connection {
+            id,
+            messages: receiver,
+            close: closing,
+        })
+    }
+
+    pub(crate) fn handle(&mut self, id: u64, request_id: String, request: Request) {
+        if !self.clients.contains_key(&id) {
+            return;
+        }
+        let result = if valid_label(&request_id) {
+            self.process(id, &request_id, request)
+        } else {
+            Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Invalid request ID",
+            ))
+        };
+        if let Err(error) = result {
+            self.send(
+                id,
+                ServerMessage::Error {
+                    request_id: Some(request_id),
+                    code: error.code,
+                    message: error.message,
+                },
+            );
+        }
+    }
+
+    fn process(&mut self, id: u64, request_id: &str, request: Request) -> Result<(), Failure> {
+        if let Request::Attach { actor } = request {
+            let client = self.clients.get_mut(&id).expect("connected client");
+            if client.actor.is_some() {
+                return Err(Failure::new(
+                    ErrorCode::AlreadyAttached,
+                    "Reconnect to attach another actor",
+                ));
+            }
+            if !client.allowed.contains(&actor) {
+                return Err(Failure::new(
+                    ErrorCode::Unauthorized,
+                    "Actor is unavailable",
+                ));
+            }
+            client.actor = Some(actor);
+            return self.snapshot(id, request_id);
+        }
+        let client = &self.clients[&id];
+        let actor = client
+            .actor
+            .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
+        let user = client.user.clone();
+        let frontend = client.frontend.clone();
+        match request {
+            Request::AcquireControl => {
+                match self.controllers.get(&actor) {
+                    Some(owner) if *owner != id => {
+                        return Err(Failure::new(
+                            ErrorCode::ControlTaken,
+                            "Another client controls this actor",
+                        ))
+                    }
+                    Some(_) => {}
+                    None => {
+                        self.controllers.insert(actor, id);
+                        self.control_update(actor);
+                    }
+                }
+                self.ack(id, request_id, None);
+            }
+            Request::ReleaseControl => {
+                if self
+                    .controllers
+                    .get(&actor)
+                    .is_some_and(|owner| *owner != id)
+                {
+                    return Err(Failure::new(
+                        ErrorCode::NotController,
+                        "This client does not control the actor",
+                    ));
+                }
+                if self.controllers.remove(&actor).is_some() {
+                    self.control_update(actor);
+                }
+                self.ack(id, request_id, None);
+            }
+            Request::Snapshot => return self.snapshot(id, request_id),
+            Request::History { before, limit } => {
+                let page =
+                    self.engine
+                        .history(actor, &user, before.as_ref(), usize::from(limit))?;
+                self.send(
+                    id,
+                    ServerMessage::History {
+                        request_id: request_id.into(),
+                        page,
+                    },
+                );
+            }
+            Request::Command { branch, command } => {
+                if let Some(previous) = self
+                    .engine
+                    .retry(&user, actor, request_id, &branch, &command)?
+                {
+                    self.ack(id, request_id, Some(previous.entry.id));
+                    return Ok(());
+                }
+                if matches!(command, Command::Act { .. })
+                    && self.controllers.get(&actor) != Some(&id)
+                {
+                    return Err(Failure::new(
+                        ErrorCode::NotController,
+                        "Acquire control before acting",
+                    ));
+                }
+                let revisions: BTreeMap<_, _> = self
+                    .engine
+                    .actors()
+                    .into_iter()
+                    .map(|actor| Ok((actor, self.engine.revision(actor)?)))
+                    .collect::<Result<_, Failure>>()?;
+                let result = self
+                    .engine
+                    .command(&user, &frontend, actor, request_id, &branch, command)?;
+                match result.entry.content {
+                    HistoryContent::Annotation { .. } => self.annotation_update(&result.entry),
+                    HistoryContent::Action { .. } => {
+                        let recipients: Vec<_> = self
+                            .clients
+                            .iter()
+                            .filter_map(|(&id, client)| client.actor.map(|actor| (id, actor)))
+                            .collect();
+                        for (recipient, observer) in recipients {
+                            let state = self.engine.state(observer)?;
+                            if revisions.get(&observer) != Some(&state.revision) {
+                                let event = (observer == result.entry.actor)
+                                    .then(|| Box::new(result.entry.clone()));
+                                self.update(
+                                    recipient,
+                                    UpdateBody::Observation {
+                                        state: Box::new(state),
+                                        event,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+                self.ack(id, request_id, Some(result.entry.id));
+            }
+            Request::Attach { .. } => unreachable!("handled before attachment lookup"),
+        }
+        Ok(())
+    }
+
+    fn snapshot(&mut self, id: u64, request_id: &str) -> Result<(), Failure> {
+        let client = &self.clients[&id];
+        let actor = client
+            .actor
+            .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
+        let state = self.engine.state(actor)?;
+        let snapshot = Snapshot {
+            actor,
+            branch: self.engine.branch().clone(),
+            cursor: StreamCursor {
+                sequence: client.sequence,
+                tick: state.observation.tick,
+            },
+            state,
+            has_control: self.controllers.get(&actor) == Some(&id),
+            history: self
+                .engine
+                .history(actor, &client.user, None, MAX_HISTORY_PAGE)?,
+        };
+        self.clients
+            .get_mut(&id)
+            .expect("connected client")
+            .observation_tick = snapshot.state.observation.tick;
+        self.send(
+            id,
+            ServerMessage::Snapshot {
+                request_id: request_id.into(),
+                snapshot: Box::new(snapshot),
+            },
+        );
+        Ok(())
+    }
+
+    /// Trusted backend entry point; not exposed as a client request.
+    pub fn annotate_backend(
+        &mut self,
+        actor: ActorId,
+        component: &str,
+        anchor: Anchor,
+        category: AnnotationCategory,
+        text: &str,
+    ) -> Result<HistoryEntry, Failure> {
+        let entry = self
+            .engine
+            .annotate_backend(actor, component, anchor, category, text)?;
+        self.annotation_update(&entry);
+        Ok(entry)
+    }
+
+    fn annotation_update(&mut self, entry: &HistoryEntry) {
+        let recipients: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| {
+                client
+                    .actor
+                    .is_some_and(|actor| entry.visible_to(actor, &client.user))
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in recipients {
+            self.update(
+                id,
+                UpdateBody::Annotation {
+                    entry: Box::new(entry.clone()),
+                },
+            );
+        }
+    }
+
+    fn control_update(&mut self, actor: ActorId) {
+        let recipients: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.actor == Some(actor))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in recipients {
+            self.update(
+                id,
+                UpdateBody::Control {
+                    has_control: self.controllers.get(&actor) == Some(&id),
+                },
+            );
+        }
+    }
+
+    fn update(&mut self, id: u64, body: UpdateBody) {
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let Some(sequence) = client.sequence.checked_add(1) else {
+            self.disconnect(id);
+            return;
+        };
+        let actor = client.actor.expect("only attached clients receive updates");
+        client.sequence = sequence;
+        // Disconnecting a slow controller can publish control changes in the
+        // middle of an action broadcast. Keep those changes at each recipient's
+        // last disclosed tick until its new observation has been queued.
+        if let UpdateBody::Observation { state, .. } = &body {
+            client.observation_tick = state.observation.tick;
+        }
+        let tick = client.observation_tick;
+        self.send(
+            id,
+            ServerMessage::Update {
+                update: Box::new(StreamUpdate {
+                    actor,
+                    branch: self.engine.branch().clone(),
+                    cursor: StreamCursor { sequence, tick },
+                    body,
+                }),
+            },
+        );
+    }
+
+    fn ack(&mut self, id: u64, request_id: &str, entry_id: Option<EntryId>) {
+        self.send(
+            id,
+            ServerMessage::Ack {
+                request_id: request_id.into(),
+                entry_id,
+            },
+        );
+    }
+
+    fn send(&mut self, id: u64, message: ServerMessage) {
+        if self
+            .clients
+            .get(&id)
+            .is_some_and(|client| client.messages.try_send(message).is_err())
+        {
+            // A slow client must reconnect for a snapshot, never silently miss updates.
+            self.disconnect(id);
+        }
+    }
+
+    pub(crate) fn disconnect(&mut self, id: u64) {
+        let Some(client) = self.clients.remove(&id) else {
+            return;
+        };
+        let _ = client.close.send(true);
+        if let Some(actor) = client.actor {
+            if self.controllers.get(&actor) == Some(&id) {
+                self.controllers.remove(&actor);
+                self.control_update(actor);
+            }
+        }
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        for id in self.clients.keys().copied().collect::<Vec<_>>() {
+            self.disconnect(id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Scenario;
+
+    #[test]
+    fn disconnect_during_action_broadcast_keeps_control_tick_at_last_disclosed_state() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            user: "alice".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut controller = service.connect(&account, "text".into()).unwrap();
+        let mut observer = service.connect(&account, "ascii".into()).unwrap();
+        for client in [&mut controller, &mut observer] {
+            client.messages.try_recv().unwrap();
+            service.handle(
+                client.id,
+                "attach".into(),
+                Request::Attach { actor: ActorId(1) },
+            );
+            client.messages.try_recv().unwrap();
+        }
+        service.handle(controller.id, "control".into(), Request::AcquireControl);
+        controller.messages.try_recv().unwrap();
+        controller.messages.try_recv().unwrap();
+        observer.messages.try_recv().unwrap();
+        for i in 0..64 {
+            service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
+        }
+        service.handle(
+            controller.id,
+            "wait".into(),
+            Request::Command {
+                branch: service.engine.branch().clone(),
+                command: Command::Act {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            },
+        );
+        assert!(*controller.close.borrow());
+        let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
+            panic!("control update")
+        };
+        assert!(matches!(
+            update.body,
+            UpdateBody::Control { has_control: false }
+        ));
+        assert_eq!(update.cursor.tick, 0);
+        let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
+            panic!("observation update")
+        };
+        assert!(matches!(update.body, UpdateBody::Observation { .. }));
+        assert_eq!(update.cursor.tick, 100);
+    }
+
+    #[test]
+    fn slow_client_is_disconnected_and_releases_control_instead_of_losing_updates() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            user: "alice".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut connection = service.connect(&account, "text".into()).unwrap();
+        connection.messages.try_recv().unwrap();
+        service.handle(
+            connection.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        connection.messages.try_recv().unwrap();
+        service.handle(connection.id, "control".into(), Request::AcquireControl);
+        connection.messages.try_recv().unwrap();
+        connection.messages.try_recv().unwrap();
+        for i in 0..65 {
+            service.handle(connection.id, format!("snapshot-{i}"), Request::Snapshot);
+        }
+        assert!(*connection.close.borrow());
+        assert!(!service.clients.contains_key(&connection.id));
+        assert!(!service.controllers.contains_key(&ActorId(1)));
+        let mut replacement = service.connect(&account, "ascii".into()).unwrap();
+        replacement.messages.try_recv().unwrap();
+        service.handle(
+            replacement.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        let ServerMessage::Snapshot { snapshot, .. } = replacement.messages.try_recv().unwrap()
+        else {
+            panic!("snapshot")
+        };
+        assert_eq!(snapshot.cursor.sequence, 0);
+        service.handle(replacement.id, "control".into(), Request::AcquireControl);
+        assert_eq!(service.controllers.get(&ActorId(1)), Some(&replacement.id));
+    }
+}

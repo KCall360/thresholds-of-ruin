@@ -1,5 +1,8 @@
 //! Client-side validation of server-pushed observation ordering.
 
+mod state;
+pub use state::ClientState;
+
 use tor_protocol::{ActorId, StreamCursor};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7,13 +10,15 @@ pub enum StreamError {
     WrongActor,
     SequenceMismatch,
     TimeReversed,
+    WrongBranch,
+    InconsistentState,
 }
 
 /// Tracks one attachment after its authoritative snapshot has been received.
 ///
 /// This only validates ordering. Transport, payload application, and reconnect
 /// orchestration are implemented in later milestones.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservationStream {
     actor: ActorId,
     cursor: StreamCursor,

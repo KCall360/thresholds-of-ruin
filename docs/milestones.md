@@ -13,9 +13,13 @@ Completed: deterministic in-memory simulation of two connected rooms, actor IDs,
 movement/pickup/wait actions, variable recovery times, room-level observations,
 and integration acceptance tests. See [implementation details](simulation-slice.md).
 
-Remaining PRs: network protocol/server and streamed observations; the text client;
-the graphical ASCII client and control transfer; persistent save/resume. The
-simulation tests do not stand in for future server or frontend process tests.
+Completed: versioned JSON/WebSocket server, actor attachment and control transfer,
+streamed observations, user/frontend/backend annotations, durable journal replay,
+and real WebSocket/process integration tests. See [the protocol](protocol.md).
+
+Remaining PRs: the text client; the graphical ASCII client; client-driven switching
+and save/resume acceptance. The journal already persists actions and notes, but
+the full milestone still requires both runnable frontends and their process tests.
 
 Write the acceptance scenario first, then implement a seeded two-space scenario,
 an object, actor control, streaming server, text client, graphical ASCII client,
