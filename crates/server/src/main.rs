@@ -11,14 +11,16 @@ use tor_server::{serve, Account, Engine, Scenario, Service};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut listen: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut seed = 0;
+    let mut wizard = false;
     let mut save = PathBuf::from("saves/game.json");
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
-                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\nOnly loopback connections are supported. Existing saves retain their original seed.");
+                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
             }
+            "--wizard" => wizard = true,
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
             "--seed" => seed = args.next().ok_or("Missing --seed value")?.parse()?,
             "--save" => save = args.next().ok_or("Missing --save value")?.into(),
@@ -49,7 +51,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(std::env::VarError::NotPresent) => None,
         Err(_) => return Err("TOR_SPECTATOR_TOKEN must be Unicode".into()),
     };
-    let engine = Engine::open(save, Scenario::two_room(seed))?;
+    let wizard_token = match std::env::var("TOR_WIZARD_TOKEN") {
+        Ok(value) => {
+            if !wizard {
+                return Err("TOR_WIZARD_TOKEN requires --wizard".into());
+            }
+            if value.trim().len() < 16
+                || value.len() > 1024
+                || value.chars().any(char::is_control)
+                || value == token
+                || spectator_token.as_ref() == Some(&value)
+            {
+                return Err(
+                    "TOR_WIZARD_TOKEN must be distinct and contain 16-1024 non-control characters"
+                        .into(),
+                );
+            }
+            Some(value)
+        }
+        Err(std::env::VarError::NotPresent) if !wizard => None,
+        Err(_) => return Err("--wizard requires TOR_WIZARD_TOKEN".into()),
+    };
+    let mut engine = Engine::open(save, Scenario::two_room(seed))?;
+    if wizard {
+        engine.enable_wizard()?;
+    }
     let account = Account {
         role: tor_protocol::AccessRole::Player,
         user: "local".into(),
@@ -61,6 +87,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         accounts.push(Account {
             role: tor_protocol::AccessRole::Spectator,
             user: "spectator".into(),
+            token,
+            actors: accounts[0].actors.clone(),
+        });
+    }
+    if let Some(token) = wizard_token {
+        accounts.push(Account {
+            role: tor_protocol::AccessRole::Wizard,
+            user: "wizard".into(),
             token,
             actors: accounts[0].actors.clone(),
         });

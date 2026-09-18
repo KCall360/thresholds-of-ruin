@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::fs;
 use std::num::NonZeroU64;
@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use crate::adapt;
 
-const ARCHIVE_VERSION: u32 = 1;
+const ARCHIVE_VERSION: u32 = 2;
+const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = "two-room-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +89,8 @@ struct Record {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Archive {
+    #[serde(default)]
+    wizard_game: Option<bool>,
     version: u32,
     ruleset: String,
     scenario: Scenario,
@@ -101,10 +104,19 @@ pub struct CommandResult {
     pub duplicate: bool,
 }
 
-/// A durable, single-branch journal. Notes never enter the game simulation.
-/// New timeline branches are reserved for the later undo milestone.
+#[derive(Clone, Debug)]
+struct Boundary {
+    id: Option<EntryId>,
+    game: Game,
+    revisions: BTreeMap<ActorId, u64>,
+}
+
+/// Durable chronological journal, including retained futures and explicit forks.
 #[derive(Debug)]
 pub struct Engine {
+    current_branch: BranchId,
+    wizard_enabled: bool,
+    boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     archive: Archive,
     revisions: BTreeMap<ActorId, u64>,
@@ -127,17 +139,27 @@ impl Engine {
                 .map_err(|_| invalid_archive())?;
             revisions.insert(ActorId(id.0), 0);
         }
+        let branch = BranchId(Uuid::new_v4().to_string());
+        let initial = Arc::new(Boundary {
+            id: None,
+            game: game.clone(),
+            revisions: revisions.clone(),
+        });
         Ok(Self {
+            current_branch: branch.clone(),
+            wizard_enabled: false,
+            boundaries: VecDeque::from([initial]),
             game,
             revisions,
             receipts: BTreeMap::new(),
             path: None,
             lock: None,
             archive: Archive {
+                wizard_game: Some(false),
                 version: ARCHIVE_VERSION,
                 ruleset: RULESET.into(),
                 scenario,
-                branch: BranchId(Uuid::new_v4().to_string()),
+                branch,
                 records: Vec::new(),
             },
         })
@@ -162,13 +184,18 @@ impl Engine {
     }
 
     fn replay(archive: Archive) -> Result<Self, Failure> {
-        if archive.version != ARCHIVE_VERSION
+        if !matches!(archive.version, 1 | ARCHIVE_VERSION)
+            || (archive.version == 1 && archive.wizard_game == Some(true))
+            || (archive.version == ARCHIVE_VERSION && archive.wizard_game.is_none())
             || archive.ruleset != RULESET
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
             return Err(invalid_archive());
         }
         let mut engine = Self::memory(archive.scenario)?;
+        engine.current_branch = archive.branch.clone();
+        engine.archive.wizard_game = Some(archive.wizard_game.unwrap_or(false));
+        engine.wizard_enabled = archive.wizard_game.unwrap_or(false);
         engine.archive.branch = archive.branch;
         for record in archive.records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
@@ -208,11 +235,24 @@ impl Engine {
                 return Err(invalid_archive());
             }
         }
+        engine.wizard_enabled = false;
         Ok(engine)
     }
 
     pub fn branch(&self) -> &BranchId {
-        &self.archive.branch
+        &self.current_branch
+    }
+    /// Trusted administration operation. The marker commits before authority changes.
+    pub fn enable_wizard(&mut self) -> Result<(), Failure> {
+        let mut candidate = self.candidate();
+        candidate.archive.wizard_game = Some(true);
+        candidate.persist()?;
+        candidate.wizard_enabled = true;
+        *self = candidate;
+        Ok(())
+    }
+    pub fn wizard_enabled(&self) -> bool {
+        self.wizard_enabled
     }
     pub fn actors(&self) -> Vec<ActorId> {
         self.revisions.keys().copied().collect()
@@ -235,6 +275,7 @@ impl Engine {
     }
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
         Ok(StateView {
+            wizard_game: self.archive.wizard_game.unwrap_or(false),
             revision: self.revision(actor)?,
             observation: self.observation(actor)?,
         })
@@ -244,6 +285,17 @@ impl Engine {
         &self,
         actor: ActorId,
         user: &str,
+        before: Option<&EntryId>,
+        limit: usize,
+    ) -> Result<HistoryPage, Failure> {
+        self.history_branch(actor, user, self.branch(), before, limit)
+    }
+
+    pub fn history_branch(
+        &self,
+        actor: ActorId,
+        user: &str,
+        branch: &BranchId,
         before: Option<&EntryId>,
         limit: usize,
     ) -> Result<HistoryPage, Failure> {
@@ -259,7 +311,7 @@ impl Engine {
             .records
             .iter()
             .map(|record| &record.entry)
-            .filter(|entry| entry.visible_to(actor, user))
+            .filter(|entry| &entry.branch == branch && entry.visible_to(actor, user))
             .collect();
         let end = match before {
             Some(id) => visible
@@ -334,6 +386,12 @@ impl Engine {
         receipt: &Receipt,
         recorded_id: Option<EntryId>,
     ) -> Result<CommandResult, Failure> {
+        if matches!(receipt.command, Command::Wizard { .. }) && !self.wizard_enabled {
+            return Err(Failure::new(
+                ErrorCode::Unauthorized,
+                "Wizard operations are disabled",
+            ));
+        }
         if !valid_label(&receipt.user)
             || !valid_label(&receipt.frontend)
             || !valid_label(&receipt.request_id)
@@ -360,8 +418,32 @@ impl Engine {
         }
         let revision = self.revision(receipt.actor)?;
         let mut candidate = self.candidate();
-        let tick = candidate.game.tick();
+        let mut tick = candidate.game.tick();
+        let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
+            Command::Wizard {
+                expected_revision,
+                operation,
+            } => {
+                if *expected_revision != revision {
+                    return Err(Failure::new(
+                        ErrorCode::StaleRevision,
+                        "Refresh before a wizard operation",
+                    ));
+                }
+                let result = candidate.apply_wizard(receipt, operation, &entry_id)?;
+                tick = candidate.game.tick();
+                (
+                    Author::User {
+                        user: receipt.user.clone(),
+                    },
+                    Audience::Private,
+                    HistoryContent::Wizard {
+                        operation: operation.clone(),
+                        result,
+                    },
+                )
+            }
             Command::Act {
                 expected_revision,
                 action,
@@ -429,8 +511,8 @@ impl Engine {
             }
         };
         let entry = HistoryEntry {
-            id: recorded_id.unwrap_or_else(new_id),
-            branch: self.branch().clone(),
+            id: entry_id,
+            branch: candidate.branch().clone(),
             actor: receipt.actor,
             tick,
             author,
@@ -445,6 +527,16 @@ impl Engine {
             entry: entry.clone(),
             receipt: Some(receipt.clone()),
         });
+        if !matches!(entry.content, HistoryContent::Annotation { .. }) {
+            candidate.boundaries.push_back(Arc::new(Boundary {
+                id: Some(entry.id.clone()),
+                game: candidate.game.clone(),
+                revisions: candidate.revisions.clone(),
+            }));
+            if candidate.boundaries.len() > REWIND_BOUNDARIES {
+                candidate.boundaries.pop_front();
+            }
+        }
         candidate.persist()?;
         *self = candidate;
         Ok(CommandResult {
@@ -462,6 +554,93 @@ impl Engine {
         text: &str,
     ) -> Result<HistoryEntry, Failure> {
         self.backend_note(actor, component, anchor, category, text, None)
+    }
+
+    fn apply_wizard(
+        &mut self,
+        receipt: &Receipt,
+        operation: &WizardOperation,
+        entry_id: &EntryId,
+    ) -> Result<WizardResult, Failure> {
+        let invalid = || {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Wizard target or settings are unavailable",
+            )
+        };
+        let before: BTreeMap<_, _> = self
+            .actors()
+            .into_iter()
+            .map(|actor| Ok((actor, self.observation(actor)?)))
+            .collect::<Result<_, Failure>>()?;
+        let result = match operation {
+            WizardOperation::PlaceItem { kind, position } => {
+                let name = match kind {
+                    WizardItem::Token => "copper token",
+                    WizardItem::Tablet => "stone tablet",
+                };
+                let item = self
+                    .game
+                    .place_item(adapt::location(*position), name.into())
+                    .map_err(|_| invalid())?;
+                WizardResult::ItemPlaced { item: item.0 }
+            }
+            WizardOperation::SpawnActor {
+                position,
+                turn_ticks,
+            } => {
+                let duration = NonZeroU64::new(*turn_ticks).ok_or_else(invalid)?;
+                let actor = self
+                    .game
+                    .spawn_actor(adapt::location(*position), duration)
+                    .map_err(|_| invalid())?;
+                self.revisions.insert(ActorId(actor.0), 0);
+                WizardResult::ActorSpawned {
+                    actor: ActorId(actor.0),
+                }
+            }
+            WizardOperation::Teleport { actor, position } => {
+                self.game
+                    .teleport(SimActor(actor.0), adapt::location(*position))
+                    .map_err(|_| invalid())?;
+                WizardResult::Teleported { actor: *actor }
+            }
+            WizardOperation::Rewind { target } => {
+                if let Some(id) = target {
+                    if !self.archive.records.iter().any(|r| {
+                        &r.entry.id == id && r.entry.visible_to(receipt.actor, &receipt.user)
+                    }) {
+                        return Err(invalid());
+                    }
+                }
+                let boundary = self
+                    .boundaries
+                    .iter()
+                    .find(|b| &b.id == target)
+                    .cloned()
+                    .ok_or_else(invalid)?;
+                if !boundary.revisions.contains_key(&receipt.actor) {
+                    return Err(invalid());
+                }
+                self.game = boundary.game.clone();
+                self.revisions = boundary.revisions.clone();
+                let from_branch = self.current_branch.clone();
+                self.current_branch = BranchId(entry_id.0.clone());
+                return Ok(WizardResult::Rewound {
+                    from_branch,
+                    branch: self.current_branch.clone(),
+                    tick: self.game.tick(),
+                    next_actor: ActorId(self.game.next_actor().ok_or_else(invalid)?.0),
+                });
+            }
+        };
+        for (actor, old) in before {
+            if actor == receipt.actor || self.observation(actor)? != old {
+                let revision = self.revisions.get_mut(&actor).expect("existing actor");
+                *revision = revision.checked_add(1).ok_or_else(invalid)?;
+            }
+        }
+        Ok(result)
     }
 
     fn backend_note(
@@ -535,7 +714,8 @@ impl Engine {
                     .map(|r| &r.entry)
                     .find(|entry| &entry.id == id)
                     .ok_or_else(invalid_anchor)?;
-                if !entry.visible_to(actor, user)
+                if &entry.branch != self.branch()
+                    || !entry.visible_to(actor, user)
                     || (audience == Audience::Actor && entry.audience == Audience::Private)
                 {
                     return Err(invalid_anchor());
@@ -550,6 +730,9 @@ impl Engine {
     // Clone would allow two independent engines to overwrite each other's journal.
     fn candidate(&self) -> Self {
         Self {
+            current_branch: self.current_branch.clone(),
+            wizard_enabled: self.wizard_enabled,
+            boundaries: self.boundaries.clone(),
             game: self.game.clone(),
             archive: self.archive.clone(),
             revisions: self.revisions.clone(),

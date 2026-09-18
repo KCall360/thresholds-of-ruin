@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 2)
+# Server protocol and annotations (version 3)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -65,9 +65,10 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 2 requires the role in `welcome`; version 1 clients are rejected
-and must be upgraded with the server. The save format and simulation rules remain
-version 1: role and credentials are startup/session configuration, never journaled.
+Protocol version 3 requires the role in `welcome` and the wizard marker in state.
+Older clients are rejected and must be upgraded with the server. Save format 2
+migrates normal format-1 saves on open; simulation rules remain `two-room-v1`.
+Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
 ## Connection and control
@@ -75,11 +76,11 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":2,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":3,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
-server-granted `role` (`player` or `spectator`).
+server-granted `role` (`player`, `spectator`, or `wizard`).
 It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 
@@ -207,7 +208,7 @@ Both live delivery and history queries apply the same audience rules.
 Each record has an opaque UUID, branch ID, actor, creation tick, author, audience,
 and content. These server-generated identities use system entropy outside the
 simulation. Branch IDs survive replay, and notes keep their original attachments.
-Timeline creation and undo are not implemented in this version.
+Wizard rewind creates distinct branches and retains existing entry anchors.
 
 ## History and persistence
 
@@ -220,7 +221,8 @@ pagination, so private entries do not create visible gaps or total-count leaks.
 {"type":"request","request_id":"history-1","request":{"type":"history","before":null,"limit":50}}
 ```
 
-The versioned journal stores scenario inputs, branch identity, actions, annotations,
+The versioned journal stores scenario inputs, root branch identity, a permanent
+wizard marker, actions, privileged inputs/results, annotations,
 and accepted-command receipts. Replay applies actions to the deterministic
 simulation and restores notes as metadata, checking the recorded results and
 timestamps. Unknown format/rules versions and inconsistent journals fail to load;
@@ -259,3 +261,41 @@ state, verify pagination and reconnection, and reject old protocol handshakes.
 Actual text and native ASCII processes additionally test spectator credentials,
 read-only inputs, live gameplay, unchanged saves on denied inputs, and restart.
 The server configuration tests cover absent, duplicate, and invalid spectator tokens.
+
+## Wizard commands and retained branches
+
+See [wizard mode](wizard-mode.md) for configuration, commands, limits, and testing.
+`--wizard` and a distinct `TOR_WIZARD_TOKEN` permanently mark the save before
+listening. Only server-granted `wizard` accounts can submit `command` with a
+`wizard` payload; ordinary actor control is not wizard authority. These accounts
+have game-wide developer authority, while ordinary actions still require control.
+Spectators can also use `history_branch` to read permitted abandoned history.
+
+Example payload inside a branch-checked `command` request:
+
+```json
+{"type":"wizard","expected_revision":0,"operation":{"type":"teleport","actor":1,"position":{"region":2,"x":1,"y":1,"z":0}}}
+```
+
+Operations are `place_item` (kind `token` or `tablet`, position), `spawn_actor`
+(position, positive `turn_ticks`), `teleport` (actor, position), and `rewind`
+(`target`: a retained entry ID, or null for the initial boundary). Each records
+private authenticated wizard history with structured inputs/results, separate
+from annotations. Setup preserves ordinary action time and validates invariants.
+
+After setup, affected clients receive a `snapshot` with empty `request_id`; rewind
+sends new-branch snapshots to all surviving attachments. Such snapshots establish
+a new stream boundary and do not complete an outstanding request. Old branch
+requests cannot mutate the new branch. Clients attached to removed actors
+are disconnected. Normal action updates retain their monotonically increasing
+stream rules between snapshots.
+
+`history` returns only the current branch. To inspect an earlier branch:
+
+```json
+{"type":"request","request_id":"past-1","request":{"type":"history_branch","branch":"<old branch>","before":null,"limit":50}}
+```
+
+Filtering remains actor/user scoped and precedes pagination. Notes never move to
+a new branch; new entry anchors cannot reference another branch. Wizard parameters
+are private to their author so normal spectators do not receive hidden setup facts.

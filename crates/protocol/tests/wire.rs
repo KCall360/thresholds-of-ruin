@@ -1,6 +1,23 @@
 use tor_protocol::*;
 
 #[test]
+fn wizard_wire_rejects_arbitrary_archetypes_and_forged_properties() {
+    for operation in [
+        serde_json::json!({"type":"place_item","kind":"sword","position":{"region":1,"x":1,"y":1,"z":0}}),
+        serde_json::json!({"type":"spawn_actor","position":{"region":1,"x":1,"y":1,"z":0},"turn_ticks":100,"god":true}),
+    ] {
+        assert!(serde_json::from_value::<WizardOperation>(operation).is_err());
+    }
+    assert!(!AccessRole::Spectator.permits(&Request::Command {
+        branch: BranchId("branch".into()),
+        command: Command::Wizard {
+            expected_revision: 0,
+            operation: WizardOperation::Rewind { target: None }
+        }
+    }));
+}
+
+#[test]
 fn clients_cannot_claim_backend_authorship_or_supply_an_author() {
     let forged = r#"{"type":"annotate","anchor":{"type":"state","revision":0},"text":"spoiler","source":"backend"}"#;
     assert!(serde_json::from_str::<Command>(forged).is_err());

@@ -82,6 +82,17 @@ impl App {
     }
 
     pub fn set_state(&mut self, state: ClientState) {
+        if self
+            .state
+            .as_ref()
+            .is_some_and(|old| old.branch() != state.branch())
+        {
+            self.note = None;
+            self.pickup.clear();
+            self.history_page = None;
+            self.history_scroll = 0;
+            self.status = "Timeline changed; pending selections cleared.".into();
+        }
         // Do not let an old selection silently target a changed observation.
         if self
             .state
@@ -346,6 +357,7 @@ pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
 
 pub fn history_text(entry: &HistoryEntry) -> String {
     match &entry.content {
+        HistoryContent::Wizard { result, .. } => format!("Wizard: {result:?}"),
         HistoryContent::Action { event, .. } => match event {
             Event::Moved { to, .. } => format!("Moved to ({}, {}, {}).", to.x, to.y, to.z),
             Event::Taken { item } => format!("Picked up item #{item}."),

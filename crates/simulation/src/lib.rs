@@ -162,6 +162,27 @@ impl Game {
         self.tick
     }
 
+    /// Authorized setup relocation; preserves recovery time and reveals the destination.
+    pub fn teleport(&mut self, id: ActorId, location: Location) -> Result<(), GameError> {
+        if !self.actors.contains_key(&id) {
+            return Err(GameError::UnknownActor);
+        }
+        if !self.world.contains(location) {
+            return Err(GameError::InvalidLocation);
+        }
+        if self
+            .actors
+            .iter()
+            .any(|(&other, actor)| other != id && actor.location == location)
+        {
+            return Err(GameError::Occupied);
+        }
+        let actor = self.actors.get_mut(&id).expect("validated actor");
+        actor.location = location;
+        actor.visited.insert(location.region);
+        Ok(())
+    }
+
     pub fn seed(&self) -> u64 {
         self.seed
     }

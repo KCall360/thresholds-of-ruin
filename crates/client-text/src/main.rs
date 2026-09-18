@@ -81,6 +81,8 @@ async fn run() -> Result<(), Error> {
                     Ok(Input::Command(command)) => {
                         if connection.role() == AccessRole::Spectator {
                             println!("Spectator access is read-only.");
+                        } else if matches!(command, Command::Wizard { .. }) && connection.role() != AccessRole::Wizard {
+                            println!("Wizard authority is required.");
                         } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
                             println!("You are observing. Use control to request control.");
                         } else {
@@ -141,9 +143,20 @@ fn present(connection: &Connection, message: &ServerMessage) {
                 if *has_control { "yours" } else { "observing" }
             ),
         },
-        ServerMessage::Snapshot { .. } => {
+        ServerMessage::Snapshot { request_id, .. } => {
             println!("{}", describe(connection.state.state()));
             println!("{}", inventory(connection.state.state()));
+            println!("Branch: {}", safe(&connection.state.branch().0));
+            if request_id.is_empty() {
+                if let Some(entry) = connection
+                    .state
+                    .history()
+                    .last()
+                    .filter(|entry| matches!(entry.content, HistoryContent::Wizard { .. }))
+                {
+                    println!("{}", history(entry));
+                }
+            }
         }
         ServerMessage::History { page, .. } => {
             if page.entries.is_empty() {

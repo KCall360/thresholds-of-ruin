@@ -2,6 +2,36 @@ use tor_client_text::{parse, Input};
 use tor_protocol::*;
 
 #[test]
+fn wizard_commands_are_structured_revision_checked_and_reject_unknown_settings() {
+    assert_eq!(
+        parse("wizard teleport 2 1 3 1 0", &state()).unwrap(),
+        Input::Command(Command::Wizard {
+            expected_revision: 7,
+            operation: WizardOperation::Teleport {
+                actor: ActorId(2),
+                position: Position {
+                    region: 1,
+                    x: 3,
+                    y: 1,
+                    z: 0
+                }
+            }
+        })
+    );
+    for command in [
+        "wizard item sword 1 1 1 0",
+        "wizard actor fast 1 1 1 0",
+        "wizard rewind",
+        "wizard teleport 1 2",
+    ] {
+        assert!(parse(command, &state()).is_err());
+    }
+    let mut marked = state();
+    marked.wizard_game = true;
+    assert!(tor_client_text::describe(&marked).contains("WIZARD GAME"));
+}
+
+#[test]
 fn prose_renders_disclosed_positions_and_escapes_terminal_controls() {
     let mut state = state();
     state.observation.region.name = "Entry\u{1b}[2J".into();
@@ -45,7 +75,7 @@ fn movement_queries_and_control_have_distinct_intents() {
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "revision": 7, "observation": {
+        "wizard_game":false,"revision": 7, "observation": {
             "actor": 1, "tick": 100, "position": {"region":1,"x":1,"y":1,"z":0},
             "region":{"id":1,"name":"Entry chamber","width":5,"depth":3,"height":1},
             "ground_items":[

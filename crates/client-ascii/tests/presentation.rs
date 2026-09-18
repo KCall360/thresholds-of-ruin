@@ -2,11 +2,34 @@ use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
+#[test]
+fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    app.input(Input::Key { key: Key::Note });
+    assert!(app.note.is_some());
+    let mut canvas = tor_client_ascii::render::Canvas::default();
+    canvas.draw(&app);
+    let normal = canvas.pixels.clone();
+    let mut snapshot = serde_json::to_value(serde_json::json!({
+        "actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "history":{"entries":[],"older_before":null},"state":state().state()
+    }))
+    .unwrap();
+    snapshot["state"]["wizard_game"] = true.into();
+    app.set_state(ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap());
+    assert!(app.note.is_none());
+    canvas.draw(&app);
+    assert_ne!(normal, canvas.pixels);
+}
+
 fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
         "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
         "history":{"entries":[],"older_before":null},
-        "state":{"revision":3,"observation":{
+        "state":{"wizard_game":false,"revision":3,"observation":{
             "actor":1,"tick":0,"position":{"region":1,"x":1,"y":1,"z":0},
             "region":{"id":1,"name":"Entry","width":5,"depth":3,"height":1},
             "ground_items":[{"item":{"id":3,"name":"token"},"position":{"region":1,"x":1,"y":1,"z":0}}],
