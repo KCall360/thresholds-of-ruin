@@ -7,7 +7,7 @@
 - Foundational region bounds and observation-stream ordering tests.
 - No playable application or frontend launch-test claim at this stage.
 
-## 1: Shared playable slice (in progress)
+## 1: Shared playable slice (complete)
 
 Completed: deterministic in-memory simulation of two connected rooms, actor IDs,
 movement/pickup/wait actions, variable recovery times, room-level observations,
@@ -22,13 +22,16 @@ item-name resolution, annotations, paginated history, live updates, and control
 transfer. Actual server/text process tests cover play, two clients, and restart
 persistence in debug and release on Windows and Linux. See [the client guide](text-client.md).
 
-Remaining PRs: the graphical ASCII client; cross-frontend client-driven switching
-and save/resume acceptance. The journal already persists actions and notes, but
-the full milestone still requires both runnable frontends and their process tests.
+Completed: native graphical ASCII frontend with disclosed-room rendering,
+keyboard movement/pickup, inventory, private/shared notes, history browsing, and
+explicit control transfer. Actual process acceptance starts in text, picks up the
+token, transfers control to the graphical window, traverses the passage, restarts
+the server, and compares resumed state and history. Native keyboard-event and
+window-launch tests run on Windows and Linux Xvfb. See [the ASCII guide](ascii-client.md).
 
-Write the acceptance scenario first, then implement a seeded two-space scenario,
-an object, actor control, streaming server, text client, graphical ASCII client,
-and save/resume.
+The slice includes a seeded two-space scenario, an object, actor control,
+streaming server, both frontends, and save/resume. This is not the full dungeon
+gameplay milestone; reconnects currently require relaunching the clients.
 
 Acceptance: start through text, pick up the object, transfer control to ASCII,
 move through a doorway, save, restart the server, reconnect both clients, and
@@ -99,3 +102,11 @@ deterministic. Protocol tests run a real server once transport exists; text test
 drive process input/output; ASCII tests combine input/presentation assertions with
 actual window-launch tests. Configure graphical environments explicitly on both
 platforms. Do not label model-only tests as graphical application tests.
+
+Every new feature carries behavior tests and an integration acceptance scenario,
+not only a milestone-wide test at the end. Once wizard mode exists, scripted
+wizard commands should often provide the final integration test through actual
+server/frontend processes. Use them to arrange and reproduce scenarios, then
+exercise the feature through its intended commands and assert outcomes. Keep
+normal-game coverage and update documentation as part of completing the feature.
+See [development practices](../CONTRIBUTING.md) for the testing requirements.

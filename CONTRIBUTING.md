@@ -1,10 +1,40 @@
 # Development practices
 
+Accumulate small project-plan, strategy, and documentation updates locally.
+Publish them to GitHub at meaningful checkpoints, such as a completed feature or
+milestone or a consolidated strategy revision, or when the user explicitly asks.
+Do not create or push a separate PR for every planning clarification. A request
+to update the plan alone does not require immediate publication.
+
+When publishing, use a feature branch and PR; require Windows and Linux CI to
+pass before merging. Keep this publication cadence separate from the testing
+requirements below: delaying a push does not postpone feature verification.
+
 Use test-driven development for simulation rules, protocol behavior, and client
 interactions: write a failing behavior test, implement it, then refactor with
 the tests passing. Prefer assertions about outcomes to copies of implementation
 details. Keep main green; incomplete acceptance scenarios belong in the milestone
 document until implementation starts, not in permanently ignored tests.
+
+Every new feature must include automated behavior tests at the layers it changes
+and an integration acceptance scenario for its complete user-visible behavior.
+Add regression tests for bug fixes. Update the project documentation and milestone
+status with the behavior, limitations, and how the feature is verified.
+
+Once [wizard mode](docs/wizard-mode.md) is available, use scripted wizard commands
+where appropriate as the final integration test: launch the actual server and
+frontend, construct a reproducible scenario through authorized wizard commands,
+exercise the feature, and assert the resulting state and client-visible behavior.
+For example, place a mob and equipment, teleport into position, then use ordinary
+combat actions to verify combat. Test a wizard feature through its own privileged
+commands. Include save/resume or rewind when relevant to the feature.
+
+Wizard scenarios complement focused unit/protocol tests and normal-play coverage.
+Setup shortcuts must not bypass the behavior under test, and wizard success does
+not establish that the feature works or is properly restricted in a normal game.
+Keep command scripts, seeds, and expected outcomes in version control and run the
+applicable process tests in Windows and Linux CI. Until wizard mode is implemented,
+use existing fixtures and real process tests; do not postpone feature testing.
 
 Run the commands in README.md before pushing. Both Windows and Linux CI must pass.
 Document any checks that could not run locally.

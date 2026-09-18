@@ -9,8 +9,8 @@ controllers so multiplayer can be designed later. Windows first; Linux portable.
 
 This document records intended architecture. Implemented behavior is described in
 [the simulation slice](simulation-slice.md) and [the server protocol](protocol.md).
-The [text frontend](text-client.md) is playable. Richer perception, graphical
-frontends, and the remaining milestones are planned.
+The [text frontend](text-client.md) and [graphical ASCII frontend](ascii-client.md)
+are playable. Richer perception, the 3D frontend, and remaining milestones are planned.
 
 ## Workspace boundaries
 
@@ -173,6 +173,10 @@ several rooms across two elevations, stairs, an unusual portal connection,
 doors/keys/containers, inventory/equipment, melee, two enemies, death, and an exit.
 Hunger, identification, ranged combat, multiplayer, and a 3D client follow later.
 
-Choose the graphical ASCII framework when implementing that client. Choose a 3D
-renderer after ASCII and text validate the protocol. Avoid speculative rendering
-dependencies in the simulation or wire format.
+The ASCII client uses minifb for a native pixel-buffer window and font8x8 for
+bitmap glyphs, with Win32 and X11 backends. UI input/presentation stay separate
+from a background connection worker; the worker applies the shared validated
+ClientState and never exposes world/simulation internals. Window size and redraw
+rate do not affect game time. See the ASCII guide for display/test requirements.
+Choose a 3D renderer after ASCII and text validate the protocol. Avoid speculative
+rendering dependencies in the simulation or wire format.
