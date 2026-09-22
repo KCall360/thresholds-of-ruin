@@ -268,9 +268,15 @@ fn window_loop(
                 }
             }
         }
-        canvas.draw(&app);
-        window.update_with_buffer(&canvas.pixels, WIDTH, HEIGHT)?;
-        frame += 1;
+        if dirty {
+            canvas.draw(&app);
+            window.update_with_buffer(&canvas.pixels, WIDTH, HEIGHT)?;
+            frame += 1;
+        } else {
+            // Pump native events without repainting an unchanged 960,000-pixel
+            // framebuffer. State/input changes set `dirty` above.
+            window.update();
+        }
         // This is intentionally after real native presentation. There is no
         // headless fallback; CI must supply a functioning display environment.
         if report && dirty {
