@@ -92,13 +92,9 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
-    diagonals: bool,
     material_surfaces: bool,
     navigation: BTreeMap<ActorId, travel::Navigation>,
     world: World,
-    legacy_perception: bool,
-    scene_rules: bool,
-    shadowcasting: bool,
     seed: u64,
     tick: u64,
     actors: BTreeMap<ActorId, Actor>,
@@ -122,15 +118,8 @@ fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
 }
 
 impl Game {
-    pub fn enable_diagonals(&mut self) {
-        self.diagonals = true;
-    }
-
     fn reach(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
         if direction.components().is_some() {
-            if !self.diagonals {
-                return None;
-            }
             self.world
                 .diagonal_reach(from, direction, |side| side == from || !self.occupied(side))
         } else {
@@ -142,13 +131,9 @@ impl Game {
 
     pub fn new(world: World, seed: u64) -> Self {
         Self {
-            diagonals: false,
             material_surfaces: false,
             navigation: BTreeMap::new(),
             world,
-            legacy_perception: false,
-            scene_rules: true,
-            shadowcasting: true,
             seed,
             tick: 0,
             actors: BTreeMap::new(),
@@ -272,25 +257,6 @@ impl Game {
         self.seed
     }
 
-    /// Legacy save replay retains the original observation and vertical-step rules.
-    pub fn use_legacy_perception(&mut self) {
-        self.legacy_perception = true;
-        self.scene_rules = false;
-        self.shadowcasting = false;
-    }
-
-    pub fn use_portal_v2_rules(&mut self) {
-        self.scene_rules = false;
-        self.shadowcasting = false;
-    }
-    /// Preserve cell-centre ray perception when replaying pre-shadowcasting saves.
-    pub fn use_ray_perception(&mut self) {
-        self.shadowcasting = false;
-    }
-    pub fn uses_scene_rules(&self) -> bool {
-        self.scene_rules
-    }
-
     pub fn connect_area(
         &mut self,
         passage: Passage,
@@ -298,41 +264,24 @@ impl Game {
         width: u16,
         height: u16,
     ) -> Result<(), GameError> {
-        if !self.scene_rules {
-            return Err(GameError::InvalidLocation);
-        }
         self.world
             .connect_area(passage, turns, width, height)
             .map_err(|_| GameError::InvalidLocation)
     }
 
     pub fn add_region(&mut self, region: Region) -> Result<(), GameError> {
-        if self.legacy_perception {
-            return Err(GameError::InvalidLocation);
-        }
         self.world
             .add_region(region)
             .map_err(|_| GameError::InvalidLocation)
     }
 
     pub fn add_chamber(&mut self, region: Region) -> Result<(), GameError> {
-        if self.legacy_perception {
-            return Err(GameError::InvalidLocation);
-        }
         self.world
             .add_chamber(region)
             .map_err(|_| GameError::InvalidLocation)
     }
 
-    /// Original material-volume sight retained only for older saved rules.
-    pub fn use_initial_material_rims(&mut self) {
-        self.world.use_initial_material_rims();
-    }
-
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), GameError> {
-        if self.legacy_perception {
-            return Err(GameError::InvalidLocation);
-        }
         self.world
             .connect(passage, quarter_turns)
             .map_err(|_| GameError::InvalidLocation)
@@ -346,13 +295,12 @@ impl Game {
     }
 
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), GameError> {
-        if self.legacy_perception
-            || (wall
-                && (self.occupied(location)
-                    || self
-                        .items
-                        .values()
-                        .any(|item| item.location == ItemLocation::Ground(location))))
+        if wall
+            && (self.occupied(location)
+                || self
+                    .items
+                    .values()
+                    .any(|item| item.location == ItemLocation::Ground(location)))
         {
             return Err(GameError::InvalidLocation);
         }
@@ -404,13 +352,8 @@ impl Game {
                 )
             }
             Action::Move(direction) => {
-                let direction = if self.scene_rules {
-                    direction.rotated(actor.orientation)
-                } else {
-                    direction
-                };
-                if !self.legacy_perception
-                    && matches!(direction, Direction::Up | Direction::Down)
+                let direction = direction.rotated(actor.orientation);
+                if matches!(direction, Direction::Up | Direction::Down)
                     && self.world.passage(actor.location, direction).is_none()
                 {
                     return Err(GameError::Blocked);
@@ -451,7 +394,7 @@ impl Game {
         };
         let at_tick = self.tick;
         let new_orientation = match action {
-            Action::Move(direction) if self.scene_rules => {
+            Action::Move(direction) => {
                 (actor.orientation
                     + self
                         .reach(actor.location, direction.rotated(actor.orientation))

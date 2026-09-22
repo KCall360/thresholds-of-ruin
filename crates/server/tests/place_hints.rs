@@ -71,23 +71,6 @@ fn unnamed_hints_are_visible_only_with_their_cells_and_restore_on_replay_and_rew
 }
 
 #[test]
-fn older_rules_do_not_gain_hints_or_allow_hint_mutations() {
-    for ruleset in ["two-room-v1", "portal-sight-v2", "observer-scene-v3"] {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("old.json");
-        drop(Engine::open(&path, Scenario::two_room(42)).unwrap());
-        let mut archive: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        archive["ruleset"] = ruleset.into();
-        std::fs::write(&path, serde_json::to_vec(&archive).unwrap()).unwrap();
-        let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
-        assert!(hints(&engine).is_empty());
-        engine.enable_wizard().unwrap();
-        assert!(setup(&mut engine, "unsupported", "place 1 1 1 0 on").is_err());
-    }
-}
-
-#[test]
 fn rotated_and_repeated_occurrences_keep_opaque_anchor_identity() {
     let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
     engine.enable_wizard().unwrap();

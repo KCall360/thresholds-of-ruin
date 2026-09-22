@@ -120,7 +120,6 @@ pub enum WorldError {
 /// Validated region topology with stable iteration order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct World {
-    initial_material_rims: bool,
     doors: BTreeMap<Location, Door>,
     regions: BTreeMap<RegionId, Region>,
     passages: BTreeMap<(Location, Direction), Passage>,
@@ -180,7 +179,6 @@ impl World {
 
     pub fn new(regions: Vec<Region>, passages: Vec<Passage>) -> Result<Self, WorldError> {
         let mut world = Self {
-            initial_material_rims: false,
             doors: BTreeMap::new(),
             regions: BTreeMap::new(),
             passages: BTreeMap::new(),
@@ -447,9 +445,6 @@ impl World {
         if let Some(passage) = self.passage(from, direction) {
             return Some((passage.to, self.rotations[&(from, direction)]));
         }
-        if self.initial_material_rims {
-            return self.initial_rim_step(from, direction);
-        }
         if self.chambers.contains_key(&from.region) {
             return self.rim_step(from, direction);
         }
@@ -505,60 +500,6 @@ impl World {
         if let Some((to, turns)) = projected {
             if self.contains(to) && (self.is_wall(from) || self.is_wall(to)) {
                 return Some((to, turns));
-            }
-        }
-        let to = Location {
-            position: direction.offset(from.position)?,
-            ..from
-        };
-        self.contains(to).then_some((to, 0))
-    }
-
-    /// Preserve the original material-volumes-v9 perception for journal replay.
-    pub fn use_initial_material_rims(&mut self) {
-        self.initial_material_rims = true;
-    }
-
-    fn initial_rim_step(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
-        if self.chambers.contains_key(&from.region) && self.is_wall(from) {
-            let mut rim = None;
-            for side in [
-                Direction::North,
-                Direction::East,
-                Direction::South,
-                Direction::West,
-                Direction::Up,
-                Direction::Down,
-            ] {
-                let Some(position) = side.offset(from.position) else {
-                    continue;
-                };
-                let neighbor = Location { position, ..from };
-                if let Some(passage) = self.passage(neighbor, direction) {
-                    let turns = self.crossing_rotation(neighbor, direction);
-                    let opposite = match side {
-                        Direction::Up => Direction::Down,
-                        Direction::Down => Direction::Up,
-                        value => value.rotated(2),
-                    };
-                    let Some(position) = opposite.rotated(turns).offset(passage.to.position) else {
-                        continue;
-                    };
-                    let to = Location {
-                        position,
-                        ..passage.to
-                    };
-                    if self.is_wall(to) {
-                        let candidate = (to, turns);
-                        if rim.is_some_and(|old| old != candidate) {
-                            return None;
-                        }
-                        rim = Some(candidate);
-                    }
-                }
-            }
-            if rim.is_some() {
-                return rim;
             }
         }
         let to = Location {

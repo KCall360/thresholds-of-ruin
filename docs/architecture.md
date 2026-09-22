@@ -208,8 +208,8 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 11 and save format 3 support the current interface; normal format-1 saves migrate
-on open. New games use diagonal-v11; existing saves retain their ruleset.
+version 11, save format 3, and ruleset `diagonal-v11` are the only supported
+runtime formats. Older saves and rulesets are rejected rather than migrated.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII

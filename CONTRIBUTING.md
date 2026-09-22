@@ -63,8 +63,9 @@ into protocol messages or provide hidden facts through interaction metadata.
 Each actor has explicit identity and control ownership. Avoid a global player.
 Doors are independent entities; they need not be on portal apertures.
 
-Add protocol and save versioning decisions when those formats change. Preserve
-original code and content; NetHack is a gameplay reference, not a source to copy.
+When protocol, save, or rules formats change, update callers and fixtures together;
+the project supports only the current versions. Preserve original code and content;
+NetHack is a gameplay reference, not a source to copy.
 
 Frontend milestones must include tests launching the actual applications in
 addition to parser, input-model, presentation-model, and protocol tests. The

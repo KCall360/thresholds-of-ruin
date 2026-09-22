@@ -117,7 +117,7 @@ impl Game {
             for direction in DIRECTIONS.into_iter().chain(
                 Direction::HORIZONTAL
                     .into_iter()
-                    .filter(|d| self.diagonals && d.components().is_some()),
+                    .filter(|d| d.components().is_some()),
             ) {
                 let local = direction.rotated(node.1);
                 let edge = if let Some((a, b)) = local.components() {

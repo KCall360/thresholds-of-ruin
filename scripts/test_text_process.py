@@ -3,15 +3,29 @@ import json
 import os
 from pathlib import Path
 import queue
+import shutil
 import subprocess
-import tempfile
 import threading
 import time
 import unittest
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "text-process-test-token-not-a-secret"
 SPECTATOR_TOKEN = "spectator-process-test-token-not-a-secret"
+
+
+class ProcessTestDirectory:
+    """Temporary directory whose permissions are inherited by child processes."""
+
+    def __init__(self):
+        root = ROOT / "target" / "process-tests"
+        root.mkdir(parents=True, exist_ok=True)
+        self.name = str(root / uuid.uuid4().hex)
+        Path(self.name).mkdir()
+
+    def cleanup(self):
+        shutil.rmtree(self.name, ignore_errors=True)
 
 
 class Process:
@@ -82,7 +96,7 @@ class TextProcesses(unittest.TestCase):
         cls.suffix = ".exe" if os.name == "nt" else ""
 
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
+        self.directory = ProcessTestDirectory()
         self.addCleanup(self.directory.cleanup)
         self.save = Path(self.directory.name) / "game.json"
         self.server, self.address = self.start_server()

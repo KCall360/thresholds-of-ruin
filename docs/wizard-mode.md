@@ -99,10 +99,8 @@ the original receipt without replaying the operation.
 Save format **3** preserves the root branch, permanent marker, and chronological
 records with authenticated receipts. Replaying the records reconstructs all
 branches and the bounded decision cache; the final branch is determined by the
-rewind records. Normal format-1 saves migrate on successful open while retaining
-`two-room-v1`. New games use `diagonal-v11`; wide joins also remain supported
-in `observer-scene-v3`.
-Legacy rules remain unchanged. Older servers cannot load the new ruleset. Rewind restores complete
+rewind records. Only format-3, `diagonal-v11` saves load; older formats and
+rulesets are rejected. Rewind restores complete
 simulation state, including scheduler, knowledge, inventory, and ID allocation.
 The fixture has no evolving RNG; future RNG state belongs in these boundaries.
 
@@ -248,8 +246,7 @@ existing fixtures and process tests must still verify each new feature.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). New saves use
-`diagonal-v11`; earlier saves retain their original rules.
+[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

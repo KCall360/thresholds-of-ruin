@@ -108,8 +108,8 @@ rules for notes. History remains available; control, gameplay, and note-writing
 inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
-does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 11. Real process tests cover live spectator
+does not restrict that credential. Server and clients must all use protocol
+version 11. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -122,7 +122,7 @@ and selections from an abandoned branch. Server and clients must use protocol 11
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on
-arrival. Existing saves retain their original rules; travel-v5, doors-v6, shadowcasting-v7, doorway-v8, material-rims-v10, and diagonal-v11 support travel.
+arrival. Current `diagonal-v11` games support travel.
 
 [Door interactions](doors.md) add open/close, examination, clarification and
 approach intentions to the adventure interface.

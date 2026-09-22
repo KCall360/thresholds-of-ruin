@@ -92,8 +92,7 @@ invent enclosed walls or use internal region names.
 - `take tablet`: take it immediately if reachable, otherwise travel to its current
   disclosed cell and attempt ordinary pickup on arrival.
 - `stop` / `cancel`: cancel travel and discard any pending pickup.
-- `step east`: explicitly request one ordinary movement action, also useful in
-  old saves that do not support travel.
+- `step east`: explicitly request one ordinary movement action.
 - `wait`, `control`, `release`, `sync`, notes, history and wizard commands retain
   their existing authority and timing rules; `quit` disconnects.
 
@@ -154,7 +153,7 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. New saves use diagonal-v11; old saves keep their rules.
+automatically opens a door. Saves use `diagonal-v11`.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling

@@ -19,7 +19,6 @@ fn game(cost: u64) -> (Game, tor_simulation::ActorId) {
     )
     .unwrap();
     let mut game = Game::new(world, 42);
-    game.enable_diagonals();
     let actor = game
         .spawn_actor(cell(2, 2), NonZeroU64::new(cost).unwrap())
         .unwrap();
@@ -75,20 +74,12 @@ fn diagonal_door_reach_uses_normal_cost_and_corner_clearance() {
 }
 
 #[test]
-fn travel_uses_diagonals_and_legacy_games_reject_them() {
+fn travel_uses_diagonals() {
     let (mut game, actor) = game(100);
     game.refresh_navigation();
     let route = game.travel_route(actor, cell(4, 0)).unwrap();
     assert_eq!(route.len(), 2);
     assert!(route.iter().all(|s| s.direction == Direction::NorthEast));
-    let mut legacy = Game::two_room(42);
-    let actor = legacy
-        .spawn_actor(cell(2, 1), NonZeroU64::new(100).unwrap())
-        .unwrap();
-    assert_eq!(
-        legacy.act(actor, Action::Move(Direction::NorthEast)),
-        Err(GameError::Blocked)
-    );
 }
 
 #[test]
@@ -154,7 +145,6 @@ fn minimum_ticks_can_require_more_steps() {
         world.set_wall(cell(x, y), true).unwrap();
     }
     let mut game = Game::new(world, 42);
-    game.enable_diagonals();
     let actor = game
         .spawn_actor(cell(0, 3), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -189,7 +179,6 @@ fn door_approaches_do_not_disclose_hidden_corner_clearance() {
     )
     .unwrap();
     let mut game = Game::new(world, 42);
-    game.enable_diagonals();
     let actor = game
         .spawn_actor(cell(0, 0), NonZeroU64::new(100).unwrap())
         .unwrap();

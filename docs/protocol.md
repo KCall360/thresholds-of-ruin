@@ -76,9 +76,8 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 protocol-8 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Save format 3 adds a private stable view-identity salt; format 1/2
-saves migrate while retaining their original rules. New saves use
-`diagonal-v11`. See [geometry and compatibility](portal-geometry.md).
+must upgrade. Saves must use format 3 and ruleset `diagonal-v11`; older formats
+and rulesets are rejected. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 

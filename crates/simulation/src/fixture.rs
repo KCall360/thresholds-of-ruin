@@ -3,8 +3,7 @@ use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId
 use crate::Game;
 
 impl Game {
-    /// Historical map with two unnamed room anchors.
-    /// The original fixture remains available for deterministic old-save replay.
+    /// Two-room diagnostic fixture with authored room anchors.
     pub fn two_room_with_place_hints(seed: u64) -> Self {
         let mut game = Self::two_room(seed);
         game.add_room_hints();

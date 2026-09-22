@@ -82,9 +82,9 @@ restored snapshot. Memory is local to a connection and is not saved or recovered
 from history: restarting a client starts with its attachment snapshot only.
 
 The [portal-geometry slice](portal-geometry.md) introduces explicit visible cells,
-bounded portal sight, rotations, walls and stairs for new games. Protocol version
-5 requires observer-relative disclosure; save format 3 retains old saves’ original
-rules. Memory output now describes individual cells rather than room elevations.
+bounded portal sight, rotations, walls and stairs. Protocol version 11 requires
+observer-relative disclosure. Memory output now describes individual cells rather
+than room elevations.
 Wizard operations still advance their author's actor revision even
 when the changed room is hidden; command details remain private.
 
@@ -101,8 +101,7 @@ text/ASCII process coverage remains required alongside this headless frontend.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). New saves use
-`diagonal-v11`; earlier saves retain their original rules.
+[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

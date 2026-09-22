@@ -96,18 +96,15 @@ interactions remain deferred. Actor position is the cell containing their feet;
 ordinary vertical movement still requires an explicit stair/link. Empty headroom
 does not grant upward movement, and removing support does not cause a fall.
 
-Save format remains **3**. The material-rims-v10 feature preserved all nine earlier
-rulesets; diagonal-v11 additionally preserves material-rims-v10. In particular, **material-volumes-v9** keeps its original corner behavior
-and surface facts; the eight rulesets preceding it have no physical surface
-facts. Existing saves never silently upgrade. Start a new game for the corrected
-doorway corners. All connected
+Save format remains **3**, and the only supported ruleset is `diagonal-v11`.
+Start a new game after a format or rules update. All connected
 clients must use protocol 11. Existing launchers use `target/doors/debug` and
 continue creating fresh normal saves.
 
 World tests cover finite shells, unallocated space, vertical probe limits and
 barriers, and split/unsplit equivalence across ordinary and rotated joins.
 Simulation tests verify surfaces and free rejected vertical movement. Server tests
-cover all legacy rules, atomic setup, duplicate receipts, solid-cell rejection,
+cover current rules, atomic setup, duplicate receipts, solid-cell rejection,
 rewind, and restart. Client tests cover surface prose and stale memory.
 `scripts/scenarios/material-volumes.json` and `scripts/test_material_process.py`
 exercise normal play plus wizard setup through real server/text/headless/native

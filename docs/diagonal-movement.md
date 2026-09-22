@@ -1,8 +1,7 @@
 # Diagonal movement and reach
 
-New games use **diagonal-v11**, with protocol **11** and save format **3**.
-All ten previous rulesets retain their original movement, door reach, and replay.
-Existing saves are never silently upgraded; start a fresh game for diagonals.
+Games use **diagonal-v11**, with protocol **11** and save format **3**. Previous
+rulesets and save formats are unsupported; start a fresh game after an upgrade.
 
 ## Rules
 
@@ -35,7 +34,7 @@ It composes diagonal routes only from remembered disclosed connections and clear
 side cells. It never queries hidden current geometry to find a route. Ordinary
 movement revalidates every executed step; stale obstacles interrupt travel.
 Equal-cost routes preserve stable discovery order: N/E/S/W/up/down, then
-NE/SE/SW/NW. Legacy games keep cardinal-only routing and their original ties.
+NE/SE/SW/NW.
 
 ASCII movement:
 
@@ -48,8 +47,7 @@ B J N
 Arrows remain cardinal movement. `<` ascends; `>` descends, with D retained as
 a descend alias. F4 opens notes. Period/Space wait; shifted `>` never also waits.
 O/C followed by any horizontal movement key manipulates a door. Destination
-selection accepts diagonals too. These bindings also apply when playing old saves,
-but the server rejects unsupported diagonal actions.
+selection accepts diagonals too.
 
 Text accepts northeast/southeast/southwest/northwest and ne/se/sw/nw. `step ne`
 makes one move; `ne` or `go northeast` requests travel to a visible destination.
@@ -61,7 +59,7 @@ Headless actions use `north_east`, `south_east`, `south_west`, `north_west`.
 World and simulation tests exercise corner masks, occupancy, exact timing and
 overflow, rotated and ambiguous connections, normal-cost diagonal door actions,
 hidden corner approach disclosure, stale navigation, and a route where seven steps cost less than six diagonals.
-Server tests cover durable retries, restart, and all ten legacy rulesets.
+Server tests cover durable retries, restart, and rejection of obsolete rulesets.
 Client tests cover parsing, bearings, key mappings and free cursor movement.
 
 `scripts/scenarios/diagonal.json` and `scripts/test_diagonal_process.py` exercise
