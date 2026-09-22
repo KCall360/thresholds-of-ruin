@@ -135,6 +135,53 @@ Complete the scale matrix, add phase timings, encode the recorded durability and
 format decisions in tests, and add recovery fixtures. No storage behavior changes
 in this phase.
 
+#### Phase A results (2026-09-22)
+
+The checked-in harness is `crates/server/examples/latency_bench.rs` and emits
+diagnostic CSV with mean, p50, p95, and maximum timings. It covers 1, 8, 64,
+and 256 connected two-level regions with portals, obstacles, a door, and up to
+8 actors; server histories are seeded at 0, 100, 1,000, and 10,000 actions.
+The command profile isolates simulation transition, perception, revision
+detection, candidate/rollback capture, serialization, write, and sync. The
+client-common update path and ASCII renderer are measured separately. Stable
+contracts assert actor-proportional observation/comparison counts and record /
+byte accounting rather than machine-specific timings. Recovery fixtures cover
+partial/corrupt final frames and checkpoint install/rotation interruption
+boundaries; existing save-failure tests continue to verify publication atomicity.
+
+Release measurements on the development Windows host found perception and
+revision detection scale with actor count (about 0.36 ms and 0.18 ms for one
+actor versus 3.2 ms and 1.6 ms for eight in the 10,000-action case). The
+candidate clone grows from about 0.05 ms at an empty history to about 10.6 ms at
+10,000 records; durable sync is roughly 0.10 ms to 4.2–5.0 ms. Region count is
+not the dominant term in this fixture, while actor count and full-archive
+copy/serialization are. These are diagnostic observations, not CI thresholds.
+
+#### Reviewed Phase B design
+
+Advance the save format to version 4 and reject version 3. The append journal
+uses little-endian frames:
+
+`magic[4] = "TORJ" | format:u16 = 4 | kind:u16 | sequence:u64 |
+payload_len:u32 | crc32c:u32 | payload[payload_len]`
+
+The 24-byte header is followed by canonical serde payload bytes. `kind=1` is a
+committed command/annotation record; reserved kinds are rejected. The checksum
+covers the header fields after `magic` plus payload, and sequence numbers are
+strictly increasing. Startup scans only complete, checksum-valid frames and
+truncates an incomplete/corrupt final frame; an acknowledged sequence must be
+present in a durable frame. A failed append or sync leaves the in-memory
+publication, receipt index, and request identity untouched.
+
+Checkpoints are separate files containing the authoritative replay base,
+receipt index, branch metadata, rewind boundaries, and deterministic world
+state, encoded with the same version marker. They are written to a temporary
+file, flushed and synced, atomically renamed, and only then is the old journal
+rotated. Recovery chooses the newest valid checkpoint and replays subsequent
+valid frames. Phase B should preserve current filtering, idempotency, branch,
+rewind, annotation, wizard, and lock behavior before Phase C adds rotation and
+compaction.
+
 ### Phase B — Append journal
 
 Introduce framed records and recovery scanning behind focused storage tests.
