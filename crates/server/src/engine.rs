@@ -776,7 +776,7 @@ impl Engine {
                 profile.rollback_snapshots += 1;
             }
         }
-        candidate.persist_profiled(profile.as_deref_mut())?;
+        candidate.persist_profiled(profile)?;
         *self = candidate;
         Ok(CommandResult {
             entry,
@@ -1084,7 +1084,7 @@ impl Engine {
         fs::create_dir_all(parent).map_err(|_| storage_failure())?;
         let started = Instant::now();
         let bytes = serde_json::to_vec(&self.archive).map_err(|_| storage_failure())?;
-        if let Some(profile) = profile.as_deref_mut() {
+        if let Some(profile) = profile.as_mut() {
             profile.journal_serialization += started.elapsed();
             profile.records_serialized += self.archive.records.len();
             profile.bytes_written += bytes.len() as u64;
@@ -1097,7 +1097,7 @@ impl Engine {
             writer.write_all(&bytes).map_err(|_| storage_failure())?;
             writer.flush().map_err(|_| storage_failure())?;
         }
-        if let Some(profile) = profile.as_deref_mut() {
+        if let Some(profile) = profile.as_mut() {
             profile.journal_write += started.elapsed();
         }
         let started = Instant::now();
@@ -1106,7 +1106,7 @@ impl Engine {
             .sync_all()
             .map_err(|_| storage_failure())?;
         temporary.persist(path).map_err(|_| storage_failure())?;
-        if let Some(profile) = profile.as_deref_mut() {
+        if let Some(profile) = profile.as_mut() {
             profile.journal_sync += started.elapsed();
         }
         Ok(())
