@@ -95,6 +95,7 @@ fn scenario(actors: usize) -> Scenario {
     ];
     Scenario {
         seed: 42,
+        regions: 2,
         actors: positions[..actors]
             .iter()
             .map(|&(x, y)| ActorSetup {

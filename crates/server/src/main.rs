@@ -13,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut seed = 0;
     let mut wizard = false;
     let mut save = PathBuf::from("saves/game.json");
+    let mut regions = 2u64;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -23,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--wizard" => wizard = true,
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
             "--seed" => seed = args.next().ok_or("Missing --seed value")?.parse()?,
+            "--regions" => regions = args.next().ok_or("Missing --regions value")?.parse()?,
             "--save" => save = args.next().ok_or("Missing --save value")?.into(),
             _ => return Err(format!("Unknown argument: {argument}").into()),
         }
@@ -72,7 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(std::env::VarError::NotPresent) if !wizard => None,
         Err(_) => return Err("--wizard requires TOR_WIZARD_TOKEN".into()),
     };
-    let mut engine = Engine::open(save, Scenario::two_room(seed))?;
+    let mut scenario = Scenario::two_room(seed);
+    scenario.regions = regions.max(2);
+    let mut engine = Engine::open(save, scenario)?;
     if wizard {
         engine.enable_wizard()?;
     }

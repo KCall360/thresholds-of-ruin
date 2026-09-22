@@ -54,6 +54,8 @@ pub struct ActorSetup {
 pub struct Scenario {
     pub seed: u64,
     pub actors: Vec<ActorSetup>,
+    #[serde(default = "default_region_count")]
+    pub regions: u64,
 }
 
 impl Scenario {
@@ -69,8 +71,75 @@ impl Scenario {
                 },
                 turn_ticks: 100,
             }],
+            regions: 2,
         }
     }
+}
+
+fn default_region_count() -> u64 {
+    2
+}
+
+fn scenario_game(scenario: &Scenario) -> Game {
+    if scenario.regions <= 2 {
+        return Game::two_room_in_stone(scenario.seed);
+    }
+    let rooms = (1..=scenario.regions)
+        .map(|id| tor_world::Region {
+            id: tor_world::RegionId(id),
+            name: format!("Region {id}"),
+            bounds: tor_world::Extent::new(17, 17, 2).expect("valid benchmark extent"),
+        })
+        .collect();
+    let mut world = tor_world::World::new(rooms, vec![]).expect("valid benchmark world");
+    for id in 1..scenario.regions {
+        for z in 0..2 {
+            let from = tor_world::Location {
+                region: tor_world::RegionId(id),
+                position: tor_world::Position { x: 16, y: 8, z },
+            };
+            let to = tor_world::Location {
+                region: tor_world::RegionId(id + 1),
+                position: tor_world::Position { x: 0, y: 8, z },
+            };
+            world
+                .connect(
+                    tor_world::Passage {
+                        from,
+                        direction: tor_world::Direction::East,
+                        to,
+                    },
+                    0,
+                )
+                .expect("valid benchmark passage");
+            world
+                .connect(
+                    tor_world::Passage {
+                        from: to,
+                        direction: tor_world::Direction::West,
+                        to: from,
+                    },
+                    0,
+                )
+                .expect("valid benchmark passage");
+        }
+    }
+    for id in 1..=scenario.regions {
+        for z in 0..2 {
+            for (x, y) in [(4, 4), (4, 12), (12, 4), (12, 12)] {
+                world
+                    .set_wall(
+                        tor_world::Location {
+                            region: tor_world::RegionId(id),
+                            position: tor_world::Position { x, y, z },
+                        },
+                        true,
+                    )
+                    .expect("valid benchmark wall");
+            }
+        }
+    }
+    Game::new(world, scenario.seed)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,7 +221,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
-        let mut game = Game::two_room_in_stone(scenario.seed);
+        let mut game = scenario_game(&scenario);
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
