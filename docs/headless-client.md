@@ -3,7 +3,10 @@
 `tor-client-headless` is a JSON-lines frontend built on `tor-client-common`.
 It connects to the actual server as a player, spectator, or authorized wizard.
 It has no world, simulation, or server dependency and cannot inspect a save.
-Use it for scripted play and perception acceptance without a native window.
+Use it for scripted play and perception acceptance without a native window. It
+is also the preferred frontend for authorized wizard setup and scenario-driving
+in new automation; use the text client when the behavior under test is
+specifically text input or presentation.
 
 ## Run
 
@@ -37,7 +40,9 @@ Send one input object per line, waiting for `ready` before the next command:
 Use an item ID from the received observation. `act` supplies the current branch
 and revision and requires control. `request` accepts a structured protocol
 request, including explicitly branch/revision-checked wizard commands when
-authorized. Server validation always applies. Malformed input, denied access,
+authorized. This makes the headless client suitable for driving privileged
+scenario setup directly, without launching the text client. Server validation
+always applies. Malformed input, denied access,
 and rejected requests yield a `ready` frame with a non-null `error`; the client
 remains available. Fatal transport/startup errors are JSON on stderr.
 

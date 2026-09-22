@@ -739,6 +739,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "tor-client-ascii",
+ "tor-client-common",
  "tor-protocol",
  "tor-simulation",
  "tor-world",

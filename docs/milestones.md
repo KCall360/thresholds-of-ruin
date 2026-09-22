@@ -9,8 +9,8 @@ appropriate unit, integration, protocol, and actual-client process tests.
 
 The current tree is a playable development slice built around a deterministic
 two-room fixture. New games use protocol **11**, save format **3**, and ruleset
-**`diagonal-v11`**. Old saves retain one of the ten earlier rulesets and are not
-silently upgraded.
+**`diagonal-v11`**. Older protocols, save formats, and rulesets are rejected
+rather than migrated or silently upgraded.
 
 | Area | Status | Implemented scope |
 | --- | --- | --- |
@@ -70,9 +70,38 @@ place knowledge will be added when interactions require them.
 
 ## Active direction
 
+### 3p — Performance and scalable persistence
+
+Status: **next milestone**.
+
+Before adding more gameplay, establish representative performance baselines and
+remove work whose cost grows with save history or total dungeon size from the
+interactive action path. The initial harness covers percentile latency for a
+64-region connected layout, portal movement, perception, in-memory commands, and
+durable commands. It already shows that simulation and perception are
+sub-millisecond while whole-archive durable rewrites dominate action latency and
+produce much larger tail stalls.
+
+Scope and sequencing are defined in the
+[performance and persistence plan](performance-persistence.md). The milestone
+will replace whole-save rewrites with an append-oriented journal plus bounded
+snapshot/checkpoint work, remove avoidable full-state cloning, profile client
+state application and rendering, and add scale-sensitive regression checks.
+Caching, alternate collections, and speculative presentation will be adopted
+only for measured hot paths and must preserve determinism, disclosure, retry,
+rewind, and crash-recovery behavior.
+
+Acceptance requires acknowledgement only after durable recovery is possible;
+bounded p95 and maximum action latency as journal history and dungeon size grow;
+recovery tests at every write boundary; equivalent replay, retry, and rewind
+behavior; and actual-client tests proving the ASCII and text clients remain
+responsive during saving. Because the project is pre-release, the new persistence
+layout will explicitly reject old save formats rather than add a compatibility
+importer.
+
 ### 3 — Complete interactions and travel
 
-Status: **in progress**.
+Status: **in progress; feature expansion paused behind milestone 3p**.
 
 Already implemented: server-managed travel through known cells, interruption and
 cancellation at action boundaries, ASCII keyboard/mouse destinations, text

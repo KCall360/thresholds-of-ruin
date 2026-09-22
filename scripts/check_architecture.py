@@ -35,6 +35,10 @@ def violations(metadata):
             continue
         for dependency in package["dependencies"]:
             target = dependency["name"]  # Cargo preserves the real name for aliases.
+            # Performance examples may compose the server with presentation
+            # clients, but those edges must never enter the runtime graph.
+            if name == "tor-server" and dependency.get("kind") == "dev":
+                continue
             if target in names or dependency.get("path") is not None:
                 if target not in ALLOWED[name]:
                     errors.append(f"{name} -> {target} is forbidden")

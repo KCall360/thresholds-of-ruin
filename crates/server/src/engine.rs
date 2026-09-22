@@ -5,6 +5,7 @@ use std::io::{BufWriter, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tor_protocol::*;
@@ -53,6 +54,8 @@ pub struct ActorSetup {
 pub struct Scenario {
     pub seed: u64,
     pub actors: Vec<ActorSetup>,
+    #[serde(default = "default_region_count")]
+    pub regions: u64,
 }
 
 impl Scenario {
@@ -68,8 +71,75 @@ impl Scenario {
                 },
                 turn_ticks: 100,
             }],
+            regions: 2,
         }
     }
+}
+
+fn default_region_count() -> u64 {
+    2
+}
+
+fn scenario_game(scenario: &Scenario) -> Game {
+    if scenario.regions <= 2 {
+        return Game::two_room_in_stone(scenario.seed);
+    }
+    let rooms = (1..=scenario.regions)
+        .map(|id| tor_world::Region {
+            id: tor_world::RegionId(id),
+            name: format!("Region {id}"),
+            bounds: tor_world::Extent::new(17, 17, 2).expect("valid benchmark extent"),
+        })
+        .collect();
+    let mut world = tor_world::World::new(rooms, vec![]).expect("valid benchmark world");
+    for id in 1..scenario.regions {
+        for z in 0..2 {
+            let from = tor_world::Location {
+                region: tor_world::RegionId(id),
+                position: tor_world::Position { x: 16, y: 8, z },
+            };
+            let to = tor_world::Location {
+                region: tor_world::RegionId(id + 1),
+                position: tor_world::Position { x: 0, y: 8, z },
+            };
+            world
+                .connect(
+                    tor_world::Passage {
+                        from,
+                        direction: tor_world::Direction::East,
+                        to,
+                    },
+                    0,
+                )
+                .expect("valid benchmark passage");
+            world
+                .connect(
+                    tor_world::Passage {
+                        from: to,
+                        direction: tor_world::Direction::West,
+                        to: from,
+                    },
+                    0,
+                )
+                .expect("valid benchmark passage");
+        }
+    }
+    for id in 1..=scenario.regions {
+        for z in 0..2 {
+            for (x, y) in [(4, 4), (4, 12), (12, 4), (12, 12)] {
+                world
+                    .set_wall(
+                        tor_world::Location {
+                            region: tor_world::RegionId(id),
+                            position: tor_world::Position { x, y, z },
+                        },
+                        true,
+                    )
+                    .expect("valid benchmark wall");
+            }
+        }
+    }
+    Game::new(world, scenario.seed)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +178,26 @@ pub struct CommandResult {
     pub duplicate: bool,
 }
 
+/// Diagnostic phase measurements for the checked-in performance harness.
+/// Durations are deliberately not used as correctness thresholds; the counts
+/// and byte totals provide stable regression contracts.
+#[derive(Clone, Debug, Default)]
+pub struct CommandProfile {
+    pub rollback_capture: Duration,
+    pub simulation_transition: Duration,
+    pub perception: Duration,
+    pub revision_detection: Duration,
+    pub rollback_snapshot: Duration,
+    pub journal_serialization: Duration,
+    pub journal_write: Duration,
+    pub journal_sync: Duration,
+    pub actors_observed: usize,
+    pub revision_comparisons: usize,
+    pub rollback_snapshots: usize,
+    pub records_serialized: usize,
+    pub bytes_written: u64,
+}
+
 #[derive(Clone, Debug)]
 struct Boundary {
     id: Option<EntryId>,
@@ -131,7 +221,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
-        let mut game = Game::two_room_in_stone(scenario.seed);
+        let mut game = scenario_game(&scenario);
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
@@ -414,7 +504,7 @@ impl Engine {
         branch: &BranchId,
         command: Command,
     ) -> Result<CommandResult, Failure> {
-        self.apply_command(
+        self.apply_command_profiled(
             &Receipt {
                 user: user.into(),
                 frontend: frontend.into(),
@@ -424,13 +514,130 @@ impl Engine {
                 command,
             },
             None,
+            None,
         )
+    }
+
+    /// Execute the production command path while collecting phase diagnostics.
+    pub fn command_profiled(
+        &mut self,
+        user: &str,
+        frontend: &str,
+        actor: ActorId,
+        request_id: &str,
+        branch: &BranchId,
+        command: Command,
+    ) -> Result<(CommandResult, CommandProfile), Failure> {
+        let mut profile = CommandProfile::default();
+        let result = self.apply_command_profiled(
+            &Receipt {
+                user: user.into(),
+                frontend: frontend.into(),
+                actor,
+                request_id: request_id.into(),
+                branch: branch.clone(),
+                command,
+            },
+            None,
+            Some(&mut profile),
+        )?;
+        Ok((result, profile))
+    }
+
+    /// Persist the current archive to a diagnostic target and report the same
+    /// serialization/write/sync phases used by normal saves. The target should
+    /// be disposable; this does not attach it to the engine or publish state.
+    pub fn profile_persistence(&self, path: impl AsRef<Path>) -> Result<CommandProfile, Failure> {
+        let mut candidate = self.candidate();
+        candidate.path = Some(path.as_ref().to_path_buf());
+        candidate.lock = None;
+        let mut profile = CommandProfile::default();
+        candidate.persist_profiled(Some(&mut profile))?;
+        Ok(profile)
+    }
+
+    /// Populate an in-memory diagnostic fixture in linear time. Records are
+    /// ordinary deterministic wait actions and remain replayable; persistence
+    /// is intentionally bypassed so a 10,000-action baseline does not spend its
+    /// setup time exercising the quadratic behavior being measured.
+    pub fn seed_profile_history(&mut self, count: usize) -> Result<(), Failure> {
+        for index in 0..count {
+            let actors = self.actors();
+            let actor = actors[index % actors.len()];
+            let expected_revision = self.revision(actor)?;
+            let before: BTreeMap<_, _> = actors
+                .into_iter()
+                .map(|id| Ok((id, self.revision_view(id)?)))
+                .collect::<Result<_, Failure>>()?;
+            let tick = self.game.tick();
+            let outcome = self
+                .game
+                .act(SimActor(actor.0), tor_simulation::Action::Wait)
+                .map_err(|_| invalid_archive())?;
+            for (id, old) in before {
+                if self.revision_view(id)? != old {
+                    *self.revisions.get_mut(&id).expect("known actor") += 1;
+                }
+            }
+            self.game.refresh_navigation();
+            let entry = HistoryEntry {
+                id: new_id(),
+                branch: self.branch().clone(),
+                actor,
+                tick,
+                author: Author::User {
+                    user: "bench".into(),
+                },
+                audience: Audience::Actor,
+                content: HistoryContent::Action {
+                    action: tor_protocol::Action::Wait,
+                    event: adapt::event(outcome.kind),
+                },
+            };
+            let receipt = Receipt {
+                user: "bench".into(),
+                frontend: "headless".into(),
+                request_id: format!("seed-{index}"),
+                actor,
+                branch: self.branch().clone(),
+                command: Command::Act {
+                    expected_revision,
+                    action: tor_protocol::Action::Wait,
+                },
+            };
+            self.receipts.insert(
+                (receipt.user.clone(), receipt.request_id.clone()),
+                self.archive.records.len(),
+            );
+            self.archive.records.push(Record {
+                entry: entry.clone(),
+                receipt: Some(receipt),
+            });
+            self.boundaries.push_back(Arc::new(Boundary {
+                id: Some(entry.id),
+                game: self.game.clone(),
+                revisions: self.revisions.clone(),
+            }));
+            if self.boundaries.len() > REWIND_BOUNDARIES {
+                self.boundaries.pop_front();
+            }
+        }
+        Ok(())
     }
 
     fn apply_command(
         &mut self,
         receipt: &Receipt,
         recorded_id: Option<EntryId>,
+    ) -> Result<CommandResult, Failure> {
+        self.apply_command_profiled(receipt, recorded_id, None)
+    }
+
+    fn apply_command_profiled(
+        &mut self,
+        receipt: &Receipt,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
         if matches!(receipt.command, Command::Wizard { .. }) && !self.wizard_enabled {
             return Err(Failure::new(
@@ -463,7 +670,11 @@ impl Engine {
             ));
         }
         let revision = self.revision(receipt.actor)?;
+        let started = Instant::now();
         let mut candidate = self.candidate();
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.rollback_capture += started.elapsed();
+        }
         let mut tick = candidate.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
@@ -525,22 +736,42 @@ impl Engine {
                         "Refresh the observation before acting",
                     ));
                 }
+                let started = Instant::now();
                 let before: BTreeMap<_, _> = self
                     .actors()
                     .into_iter()
                     .map(|actor| Ok((actor, self.revision_view(actor)?)))
                     .collect::<Result<_, Failure>>()?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.perception += started.elapsed();
+                    profile.actors_observed += before.len();
+                }
+                let started = Instant::now();
                 let outcome = candidate
                     .game
                     .act(SimActor(receipt.actor.0), adapt::action(action))
                     .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.simulation_transition += started.elapsed();
+                }
+                let started = Instant::now();
                 for (actor, old) in before {
-                    if candidate.revision_view(actor)? != old {
+                    let perception_started = Instant::now();
+                    let changed = candidate.revision_view(actor)? != old;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.perception += perception_started.elapsed();
+                        profile.actors_observed += 1;
+                        profile.revision_comparisons += 1;
+                    }
+                    if changed {
                         let revision = candidate.revisions.get_mut(&actor).expect("known actor");
                         *revision = revision.checked_add(1).ok_or_else(|| {
                             Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
                         })?;
                     }
+                }
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.revision_detection += started.elapsed();
                 }
                 (
                     Author::User {
@@ -600,6 +831,7 @@ impl Engine {
             receipt: Some(receipt.clone()),
         });
         if !matches!(entry.content, HistoryContent::Annotation { .. }) {
+            let started = Instant::now();
             candidate.boundaries.push_back(Arc::new(Boundary {
                 id: Some(entry.id.clone()),
                 game: candidate.game.clone(),
@@ -608,8 +840,12 @@ impl Engine {
             if candidate.boundaries.len() > REWIND_BOUNDARIES {
                 candidate.boundaries.pop_front();
             }
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.rollback_snapshot += started.elapsed();
+                profile.rollback_snapshots += 1;
+            }
         }
-        candidate.persist()?;
+        candidate.persist_profiled(profile)?;
         *self = candidate;
         Ok(CommandResult {
             entry,
@@ -903,6 +1139,10 @@ impl Engine {
     }
 
     fn persist(&self) -> Result<(), Failure> {
+        self.persist_profiled(None)
+    }
+
+    fn persist_profiled(&self, mut profile: Option<&mut CommandProfile>) -> Result<(), Failure> {
         let Some(path) = &self.path else {
             return Ok(());
         };
@@ -911,20 +1151,33 @@ impl Engine {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         fs::create_dir_all(parent).map_err(|_| storage_failure())?;
+        let started = Instant::now();
+        let bytes = serde_json::to_vec(&self.archive).map_err(|_| storage_failure())?;
+        if let Some(profile) = profile.as_mut() {
+            profile.journal_serialization += started.elapsed();
+            profile.records_serialized += self.archive.records.len();
+            profile.bytes_written += bytes.len() as u64;
+        }
+        let started = Instant::now();
         let mut temporary =
             tempfile::NamedTempFile::new_in(parent).map_err(|_| storage_failure())?;
         {
-            // JSON emits many small writes. Buffer them before touching the file;
-            // explicitly propagate flush failures before syncing or publishing.
             let mut writer = BufWriter::new(temporary.as_file_mut());
-            serde_json::to_writer(&mut writer, &self.archive).map_err(|_| storage_failure())?;
+            writer.write_all(&bytes).map_err(|_| storage_failure())?;
             writer.flush().map_err(|_| storage_failure())?;
         }
+        if let Some(profile) = profile.as_mut() {
+            profile.journal_write += started.elapsed();
+        }
+        let started = Instant::now();
         temporary
             .as_file()
             .sync_all()
             .map_err(|_| storage_failure())?;
         temporary.persist(path).map_err(|_| storage_failure())?;
+        if let Some(profile) = profile.as_mut() {
+            profile.journal_sync += started.elapsed();
+        }
         Ok(())
     }
 }

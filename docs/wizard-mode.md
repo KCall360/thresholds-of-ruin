@@ -2,9 +2,13 @@
 
 The foundation is implemented: permanent game marking, separately authenticated
 wizard authority, ground-item and actor placement, teleportation, and bounded
-rewind with retained futures. Scriptable commands are available in the text
-client. Both frontends display the marker and follow setup/rewind snapshots;
-the graphical ASCII client currently uses text alongside it for wizard commands.
+rewind with retained futures. Scriptable commands are available through the
+headless client's structured request interface and the text client's developer
+console. Both frontends display the marker and follow setup/rewind snapshots;
+the headless client is the preferred frontend for scripted wizard setup and
+scenario-driving. Use the text client when testing its text-specific input or
+presentation; the graphical ASCII client currently uses text alongside it for
+wizard commands.
 [Geometry setup](portal-geometry.md) now adds room placement, rotated passages,
 wall terrain and explicit vertical links. Richer item properties, enemy archetypes,
 and scalable history remain later milestones.
@@ -25,9 +29,12 @@ is used. The marker commits before the listener opens. Both the flag and a valid
 distinct `TOR_WIZARD_TOKEN` are required. An optional `TOR_SPECTATOR_TOKEN` must
 also differ. Invalid credential configuration fails before opening the save.
 
-In the text client's terminal, set `TOR_SERVER_TOKEN` to the **wizard credential**
-and start the client normally. The server grants role `wizard`; a player token
-cannot gain wizard authority through control ownership or a frontend label.
+Set `TOR_SERVER_TOKEN` to the **wizard credential** and connect with the
+headless client or start the text client normally. The server grants role
+`wizard`; a player token cannot gain wizard authority through control ownership
+or a frontend label. For headless use, send a branch/revision-checked
+`Command::Wizard` through a `request` input; the server applies the same
+authorization and validation as it does for text commands.
 Wizard authority covers the whole game, including all actors and rewind of the
 whole simulation. It does not require ordinary control; ordinary actions still
 do. Only grant the wizard credential to a trusted developer of this game.
@@ -114,12 +121,16 @@ player, and spectator roles, disabled mode, same-user retry bypasses, stale bran
 requests, and snapshots. A slow-controller regression verifies rewind snapshots
 precede new-branch control updates.
 
-`scripts/scenarios/wizard-foundation.json` drives the actual server, text client,
-text spectator, and native ASCII spectator in `scripts/test_wizard_process.py`.
-It verifies ordinary pickup/wait actions, setup, rewind, branch history, spawned
-actor scheduling, control transfer, denied inputs, and marked save/resume with
-privileged access disabled. These tests run in debug/release on Windows and Linux
-with the existing desktop/Xvfb CI configuration.
+`scripts/scenarios/wizard-foundation.json` currently drives the actual server,
+text client, text spectator, and native ASCII spectator in
+`scripts/test_wizard_process.py`. The existing process tests are retained for
+now; new scripted wizard scenarios should use `tor-client-headless` for
+privileged setup and scenario-driving, reserving the text client for text
+frontend coverage. The suite verifies ordinary pickup/wait actions, setup,
+rewind, branch history, spawned actor scheduling, control transfer, denied
+inputs, and marked save/resume with privileged access disabled. These tests run
+in debug/release on Windows and Linux with the existing desktop/Xvfb CI
+configuration.
 
 ## Design requirements and later extensions
 
