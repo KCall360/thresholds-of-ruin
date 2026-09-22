@@ -21,10 +21,17 @@ and an integration acceptance scenario for its complete user-visible behavior.
 Add regression tests for bug fixes. Update the project documentation and milestone
 status with the behavior, limitations, and how the feature is verified.
 
-Once [wizard mode](docs/wizard-mode.md) is available, use scripted wizard commands
-where appropriate as the final integration test: launch the actual server and
-frontend, construct a reproducible scenario through authorized wizard commands,
-exercise the feature, and assert the resulting state and client-visible behavior.
+Keep documentation roles distinct. `docs/milestones.md` is the status and roadmap
+source of truth, `docs/architecture.md` records durable boundaries and rationale,
+and feature guides specify implemented behavior. Link every guide from
+`docs/README.md`; `scripts/test_documentation.py` rejects broken local links and
+unindexed guides. Delete superseded claims instead of preserving an unlabelled
+historical plan beside current behavior.
+
+Use scripted [wizard mode](docs/wizard-mode.md) commands where appropriate as the
+final integration test: launch the actual server and frontend, construct a
+reproducible scenario through authorized wizard commands, exercise the feature,
+and assert the resulting state and client-visible behavior.
 For example, place a mob and equipment, teleport into position, then use ordinary
 combat actions to verify combat. Test a wizard feature through its own privileged
 commands. Include save/resume or rewind when relevant to the feature.
@@ -33,8 +40,7 @@ Wizard scenarios complement focused unit/protocol tests and normal-play coverage
 Setup shortcuts must not bypass the behavior under test, and wizard success does
 not establish that the feature works or is properly restricted in a normal game.
 Keep command scripts, seeds, and expected outcomes in version control and run the
-applicable process tests in Windows and Linux CI. Until wizard mode is implemented,
-use existing fixtures and real process tests; do not postpone feature testing.
+applicable process tests in Windows and Linux CI.
 
 Run the commands in README.md before pushing. Both Windows and Linux CI must pass.
 Document any checks that could not run locally.

@@ -1,6 +1,8 @@
 # Backend travel and ASCII destinations
 
-`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`, `material-rims-v10`, and new `diagonal-v11` games support travel to an actor's known cell,
+`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`,
+`material-volumes-v9`, `material-rims-v10`, and `diagonal-v11` games support
+travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
 region names, and frontend language. Protocol 11 is required. Save format remains 3.
 

@@ -1,73 +1,65 @@
 # Thresholds of Ruin
 
 A turn-based roguelike with one authoritative Rust backend and interchangeable
-frontends: graphical ASCII, interactive fiction, and eventually immersive 3D.
-Working title; original code and content inspired by NetHack.
+frontends: graphical ASCII, interactive fiction, and, eventually, immersive 3D.
+The name is provisional; the code and content are original, with NetHack used as
+a gameplay reference.
 
-## Status
+## Current state
 
-The simulation and server/protocol slices are implemented: a seeded two-room
-fixture, explicit actors, deterministic action timing, movement, inventory pickup,
-and actor-specific observations. The local WebSocket server supports pushed
-updates, client control transfer, and durable action history with user, frontend,
-and backend annotations. A playable text client now supports movement, pickup,
-live observation, control transfer, annotations, and paginated history.
-The graphical ASCII client now presents a native window with a backend-resolved
-view, inventory, notes, history, and explicit control transfer. Both clients can
-continue the same saved game. Both support server-enforced read-only spectators
-who follow live actions and results and browse permitted history. Enable a separate
-spectator credential as described in [the protocol guide](docs/protocol.md#read-only-spectators).
-The [wizard mode foundation](docs/wizard-mode.md) provides server-authorized item
-and actor placement, teleportation, and bounded rewind with retained branches.
-Wizard games are permanently marked in both frontends.
+The repository contains a playable development slice rather than a complete
+dungeon game. It currently provides:
 
-A [headless JSON-lines client](docs/headless-client.md) supports scripted play
-and perception tests. Shared clients retain disclosed cells separately from
-current state; the headless output exposes this potentially stale local memory.
-New games now support [portal-aware sight and geometry](docs/portal-geometry.md),
-including wide joins, rotated connections, opaque walls, explicit stairs, and wizard setup.
-Clients receive one actor-relative scene with no internal region or portal metadata.
-New maps also carry [unnamed place hints](docs/place-hints.md) for future text
-location organization; hints are disclosed only with perceived cells.
-[Backend travel](docs/travel.md) now moves toward known cells through ordinary
-saved actions. ASCII exposes `_` destination selection, mouse-click travel, and
-Escape cancellation. The [text adventure interface](docs/text-adventure.md) adds
-prose, examination, conversational clarification, travel and approach-then-pickup.
-[Independent doors](docs/doors.md) now support open/close actions, sight and
-movement obstruction, text approach intentions, and ASCII O/C then direction controls. New
-games include an open wooden door in an unhinted 1x1 hall between the rooms.
-[Symmetric shadowcasting](docs/shadowcasting.md) allows sight around door corners
-while preserving shadows behind closed doors. Existing saves retain their original
-rules. Server and clients use protocol 11.
-New games now use [finite material volumes](docs/material-volumes.md): 5-foot
-cubes, 10-foot room interiors, and actual stone walls, floors, and ceilings.
-New saves use `diagonal-v11`; existing saves keep their original rules.
+- a deterministic simulation with movement, waiting, pickup, doors, inventory,
+  finite material volumes, portal-connected geometry, stairs, visibility, and
+  actor-specific perception;
+- a local, authenticated WebSocket server with saved action history, annotations,
+  control transfer, read-only spectators, travel, replay, and bounded wizard
+  rewind;
+- playable text and native graphical ASCII clients, plus a JSON-lines headless
+  client for scripted acceptance tests; and
+- client-held last-seen map memory that never exposes undisclosed world state.
 
-The ASCII client now shows [remembered areas in grey](docs/ascii-memory.md),
-including last-seen items, doors, and stairs. Unseen actors disappear. This uses
-only client-held observations and refreshes cells when they become visible again.
+New games use protocol **11**, save format **3**, and ruleset
+**`diagonal-v11`**. Existing saves retain the rules under which they were created.
+The current fixture is deliberately small: two rooms and a connecting hall. It is
+a proving ground for architecture and interaction, not the planned dungeon.
 
-[Diagonal movement](docs/diagonal-movement.md) adds eight-way movement and door
-reach. Diagonal moves cost `ceil(cardinal ticks × √2)`; travel minimizes total ticks.
-ASCII uses HJKL/YUBN, `<`/`>` for stairs, and F4 for notes. New games use
-diagonal-v11; old games keep their original rules.
+For the exact implementation matrix and next work, see the
+[project status and roadmap](docs/milestones.md). The [documentation index](docs/README.md)
+routes to player guides, implementation details, and design reasoning.
 
-Start playing with [the text client guide](docs/text-client.md).
-For the windowed frontend and text-to-ASCII switching, see
-[the graphical ASCII guide](docs/ascii-client.md).
+## Run locally
 
-See [the simulation slice](docs/simulation-slice.md) for its rules and limitations.
-See [the protocol guide](docs/protocol.md) to run the server and understand messages,
-annotation audiences, and save/replay behavior.
+Install Rust through [rustup](https://rustup.rs/). On Windows, the default MSVC
+toolchain also requires Visual Studio Build Tools with the C++ tools and Windows
+SDK. The checked-in toolchain file selects stable Rust, rustfmt, and Clippy.
 
-Windows is the primary platform; Linux is tested from the beginning.
+Start the server in PowerShell:
+
+```powershell
+$env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
+cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.json
+```
+
+In another PowerShell terminal, set the same token and choose a client:
+
+```powershell
+$env:TOR_SERVER_TOKEN = '<same token>'
+cargo run -p tor-client-text -- --connect 127.0.0.1:4000 --actor 1
+# or
+cargo run -p tor-client-ascii -- --connect 127.0.0.1:4000 --actor 1
+```
+
+See the [text client guide](docs/text-client.md),
+[ASCII client guide](docs/ascii-client.md), or
+[headless client contract](docs/headless-client.md) for controls and other roles.
+The server accepts numeric loopback addresses only; remote deployment and account
+administration are not implemented.
 
 ## Development
 
-Install Rust through [rustup](https://rustup.rs/). On Windows, the default MSVC
-toolchain also needs Visual Studio Build Tools with the C++ build tools and
-Windows SDK. The repository toolchain file selects stable Rust with rustfmt
-and Clippy.
+Run the full local verification suite before publishing a change:
 
 ```sh
 cargo fmt --all --check
@@ -78,28 +70,29 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_architecture.py
 ```
 
-Graphical process tests require a desktop. On Linux install X11 development
-libraries, Xvfb, xauth, and xdotool, then run Python discovery under
-`xvfb-run -a -s "-screen 0 1280x1024x24"` (see the ASCII guide). Windows tests use
-the native desktop. Missing displays are errors, not skipped graphical tests.
+Graphical process tests require a desktop. Linux CI supplies X11 development
+libraries, Xvfb, xauth, and xdotool and runs Python discovery under
+`xvfb-run -a -s "-screen 0 1280x1024x24"`. Windows uses the native desktop.
+Missing displays are test failures rather than skipped graphical tests.
 
-Python 3 is used only for development checks; the game remains Rust. The boundary
-checker reads Cargo metadata, including optional and platform-specific edges.
-GitHub Actions runs these checks on Windows and Linux and builds Rust documentation
-with warnings treated as errors. Python discovery includes actual server/text/ASCII
-process tests and builds all binaries. To run those process tests against optimized
-binaries, set `TOR_TEST_PROFILE=release` before running
-`python -m unittest discover -s scripts -p "test_*process.py" -v` (PowerShell:
-`$env:TOR_TEST_PROFILE = 'release'`). CI runs both profiles on both platforms.
+Python is used only for development checks. GitHub Actions runs the checks on
+Windows and Linux, in debug and release where applicable, and builds Rust API
+documentation with warnings denied. Set `TOR_TEST_PROFILE=release` to point the
+process tests at optimized binaries.
 
-Dependabot checks weekly for Rust dependency and GitHub Actions updates and
-opens reviewable pull requests; updates are not automatically merged.
+Read [the architecture](docs/architecture.md),
+[project status and roadmap](docs/milestones.md), and
+[development practices](CONTRIBUTING.md) before making changes.
 
-Read [the architecture](docs/architecture.md), [milestones](docs/milestones.md),
-and [development practices](CONTRIBUTING.md) before making changes.
+## Platform and scope
+
+Windows is the primary platform; Linux is tested continuously. Automatic server
+launch, packaged builds, remote networking, procedural dungeon generation,
+combat, death, and the exit objective remain roadmap work.
 
 ## License
 
 GPL-3.0-only. See [LICENSE](LICENSE). Distributed derivative works must comply
 with the GPL; merely operating a modified network service does not trigger a
-source-disclosure requirement. See the [GNU GPL text](https://www.gnu.org/licenses/gpl-3.0.html).
+source-disclosure requirement. See the
+[GNU GPL text](https://www.gnu.org/licenses/gpl-3.0.html).

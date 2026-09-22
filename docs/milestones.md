@@ -1,245 +1,132 @@
-# Milestones
+# Project status and roadmap
 
-## 0: Foundation (complete)
+This is the source of truth for project scope and sequence. It distinguishes
+implemented behavior from planned work; feature guides contain the detailed rules
+and verification. “Complete” means implemented, documented, and covered by the
+appropriate unit, integration, protocol, and actual-client process tests.
 
-- Public GitHub repository, GPL-3.0-only license, workspace and architecture.
-- Windows and Linux formatting, lint, unit and cross-crate integration checks.
-- Foundational region bounds and observation-stream ordering tests.
-- No playable application or frontend launch-test claim at this stage.
+## Current implementation
 
-## 1: Shared playable slice (complete)
+The current tree is a playable development slice built around a deterministic
+two-room fixture. New games use protocol **11**, save format **3**, and ruleset
+**`diagonal-v11`**. Old saves retain one of the ten earlier rulesets and are not
+silently upgraded.
 
-Completed: deterministic in-memory simulation of two connected rooms, actor IDs,
-movement/pickup/wait actions, variable recovery times, room-level observations,
-and integration acceptance tests. See [implementation details](simulation-slice.md).
+| Area | Status | Implemented scope |
+| --- | --- | --- |
+| Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
+| Simulation | Complete for the slice | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, pickup, inventory, doors, stairs |
+| Geometry | Complete for the slice | Bounded 3D regions, rotated and elevated joins, finite stone volumes, actor-relative scenes |
+| Perception | Complete for the slice | Symmetric shadowcasting, disclosed surfaces/entities, opaque cell keys, stale client memory |
+| Server and persistence | Complete for the slice | Local authenticated WebSockets, action journal, save/replay, protocol validation, history and annotations |
+| Clients | Complete for the slice | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
+| Access and development | Complete for the slice | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
+| Navigation and interaction | Partial | Known-cell travel, cancellation, prose/examination, clarification, approach-and-pickup, open/close doors |
+| Dungeon gameplay | Not started | Equipment, combat, enemies, death, exit objective, authored/generated scenario inputs |
+| Distribution | Not started | Packaged clients and automatic local-server startup |
 
-Completed: versioned JSON/WebSocket server, actor attachment and control transfer,
-streamed observations, user/frontend/backend annotations, durable journal replay,
-and real WebSocket/process integration tests. See [the protocol](protocol.md).
+The current fixture, compatibility behavior, and checks are described in the
+[documentation index](README.md). Notable limitations are intentional: clients
+must be relaunched to reconnect; active travel does not resume after a server
+restart; server listeners are loopback-only; wizard history is bounded; and
+there is no procedural generator or complete game loop.
 
-Completed: playable text client with deterministic command parsing, disclosed
-item-name resolution, annotations, paginated history, live updates, and control
-transfer. Actual server/text process tests cover play, two clients, and restart
-persistence in debug and release on Windows and Linux. See [the client guide](text-client.md).
+## Completed foundations
 
-Completed: native graphical ASCII frontend with disclosed-room rendering,
-keyboard movement/pickup, inventory, private/shared notes, history browsing, and
-explicit control transfer. Actual process acceptance starts in text, picks up the
-token, transfers control to the graphical window, traverses the passage, restarts
-the server, and compares resumed state and history. Native keyboard-event and
-window-launch tests run on Windows and Linux Xvfb. See [the ASCII guide](ascii-client.md).
+### 0 — Repository and architectural boundaries
 
-Completed: server-enforced spectator credentials for both frontends, live
-actor-perspective actions/results, read-only snapshots/history, and unchanged
-annotation privacy. Raw WebSocket tests reject forged mutation requests and
-receipt retries; actual text/ASCII process tests verify live observation, denied
-inputs, and save/resume. See [spectator access](protocol.md#read-only-spectators).
+Complete. The workspace enforces a one-way dependency structure: world and
+simulation contain no UI, network, filesystem, or wall-clock behavior; protocol
+types contain no internal world state; clients consume actor-specific disclosed
+observations. CI validates formatting, linting, tests, dependency boundaries, and
+native client launch behavior on Windows and Linux.
 
-The slice includes a seeded two-space scenario, an object, actor control,
-streaming server, both frontends, and save/resume. This is not the full dungeon
-gameplay milestone; reconnects currently require relaunching the clients.
+### 1 — Shared playable slice
 
-Acceptance: start through text, pick up the object, transfer control to ASCII,
-move through a doorway, save, restart the server, reconnect both clients, and
-compare their disclosed state to the resumed authoritative state. Exercise the
-actual client processes as well as shared adapters. Reconnection and stale or
-duplicate commands must not corrupt the game.
+Complete. The server, text client, and native ASCII client can play and resume the
+same saved game. Actions stream to controllers and observers, control transfer is
+explicit, spectator credentials are server-enforced, and history preserves scoped
+annotations. Duplicate or stale commands cannot execute an action twice.
 
-## 1a: Wizard mode development foundation (complete)
+### 1a — Wizard development foundation
 
-Implemented server-enabled wizard mode with separate developer credentials and
-a durable permanent marker. Text commands provide item/actor placement, teleport,
-and rewind across the last 128 recorded decision boundaries. Both frontends
-follow fresh snapshots and display wizard status. See [wizard mode](wizard-mode.md)
-for commands, authorization, format migration, limits, and acceptance coverage.
+Complete. A distinct credential authorizes reproducible setup, placement,
+teleportation, geometry editing, and bounded rewind. Enabling it permanently marks
+the game lineage; rewinds retain abandoned branches and never become available in
+normal play. See [wizard mode](wizard-mode.md).
 
-- Server-controlled enablement and authorization; permanent wizard-game identity
-  across saves, restarts, replay, copies, and all history branches.
-- Explicit privileged protocol commands and visible wizard-game indicators in
-  every frontend, including for observers without command privileges.
-- Initial placement of supported objects/actors, teleportation, and bounded turn
-  rewind to recorded decision boundaries, with deterministic journaling and
-  preservation of the abandoned future. Never expose rewind in normal games.
-- Scriptable text commands and actual server/client process tests for reproducible
-  development scenarios; ASCII currently uses the text client alongside it for
-  privileged commands.
+### 2 — Geometry and perception foundation
 
-Acceptance: explicitly enable wizard mode on the server; place an object,
-teleport an actor, perform ordinary actions, rewind, and take a different action.
-Restart the server and verify state, annotations, retained branches, and the
-permanent wizard marker. Reject the same privileged requests in a normal game
-and from an unauthorized observer without changing state or disclosing hidden
-facts. Turning off privileged access must not remove the marker.
+Complete for the present gameplay needs. Implemented slices include
+[portal geometry](portal-geometry.md), [place hints](place-hints.md),
+[doors](doors.md), [symmetric shadowcasting](shadowcasting.md),
+[finite material volumes](material-volumes.md),
+[ASCII map memory](ascii-memory.md), and
+[diagonal movement](diagonal-movement.md).
 
-## 2: Geometry and perception
+Remaining perception work is driven by gameplay rather than more geometry in
+isolation: richer semantic events, sound propagation, and durable player-facing
+place knowledge will be added when interactions require them.
 
-First slice complete (PR #10): a JSON-lines headless frontend uses the shared
-connection and exposes current disclosed state separately from last-seen room
-memory. Same-branch snapshots preserve memory; rewind resets it. Actual process
-tests cover player/spectator access, stale hidden-room contents, revisit refresh,
-and save/resume. See [the headless guide](headless-client.md). Later slices extend geometry and
-perception below; this foundation does not complete milestone 2.
+## Active direction
 
-Completed (PR #11): [portal geometry](portal-geometry.md) adds bounded
-cell visibility through rotated passages, elevation offsets, wall occlusion,
-explicit stair links, and wizard room/link/terrain setup. Memory now refreshes
-individual visible cells by opaque keys. The backend resolves one actor-relative
-scene; clients never receive region or portal geometry. Rectangular multi-cell
-joins are atomic, and orientation stays consistent through crossings. That slice
-introduced protocol 5, save format 3, and observer-scene-v3 while preserving older
-rules during replay.
-Actual server/text/headless/native ASCII acceptance covers sight, stale memory,
-movement, pickup, stairs, save/resume and rewind. Independent doors are now
-implemented as described below; richer multi-event
-perception remains pending.
+### 3 — Complete interactions and travel
 
-Implemented: [unnamed place hints](place-hints.md), authored cell anchors
-independent of regions and portals. Protocol 6 discloses hints only with perceived
-cells; shared memory retains potentially stale values. Wizard set/clear supports
-dynamic maps, restart and rewind. That slice introduced place-hints-v4; older rules remain
-unchanged. Actual text/headless/native ASCII acceptance covers disclosure and
-memory. Client location grouping and navigation are not implemented by this slice.
+Status: **in progress**.
 
-Stairs/elevations, rotated portal, portal-aware visibility, knowledge and memory.
-Test an interior door unrelated to a portal, portal orientation transforms,
-vertical movement, cycles, and hidden-information disclosure. Test one action
-producing several ordered updates before the next player decision.
-Extend wizard commands with room placement and explicit passage connections as
-the geometry model supports them; use these to reproduce perception edge cases.
+Already implemented: server-managed travel through known cells, interruption and
+cancellation at action boundaries, ASCII keyboard/mouse destinations, text
+direction intentions, prose and examination, noun clarification, compound
+approach-and-pickup, and open/close doors.
 
-Headless-client requirements (foundation and portal coverage implemented):
+Next scope:
 
-Add a thin headless client built on `tor-client-common`. It must connect as a
-player or authorized spectator, issue scripted actions where permitted, and
-expose only its received disclosed state to tests. Use it to test current
-visibility separately from retained client memory, including portal views and
-hidden-information boundaries.
+- add locks, keys, containers, and the corresponding item properties;
+- extend wizard placement so each failure and interaction can be reproduced;
+- add named or durable place knowledge without revealing unseen topology;
+- expand semantic event narration and threat/damage travel interruption; and
+- verify slow-client presentation and resynchronization independently of server
+  action timing.
 
-Implemented: [independent doors](doors.md), cell-sized entities with open/close
-ordinary actions, sight/movement obstruction, topology-independent placement,
-perceived reach and approach cells, stale memory, and deterministic replay/rewind.
-World tests compare interior and wide-join doors; actual text/headless/native ASCII
-acceptance covers ordinary play, wizard scenarios, rotated joins, permissions and
-persistence. Protocol 9 and doors-v6 preserve all earlier saves' rules. This does
-not complete milestone 2; richer perceived events remain pending.
+The backend continues to resolve every ordinary step. Clients never receive a
+planned route or future outcome, and ambiguity never consumes simulation time.
 
-Implemented: [symmetric shadowcasting](shadowcasting.md), exact slope arithmetic,
-beveled door/wall corners, symmetric floor visibility on ordinary grids, and
-bounded topology resolution across rotated joins and cycles. Exhaustive small-map
-tests cover reciprocity; split-room tests cover storage independence. Actual
-text/headless/native ASCII tests cover door shadows, diagonal contents, stale
-memory, and resume. That slice introduced shadowcasting-v7; all six earlier rulesets
-retain their behavior. A release benchmark measures complete scene construction.
+## Planned milestones
 
-Fixture refinement: doorway-v8 places the initially open door in an unhinted
-1x1 hall between two 5x3 rooms. Only the room interiors have place hints; text
-travel targets the far room rather than stopping in the doorway. Seven previous
-rulesets retain their original layouts. Server and actual-client tests cover
-hall geometry, crossing, sight obstruction, text navigation, save and rewind.
+### 4 — Dungeon gameplay
 
-Implemented: [finite material volumes](material-volumes.md), five-foot cubes,
-two-cell-high carved interiors, stone shells with floors and ceilings, bounded
-surface disclosure, and wizard chamber authoring. Protocol 10 and
-material-rims-v10 preserve all nine earlier rulesets. The doorway rim correction
-verifies solid/empty corners from every floor position through all rotations,
-plus the three reported viewpoints in the actual ASCII client. World tests verify
-storage-independent views through ordinary and rotated joins; real text/headless/
-native ASCII acceptance covers normal play, stale surfaces, edits, rewind and
-resume. Gravity, falling, digging, destruction, and body clearance remain deferred.
-Buffered journal serialization also reduces movement latency while retaining
-explicit flush, disk sync, and atomic replacement. A diagnostic benchmark separates
-perception costs from save costs; long-history storage improvements remain deferred.
-Richer perceived events are still pending in milestone 2.
+Add equipment, melee, two enemy types, differing actor speeds, death, and an exit
+objective. Player actors and mobs use the same actions; controllers supply intent.
+Introduce explicit scenario and world-schema inputs before seeded procedural
+generation becomes the default, supporting authored, generated, and hybrid maps.
 
-Implemented client presentation refinement: [ASCII map memory](ascii-memory.md)
-renders remembered terrain, doors, stairs, and items in grey while hiding unseen
-actors. Shared clients align received sightings without backend geometry, retain
-a bounded local chart, and reset uncertain alignments or abandoned branches.
-Actual native acceptance covers occlusion, movement, item refresh, rotated joins,
-spectators, hidden changes, rewind and fresh-session resume. No protocol, save,
-or gameplay-rules change; richer perceived events remain pending in milestone 2.
+Acceptance requires deterministic combat, victory, persistent permadeath, and all
+scenario forms through both playable clients. Wizard setup must reproduce combat
+and death cases without bypassing the ordinary actions under test.
 
-Implemented: [diagonal movement](diagonal-movement.md), exact rounded-up √2 tick
-costs, one-clear-side corner traversal, rotated portal resolution, diagonal door
-reach, and minimum-tick travel. ASCII uses Y/U/B/N with `<`/`>` stairs and F4 notes;
-text supports diagonal steps and destination bearings. Protocol 11 and diagonal-v11
-preserve all ten earlier rulesets. Behavior tests and actual native/text/headless
-scenarios cover movement, corners, doors, travel, spectators, restart and rewind.
-Richer perceived events remain pending.
+### 5 — Rogue-o-matic bot framework
 
-## 3: Interactions and travel
+Build bots on the ordinary disclosed client view, including explicitly uncertain
+knowledge, map memory, inventory, and events. Begin with deterministic exploration
+and scenario-driven test policies. Bots must obey the same visibility, travel, and
+action boundaries as human clients and must never access server world state.
 
-Implemented first travel slice: [backend travel to known cells](travel.md), ASCII
-`_` selection and mouse clicks, ordered completed-step updates, cancellation,
-potential-hazard/obstruction/control interruptions, replayed navigation knowledge, and
-restart/rewind behavior. Protocol 7 and new rules `travel-v5` preserve legacy
-saves. Actual server/text observer/headless/native ASCII acceptance includes
-native underscore and mouse input, normal play, wizard scenarios and persistence.
-Implemented [the first text adventure slice](text-adventure.md): backend-provided
-cosmetic appearances, prose and examination, conversational item clarification,
-visible-anchor directional travel, and approach-then-pickup. Place exits exclude
-ordinary floor within the current place; compound intentions have one narrative
-response and a completion prompt. Protocol 8 leaves
-travel-v5 and save format 3 unchanged. Generic descriptions and a conservative
-visible-place heuristic are initial foundations; persistent named places, richer
-spatial descriptions, and broader compound interactions remain future work.
-The [door slice](doors.md) adds examination, noun clarification, approach-then-open/close,
-ASCII O/C then direction controls and explicit travel barriers. Locks, containers, richer
-threat/damage interruptions and the remaining work below are still pending.
+### 6 — History, recovery, and distribution
 
+Scale wizard rewind and branch retention beyond the current 128-boundary window;
+add replay checksums, stronger interrupted-write recovery, packaged clients, and
+automatic local-server startup or attachment. Verify compatible replay, retained
+branches, and package launch behavior on both supported platforms.
 
-Doors, locks, keys, containers, clarification, named places and interrupted travel.
-Both clients complete the same manipulation scenarios. Unknown map regions must
-not influence travel. Travel is server-managed: it resolves ordinary movement
-steps without disclosing unresolved route steps or future outcomes. Ambiguity
-consumes no time; threats interrupt before another automatic movement action.
-Player cancellation takes effect at an action boundary. Test cancellation,
-slow-client resynchronization, and clients that present already-completed travel
-updates more slowly than the simulation.
-Extend wizard object placement with supported container, door, lock, and item
-properties so interaction/travel failures can be reproduced without manual setup.
+An immersive 3D frontend is deliberately deferred until ASCII and text gameplay
+validate the protocol and interaction model. Remote authentication, encrypted
+deployment, multiplayer input policy, hunger, identification, and ranged combat
+are also outside the current milestone sequence.
 
-## 4: Dungeon gameplay
+## How the roadmap changes
 
-Equipment, melee, two enemy types, different action durations/speeds, death and
-exit objective. Player actors and mobs interact through the same action and world
-interfaces; distinct player, AI, and future bot controllers supply their intents.
-Add scenario and world-schema inputs before making seeded generation the default:
-support fully authored scenarios, fully generated scenarios, and authored
-scenarios with marked procedural-generation regions. Test deterministic combat,
-victory, persistent permadeath, and each scenario form through both clients.
-Add wizard mob placement with explicit supported archetypes and behavior settings;
-use placement, teleportation, and rewind to verify combat and death scenarios.
-
-## 5: Rogue-o-matic bot framework
-
-Build a rogue-o-matic client framework on the ordinary disclosed client view. It
-tracks received state, retained map memory, inventory and equipment, messages, and
-explicitly uncertain or inferred knowledge; it cannot access server world state.
-Provide a small action interface so multiple bot policies can be implemented on
-top, starting with deterministic exploration and scenario-driven test bots. Test
-that bots obey the same visibility, travel, and action boundaries as a human
-client.
-
-## 6: History and release preparation
-
-Scale wizard rewind/branching beyond the initial bounded implementation; add
-replay checksums, save-write recovery and packaged builds.
-Verify retained branches, replay with compatible versions, and packaged client
-launches that automatically start a local backend or attach to an existing one.
-
-## CI growth
-
-Every milestone adds its acceptance tests to CI. Keep unit tests fast and
-deterministic. Protocol tests run a real server once transport exists; text tests
-drive process input/output; ASCII tests combine input/presentation assertions with
-actual window-launch tests. Configure graphical environments explicitly on both
-platforms. Do not label model-only tests as graphical application tests.
-
-Every new feature carries behavior tests and an integration acceptance scenario,
-not only a milestone-wide test at the end. Once wizard mode exists, scripted
-wizard commands should often provide the final integration test through actual
-server/frontend processes. Use them to arrange and reproduce scenarios, then
-exercise the feature through its intended commands and assert outcomes. Keep
-normal-game coverage and update documentation as part of completing the feature.
-See [development practices](../CONTRIBUTING.md) for the testing requirements.
+Every feature must add behavior tests at the layers it changes and an end-to-end
+acceptance scenario using the real applications. Update this file when status or
+scope changes, and update the relevant implementation guide with behavior,
+limitations, compatibility, reasoning, and verification. See
+[development practices](../CONTRIBUTING.md) for the full completion criteria.

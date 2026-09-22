@@ -1,8 +1,9 @@
 # First simulation slice
 
-The `tor-simulation` crate now implements the first in-memory portion of Milestone
-1. It uses only the standard library and `tor-world`; it performs no I/O, rendering,
-wall-clock access, or implicit random sampling.
+`tor-simulation` implements the authoritative in-memory rules for the current
+playable slice. It uses only the standard library and `tor-world`; it performs no
+I/O, rendering, wall-clock access, or implicit random sampling. This page records
+the implemented fixture and rules, not the future dungeon-gameplay scope.
 
 ## Scenario and geometry
 
