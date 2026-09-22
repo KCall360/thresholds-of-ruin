@@ -102,26 +102,20 @@ disclosed views cannot establish a consistent alignment.
 
 ## Saves and verification
 
-Save format **3** adds the private view-identity salt. Formats 1 and 2 migrate on
-successful open while retaining their ruleset. `two-room-v1` keeps whole-room
-perception and its old movement rules; `portal-sight-v2` keeps its four-step
-visibility and original input directions for deterministic journal replay.
-No save silently changes its rules. The new protocol presents these older
-observations through relative views as well. Existing normal saves are never
-implicitly promoted to wizard mode.
+Save format **3** contains the private view-identity salt. Formats 1 and 2 and
+rulesets other than `diagonal-v11` are rejected.
 
 Tests compare one region against the same space split by a wide join, including
 all visible offsets. They cover rotations, consistent movement, height offsets,
 wall occlusion, corners, cycles, atomic rejection, stable opaque keys, sanitized
-history, reach, legacy replay, and rewind. `scripts/scenarios/wide-join.json` and
+history, reach, current-format replay, and rewind. `scripts/scenarios/wide-join.json` and
 `portal-geometry.json` drive the actual server, text, headless, and native ASCII
 clients. They test continuous sight, movement/pickup, hidden changes, stale
 memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). New saves use
-`diagonal-v11`; earlier saves retain their original rules.
+[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)

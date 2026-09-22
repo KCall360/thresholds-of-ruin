@@ -1,7 +1,6 @@
 """Portal geometry acceptance through server, text, headless and native ASCII."""
 import json
 from pathlib import Path
-import tempfile
 import unittest
 
 import test_ascii_process as ascii_support
@@ -23,7 +22,7 @@ class GeometryProcesses(unittest.TestCase):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
 
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
+        directory = support.ProcessTestDirectory()
         self.addCleanup(directory.cleanup)
         self.save = Path(directory.name) / "geometry.json"
 

@@ -39,9 +39,9 @@ These pages describe current behavior rather than proposals.
 | Navigation | [Backend travel](travel.md) |
 | Development tools | [Wizard mode](wizard-mode.md) |
 
-The feature guides retain the version in which behavior first appeared because
-old saves keep their original rules. The current version summary is maintained in
-[the roadmap](milestones.md#current-implementation).
+Feature guides may identify the version in which behavior first appeared for
+historical context. Runtime support is limited to the current protocol, save
+format, and ruleset listed in [the roadmap](milestones.md#current-implementation).
 
 ## Documentation maintenance
 

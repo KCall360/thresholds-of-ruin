@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
 import unittest
 
 import test_ascii_process as ascii_support
@@ -22,7 +21,7 @@ class WizardProcesses(unittest.TestCase):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
 
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
+        directory = text_support.ProcessTestDirectory()
         self.addCleanup(directory.cleanup)
         self.save = Path(directory.name) / "wizard.json"
 

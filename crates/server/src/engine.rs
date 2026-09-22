@@ -19,16 +19,6 @@ use crate::journal::{
 const ARCHIVE_VERSION: u32 = 3;
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = "diagonal-v11";
-const MATERIAL_V10_RULESET: &str = "material-rims-v10";
-const MATERIAL_V9_RULESET: &str = "material-volumes-v9";
-const DOORWAY_V8_RULESET: &str = "doorway-v8";
-const SHADOW_V7_RULESET: &str = "shadowcasting-v7";
-const DOORS_V6_RULESET: &str = "doors-v6";
-const TRAVEL_V5_RULESET: &str = "travel-v5";
-const PLACES_V4_RULESET: &str = "place-hints-v4";
-const SCENE_V3_RULESET: &str = "observer-scene-v3";
-const PORTAL_V2_RULESET: &str = "portal-sight-v2";
-const LEGACY_RULESET: &str = "two-room-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
@@ -103,10 +93,8 @@ struct Record {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Archive {
-    #[serde(default)]
     view_salt: String,
-    #[serde(default)]
-    wizard_game: Option<bool>,
+    wizard_game: bool,
     version: u32,
     ruleset: String,
     scenario: Scenario,
@@ -143,59 +131,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
-        Self::memory_rules(scenario, RULESET)
-    }
-
-    fn memory_rules(scenario: Scenario, ruleset: &str) -> Result<Self, Failure> {
-        let mut game = if matches!(
-            ruleset,
-            RULESET | MATERIAL_V10_RULESET | MATERIAL_V9_RULESET
-        ) {
-            Game::two_room_in_stone(scenario.seed)
-        } else if ruleset == DOORWAY_V8_RULESET {
-            Game::two_room_with_doorway(scenario.seed)
-        } else if matches!(
-            ruleset,
-            SHADOW_V7_RULESET | DOORS_V6_RULESET | TRAVEL_V5_RULESET | PLACES_V4_RULESET
-        ) {
-            Game::two_room_with_place_hints(scenario.seed)
-        } else {
-            Game::two_room(scenario.seed)
-        };
-        if !matches!(
-            ruleset,
-            RULESET
-                | MATERIAL_V10_RULESET
-                | MATERIAL_V9_RULESET
-                | DOORWAY_V8_RULESET
-                | SHADOW_V7_RULESET
-        ) {
-            game.use_ray_perception();
-        }
-        if ruleset == PORTAL_V2_RULESET {
-            game.use_portal_v2_rules();
-        }
-        if ruleset == LEGACY_RULESET {
-            game.use_legacy_perception();
-        }
-        if matches!(ruleset, SHADOW_V7_RULESET | DOORS_V6_RULESET) {
-            game.place_door(
-                adapt::location(crate::journal::Position {
-                    region: 1,
-                    x: 3,
-                    y: 1,
-                    z: 0,
-                }),
-                true,
-            )
-            .map_err(|_| invalid_archive())?;
-        }
-        if ruleset == MATERIAL_V9_RULESET {
-            game.use_initial_material_rims();
-        }
-        if ruleset == RULESET {
-            game.enable_diagonals();
-        }
+        let mut game = Game::two_room_in_stone(scenario.seed);
         let mut revisions = BTreeMap::new();
         if scenario.actors.is_empty() {
             return Err(invalid_archive());
@@ -207,18 +143,7 @@ impl Engine {
                 .map_err(|_| invalid_archive())?;
             revisions.insert(ActorId(id.0), 0);
         }
-        if matches!(
-            ruleset,
-            RULESET
-                | MATERIAL_V10_RULESET
-                | MATERIAL_V9_RULESET
-                | DOORWAY_V8_RULESET
-                | SHADOW_V7_RULESET
-                | DOORS_V6_RULESET
-                | TRAVEL_V5_RULESET
-        ) {
-            game.refresh_navigation();
-        }
+        game.refresh_navigation();
         let branch = BranchId(Uuid::new_v4().to_string());
         let initial = Arc::new(Boundary {
             id: None,
@@ -236,9 +161,9 @@ impl Engine {
             lock: None,
             archive: Archive {
                 view_salt: Uuid::new_v4().to_string(),
-                wizard_game: Some(false),
+                wizard_game: false,
                 version: ARCHIVE_VERSION,
-                ruleset: ruleset.into(),
+                ruleset: RULESET.into(),
                 scenario,
                 branch,
                 records: Vec::new(),
@@ -265,35 +190,18 @@ impl Engine {
     }
 
     fn replay(archive: Archive) -> Result<Self, Failure> {
-        if !matches!(archive.version, 1 | 2 | ARCHIVE_VERSION)
-            || (archive.version == 1 && archive.wizard_game == Some(true))
-            || (archive.version >= 2 && archive.wizard_game.is_none())
-            || (archive.version == ARCHIVE_VERSION && Uuid::parse_str(&archive.view_salt).is_err())
-            || !matches!(
-                archive.ruleset.as_str(),
-                RULESET
-                    | MATERIAL_V10_RULESET
-                    | MATERIAL_V9_RULESET
-                    | DOORWAY_V8_RULESET
-                    | SHADOW_V7_RULESET
-                    | DOORS_V6_RULESET
-                    | TRAVEL_V5_RULESET
-                    | PLACES_V4_RULESET
-                    | SCENE_V3_RULESET
-                    | PORTAL_V2_RULESET
-                    | LEGACY_RULESET
-            )
+        if archive.version != ARCHIVE_VERSION
+            || Uuid::parse_str(&archive.view_salt).is_err()
+            || archive.ruleset != RULESET
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
             return Err(invalid_archive());
         }
-        let mut engine = Self::memory_rules(archive.scenario, &archive.ruleset)?;
-        if !archive.view_salt.is_empty() {
-            engine.archive.view_salt = archive.view_salt;
-        }
+        let mut engine = Self::memory(archive.scenario)?;
+        engine.archive.view_salt = archive.view_salt;
         engine.current_branch = archive.branch.clone();
-        engine.archive.wizard_game = Some(archive.wizard_game.unwrap_or(false));
-        engine.wizard_enabled = archive.wizard_game.unwrap_or(false);
+        engine.archive.wizard_game = archive.wizard_game;
+        engine.wizard_enabled = archive.wizard_game;
         engine.archive.branch = archive.branch;
         for record in archive.records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
@@ -343,7 +251,7 @@ impl Engine {
     /// Trusted administration operation. The marker commits before authority changes.
     pub fn enable_wizard(&mut self) -> Result<(), Failure> {
         let mut candidate = self.candidate();
-        candidate.archive.wizard_game = Some(true);
+        candidate.archive.wizard_game = true;
         candidate.persist()?;
         candidate.wizard_enabled = true;
         *self = candidate;
@@ -383,13 +291,10 @@ impl Engine {
             .game
             .observe(SimActor(actor.0))
             .map_err(|_| invalid_archive())?;
-        let scene = if self.game.uses_scene_rules() {
-            self.game
-                .scene(SimActor(actor.0))
-                .map_err(|_| invalid_archive())?
-        } else {
-            Vec::new()
-        };
+        let scene = self
+            .game
+            .scene(SimActor(actor.0))
+            .map_err(|_| invalid_archive())?;
         Ok((view, scene))
     }
 
@@ -404,18 +309,6 @@ impl Engine {
                 "Travel destination or known route is unavailable",
             )
         };
-        if !matches!(
-            self.archive.ruleset.as_str(),
-            RULESET
-                | MATERIAL_V10_RULESET
-                | MATERIAL_V9_RULESET
-                | DOORWAY_V8_RULESET
-                | SHADOW_V7_RULESET
-                | DOORS_V6_RULESET
-                | TRAVEL_V5_RULESET
-        ) {
-            return Err(unavailable());
-        }
         let location = self
             .game
             .known_cells(SimActor(actor.0))
@@ -428,7 +321,7 @@ impl Engine {
 
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
         Ok(StateView {
-            wizard_game: self.archive.wizard_game.unwrap_or(false),
+            wizard_game: self.archive.wizard_game,
             revision: self.revision(actor)?,
             observation: self.observation(actor)?,
         })
@@ -632,22 +525,6 @@ impl Engine {
                         "Refresh the observation before acting",
                     ));
                 }
-                if matches!(action, tor_protocol::Action::SetDoor { .. })
-                    && !matches!(
-                        self.archive.ruleset.as_str(),
-                        RULESET
-                            | MATERIAL_V10_RULESET
-                            | MATERIAL_V9_RULESET
-                            | DOORWAY_V8_RULESET
-                            | SHADOW_V7_RULESET
-                            | DOORS_V6_RULESET
-                    )
-                {
-                    return Err(Failure::new(
-                        ErrorCode::InvalidAction,
-                        "Action is unavailable",
-                    ));
-                }
                 let before: BTreeMap<_, _> = self
                     .actors()
                     .into_iter()
@@ -704,18 +581,7 @@ impl Engine {
                 )
             }
         };
-        if matches!(
-            candidate.archive.ruleset.as_str(),
-            RULESET
-                | MATERIAL_V10_RULESET
-                | MATERIAL_V9_RULESET
-                | DOORWAY_V8_RULESET
-                | SHADOW_V7_RULESET
-                | DOORS_V6_RULESET
-                | TRAVEL_V5_RULESET
-        ) {
-            candidate.game.refresh_navigation();
-        }
+        candidate.game.refresh_navigation();
         let entry = HistoryEntry {
             id: entry_id,
             branch: candidate.branch().clone(),
@@ -781,20 +647,6 @@ impl Engine {
             .collect::<Result<_, Failure>>()?;
         let result = match operation {
             WizardOperation::PlaceDoor { position, open } => {
-                if !matches!(
-                    self.archive.ruleset.as_str(),
-                    RULESET
-                        | MATERIAL_V10_RULESET
-                        | MATERIAL_V9_RULESET
-                        | DOORWAY_V8_RULESET
-                        | SHADOW_V7_RULESET
-                        | DOORS_V6_RULESET
-                ) {
-                    return Err(Failure::new(
-                        ErrorCode::InvalidAction,
-                        "Door setup requires new rules",
-                    ));
-                }
                 let door = self
                     .game
                     .place_door(adapt::location(*position), *open)
@@ -827,14 +679,6 @@ impl Engine {
             }
             WizardOperation::PlaceRoom { region } | WizardOperation::PlaceChamber { region } => {
                 let chamber = matches!(operation, WizardOperation::PlaceChamber { .. });
-                if chamber
-                    && !matches!(
-                        self.archive.ruleset.as_str(),
-                        RULESET | MATERIAL_V10_RULESET | MATERIAL_V9_RULESET
-                    )
-                {
-                    return Err(invalid());
-                }
                 // Bound setup and disclosure work independently of wire limits.
                 if region.id == 0
                     || region.name.is_empty()
@@ -879,19 +723,6 @@ impl Engine {
                 WizardResult::Connected
             }
             WizardOperation::SetPlaceHint { position, present } => {
-                if !matches!(
-                    self.archive.ruleset.as_str(),
-                    RULESET
-                        | MATERIAL_V10_RULESET
-                        | MATERIAL_V9_RULESET
-                        | DOORWAY_V8_RULESET
-                        | SHADOW_V7_RULESET
-                        | DOORS_V6_RULESET
-                        | TRAVEL_V5_RULESET
-                        | PLACES_V4_RULESET
-                ) {
-                    return Err(invalid());
-                }
                 self.game
                     .set_place_hint(adapt::location(*position), *present)
                     .map_err(|_| invalid())?;

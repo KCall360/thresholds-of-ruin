@@ -136,8 +136,8 @@ rules for notes. History remains available; control, gameplay, and note-writing
 inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
-does not restrict that credential. Existing saves are compatible, but server and
-clients must all use protocol version 11. Real process tests cover live spectator
+does not restrict that credential. Server and clients must all use protocol
+version 11. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -150,8 +150,7 @@ and selections from an abandoned branch. Server and clients must use protocol 11
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). New saves use
-`diagonal-v11`; earlier saves retain their original rules.
+[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.

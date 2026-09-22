@@ -8,7 +8,7 @@ The `GREY: LAST SEEN` legend distinguishes memory from current sight; the invent
 and `IN SIGHT` list still show current observations only.
 
 This is entirely client-side. No server, protocol, save-format, or gameplay-rules
-change is involved, and existing saves work. Hidden changes do not refresh memory.
+change is involved. Hidden changes do not refresh memory.
 Mouse travel and destination selection still target currently visible cells only;
 mouse hit testing uses the same expanded layout as painting.
 

@@ -12,14 +12,7 @@ fn main() {
     } else {
         "release"
     };
-    for (name, mut game) in [
-        ("doorway-v8", Game::two_room_with_doorway(42)),
-        ("materials-v9", Game::two_room_in_stone(42)),
-        ("rims-v10", Game::two_room_in_stone(42)),
-    ] {
-        if name == "materials-v9" {
-            game.use_initial_material_rims();
-        }
+    for (name, mut game) in [("diagonal-v11", Game::two_room_in_stone(42))] {
         let actor = game
             .spawn_actor(
                 Location {

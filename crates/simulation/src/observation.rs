@@ -68,46 +68,17 @@ pub struct Observation {
 }
 
 impl Game {
-    /// A free read of current perception. New games use bounded symmetric shadowcasting,
-    /// including rotated portals. Legacy saves retain whole-room perception.
+    /// A free read using bounded symmetric shadowcasting through rotated portals.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        let cells = if self.legacy_perception {
-            let (width, depth, _) = self
-                .world
-                .region(actor.location.region)
-                .expect("actor region")
-                .bounds
-                .dimensions();
-            (0..width)
-                .flat_map(|x| {
-                    (0..depth).map(move |y| Location {
-                        region: actor.location.region,
-                        position: Position {
-                            x,
-                            y,
-                            z: actor.location.position.z,
-                        },
-                    })
-                })
-                .collect::<BTreeSet<_>>()
-        } else {
-            if self.scene_rules {
-                self.scene(id)?
-                    .into_iter()
-                    .map(|cell| cell.location)
-                    .collect()
-            } else {
-                self.world.visible_cells(actor.location, 4)
-            }
-        };
+        let cells = self
+            .scene(id)?
+            .into_iter()
+            .map(|cell| cell.location)
+            .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
-        let surface_scene = if self.legacy_perception {
-            vec![]
-        } else {
-            self.scene(id)?
-        };
+        let surface_scene = self.scene(id)?;
         let surface = |location, direction| {
             if !self.material_surfaces {
                 return None;
@@ -176,7 +147,7 @@ impl Game {
                     material: match self.world.terrain(location) {
                         Some(tor_world::Terrain::Solid(material)) => material.name(),
                         _ if self.world.is_chamber(location.region) => "",
-                        _ => "stone", // Historical cosmetic surface for raw/legacy regions.
+                        _ => "stone", // Cosmetic fallback for raw diagnostic regions.
                     },
                     location,
                     wall: self.world.is_wall(location),
@@ -242,9 +213,6 @@ impl Game {
                 let (dx, dy, _) = direction.delta();
                 let local = direction.rotated(from.rotation);
                 let reach = if let Some((a, b)) = direction.components() {
-                    if !self.diagonals {
-                        continue;
-                    }
                     self.world.diagonal_reach(from.location, local, |side| {
                         !self.occupied(side)
                             && [a, b].into_iter().any(|first| {
@@ -298,33 +266,9 @@ impl Game {
     /// Backend-resolved view occurrences. A location may be seen at several offsets.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        if self.legacy_perception {
-            return Ok(self
-                .observe(id)?
-                .visible_cells
-                .into_iter()
-                .map(|cell| tor_world::SightCell {
-                    location: cell.location,
-                    offset: Position {
-                        x: cell.location.position.x - actor.location.position.x,
-                        y: cell.location.position.y - actor.location.position.y,
-                        z: 0,
-                    },
-                    rotation: 0,
-                    wall: cell.wall,
-                })
-                .collect());
-        }
-        if self.shadowcasting {
-            return Ok(self
-                .world
-                .shadow_scene(actor.location, actor.orientation, 8));
-        }
-        Ok(self.world.scene(
-            actor.location,
-            actor.orientation,
-            if self.scene_rules { 8 } else { 4 },
-        ))
+        Ok(self
+            .world
+            .shadow_scene(actor.location, actor.orientation, 8))
     }
 }
 

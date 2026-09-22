@@ -436,7 +436,7 @@ fn rewind_targets_are_bounded_and_notes_keep_original_branch_anchors_and_privacy
 }
 
 #[test]
-fn old_normal_save_migrates_but_corrupt_wizard_journal_does_not_load() {
+fn old_save_and_corrupt_wizard_journal_do_not_load() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("legacy.json");
     drop(Engine::open(&path, Scenario::two_room(0)).unwrap());
@@ -445,6 +445,12 @@ fn old_normal_save_migrates_but_corrupt_wizard_journal_does_not_load() {
     archive["version"] = 1.into();
     archive.as_object_mut().unwrap().remove("wizard_game");
     std::fs::write(&path, serde_json::to_vec(&archive).unwrap()).unwrap();
+    assert_eq!(
+        Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
+        ErrorCode::InvalidArchive
+    );
+
+    let path = dir.path().join("corrupt.json");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     engine.enable_wizard().unwrap();
     wizard(

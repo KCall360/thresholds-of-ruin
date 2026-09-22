@@ -1,7 +1,6 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
 import json
 from pathlib import Path
-import tempfile
 import unittest
 
 import test_text_process as support
@@ -17,7 +16,7 @@ class HeadlessProcesses(unittest.TestCase):
         support.TextProcesses.setUpClass.__func__(cls)
 
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
+        directory = support.ProcessTestDirectory()
         self.addCleanup(directory.cleanup)
         self.save = Path(directory.name) / "game.json"
 

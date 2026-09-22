@@ -82,49 +82,6 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
 }
 
 #[test]
-fn old_rules_retain_their_behavior_and_reject_travel() {
-    for ruleset in [
-        "two-room-v1",
-        "portal-sight-v2",
-        "observer-scene-v3",
-        "place-hints-v4",
-    ] {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("old.json");
-        drop(Engine::open(&path, Scenario::two_room(42)).unwrap());
-        let mut archive: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        archive["ruleset"] = ruleset.into();
-        std::fs::write(&path, serde_json::to_vec(&archive).unwrap()).unwrap();
-        let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
-        let before = engine.state(ActorId(1)).unwrap();
-        let target = before.observation.visible_cells[0].key.clone();
-        assert!(engine
-            .command(
-                "player",
-                "ascii",
-                ActorId(1),
-                "travel",
-                &engine.branch().clone(),
-                Command::Travel {
-                    expected_revision: 0,
-                    destination: target
-                }
-            )
-            .is_err());
-        assert_eq!(engine.state(ActorId(1)).unwrap(), before);
-        command(
-            &mut engine,
-            "ordinary",
-            Command::Act {
-                expected_revision: 0,
-                action: Action::Wait,
-            },
-        );
-    }
-}
-
-#[test]
 fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("remembered.json");

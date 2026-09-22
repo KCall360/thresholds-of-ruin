@@ -86,9 +86,8 @@ unknown, already carried, and out-of-reach items produces the same unavailable
 error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
-`two-room-v1` saves retain original whole-room perception; new saves use
-`diagonal-v11`. Sound remains later work. New server games add an initially
-open door; older fixtures retain their original rules.
+Saves use `diagonal-v11`; older rulesets are rejected. Sound remains later work.
+Server games add an initially open door.
 
 ## Validation and remaining work
 
@@ -109,8 +108,7 @@ process tests, including cross-frontend control transfer and save/resume.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). New saves use
-`diagonal-v11`; earlier saves retain their original rules.
+[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
 [Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
 Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
