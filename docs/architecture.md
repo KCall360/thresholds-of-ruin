@@ -1,16 +1,17 @@
-# Architecture
+# Architecture and design rationale
 
 ## Scope
 
-One authoritative backend supports graphical ASCII, Zork-style text, and later
-immersive 3D clients using the same protocol. A game can continue across client
-switches. Initial gameplay is single player, with explicit actor identities and
-controllers so multiplayer can be designed later. Windows first; Linux portable.
+One authoritative backend supports graphical ASCII and interactive-fiction
+clients through the same protocol; an immersive 3D client is a later possibility.
+A game can continue across client switches. Gameplay is currently single-player,
+but actor identity and control are explicit so the design does not assume a
+global player. Windows is primary and Linux is continuously tested.
 
-This document records intended architecture. Implemented behavior is described in
-[the simulation slice](simulation-slice.md) and [the server protocol](protocol.md).
-The [text frontend](text-client.md) and [graphical ASCII frontend](ascii-client.md)
-are playable. Richer perception, the 3D frontend, and remaining milestones are planned.
+This document records durable boundaries and their rationale. It is not a
+roadmap or changelog. The [project status and roadmap](milestones.md) identifies
+implemented and planned scope; the [documentation index](README.md) links to the
+current behavioral specifications.
 
 ## Workspace boundaries
 
