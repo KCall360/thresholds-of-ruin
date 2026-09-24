@@ -37,7 +37,7 @@ These pages describe current behavior rather than proposals.
 | Geometry and perception | [Portal geometry](portal-geometry.md), [shadowcasting](shadowcasting.md), [material volumes](material-volumes.md), [place hints](place-hints.md) |
 | Client knowledge and presentation | [ASCII memory](ascii-memory.md), [text adventure](text-adventure.md) |
 | Navigation | [Backend travel](travel.md) |
-| Engineering plans | [Performance and scalable persistence](performance-persistence.md), [performance harness](performance-harness.md), [persistence design review](persistence-review.md) |
+| Engineering plans | [Performance and scalable persistence](performance-persistence.md), [performance harness](performance-harness.md), [Phase A findings](phase-a-findings.md), [persistence design review](persistence-review.md) |
 | Development tools | [Wizard mode](wizard-mode.md) |
 
 Feature guides may identify the version in which behavior first appeared for

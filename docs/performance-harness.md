@@ -1,6 +1,7 @@
 # Performance harness and Phase A verification
 
-Status: Phase A implementation under final verification, 2026-09-24. Phase B
+Status: Phase A complete, 2026-09-24. The [measured findings](phase-a-findings.md)
+retain the complete release baseline and verification. Phase B
 storage is not implemented or authorized. The governing scope remains
 [performance and scalable persistence](performance-persistence.md).
 
@@ -55,6 +56,12 @@ Run the full release matrix and validate exact ordered coverage:
 cargo run --release -p tor-server --example latency_bench --locked -- --cycles 5 > samples.jsonl
 python scripts/performance_report.py samples.jsonl --summary summaries.jsonl
 ```
+
+Select the intended local save volume explicitly when collecting a baseline.
+The example uses the process's temporary directory; on Windows set `TMP` and
+`TEMP` for that invocation to a directory on the selected drive. Record the
+volume, filesystem, device and free space with the run. A nearly full unrelated
+system volume is not representative of a project saved on another drive.
 
 The matrix combines 1/8/64/256 regions, 1/8 actors, 0/100/1,000/10,000 retained
 starting actions, and memory/durable modes: 64 cases. `--quick --cycles 1` selects
@@ -142,7 +149,7 @@ The fourth invokes this checked-in driver. Verify real connections and presented
 frames, helper paths, separate spectator credentials, fresh saves and owned
 cleanup whenever updating binaries; `cargo check` is insufficient.
 
-## Stable tests and remaining verification
+## Stable tests and verification
 
 Rust tests cover exact world sizes, ordinary and rotated joins, LOS, stairs,
 door passage, blocked attempts, multi-actor handoff/disclosure, mixed replay,

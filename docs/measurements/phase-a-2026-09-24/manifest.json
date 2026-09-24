@@ -1,0 +1,98 @@
+{
+  "date_utc": "2026-09-24",
+  "source_commit": "21d0b5e5d0180d1573ddbe3ba798fbd35a47a775",
+  "raw_run_commit_note": "The complete matrix started at source_commit with a clean tracked tree. Binaries were built from the same implementation before its commit (Git normalized line endings).",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-pc-windows-msvc\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "hardware": {
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "NumberOfCores": 6,
+        "NumberOfLogicalProcessors": 12
+      }
+    ],
+    "ram": [
+      {
+        "TotalPhysicalMemory": 16983539712
+      }
+    ],
+    "os": [
+      {
+        "Caption": "Microsoft Windows 11 Home",
+        "Version": "10.0.26200",
+        "BuildNumber": "26200"
+      }
+    ],
+    "volumes": [
+      {
+        "DriveLetter": "F",
+        "FileSystem": "NTFS",
+        "DriveType": "Fixed"
+      },
+      {
+        "DriveLetter": "C",
+        "FileSystem": "NTFS",
+        "DriveType": "Fixed"
+      }
+    ],
+    "disks": [
+      {
+        "FriendlyName": "ST1000LM035-1RK172",
+        "MediaType": "HDD",
+        "BusType": "RAID",
+        "Size": 1000204886016
+      },
+      {
+        "FriendlyName": "NVMe KBG30ZMS128G NVMe TOSHIBA 128GB",
+        "MediaType": "SSD",
+        "BusType": "RAID",
+        "Size": 128035676160
+      }
+    ]
+  },
+  "storage": {
+    "matrix_saves": "F: NTFS / Seagate HDD; TMP and TEMP scoped to .local/phase-a/benchmark-temp",
+    "raw_output": "F: NTFS / Seagate HDD; outside command timing",
+    "actual_client_save_and_logs": "F: NTFS / Seagate HDD",
+    "free_at_run_bytes": {
+      "C": 971587584,
+      "F": 642135859200
+    }
+  },
+  "matrix_command": "TMP=<workspace>/.local/phase-a/benchmark-temp TEMP=<same> target/release/examples/latency_bench.exe --cycles 5",
+  "client_command": "python scripts/performance_driver.py --bin-dir target/release --output <new directory> --regions 256 --cycles 3 --pace-ms 0",
+  "conditions": "Sequential matrix, zero warmup, diagnostics not CI wall-clock gates; no concurrent test suites or compilation during measurement. Normal background OS/app activity was not isolated. An incomplete preliminary run on the nearly full C: SSD was discarded; its results are not combined with this baseline.",
+  "binaries": {
+    "target/release/examples/latency_bench.exe": "72cd6981a36418fe8d7d1e36cf3c11f422074f223f0db09a1534dc27332897eb",
+    "target/release/tor-server.exe": "81912b0a891a98dab1ec80560a63fae8f05319326b3bf183d805255711a92d20",
+    "target/release/tor-client-headless.exe": "66b0e5790daef1dfef7cddc02c3d0da6f7f902dd56921892d084beb9259b4a29",
+    "target/release/tor-client-ascii.exe": "d409d382d13239b3b1a4d4218b739fe8b990f4c890b537b3e9fd9b300f29b51b"
+  },
+  "verification": {
+    "rust": "workspace debug and release passed; fmt, Clippy, rustdoc warnings denied passed",
+    "python": "all 52 release actual frontend process tests passed; debug passed after native mouse test rerun with desktop permission; report, documentation, architecture checks passed",
+    "desktop_shortcuts": "All four rebuilt debug targets/icons/helpers verified through actual shortcuts; distinct spectator credentials, fresh saves, connection and owned cleanup passed; paced 256-region run completed three cycles before window close.",
+    "ci": {
+      "commit": "21d0b5e5d0180d1573ddbe3ba798fbd35a47a775",
+      "url": "https://github.com/KCall360/thresholds-of-ruin/actions/runs/35954192426",
+      "windows": "passed",
+      "linux": "passed"
+    }
+  },
+  "samples": {
+    "matrix_cases": 64,
+    "matrix_attempts": 78064,
+    "matrix_accepted": 77424,
+    "discovery_attempts": 3575
+  },
+  "artifacts_sha256": {
+    "actual-client.json": "1ca6ddebf2a62be7d535ea934835778cb3031c8fae7721ce2fd14caec55a3401",
+    "latency-history.png": "0ee58f2419dc94b927cb7640b548a7ce232a8e1e418407e0862bdc5738fefd45",
+    "matrix-summary.json": "7e55fbc9c9c61bce34b758d1367b9750b00c079b6218eab29f29a1e1342a95ef",
+    "plot.py": "cef1494612be2baed224e503c5a638899411576cb44c0a0c139c7a793836bd86",
+    "samples.jsonl.gz": "b281b69bbaee91a90bb2aa6aa504fbcd0c09765b177148bcd61f58a08463a78d",
+    "spectator-release.png": "832053094d4886009b0df2292766dfe71e60add609ab22f28827416a82d0d737"
+  },
+  "run_wall_seconds": 6589.748053073883,
+  "text_artifact_hashes": "SHA-256 over UTF-8 repository files with LF line endings"
+}

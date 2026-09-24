@@ -7,7 +7,8 @@ before dungeon gameplay expands the world, entity count, and action history. It
 does not weaken deterministic simulation, actor-specific disclosure, idempotent
 requests, or wizard rewind.
 
-Phase A now measures ordinary mixed commands through a shared deterministic
+Phase A is complete. The [measured findings](phase-a-findings.md) retain the
+validated baseline. The harness measures ordinary mixed commands through a shared deterministic
 fixture, including boundaries, doors, elevations, LOS changes, and multiple
 actors. The [harness guide](performance-harness.md) defines reproducible commands
 and measurement boundaries. The [storage review](persistence-review.md) separates

@@ -72,7 +72,7 @@ place knowledge will be added when interactions require them.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phase A implementation under final verification; Phase B not started**.
+Status: **Phase A complete; Phase B not started**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -81,7 +81,9 @@ The release matrix combines 1/8/64/256 regions, 1/8 actors, and
 exclusive command phases, client application/rendering, actual I/O counts,
 bytes, and normal restart/replay; a separate discovery trace grows map memory.
 
-The [harness guide](performance-harness.md) describes reproduction, the real
+The [measured findings](phase-a-findings.md) retain the validated 64-case release
+baseline, growing discovery and actual-client samples. The
+[harness guide](performance-harness.md) describes reproduction, the real
 headless/ASCII driver, and the verified 256-region spectator demonstration.
 Current-writer fault injection replaces the toy scanner. The
 [storage review](persistence-review.md) documents a missing name-durability

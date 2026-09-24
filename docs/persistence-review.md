@@ -65,7 +65,7 @@ No directory/rename storage behavior is changed in Phase A.
 
 Retain the proposed 24-byte little-endian frame header:
 
-`"TORJ" | format:u16=4 | kind:u16=1 | sequence:u64 | payload_len:u32 | crc32c:u32`
+`"TORJ" | format:u16=4 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
 
 The CRC32C covers header bytes 4 through 19 followed by the payload. Use Castagnoli
 CRC32C, reflected polynomial `0x82f63b78`, initial/final complement; test standard
@@ -75,14 +75,49 @@ duplicate sequences, and payloads larger than 1 MiB before allocation. First
 sequence is the selected checkpoint's sequence plus one. Sequence is global to
 the save, including retained branches; it is not an actor revision or tick.
 
-Freeze a UTF-8 JSON envelope with required `save_id` (UUID), `generation` (u64),
-and `record` before implementation. `record` carries the complete committed
-history entry and optional receipt as currently replayed: identity, actor,
-author/audience, branch, tick, command including expected revision, request
-identity, and resulting outcome. Reject unknown fields rather than silently
-dropping receipt or branch information. CRC is over the exact stored bytes,
-so recovery does not depend on re-encoding JSON canonically. Save/generation
-identity prevents splicing a valid frame from another file.
+Kind 1 is a committed command/annotation record. Kind 2 is the monotonic wizard
+lineage marker described below; all other kinds are rejected. This is a review
+correction to the original record-only proposal: `enable_wizard` persists a
+lineage change even when no command or annotation follows it.
+
+The kind-1 payload is compact UTF-8 JSON without a BOM or trailing newline,
+with exactly three required envelope fields: `save_id` (UUID string),
+`generation` (u64), and `record`. Its shape is
+`{"save_id":"<UUID>","generation":0,"record":{"entry":<HistoryEntry>,"receipt":<Receipt or null>}}`.
+`record` freezes the serialized fields and enum tags of the current
+[`Record`/`Receipt`](../crates/server/src/engine.rs) and
+[`HistoryEntry`](../crates/server/src/journal.rs) types, including their nested
+command, outcome, author and audience types. Both record keys are required;
+backend notes use an explicit null receipt. Integer fields must fit their
+declared Rust types; identifiers retain their existing validation rules.
+
+Version-4 decoding must reject missing or unknown fields recursively, including
+fields currently supplied by serde defaults in format 3. Writers emit those
+fields explicitly. Reject records that exceed the frame limit before writing
+or publishing. This preserves complete identity, actor, branch, tick, command,
+request, disclosure and resulting outcome data; future schema changes require a
+new version. CRC is over the exact stored bytes, so recovery does not depend on
+JSON field order or canonical re-encoding. Save/generation identity prevents
+splicing a valid frame from another file.
+
+Kind 2 has exactly `save_id`, `generation`, and `wizard_game:true`. It consumes a
+global sequence but no actor turn or request identity. Persist it before enabling
+wizard administration; never permit a false value or clear the marker on rewind.
+Replay applies this marker before any subsequent wizard records. Checkpoints
+must retain it even when every later command is rewound. Test enabling wizard
+mode followed immediately by interruption, without any gameplay command.
+
+Before admitting the first command, install an immutable generation-zero replay
+base containing format/ruleset, save ID, generation, sequence zero, scenario,
+view salt, initial branch and initial wizard marker. Its receipt/branch history
+starts empty and its initial game/navigation/rewind state is reconstructed by
+the deterministic scenario constructor. Frame the base with the same length,
+CRC32C coverage and 1 MiB payload limit, but distinct magic `TORB`, kind zero,
+and sequence zero; a base frame is never valid inside the journal. Install and
+durably name both this base
+and the matching empty journal before acknowledging readiness. Incomplete or
+inconsistent bootstrap pairs fail closed. This base is initial-save metadata;
+periodic checkpointing and rotation remain Phase C work.
 
 Validation and simulation precede encoding. Write the new frame, flush buffered
 bytes, and sync the journal before publishing state or acknowledgement. A failed
@@ -110,6 +145,13 @@ metadata, receipt index, view salt, permanent wizard marker, navigation knowledg
 and the complete retained 128-boundary rewind window. Runtime control leases and
 active travel remain ephemeral under the existing restart contract. Reject a
 checkpoint that would silently drop receipts or abandoned futures.
+
+Retain the complete history entries and receipt/result payloads needed by history
+pagination, private-annotation filtering, and duplicate-request replies, including
+abandoned branches. An index without its referenced payloads is insufficient.
+Payloads may live in the checkpoint or in immutable history segments selected
+durably with it; rotation must not delete their only recoverable copy. Compaction
+may relocate retained history, but does not authorize discarding it.
 
 Write a bounded, checksummed checkpoint candidate, flush/sync, install it with
 the required platform name durability barrier, then advance the manifest or
