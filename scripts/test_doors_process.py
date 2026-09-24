@@ -1,4 +1,5 @@
 """Door actions through the actual text, headless and native ASCII clients."""
+from test_text_process import flush_save
 import json
 import os
 from pathlib import Path
@@ -50,6 +51,7 @@ class DoorProcesses(unittest.TestCase):
         observer, closed = self.client(support.SPECTATOR_TOKEN)
         self.assertFalse(self.door(closed)["open"])
         self.assertEqual(closed["state"]["observation"]["tick"], 400)
+        flush_save(self)
         before = self.save.read_bytes()
         denied = self.act(observer, {"type":"set_door", "door":self.door(closed)["id"], "open":True})
         self.assertIsNotNone(denied["error"])

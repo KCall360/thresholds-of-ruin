@@ -5,23 +5,44 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tor_server::{serve, Account, Engine, Scenario, Service};
+use tor_server::{serve, Account, Engine, SavePolicy, Scenario, Service};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut listen: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut seed = 0;
     let mut wizard = false;
-    let mut save = PathBuf::from("saves/game.json");
+    let mut save = PathBuf::from("saves/game.db");
     let mut regions = None;
     let mut actors = 1usize;
+    let mut save_policy = SavePolicy::default();
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
+                println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
                 println!("Diagnostic fixture: --regions 1..=256 [--actors 1..=8] selects performance trace version 1.");
-                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
+                println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.db]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
+            }
+            "--save-target-ms" => {
+                save_policy.target_interval = std::time::Duration::from_millis(
+                    args.next().ok_or("Missing save target")?.parse()?,
+                )
+            }
+            "--save-max-ms" => {
+                save_policy.max_unsaved_age = std::time::Duration::from_millis(
+                    args.next().ok_or("Missing save maximum")?.parse()?,
+                )
+            }
+            "--save-idle-ms" => {
+                save_policy.idle_interval = std::time::Duration::from_millis(
+                    args.next().ok_or("Missing save idle interval")?.parse()?,
+                )
+            }
+            "--save-queue-bytes" => {
+                save_policy.max_pending_bytes =
+                    args.next().ok_or("Missing save queue size")?.parse()?
             }
             "--wizard" => wizard = true,
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
@@ -82,7 +103,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None if actors == 1 => Scenario::two_room(seed),
         None => return Err("--actors requires --regions".into()),
     };
-    let mut engine = Engine::open(save, scenario)?;
+    save_policy.validate()?;
+    let mut engine = Engine::open_with_policy(save, scenario, save_policy)?;
     if wizard {
         engine.enable_wizard()?;
     }

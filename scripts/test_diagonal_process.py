@@ -1,4 +1,5 @@
 """Diagonal gameplay through actual native ASCII, text and headless processes."""
+from test_text_process import flush_save, inspect_save
 import json
 import os
 from pathlib import Path
@@ -59,6 +60,7 @@ class DiagonalProcesses(unittest.TestCase):
         key("Escape", False)
         watched = self.request(observer, {"type":"snapshot"})
         self.assertEqual(watched["state"], current["state"])
+        flush_save(self)
         before = self.save.read_bytes()
         denied = self.act(observer, {"type":"move","direction":"north_east"})
         self.assertIsNotNone(denied["error"])
@@ -67,7 +69,7 @@ class DiagonalProcesses(unittest.TestCase):
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],current["state"])
-        self.assertEqual(json.loads(self.save.read_text())["ruleset"],"diagonal-v11")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"diagonal-v11")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
         self.server(wizard=True)

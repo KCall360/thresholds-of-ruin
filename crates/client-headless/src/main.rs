@@ -103,7 +103,7 @@ async fn run() -> Result<(), Error> {
             _ = tokio::signal::ctrl_c() => break,
         }
     }
-    connection.close().await;
+    connection.close().await?;
     Ok(())
 }
 

@@ -32,6 +32,8 @@ class Process:
     def __init__(self, executable, args, token=TOKEN, extra_env=None):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
+        self.executable = Path(executable)
+        self.token = token
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,
             env={**environment, "TOR_SERVER_TOKEN": token},
@@ -71,12 +73,22 @@ class Process:
         return self.until(lambda line: line == "Ready.")
 
     def stop(self):
-        if self.child.poll() is None:
-            self.child.kill()
-        self.child.wait(timeout=10)
-        self.reader.join(timeout=10)
-        for stream in (self.child.stdin, self.child.stdout):
-            stream.close()
+        try:
+            if self.child.poll() is None:
+                try:
+                    # Restart tests need a durable boundary. Crash-loss tests
+                    # deliberately kill the child directly instead.
+                    if self.executable.stem == "tor-server":
+                        ready = next((json.loads(line) for line in self.transcript if line.startswith('{') and '"address"' in line), None)
+                        if ready:
+                            save_at(self.executable.parent, ready["address"], self.token)
+                finally:
+                    self.child.kill()
+        finally:
+            self.child.wait(timeout=10)
+            self.reader.join(timeout=10)
+            for stream in (self.child.stdin, self.child.stdout):
+                stream.close()
 
 
 class TextProcesses(unittest.TestCase):
@@ -135,8 +147,9 @@ class TextProcesses(unittest.TestCase):
         player.command("annotate user actor note here Shared progress")
         shared = spectator.until(lambda line: "Shared progress" in line)
         self.assertNotIn("Private player plan", shared)
+        flush_save(self)
         before = self.save.read_bytes()
-        for command in ["control", "release", "wait", "east", "note No writes",
+        for command in ["control", "release", "save", "wait", "east", "note No writes",
                         "annotate frontend actor note here No shared writes"]:
             self.assertIn("read-only", spectator.command(command))
         self.assertEqual(self.save.read_bytes(), before)
@@ -258,6 +271,29 @@ class TextProcesses(unittest.TestCase):
         self.assertIn("Taken", result.stdout)
         self.assertIn("piped note", result.stdout)
         self.assertIn("Goodbye.", result.stdout)
+
+
+def save_at(bin_dir, address, token=TOKEN):
+    """Explicit save barrier through a real client; no ordinary-action timing."""
+    suffix = ".exe" if os.name == "nt" else ""
+    result = subprocess.run([str(Path(bin_dir)/("tor-client-headless"+suffix)), "--connect", address, "--observe"],
+        input=json.dumps({"type":"request","request":{"type":"save"}})+"\n"+json.dumps({"type":"quit"})+"\n",
+        text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ,"TOR_SERVER_TOKEN":token})
+    if result.returncode or any(json.loads(line).get("error") for line in result.stdout.splitlines() if line.startswith("{")):
+        raise AssertionError(f"Explicit save failed: {result.stdout} {result.stderr}")
+
+
+def flush_save(test):
+    save_at(test.bin, test.address)
+
+
+def inspect_save(path):
+    """Inspect immutable base metadata only; this does not replay journal rows."""
+    import sqlite3
+    from contextlib import closing
+    with closing(sqlite3.connect(path)) as conn:
+        frame = conn.execute("SELECT frame FROM journal WHERE sequence=0").fetchone()[0]
+    return json.loads(frame[24:])["archive"]
 
 
 if __name__ == "__main__":

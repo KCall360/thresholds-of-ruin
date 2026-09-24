@@ -1,0 +1,2994 @@
+{
+  "trace_version": 1,
+  "seed": 42,
+  "regions": 256,
+  "actors": 1,
+  "cycles": 3,
+  "pace_seconds": 0.0,
+  "samples": [
+    {
+      "cycle": 0,
+      "step": 0,
+      "actor": 1,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 4.241700000420678,
+      "request_to_ready_ms": 4.393499999423511,
+      "request_to_presentation_ms": 65.62280000071041
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_west"
+      },
+      "request_to_ack_ms": 5.453000001580222,
+      "request_to_ready_ms": 5.71960000161198,
+      "request_to_presentation_ms": 65.14180000158376
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_west"
+      },
+      "request_to_ack_ms": 3.751600001123734,
+      "request_to_ready_ms": 3.9131000012275763,
+      "request_to_presentation_ms": 54.040600000007544
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_east"
+      },
+      "request_to_ack_ms": 4.903999997623032,
+      "request_to_ready_ms": 5.161999997653766,
+      "request_to_presentation_ms": 58.70959999811021
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_east"
+      },
+      "request_to_ack_ms": 4.805799999303417,
+      "request_to_ready_ms": 5.038700001023244,
+      "request_to_presentation_ms": 61.60819999786327
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 4.922200001601595,
+      "request_to_ready_ms": 5.132999998750165,
+      "request_to_presentation_ms": 61.48880000182544
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 4.207899997709319,
+      "request_to_ready_ms": 4.379599999083439,
+      "request_to_presentation_ms": 62.3420999982045
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 3.8954000010562595,
+      "request_to_ready_ms": 4.175400001258822,
+      "request_to_presentation_ms": 57.76990000231308
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 3.7711000004492234,
+      "request_to_ready_ms": 3.9651000006415416,
+      "request_to_presentation_ms": 63.31800000043586
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 3.7033000007795636,
+      "request_to_ready_ms": 3.9256000018212944,
+      "request_to_presentation_ms": 65.94290000066394
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 1,
+      "label": "blocked_obstacle",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 1.871299999038456,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 11,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 4.2554999999993015,
+      "request_to_ready_ms": 4.5315999996091705,
+      "request_to_presentation_ms": 46.47169999952894
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 3.7378999986685812,
+      "request_to_ready_ms": 3.936100001737941,
+      "request_to_presentation_ms": 57.80189999859431
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 3.679800000099931,
+      "request_to_ready_ms": 3.917500001989538,
+      "request_to_presentation_ms": 57.22339999920223
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 4.092900002433453,
+      "request_to_ready_ms": 4.325300000346033,
+      "request_to_presentation_ms": 62.04010000146809
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 5.049200000939891,
+      "request_to_ready_ms": 5.366800000047078,
+      "request_to_presentation_ms": 58.81670000235317
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 8.641500000521773,
+      "request_to_ready_ms": 9.535699999105418,
+      "request_to_presentation_ms": 57.548400000086986
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 6.590400000277441,
+      "request_to_ready_ms": 7.201899999927264,
+      "request_to_presentation_ms": 51.604899999802
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.175499998993473,
+      "request_to_ready_ms": 7.803299999068258,
+      "request_to_presentation_ms": 53.5143999986758
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 1,
+      "label": "blocked_door",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 3.3128000031865668,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 20,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 7.108399997378001,
+      "request_to_ready_ms": 7.618100000399863,
+      "request_to_presentation_ms": 71.63459999719635
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.002999998803716,
+      "request_to_ready_ms": 7.5837000003957655,
+      "request_to_presentation_ms": 55.33619999914663
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.521100000303704,
+      "request_to_ready_ms": 8.10740000088117,
+      "request_to_presentation_ms": 52.506399999401765
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 7.503000000724569,
+      "request_to_ready_ms": 8.155400002578972,
+      "request_to_presentation_ms": 53.99240000042482
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 8.156900003086776,
+      "request_to_ready_ms": 8.890800003428012,
+      "request_to_presentation_ms": 53.97570000059204
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 7.170100001530955,
+      "request_to_ready_ms": 7.993200000782963,
+      "request_to_presentation_ms": 54.727300001104595
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 7.3722999986785,
+      "request_to_ready_ms": 8.095999997749459,
+      "request_to_presentation_ms": 50.94710000048508
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 6.499300001451047,
+      "request_to_ready_ms": 7.0630000009259675,
+      "request_to_presentation_ms": 51.88510000152746
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 6.61000000036438,
+      "request_to_ready_ms": 7.210700001451187,
+      "request_to_presentation_ms": 55.566999999427935
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 5.820599999424303,
+      "request_to_ready_ms": 6.3746000014361925,
+      "request_to_presentation_ms": 55.49840000094264
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 6.672299998172093,
+      "request_to_ready_ms": 7.25840000086464,
+      "request_to_presentation_ms": 55.731100001139566
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.52469999861205,
+      "request_to_ready_ms": 8.128900000883732,
+      "request_to_presentation_ms": 545.837699999538
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 9.113100000831764,
+      "request_to_ready_ms": 9.76029999947059,
+      "request_to_presentation_ms": 57.074399999692105
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 9.429900001123315,
+      "request_to_ready_ms": 10.565200002019992,
+      "request_to_presentation_ms": 50.45109999991837
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.478399998944951,
+      "request_to_ready_ms": 8.246699999290286,
+      "request_to_presentation_ms": 50.55210000136867
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.596100000228034,
+      "request_to_ready_ms": 8.204099998692982,
+      "request_to_presentation_ms": 55.95950000133598
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 7.283099999767728,
+      "request_to_ready_ms": 8.14410000020871,
+      "request_to_presentation_ms": 54.67869999847608
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 8.112199997412972,
+      "request_to_ready_ms": 9.067699997103773,
+      "request_to_presentation_ms": 54.03449999721488
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 12.129899998399196,
+      "request_to_ready_ms": 13.906000000133645,
+      "request_to_presentation_ms": 82.84479999929317
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 11.6621999986819,
+      "request_to_ready_ms": 13.577099998656195,
+      "request_to_presentation_ms": 78.19109999763896
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 11.293300001852913,
+      "request_to_ready_ms": 12.964500001544366,
+      "request_to_presentation_ms": 84.72679999977117
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 10.766100000182632,
+      "request_to_ready_ms": 12.880000002041925,
+      "request_to_presentation_ms": 79.36250000057044
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 12.88840000052005,
+      "request_to_ready_ms": 14.956300001358613,
+      "request_to_presentation_ms": 77.90839999870514
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 12.01490000312333,
+      "request_to_ready_ms": 13.869400001567556,
+      "request_to_presentation_ms": 63.09690000125556
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 11.212599998543737,
+      "request_to_ready_ms": 13.571899999078596,
+      "request_to_presentation_ms": 44.625899998209206
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 10.152699996979209,
+      "request_to_ready_ms": 11.91610000023502,
+      "request_to_presentation_ms": 48.99789999763016
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 10.138099998584948,
+      "request_to_ready_ms": 11.942499997530831,
+      "request_to_presentation_ms": 49.76209999949788
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 11.752499998692656,
+      "request_to_ready_ms": 13.90700000047218,
+      "request_to_presentation_ms": 46.4983999991091
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 10.361000000557397,
+      "request_to_ready_ms": 12.412799998855917,
+      "request_to_presentation_ms": 46.16389999864623
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.557300000276882,
+      "request_to_ready_ms": 13.513000001694309,
+      "request_to_presentation_ms": 79.48759999999311
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 12.203499998577172,
+      "request_to_ready_ms": 14.150799997878494,
+      "request_to_presentation_ms": 76.6007999991416
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 11.839599999802886,
+      "request_to_ready_ms": 13.836699999956181,
+      "request_to_presentation_ms": 78.7811000009242
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.546300000394695,
+      "request_to_ready_ms": 14.661500001238892,
+      "request_to_presentation_ms": 80.3449000013643
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.50300000194693,
+      "request_to_ready_ms": 15.58139999906416,
+      "request_to_presentation_ms": 64.42470000183675
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 15.812699999514734,
+      "request_to_ready_ms": 18.190799997682916,
+      "request_to_presentation_ms": 77.94300000023213
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.112000000750413,
+      "request_to_ready_ms": 16.552299999602837,
+      "request_to_presentation_ms": 70.86839999828953
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.77880000291043,
+      "request_to_ready_ms": 16.379000000597443,
+      "request_to_presentation_ms": 76.38580000275397
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.981100000819424,
+      "request_to_ready_ms": 16.43020000119577,
+      "request_to_presentation_ms": 156.67709999979706
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 10.82730000052834,
+      "request_to_ready_ms": 13.15690000046743,
+      "request_to_presentation_ms": 49.284099997748854
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 13.024200001382269,
+      "request_to_ready_ms": 15.208000000711763,
+      "request_to_presentation_ms": 75.89820000066538
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.846099998772843,
+      "request_to_ready_ms": 16.31489999999758,
+      "request_to_presentation_ms": 75.02469999963068
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.690600000496488,
+      "request_to_ready_ms": 15.350800000305753,
+      "request_to_presentation_ms": 76.53829999981099
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 11.907400003110524,
+      "request_to_ready_ms": 14.224300000932999,
+      "request_to_presentation_ms": 69.27820000055362
+    },
+    {
+      "cycle": 0,
+      "step": 0,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 12.269599999854108,
+      "request_to_ready_ms": 14.49270000011893,
+      "request_to_presentation_ms": 81.9947999989381
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 12.770299999829149,
+      "request_to_ready_ms": 15.444699998624856,
+      "request_to_presentation_ms": 65.69459999809624
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.92880000275909,
+      "request_to_ready_ms": 16.328500001691282,
+      "request_to_presentation_ms": 73.32060000044294
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 14.453299998422153,
+      "request_to_ready_ms": 16.794399998616427,
+      "request_to_presentation_ms": 74.43369999964489
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 14.325200001621852,
+      "request_to_ready_ms": 16.688399999111425,
+      "request_to_presentation_ms": 78.04609999948298
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 12.432299998181406,
+      "request_to_ready_ms": 14.733500000147615,
+      "request_to_presentation_ms": 73.98839999950724
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.786600000457838,
+      "request_to_ready_ms": 15.988800001650816,
+      "request_to_presentation_ms": 73.8950000013574
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 14.775499999814201,
+      "request_to_ready_ms": 17.199499998241663,
+      "request_to_presentation_ms": 74.36360000065179
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.386799997533672,
+      "request_to_ready_ms": 16.407700000854675,
+      "request_to_presentation_ms": 75.88430000032531
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.04270000118413,
+      "request_to_ready_ms": 20.01609999933862,
+      "request_to_presentation_ms": 67.11260000156472
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.688699997146614,
+      "request_to_ready_ms": 16.400900000007823,
+      "request_to_presentation_ms": 62.237599999207305
+    },
+    {
+      "cycle": 1,
+      "step": 0,
+      "actor": 1,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.991100000363076,
+      "request_to_ready_ms": 15.415500001836335,
+      "request_to_presentation_ms": 76.1543000007805
+    },
+    {
+      "cycle": 1,
+      "step": 1,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_west"
+      },
+      "request_to_ack_ms": 11.951000000408385,
+      "request_to_ready_ms": 14.290900002379203,
+      "request_to_presentation_ms": 75.44989999951213
+    },
+    {
+      "cycle": 1,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_west"
+      },
+      "request_to_ack_ms": 13.656700000865385,
+      "request_to_ready_ms": 16.030300001148134,
+      "request_to_presentation_ms": 76.61029999871971
+    },
+    {
+      "cycle": 1,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_east"
+      },
+      "request_to_ack_ms": 12.359400003333576,
+      "request_to_ready_ms": 14.661200002592523,
+      "request_to_presentation_ms": 64.64350000169361
+    },
+    {
+      "cycle": 1,
+      "step": 4,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_east"
+      },
+      "request_to_ack_ms": 13.290799997776048,
+      "request_to_ready_ms": 15.677499999583233,
+      "request_to_presentation_ms": 76.21849999850383
+    },
+    {
+      "cycle": 1,
+      "step": 5,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 12.810399999580113,
+      "request_to_ready_ms": 15.190899997833185,
+      "request_to_presentation_ms": 75.01419999971404
+    },
+    {
+      "cycle": 1,
+      "step": 6,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.069199998222757,
+      "request_to_ready_ms": 14.37179999993532,
+      "request_to_presentation_ms": 76.91159999740194
+    },
+    {
+      "cycle": 1,
+      "step": 7,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.15799999772571,
+      "request_to_ready_ms": 14.628799999627518,
+      "request_to_presentation_ms": 75.18189999973401
+    },
+    {
+      "cycle": 1,
+      "step": 8,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.987900001258822,
+      "request_to_ready_ms": 14.702399999805493,
+      "request_to_presentation_ms": 74.28689999869675
+    },
+    {
+      "cycle": 1,
+      "step": 9,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 11.159199999383418,
+      "request_to_ready_ms": 13.315200001670746,
+      "request_to_presentation_ms": 76.254899999185
+    },
+    {
+      "cycle": 1,
+      "step": 10,
+      "actor": 1,
+      "label": "blocked_obstacle",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 7.8304000016942155,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 1,
+      "step": 11,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 11.394799999834504,
+      "request_to_ready_ms": 14.004100001329789,
+      "request_to_presentation_ms": 75.34810000288417
+    },
+    {
+      "cycle": 1,
+      "step": 12,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.191099998744903,
+      "request_to_ready_ms": 14.55300000088755,
+      "request_to_presentation_ms": 72.33840000117198
+    },
+    {
+      "cycle": 1,
+      "step": 13,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.130999999702908,
+      "request_to_ready_ms": 15.509799999563256,
+      "request_to_presentation_ms": 74.1295000007085
+    },
+    {
+      "cycle": 1,
+      "step": 14,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.722899999265792,
+      "request_to_ready_ms": 16.117399998620385,
+      "request_to_presentation_ms": 73.57820000106585
+    },
+    {
+      "cycle": 1,
+      "step": 15,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.726200002565747,
+      "request_to_ready_ms": 16.146000001754146,
+      "request_to_presentation_ms": 74.72120000238647
+    },
+    {
+      "cycle": 1,
+      "step": 16,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 14.184399999066954,
+      "request_to_ready_ms": 16.865099998540245,
+      "request_to_presentation_ms": 73.72469999972964
+    },
+    {
+      "cycle": 1,
+      "step": 17,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 14.115900001343107,
+      "request_to_ready_ms": 16.71100000021397,
+      "request_to_presentation_ms": 71.74970000050962
+    },
+    {
+      "cycle": 1,
+      "step": 18,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 13.664100002642954,
+      "request_to_ready_ms": 16.419899999164045,
+      "request_to_presentation_ms": 76.80330000221147
+    },
+    {
+      "cycle": 1,
+      "step": 19,
+      "actor": 1,
+      "label": "blocked_door",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 8.67140000264044,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 1,
+      "step": 20,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": true
+      },
+      "request_to_ack_ms": 14.942099998734193,
+      "request_to_ready_ms": 17.711699998471886,
+      "request_to_presentation_ms": 68.93320000017411
+    },
+    {
+      "cycle": 1,
+      "step": 21,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.47910000247066,
+      "request_to_ready_ms": 19.424900001467904,
+      "request_to_presentation_ms": 68.35789999968256
+    },
+    {
+      "cycle": 1,
+      "step": 22,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.996499998640502,
+      "request_to_ready_ms": 19.91709999856539,
+      "request_to_presentation_ms": 69.51269999990473
+    },
+    {
+      "cycle": 1,
+      "step": 23,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": false
+      },
+      "request_to_ack_ms": 16.59290000316105,
+      "request_to_ready_ms": 19.67260000310489,
+      "request_to_presentation_ms": 63.95170000178041
+    },
+    {
+      "cycle": 1,
+      "step": 24,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": true
+      },
+      "request_to_ack_ms": 16.77649999692221,
+      "request_to_ready_ms": 19.94399999966845,
+      "request_to_presentation_ms": 882.3439999978291
+    },
+    {
+      "cycle": 1,
+      "step": 25,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.02179999827058,
+      "request_to_ready_ms": 18.664499999431428,
+      "request_to_presentation_ms": 79.60549999916111
+    },
+    {
+      "cycle": 1,
+      "step": 26,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 17.87069999772939,
+      "request_to_ready_ms": 20.874399997410364,
+      "request_to_presentation_ms": 67.36779999846476
+    },
+    {
+      "cycle": 1,
+      "step": 27,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": false
+      },
+      "request_to_ack_ms": 16.48840000052587,
+      "request_to_ready_ms": 19.386600000871113,
+      "request_to_presentation_ms": 68.93829999899026
+    },
+    {
+      "cycle": 1,
+      "step": 28,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 13.659700001880992,
+      "request_to_ready_ms": 16.54390000112471,
+      "request_to_presentation_ms": 74.34120000107214
+    },
+    {
+      "cycle": 1,
+      "step": 29,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 15.336200001911493,
+      "request_to_ready_ms": 18.560700002126396,
+      "request_to_presentation_ms": 696.0723000011058
+    },
+    {
+      "cycle": 1,
+      "step": 30,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": true
+      },
+      "request_to_ack_ms": 17.19280000179424,
+      "request_to_ready_ms": 20.190900002489798,
+      "request_to_presentation_ms": 81.70190000237199
+    },
+    {
+      "cycle": 1,
+      "step": 31,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.0169999981008,
+      "request_to_ready_ms": 19.041999999899417,
+      "request_to_presentation_ms": 69.97860000046785
+    },
+    {
+      "cycle": 1,
+      "step": 32,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.433799999504117,
+      "request_to_ready_ms": 19.32919999671867,
+      "request_to_presentation_ms": 67.87289999920176
+    },
+    {
+      "cycle": 1,
+      "step": 33,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": false
+      },
+      "request_to_ack_ms": 14.956499999243533,
+      "request_to_ready_ms": 17.93829999951413,
+      "request_to_presentation_ms": 69.6243999991566
+    },
+    {
+      "cycle": 1,
+      "step": 34,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 15.824699999939185,
+      "request_to_ready_ms": 18.81409999987227,
+      "request_to_presentation_ms": 70.04650000089896
+    },
+    {
+      "cycle": 1,
+      "step": 35,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 15.948499996738974,
+      "request_to_ready_ms": 18.980499997269362,
+      "request_to_presentation_ms": 66.86979999722098
+    },
+    {
+      "cycle": 1,
+      "step": 36,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.91930000015418,
+      "request_to_ready_ms": 19.908099999156548,
+      "request_to_presentation_ms": 795.0514999974985
+    },
+    {
+      "cycle": 1,
+      "step": 37,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.988200000923825,
+      "request_to_ready_ms": 20.249299999704817,
+      "request_to_presentation_ms": 79.03520000036224
+    },
+    {
+      "cycle": 1,
+      "step": 38,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 15.65409999966505,
+      "request_to_ready_ms": 17.767599998478545,
+      "request_to_presentation_ms": 65.63339999775053
+    },
+    {
+      "cycle": 1,
+      "step": 39,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.332899998815265,
+      "request_to_ready_ms": 19.514099996740697,
+      "request_to_presentation_ms": 68.32679999934044
+    },
+    {
+      "cycle": 1,
+      "step": 40,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 15.974599999026395,
+      "request_to_ready_ms": 19.033399999898393,
+      "request_to_presentation_ms": 68.09049999719718
+    },
+    {
+      "cycle": 1,
+      "step": 41,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.27550000193878,
+      "request_to_ready_ms": 19.40870000180439,
+      "request_to_presentation_ms": 68.21900000068126
+    },
+    {
+      "cycle": 1,
+      "step": 42,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": true
+      },
+      "request_to_ack_ms": 17.625299999053823,
+      "request_to_ready_ms": 20.87970000138739,
+      "request_to_presentation_ms": 67.58819999959087
+    },
+    {
+      "cycle": 1,
+      "step": 43,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.45280000270577,
+      "request_to_ready_ms": 21.654800002579577,
+      "request_to_presentation_ms": 64.06630000128644
+    },
+    {
+      "cycle": 1,
+      "step": 44,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.16219999777968,
+      "request_to_ready_ms": 19.294899997476023,
+      "request_to_presentation_ms": 60.91819999710424
+    },
+    {
+      "cycle": 1,
+      "step": 45,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": false
+      },
+      "request_to_ack_ms": 16.748699999880046,
+      "request_to_ready_ms": 19.60780000081286,
+      "request_to_presentation_ms": 67.76000000172644
+    },
+    {
+      "cycle": 1,
+      "step": 46,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.526399998838315,
+      "request_to_ready_ms": 19.63149999937741,
+      "request_to_presentation_ms": 67.80090000029304
+    },
+    {
+      "cycle": 1,
+      "step": 47,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 17.835399998148205,
+      "request_to_ready_ms": 22.35839999775635,
+      "request_to_presentation_ms": 68.86449999728939
+    },
+    {
+      "cycle": 1,
+      "step": 48,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 15.93729999876814,
+      "request_to_ready_ms": 18.917000001238193,
+      "request_to_presentation_ms": 68.26100000034785
+    },
+    {
+      "cycle": 1,
+      "step": 49,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 16.16989999820362,
+      "request_to_ready_ms": 19.39979999951902,
+      "request_to_presentation_ms": 68.83960000050138
+    },
+    {
+      "cycle": 1,
+      "step": 50,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 15.661600002204068,
+      "request_to_ready_ms": 19.048300000577,
+      "request_to_presentation_ms": 68.78900000083377
+    },
+    {
+      "cycle": 1,
+      "step": 51,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.611399998510024,
+      "request_to_ready_ms": 19.97789999950328,
+      "request_to_presentation_ms": 68.39190000027884
+    },
+    {
+      "cycle": 1,
+      "step": 52,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 17.09349999873666,
+      "request_to_ready_ms": 20.60189999974682,
+      "request_to_presentation_ms": 64.07140000010259
+    },
+    {
+      "cycle": 1,
+      "step": 53,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 17.48779999979888,
+      "request_to_ready_ms": 20.995899998524692,
+      "request_to_presentation_ms": 65.91750000006869
+    },
+    {
+      "cycle": 1,
+      "step": 54,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 18.263899997691624,
+      "request_to_ready_ms": 21.91799999854993,
+      "request_to_presentation_ms": 65.45709999772953
+    },
+    {
+      "cycle": 1,
+      "step": 55,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 18.784399999276502,
+      "request_to_ready_ms": 22.640300001512514,
+      "request_to_presentation_ms": 59.99090000113938
+    },
+    {
+      "cycle": 1,
+      "step": 56,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 19.197300000087125,
+      "request_to_ready_ms": 23.112700000638142,
+      "request_to_presentation_ms": 595.7672000004095
+    },
+    {
+      "cycle": 1,
+      "step": 57,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 18.57949999975972,
+      "request_to_ready_ms": 22.256000000197673,
+      "request_to_presentation_ms": 76.06830000077025
+    },
+    {
+      "cycle": 1,
+      "step": 58,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.98239999677753,
+      "request_to_ready_ms": 20.721299999422627,
+      "request_to_presentation_ms": 55.988099997193785
+    },
+    {
+      "cycle": 1,
+      "step": 59,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 20.457400001760107,
+      "request_to_ready_ms": 24.029600001085782,
+      "request_to_presentation_ms": 63.37859999985085
+    },
+    {
+      "cycle": 1,
+      "step": 60,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 17.479900001490023,
+      "request_to_ready_ms": 21.658000001480104,
+      "request_to_presentation_ms": 62.86959999852115
+    },
+    {
+      "cycle": 1,
+      "step": 61,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 18.911999999545515,
+      "request_to_ready_ms": 22.50590000039665,
+      "request_to_presentation_ms": 66.0706000016944
+    },
+    {
+      "cycle": 1,
+      "step": 62,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 17.863900000520516,
+      "request_to_ready_ms": 21.062499999970896,
+      "request_to_presentation_ms": 63.31820000195876
+    },
+    {
+      "cycle": 1,
+      "step": 0,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.506099997466663,
+      "request_to_ready_ms": 22.054299999581417,
+      "request_to_presentation_ms": 64.80399999782094
+    },
+    {
+      "cycle": 1,
+      "step": 1,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": true
+      },
+      "request_to_ack_ms": 19.67319999675965,
+      "request_to_ready_ms": 23.271699999895645,
+      "request_to_presentation_ms": 997.831299999234
+    },
+    {
+      "cycle": 1,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 20.31659999920521,
+      "request_to_ready_ms": 24.213299999246374,
+      "request_to_presentation_ms": 75.5447000010463
+    },
+    {
+      "cycle": 1,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 19.897100002708612,
+      "request_to_ready_ms": 23.816500000975793,
+      "request_to_presentation_ms": 62.276100001326995
+    },
+    {
+      "cycle": 1,
+      "step": 4,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 2,
+        "open": false
+      },
+      "request_to_ack_ms": 19.102899997960776,
+      "request_to_ready_ms": 21.878600000491133,
+      "request_to_presentation_ms": 63.99550000060117
+    },
+    {
+      "cycle": 1,
+      "step": 5,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.09019999927841,
+      "request_to_ready_ms": 20.186800000374205,
+      "request_to_presentation_ms": 527.2915999994439
+    },
+    {
+      "cycle": 1,
+      "step": 6,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.813300001056632,
+      "request_to_ready_ms": 22.340000003168825,
+      "request_to_presentation_ms": 76.0100000006787
+    },
+    {
+      "cycle": 1,
+      "step": 7,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.30819999668165,
+      "request_to_ready_ms": 21.928799997112947,
+      "request_to_presentation_ms": 68.52729999809526
+    },
+    {
+      "cycle": 1,
+      "step": 8,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.158900002163136,
+      "request_to_ready_ms": 22.050300001865253,
+      "request_to_presentation_ms": 58.724700000311714
+    },
+    {
+      "cycle": 1,
+      "step": 9,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.224499999632826,
+      "request_to_ready_ms": 21.754900000814814,
+      "request_to_presentation_ms": 65.28500000058557
+    },
+    {
+      "cycle": 1,
+      "step": 10,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.00809999986086,
+      "request_to_ready_ms": 21.326300000509946,
+      "request_to_presentation_ms": 65.03599999996368
+    },
+    {
+      "cycle": 2,
+      "step": 0,
+      "actor": 1,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 17.30440000028466,
+      "request_to_ready_ms": 20.898499999020714,
+      "request_to_presentation_ms": 64.2550000011397
+    },
+    {
+      "cycle": 2,
+      "step": 1,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_west"
+      },
+      "request_to_ack_ms": 16.901499999221414,
+      "request_to_ready_ms": 20.038800001202617,
+      "request_to_presentation_ms": 62.12539999978617
+    },
+    {
+      "cycle": 2,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_west"
+      },
+      "request_to_ack_ms": 18.7554000003729,
+      "request_to_ready_ms": 21.4918999990914,
+      "request_to_presentation_ms": 75.16079999913927
+    },
+    {
+      "cycle": 2,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_east"
+      },
+      "request_to_ack_ms": 21.624299999530194,
+      "request_to_ready_ms": 25.28600000005099,
+      "request_to_presentation_ms": 48.54250000062166
+    },
+    {
+      "cycle": 2,
+      "step": 4,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_east"
+      },
+      "request_to_ack_ms": 17.866700000013225,
+      "request_to_ready_ms": 21.48719999968307,
+      "request_to_presentation_ms": 65.55110000044806
+    },
+    {
+      "cycle": 2,
+      "step": 5,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.08289999826229,
+      "request_to_ready_ms": 21.64719999927911,
+      "request_to_presentation_ms": 66.4866000006441
+    },
+    {
+      "cycle": 2,
+      "step": 6,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 17.062700000678888,
+      "request_to_ready_ms": 20.63060000000405,
+      "request_to_presentation_ms": 65.96699999863631
+    },
+    {
+      "cycle": 2,
+      "step": 7,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 16.89559999795165,
+      "request_to_ready_ms": 20.52489999914542,
+      "request_to_presentation_ms": 66.7433999988134
+    },
+    {
+      "cycle": 2,
+      "step": 8,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 16.4455000012822,
+      "request_to_ready_ms": 20.008799998322502,
+      "request_to_presentation_ms": 65.25859999965178
+    },
+    {
+      "cycle": 2,
+      "step": 9,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 15.657399999327026,
+      "request_to_ready_ms": 19.146799997542985,
+      "request_to_presentation_ms": 67.76679999893531
+    },
+    {
+      "cycle": 2,
+      "step": 10,
+      "actor": 1,
+      "label": "blocked_obstacle",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 11.803600002167514,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 2,
+      "step": 11,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.024799999286188,
+      "request_to_ready_ms": 19.54420000038226,
+      "request_to_presentation_ms": 55.8759999985341
+    },
+    {
+      "cycle": 2,
+      "step": 12,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 16.688199997588526,
+      "request_to_ready_ms": 20.267299998522503,
+      "request_to_presentation_ms": 67.88289999894914
+    },
+    {
+      "cycle": 2,
+      "step": 13,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 17.987100000027567,
+      "request_to_ready_ms": 21.60389999698964,
+      "request_to_presentation_ms": 67.41369999872404
+    },
+    {
+      "cycle": 2,
+      "step": 14,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 17.325299999356503,
+      "request_to_ready_ms": 20.547600001009414,
+      "request_to_presentation_ms": 62.75630000163801
+    },
+    {
+      "cycle": 2,
+      "step": 15,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.58759999938775,
+      "request_to_ready_ms": 21.043299999291776,
+      "request_to_presentation_ms": 64.15240000205813
+    },
+    {
+      "cycle": 2,
+      "step": 16,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 19.804400002612965,
+      "request_to_ready_ms": 22.868100000778213,
+      "request_to_presentation_ms": 66.18840000010096
+    },
+    {
+      "cycle": 2,
+      "step": 17,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 20.671800000855,
+      "request_to_ready_ms": 24.21880000110832,
+      "request_to_presentation_ms": 67.52910000068368
+    },
+    {
+      "cycle": 2,
+      "step": 18,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.358799999579787,
+      "request_to_ready_ms": 19.881999996869126,
+      "request_to_presentation_ms": 59.104199997818796
+    },
+    {
+      "cycle": 2,
+      "step": 19,
+      "actor": 1,
+      "label": "blocked_door",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 12.823700002627447,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 2,
+      "step": 20,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": true
+      },
+      "request_to_ack_ms": 20.110099998419173,
+      "request_to_ready_ms": 23.568900000100257,
+      "request_to_presentation_ms": 95.88660000008531
+    },
+    {
+      "cycle": 2,
+      "step": 21,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 21.195199999056058,
+      "request_to_ready_ms": 25.18679999775486,
+      "request_to_presentation_ms": 90.58359999835375
+    },
+    {
+      "cycle": 2,
+      "step": 22,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 21.755300000222633,
+      "request_to_ready_ms": 25.95819999987725,
+      "request_to_presentation_ms": 94.77870000046096
+    },
+    {
+      "cycle": 2,
+      "step": 23,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": false
+      },
+      "request_to_ack_ms": 20.344700002169702,
+      "request_to_ready_ms": 24.328800001967466,
+      "request_to_presentation_ms": 77.68380000197794
+    },
+    {
+      "cycle": 2,
+      "step": 24,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": true
+      },
+      "request_to_ack_ms": 21.850600001926068,
+      "request_to_ready_ms": 25.89590000206954,
+      "request_to_presentation_ms": 58.6609000019962
+    },
+    {
+      "cycle": 2,
+      "step": 25,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 21.674799998436356,
+      "request_to_ready_ms": 25.715799998579314,
+      "request_to_presentation_ms": 60.18179999955464
+    },
+    {
+      "cycle": 2,
+      "step": 26,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.22729999932926,
+      "request_to_ready_ms": 23.504299999331124,
+      "request_to_presentation_ms": 59.271199999784585
+    },
+    {
+      "cycle": 2,
+      "step": 27,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": false
+      },
+      "request_to_ack_ms": 19.39729999867268,
+      "request_to_ready_ms": 23.518800000601914,
+      "request_to_presentation_ms": 60.141999998450046
+    },
+    {
+      "cycle": 2,
+      "step": 28,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.89049999974668,
+      "request_to_ready_ms": 23.878400003013667,
+      "request_to_presentation_ms": 62.208400002418784
+    },
+    {
+      "cycle": 2,
+      "step": 29,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.97079999980633,
+      "request_to_ready_ms": 21.8241999973543,
+      "request_to_presentation_ms": 62.764899998001056
+    },
+    {
+      "cycle": 2,
+      "step": 30,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": true
+      },
+      "request_to_ack_ms": 21.906599999056198,
+      "request_to_ready_ms": 25.89539999826229,
+      "request_to_presentation_ms": 64.3013000008068
+    },
+    {
+      "cycle": 2,
+      "step": 31,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 19.112099998892518,
+      "request_to_ready_ms": 23.317299997870577,
+      "request_to_presentation_ms": 61.78699999873061
+    },
+    {
+      "cycle": 2,
+      "step": 32,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 19.903500000509666,
+      "request_to_ready_ms": 24.205599998822436,
+      "request_to_presentation_ms": 62.36709999939194
+    },
+    {
+      "cycle": 2,
+      "step": 33,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": false
+      },
+      "request_to_ack_ms": 19.374499999685213,
+      "request_to_ready_ms": 23.16649999920628,
+      "request_to_presentation_ms": 60.45810000068741
+    },
+    {
+      "cycle": 2,
+      "step": 34,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 19.1698999988148,
+      "request_to_ready_ms": 23.13979999962612,
+      "request_to_presentation_ms": 64.53609999880427
+    },
+    {
+      "cycle": 2,
+      "step": 35,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.791199996485375,
+      "request_to_ready_ms": 22.396499996830244,
+      "request_to_presentation_ms": 66.13870000001043
+    },
+    {
+      "cycle": 2,
+      "step": 36,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 20.607200000085868,
+      "request_to_ready_ms": 24.761799999396317,
+      "request_to_presentation_ms": 61.37089999901946
+    },
+    {
+      "cycle": 2,
+      "step": 37,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 21.179399998800363,
+      "request_to_ready_ms": 25.505300000077114,
+      "request_to_presentation_ms": 61.55189999844879
+    },
+    {
+      "cycle": 2,
+      "step": 38,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 21.648599999025464,
+      "request_to_ready_ms": 25.923400000465335,
+      "request_to_presentation_ms": 58.170699998299824
+    },
+    {
+      "cycle": 2,
+      "step": 39,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.703299996763235,
+      "request_to_ready_ms": 24.161699999240227,
+      "request_to_presentation_ms": 60.1329999990412
+    },
+    {
+      "cycle": 2,
+      "step": 40,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.705200000316836,
+      "request_to_ready_ms": 23.847300002671545,
+      "request_to_presentation_ms": 58.956200002285186
+    },
+    {
+      "cycle": 2,
+      "step": 41,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.110100001853425,
+      "request_to_ready_ms": 24.084600001515355,
+      "request_to_presentation_ms": 60.539100002642954
+    },
+    {
+      "cycle": 2,
+      "step": 42,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": true
+      },
+      "request_to_ack_ms": 20.634000000427477,
+      "request_to_ready_ms": 25.936199999705423,
+      "request_to_presentation_ms": 61.00890000016079
+    },
+    {
+      "cycle": 2,
+      "step": 43,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.511900001816684,
+      "request_to_ready_ms": 24.302099998749327,
+      "request_to_presentation_ms": 55.286200000409735
+    },
+    {
+      "cycle": 2,
+      "step": 44,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.42580000104499,
+      "request_to_ready_ms": 24.41990000079386,
+      "request_to_presentation_ms": 60.9483000007458
+    },
+    {
+      "cycle": 2,
+      "step": 45,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 3,
+        "open": false
+      },
+      "request_to_ack_ms": 479.28249999677064,
+      "request_to_ready_ms": 482.6474999972561,
+      "request_to_presentation_ms": 488.49409999820637
+    },
+    {
+      "cycle": 2,
+      "step": 46,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 21.87690000209841,
+      "request_to_ready_ms": 24.64220000183559,
+      "request_to_presentation_ms": 64.32200000199373
+    },
+    {
+      "cycle": 2,
+      "step": 47,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 18.32479999939096,
+      "request_to_ready_ms": 22.84259999942151,
+      "request_to_presentation_ms": 64.21000000045751
+    },
+    {
+      "cycle": 2,
+      "step": 48,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 18.9950999993016,
+      "request_to_ready_ms": 23.63859999968554,
+      "request_to_presentation_ms": 65.47950000094716
+    },
+    {
+      "cycle": 2,
+      "step": 49,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 23.727100000542123,
+      "request_to_ready_ms": 28.178600001410814,
+      "request_to_presentation_ms": 63.83099999948172
+    },
+    {
+      "cycle": 2,
+      "step": 50,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.023800002789358,
+      "request_to_ready_ms": 21.055400000477675,
+      "request_to_presentation_ms": 61.11900000178139
+    },
+    {
+      "cycle": 2,
+      "step": 51,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 20.356199998786906,
+      "request_to_ready_ms": 23.112300001230324,
+      "request_to_presentation_ms": 55.62880000070436
+    },
+    {
+      "cycle": 2,
+      "step": 52,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 23.86550000301213,
+      "request_to_ready_ms": 28.0923000027542,
+      "request_to_presentation_ms": 55.562200002896134
+    },
+    {
+      "cycle": 2,
+      "step": 53,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 22.303899997496046,
+      "request_to_ready_ms": 24.537799999961862,
+      "request_to_presentation_ms": 60.21649999820511
+    },
+    {
+      "cycle": 2,
+      "step": 54,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 23.569499997392995,
+      "request_to_ready_ms": 29.746699998213444,
+      "request_to_presentation_ms": 60.343299999658484
+    },
+    {
+      "cycle": 2,
+      "step": 55,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 24.125800002366304,
+      "request_to_ready_ms": 31.670299998950213,
+      "request_to_presentation_ms": 59.68149999898742
+    },
+    {
+      "cycle": 2,
+      "step": 56,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 19.026199999643723,
+      "request_to_ready_ms": 24.956400000519352,
+      "request_to_presentation_ms": 57.996499999717344
+    },
+    {
+      "cycle": 2,
+      "step": 57,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 24.829499998304527,
+      "request_to_ready_ms": 31.297800000174902,
+      "request_to_presentation_ms": 57.35569999887957
+    },
+    {
+      "cycle": 2,
+      "step": 58,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 23.90249999734806,
+      "request_to_ready_ms": 30.113899996649707,
+      "request_to_presentation_ms": 55.895899997267406
+    },
+    {
+      "cycle": 2,
+      "step": 59,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 21.456999998918036,
+      "request_to_ready_ms": 26.67509999810136,
+      "request_to_presentation_ms": 59.29839999953401
+    },
+    {
+      "cycle": 2,
+      "step": 60,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 20.516799999313662,
+      "request_to_ready_ms": 25.765899998077657,
+      "request_to_presentation_ms": 58.317999999417225
+    },
+    {
+      "cycle": 2,
+      "step": 61,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 23.17149999726098,
+      "request_to_ready_ms": 28.07570000004489,
+      "request_to_presentation_ms": 60.272899998381035
+    },
+    {
+      "cycle": 2,
+      "step": 62,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 20.6066999999166,
+      "request_to_ready_ms": 25.373500000569038,
+      "request_to_presentation_ms": 60.701000002154615
+    }
+  ],
+  "spectator_role": "spectator",
+  "initial_revision": 0,
+  "client_memory_start": 44,
+  "presented_revision": 205,
+  "client_memory_end": 581
+}

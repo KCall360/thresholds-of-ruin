@@ -2,7 +2,7 @@
 
 The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 11 is required. Save format remains 3.
+region names, and frontend language. Protocol 12 is required. Save format remains 3.
 
 ## ASCII controls
 
@@ -59,7 +59,7 @@ catch-up burst. A journey ends on:
 
 - Arrival at the requested cell.
 - Cancellation, an accepted manual action, or a replacement travel request.
-- A blocked move or persistence failure; no further steps are attempted.
+- A blocked move or save-queue admission failure; no further steps are attempted.
 - A newly perceived potential hazard relative to the trip's starting view.
   Currently, other actors count conservatively as potential hazards because
   hostility is not modeled. Repeated views of your own actor do not count.
@@ -91,7 +91,7 @@ Send an ordinary branch-checked command envelope:
 
 The server requires control, readiness, a current revision, and a known traversable
 route. Unknown targets and unavailable routes share a generic error. Exact retries
-of an accepted request return its durable receipt without restarting the job,
+of an accepted request return its retained receipt without restarting the job,
 including after reconnect, restart, or a later branch change. Role checks precede
 receipt lookup.
 
@@ -129,3 +129,6 @@ The hazard-only interruption policy governs session interruption/status behavior
 
 [Doors](doors.md) add explicit barriers. Travel never opens a closed door; known
 closed doors exclude routes, and stale open-door routes stop on blocked movement.
+
+Travel steps follow the same [background-save contract](background-saving.md)
+as other actions. An acknowledged unsaved tail can be lost after a crash.

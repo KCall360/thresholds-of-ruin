@@ -133,6 +133,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                 },
             },
         ),
+        ("save", Request::Save),
     ];
     for (id, request) in commands {
         let request = ClientMessage::Request {
@@ -159,7 +160,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         }
     }
     drop(socket);
-    drop(child); // Simulates process termination, not a graceful save command.
+    drop(child); // Kill after the explicit durable save acknowledgement.
     let (_resumed, address) = launch(&path);
     let (mut socket, _) = timeout(Duration::from_secs(5), connect_async(&address))
         .await

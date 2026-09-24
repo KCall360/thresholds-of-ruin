@@ -1,3 +1,4 @@
+from test_text_process import flush_save
 """Real native-window tests. Linux requires DISPLAY (use xvfb-run).
 
 Automation injects UI input events, not OS keystrokes. Frames are reported only
@@ -72,6 +73,7 @@ class AsciiProcesses(unittest.TestCase):
         player.command("annotate user actor note here Public progress")
         shared = self.frame(spectator, lambda f: "Public progress" in str(f["history"]))
         self.assertNotIn("Secret", str(shared))
+        flush_save(self)
         before = self.save.read_bytes()
         for key in ["control", "release", "right", "pickup", "wait", "note"]:
             denied = self.key(spectator, key)

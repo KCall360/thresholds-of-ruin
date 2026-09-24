@@ -1,3 +1,4 @@
+mod support;
 use tempfile::tempdir;
 use tor_protocol::*;
 use tor_server::journal::{Command, Position, WizardItem, WizardOperation};
@@ -226,10 +227,9 @@ fn promotion_without_commands_survives_copy_and_disabled_restart() {
         ErrorCode::Unauthorized
     );
     drop(resumed);
-    let mut archive: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
+    let mut archive: serde_json::Value = support::read(&copy);
     archive.as_object_mut().unwrap().remove("wizard_game");
-    std::fs::write(&copy, serde_json::to_vec(&archive).unwrap()).unwrap();
+    support::write(&copy, archive);
     assert_eq!(
         Engine::open(&copy, Scenario::two_room(0)).unwrap_err().code,
         ErrorCode::InvalidArchive
@@ -284,53 +284,50 @@ fn rewind_retry_after_restart_recovers_receipt_without_another_fork() {
 }
 
 #[test]
-fn failed_marker_commit_does_not_enable_or_mark_the_game() {
+fn failed_marker_commit_never_enables_authority_and_promotion_remains_permanent() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("game.json");
+    let path = dir.path().join("game.db");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
-    std::fs::remove_file(&path).unwrap();
-    std::fs::create_dir(&path).unwrap();
-    assert_eq!(
-        engine.enable_wizard().unwrap_err().code,
-        ErrorCode::StorageFailure
-    );
+    let blocker = rusqlite::Connection::open(&path).unwrap();
+    blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    assert!(engine.enable_wizard().is_err());
     assert!(!engine.wizard_enabled());
-    assert!(!engine.state(ActorId(1)).unwrap().wizard_game);
+    assert!(engine.state(ActorId(1)).unwrap().wizard_game);
+    blocker.execute_batch("ROLLBACK").unwrap();
+    engine.flush().unwrap();
+    engine.enable_wizard().unwrap();
+    assert!(engine.wizard_enabled());
 }
 
 #[test]
-fn failed_wizard_commit_preserves_state_branch_and_retry_identity() {
+fn pending_wizard_rewind_is_saved_with_its_branch_and_retry_identity() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("game.json");
+    let path = dir.path().join("game.db");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     engine.enable_wizard().unwrap();
-    let saved = std::fs::read(&path).unwrap();
-    let state = engine.state(ActorId(1)).unwrap();
+    let old = engine.branch().clone();
+    let result = wizard(
+        &mut engine,
+        "rewind",
+        WizardOperation::Rewind { target: None },
+    )
+    .unwrap();
+    assert_ne!(engine.branch(), &old);
+    engine.flush().unwrap();
     let branch = engine.branch().clone();
-    std::fs::remove_file(&path).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    drop(engine);
+    let mut resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    resumed.enable_wizard().unwrap();
+    assert_eq!(resumed.branch(), &branch);
     assert_eq!(
-        wizard(
-            &mut engine,
-            "retry",
-            WizardOperation::Rewind { target: None }
-        )
-        .unwrap_err()
-        .code,
-        ErrorCode::StorageFailure
-    );
-    assert_eq!(engine.state(ActorId(1)).unwrap(), state);
-    assert_eq!(engine.branch(), &branch);
-    std::fs::remove_dir(&path).unwrap();
-    std::fs::write(&path, saved).unwrap();
-    assert!(
-        !wizard(
-            &mut engine,
-            "retry",
-            WizardOperation::Rewind { target: None }
-        )
-        .unwrap()
-        .duplicate
+        resumed
+            .history_branch(ActorId(1), "wizard", &branch, None, 100)
+            .unwrap()
+            .entries
+            .last()
+            .unwrap()
+            .id,
+        result.entry.id
     );
 }
 
@@ -440,11 +437,10 @@ fn old_save_and_corrupt_wizard_journal_do_not_load() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("legacy.json");
     drop(Engine::open(&path, Scenario::two_room(0)).unwrap());
-    let mut archive: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut archive: serde_json::Value = support::read(&path);
     archive["version"] = 1.into();
     archive.as_object_mut().unwrap().remove("wizard_game");
-    std::fs::write(&path, serde_json::to_vec(&archive).unwrap()).unwrap();
+    support::write(&path, archive);
     assert_eq!(
         Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
         ErrorCode::InvalidArchive
@@ -468,11 +464,10 @@ fn old_save_and_corrupt_wizard_journal_do_not_load() {
     )
     .unwrap();
     drop(engine);
-    let mut archive: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut archive: serde_json::Value = support::read(&path);
     archive["records"][0]["entry"]["content"]["result"]["item"] = 999.into();
-    let corrupt = serde_json::to_vec(&archive).unwrap();
-    std::fs::write(&path, &corrupt).unwrap();
+    support::write(&path, archive);
+    let corrupt = std::fs::read(&path).unwrap();
     assert_eq!(
         Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
         ErrorCode::InvalidArchive

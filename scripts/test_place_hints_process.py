@@ -1,4 +1,5 @@
 """Unnamed place hints through real text, headless and native ASCII processes."""
+from test_text_process import flush_save
 import json
 from pathlib import Path
 import unittest
@@ -50,6 +51,7 @@ class PlaceHintProcesses(unittest.TestCase):
         self.assertNotIn("place_hint", look)
         for forbidden in ("region", "portal", "Hidden authoring name"):
             self.assertNotIn(forbidden, json.dumps(visited))
+        flush_save(self)
         before = self.save.read_bytes()
         denied = self.request(observer, {"type": "command", "branch": visited["branch"], "command": {
             "type": "wizard", "expected_revision": visited["state"]["revision"], "operation": "place 3 2 1 0 off"}})

@@ -1,4 +1,4 @@
-//! Phase A diagnostics; JSONL raw samples and distributions, no latency gates.
+//! Performance diagnostics; JSONL raw samples and distributions, no latency gates.
 use serde_json::json;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use tor_client_ascii::{render::Canvas, App};
@@ -160,7 +160,7 @@ impl Runner {
             "actor":actor,"label":step.label,"action":action,"expected":step.expected,
             "history_start":history_start,"history_end":self.engine.profile_counts().0,"rewind_count":self.engine.profile_counts().1,
             "client_memory":self.app.state.as_ref().unwrap().memory().count(),"phases_ms":timings,
-            "profile":profile,"event":event.map(|e|e.content)})
+            "save_status":self.engine.save_status(),"profile":profile,"event":event.map(|e|e.content)})
         );
     }
     fn scheduled(&mut self, trace: &Trace, step: &Step, cycle: usize, index: usize) {
@@ -198,6 +198,19 @@ fn main() {
         .map(|a| a[1].parse::<usize>().unwrap())
         .unwrap_or(5);
     assert!(cycles > 0);
+    let focused = args.iter().any(|arg| arg == "--phase-b");
+    let save_ms = |flag: &str, fallback| {
+        args.windows(2)
+            .find(|a| a[0] == flag)
+            .map(|a| a[1].parse::<u64>().unwrap())
+            .unwrap_or(fallback)
+    };
+    let save_policy = tor_server::SavePolicy {
+        target_interval: std::time::Duration::from_millis(save_ms("--save-target-ms", 30000)),
+        max_unsaved_age: std::time::Duration::from_millis(save_ms("--save-max-ms", 60000)),
+        idle_interval: std::time::Duration::from_millis(save_ms("--save-idle-ms", 750)),
+        ..tor_server::SavePolicy::default()
+    };
     let trace = Trace::load();
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -208,8 +221,16 @@ fn main() {
         .status()
         .unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let regions: &[u64] = if quick { &[1, 8] } else { &[1, 8, 64, 256] };
-    let histories: &[usize] = if quick {
+    let regions: &[u64] = if focused {
+        &[8, 256]
+    } else if quick {
+        &[1, 8]
+    } else {
+        &[1, 8, 64, 256]
+    };
+    let histories: &[usize] = if focused {
+        &[100, 10000]
+    } else if quick {
         &[0, 100]
     } else {
         &[0, 100, 1000, 10000]
@@ -218,6 +239,9 @@ fn main() {
         for actors in [1, 8] {
             for &history in histories {
                 for durable in [false, true] {
+                    if focused && regions == 256 && (actors != 8 || history != 10000 || !durable) {
+                        continue;
+                    }
                     let case = format!(
                         "r{regions}-a{actors}-h{history}-{}",
                         if durable { "durable" } else { "memory" }
@@ -228,7 +252,9 @@ fn main() {
                     engine.seed_profile_history(history).unwrap();
                     let path = directory.path().join(format!("{case}.json"));
                     if durable {
-                        engine = engine.attach_profile_save(&path).unwrap();
+                        engine = engine
+                            .attach_profile_save_with_policy(&path, save_policy.clone())
+                            .unwrap();
                     }
                     println!(
                         "{}",
@@ -236,7 +262,8 @@ fn main() {
             "seed":trace.seed,"trace_version":trace.version,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
             "dirty":!dirty.success(),"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
-            "storage":if durable{"durable_whole_archive"}else{"memory"},"client_observer":1,
+            "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
+            "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes},
             "not_applicable":[if regions==1{Some("boundary")}else{None},if actors==1{Some("multi_actor")}else{None}]})
                     );
                     let mut runner = Runner::new(engine, case.clone());
@@ -250,6 +277,10 @@ fn main() {
                         runner.engine.profile_persistence(&path).unwrap();
                     }
                     let state = runner.engine.state(ActorId(1)).unwrap();
+                    let flush_started = Instant::now();
+                    runner.engine.flush().unwrap();
+                    let flush_ms = flush_started.elapsed().as_secs_f64() * 1000.;
+                    let save_status = runner.engine.save_status();
                     let final_save_bytes = std::fs::metadata(&path).unwrap().len();
                     drop(runner.engine);
                     let start = Instant::now();
@@ -259,7 +290,7 @@ fn main() {
                     println!(
                         "{}",
                         json!({"kind":"case_end","case":case,"history_end":history_end,"rewind_count":rewind_count,
-            "final_save_bytes":final_save_bytes,"restart_replay_ms":restart_replay_ms})
+            "final_save_bytes":final_save_bytes,"final_flush_ms":flush_ms,"save_status":save_status,"restart_replay_ms":restart_replay_ms})
                     );
                     summarize(&case, runner.distributions);
                 }
@@ -267,6 +298,9 @@ fn main() {
         }
     }
     // Separate growing-discovery trace; local cycles cannot establish its scaling.
+    if focused {
+        return;
+    }
     for regions in [8, 64, 256] {
         let case = format!("traversal-r{regions}");
         let engine =

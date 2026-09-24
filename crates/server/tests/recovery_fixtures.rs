@@ -1,5 +1,4 @@
-//! Current format-3 file recovery tests. Proposed journal/checkpoint fault
-//! schedules are documented, not implemented as Phase B storage here.
+mod support;
 use tor_protocol::{Action, ActorId, ErrorCode};
 use tor_server::{journal::Command, Engine, Scenario};
 
@@ -57,7 +56,7 @@ fn acknowledgement_loss_and_restart_recover_the_original_receipt() {
 }
 
 #[test]
-fn damaged_whole_archives_fail_closed_without_overwriting_evidence() {
+fn damaged_journals_fail_closed_without_overwriting_evidence() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("original.json");
     let mut engine = Engine::open(&path, Scenario::two_room(42)).unwrap();
@@ -80,11 +79,6 @@ fn damaged_whole_archives_fail_closed_without_overwriting_evidence() {
     for cut in [0, 1, bytes.len() / 2, bytes.len() - 1] {
         cases.push(bytes[..cut].to_vec());
     }
-    let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    invalid["records"][0]["entry"]["tick"] = serde_json::json!(999);
-    cases.push(serde_json::to_vec(&invalid).unwrap());
-    invalid["version"] = serde_json::json!(4);
-    cases.push(serde_json::to_vec(&invalid).unwrap());
     for (i, corrupt) in cases.iter().enumerate() {
         let path = directory.path().join(format!("corrupt-{i}.json"));
         std::fs::write(&path, corrupt).unwrap();

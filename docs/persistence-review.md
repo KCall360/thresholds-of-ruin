@@ -1,11 +1,14 @@
 # Phase A storage and Phase B proposal review
 
-Review date: 2026-09-24. This is a design review, **not authorization to implement
-Phase B**. Production storage remains the version-3 whole JSON archive. The
-[harness](performance-harness.md) measures that path, including buffered streaming
-encoding, actual file writes/flush, file sync, replacement, and publication.
+Historical review date: 2026-09-24, at the Phase A baseline commit. The writer
+and proposal below are preserved as measurement/design evidence, not current
+implementation instructions. The user subsequently authorized asynchronous
+acknowledgements. [Background saving](background-saving.md) supersedes the
+synchronous publication and separate base/journal installation proposal with
+atomic SQLite batches. The old temporary-file fault tests were replaced with
+current storage, contention, corruption, and real-process recovery tests.
 
-## Current writer and verified recovery boundaries
+## Phase A writer and verified recovery boundaries
 
 The engine locks a canonical save path, builds a transactional candidate, creates
 a temporary file in the save directory, streams JSON through a buffered writer,

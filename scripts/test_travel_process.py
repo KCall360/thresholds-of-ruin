@@ -1,4 +1,5 @@
 """Backend travel through actual server, text observer, headless and native ASCII."""
+from test_text_process import flush_save
 import json
 import os
 import subprocess
@@ -77,6 +78,7 @@ class TravelProcesses(unittest.TestCase):
         self.assertIn("Travel requested", wizard.command("history"))
         self.assertIn("Your surroundings", wizard.command("look"))
         self.assertNotIn("region", json.dumps(synced))
+        flush_save(self)
         before = self.save.read_bytes()
         denied = self.request(spectator, {"type":"cancel_travel", "branch":synced["branch"], "travel_id":synced["travel"]["id"]})
         self.assertIsNotNone(denied["error"])

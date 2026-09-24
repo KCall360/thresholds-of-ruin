@@ -148,7 +148,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 11](protocol.md) for the implemented format.
+visibility rules. See [protocol version 12](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -180,17 +180,22 @@ executed actions cannot be cancelled. Navigation cannot use undiscovered terrain
 
 ## Persistence and history
 
-Persist periodic snapshots and a journal of accepted authoritative actions and
-external inputs. Include RNG state, scheduler state, IDs, rules/content versions,
-and checksums. A seed alone is insufficient. Saves need atomic replacement and
-recovery from interrupted writes. Exact replay requires compatible simulation
-and content versions; arbitrary cross-version replay is not promised.
+The server encodes only newly accepted records and admits them to a bounded
+queue before publishing state. A separate worker appends atomic SQLite batches;
+normal acknowledgements do not wait for disk. Explicit save, graceful shutdown,
+and wizard enablement retain durability barriers. Restart rolls back unsaved
+play consistently, including receipts and branch history. See
+[background saving](background-saving.md) for the exact contract and limitations.
 
-Wizard-mode developer undo reconstructs an earlier state; a new action preserves
-the old branch and creates a new one. Retained history is limited by available storage,
-not held entirely in memory. Player-facing time travel is deferred. Normal play
-enforces persistent permadeath and exposes no undo. Local file manipulation is
-outside that guarantee.
+SQLite is a server-only I/O dependency with a bundled native implementation.
+Simulation remains deterministic and independent of storage and wall-clock time.
+Framed records add application versioning, checksums, and save identity to SQLite's
+transaction boundary. There is no historical save importer or rules implementation.
+
+The immutable initial replay base and complete retained records currently replay
+at startup and remain in memory. Periodic checkpoints, compaction, and reduced
+state-copy costs are later phases. Wizard undo preserves abandoned branches and
+can rewind the last 128 decision boundaries; normal play exposes no undo.
 
 ## Wizard mode
 
@@ -215,7 +220,7 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 11, save format 3, and ruleset `diagonal-v11` are the only supported
+version 12, save format 4, and ruleset `diagonal-v11` are the only supported
 runtime formats. Older saves and rulesets are rejected rather than migrated.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses

@@ -76,9 +76,12 @@ Use `release` in the first client and `control` in the second to switch control.
 Both terminals using the same token are the same authenticated user and can see
 that user's private notes. Other-user privacy is enforced by the server.
 
-The server commits accepted actions and notes automatically. Restart it with the
-same save path, then relaunch the text client to restore position, inventory, and
-visible history. Protocol 11 is required; save format 3 and existing rules are unchanged.
+The server saves accepted actions and notes in background batches. Use `save`
+for an explicit durable barrier; normal quit also saves before disconnecting.
+A crash may roll back recent acknowledged play. Restart with the same save path
+and reconnect to recover the last saved prefix. Protocol 12 and save format 4
+are required; the ruleset remains `diagonal-v11`. See
+[background saving](background-saving.md) for timing and failure handling.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
 reconnect/retry is not implemented. If a command's response is lost, inspect history
@@ -109,7 +112,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Server and clients must all use protocol
-version 11. Real process tests cover live spectator
+version 12. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -118,7 +121,7 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 11.
+and selections from an abandoned branch. Server and clients must use protocol 12.
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on

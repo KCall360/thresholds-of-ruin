@@ -68,7 +68,7 @@ pub async fn serve(
     let result = loop {
         tokio::select! {
             _ = &mut shutdown => break Ok(()),
-            _ = travel_pump.tick() => service.lock().await.advance_travel(),
+            _ = travel_pump.tick() => { let mut session = service.lock().await; session.advance_travel(); session.poll_saves(); },
             accepted = listener.accept() => {
                 let (socket, _) = match accepted { Ok(value) => value, Err(error) => break Err(error) };
                 if let Ok(permit) = capacity.clone().try_acquire_owned() {
@@ -82,6 +82,13 @@ pub async fn serve(
     service.lock().await.shutdown();
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
+    let handle = service.lock().await.flush_handle();
+    if let Some(handle) = handle {
+        tokio::task::spawn_blocking(move || handle.flush())
+            .await
+            .map_err(io::Error::other)?
+            .map_err(io::Error::other)?;
+    }
     result
 }
 

@@ -112,8 +112,30 @@ impl Connection {
         Ok(message)
     }
 
-    pub async fn close(&mut self) {
-        let _ = timeout(DEADLINE, self.socket.close(None)).await;
+    /// Save-and-quit is a durable barrier; abrupt disconnect is not.
+    pub async fn close(&mut self) -> Result<(), ConnectionError> {
+        if self.role != AccessRole::Spectator {
+            let id = self.request(Request::Save).await?;
+            timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    match self.next().await? {
+                        ServerMessage::Ack { request_id, .. } if request_id == id => {
+                            return Ok::<(), ConnectionError>(())
+                        }
+                        ServerMessage::Error {
+                            request_id: Some(request_id),
+                            message,
+                            ..
+                        } if request_id == id => return Err(message.into()),
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .map_err(|_| "Save timed out; recent play may not be durable")??;
+        }
+        timeout(DEADLINE, self.socket.close(None)).await??;
+        Ok(())
     }
 }
 

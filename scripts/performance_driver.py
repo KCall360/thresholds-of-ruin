@@ -144,6 +144,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         return process
     result = {"trace_version":spec["version"],"seed":spec["seed"],"regions":regions,"actors":actors,
         "cycles":0,"pace_seconds":pace,"samples":[]}
+    clients = {}
     try:
         server = launch("tor-server", ["--listen","127.0.0.1:0","--seed",spec["seed"],"--regions",regions,
             "--actors",actors,"--save",output/"game.json"], player, "server", extra={"TOR_SPECTATOR_TOKEN":spectator_token})
@@ -155,7 +156,6 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         assert initial["role"] == "spectator" and not initial["has_control"]
         result.update(spectator_role=initial["role"],initial_revision=initial["state"]["revision"])
         # Presented spectator frame is confirmed before creating the player driver.
-        clients = {}
         for actor in range(1,actors+1):
             client = launch("tor-client-headless",["--connect",address,"--actor",actor],player,f"actor-{actor}")
             state, _ = client.until(lambda f:f.get("type") == "ready")
@@ -225,11 +225,18 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                     scheduled(step,cycle,index)
                 region += 1
         result["client_memory_end"] = len(clients[1].snapshot()["memory"])
+        # Durability barrier is outside action timing; ordinary acks are in-memory.
+        saved, *_ = clients[1].send({"type":"request","request":{"type":"save"}})
+        assert saved["error"] is None, saved["error"]
         (output/"result.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         if stay_open:
             spectator.child.wait()
         return result
     except WindowClosed:
+        if 1 in clients:
+            saved, *_ = clients[1].send({"type":"request","request":{"type":"save"}})
+            if saved["error"]:
+                raise RuntimeError(saved["error"])
         result["cancelled"] = True
         (output/"result.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return result

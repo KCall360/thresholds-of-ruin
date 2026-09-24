@@ -132,7 +132,7 @@ fn run() -> Result<(), Error> {
     let input = automation.then(automation_input);
     let network = Network::start(address, token, actor, observe);
     let result = window_loop(&mut window, &network, &text, input, report, capture);
-    network.shutdown();
+    network.shutdown()?;
     result
 }
 

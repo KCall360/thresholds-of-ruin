@@ -87,7 +87,7 @@ restored snapshot. Memory is local to a connection and is not saved or recovered
 from history: restarting a client starts with its attachment snapshot only.
 
 The [portal-geometry slice](portal-geometry.md) introduces explicit visible cells,
-bounded portal sight, rotations, walls and stairs. Protocol version 11 requires
+bounded portal sight, rotations, walls and stairs. Protocol version 12 requires
 observer-relative disclosure. Memory output now describes individual cells rather
 than room elevations.
 Wizard operations still advance their author's actor revision even

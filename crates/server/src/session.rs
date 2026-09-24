@@ -56,6 +56,8 @@ pub struct Service {
     resetting_streams: bool,
     broadcasting_travel: bool,
     engine: Engine,
+    pending_saves: Vec<(u64, String, u64)>,
+    save_warning: Option<String>,
     clients: BTreeMap<u64, Client>,
     controllers: BTreeMap<ActorId, u64>,
     next_client: u64,
@@ -69,6 +71,8 @@ impl Service {
             resetting_streams: false,
             broadcasting_travel: false,
             engine,
+            pending_saves: Vec::new(),
+            save_warning: None,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
@@ -189,7 +193,18 @@ impl Service {
                 ));
             }
             client.actor = Some(actor);
-            return self.snapshot(id, request_id);
+            self.snapshot(id, request_id)?;
+            if let Some(message) = self.save_warning.clone() {
+                self.send(
+                    id,
+                    ServerMessage::Error {
+                        request_id: None,
+                        code: ErrorCode::StorageFailure,
+                        message,
+                    },
+                );
+            }
+            return Ok(());
         }
         let client = &self.clients[&id];
         let actor = client
@@ -198,6 +213,24 @@ impl Service {
         let user = client.user.clone();
         let frontend = client.frontend.clone();
         match request {
+            Request::Save => {
+                if self
+                    .pending_saves
+                    .iter()
+                    .any(|(client, _, _)| *client == id)
+                {
+                    return Err(Failure::new(
+                        ErrorCode::InvalidRequest,
+                        "A save is already pending",
+                    ));
+                }
+                if self.controllers.get(&actor) == Some(&id) {
+                    self.stop_travel(actor, TravelPhase::Cancelled);
+                }
+                let target = self.engine.request_save();
+                self.pending_saves.push((id, request_id.into(), target));
+                self.poll_saves();
+            }
             Request::CancelTravel { branch, travel_id } => {
                 if self.controllers.get(&actor) != Some(&id) {
                     return Err(Failure::new(
@@ -728,6 +761,59 @@ impl Service {
         }
     }
 
+    pub(crate) fn poll_saves(&mut self) {
+        let status = self.engine.save_status();
+        let warning = status.error.clone().or_else(|| {
+            status.overdue.then(|| {
+                "Saving is behind schedule; recent play may be lost if the server stops.".into()
+            })
+        });
+        if warning != self.save_warning {
+            if let Some(message) = &warning {
+                eprintln!("{message}");
+                // Never interleave a warning with the welcome/attach handshake.
+                for id in self
+                    .clients
+                    .iter()
+                    .filter_map(|(id, client)| client.actor.map(|_| *id))
+                    .collect::<Vec<_>>()
+                {
+                    self.send(
+                        id,
+                        ServerMessage::Error {
+                            request_id: None,
+                            code: ErrorCode::StorageFailure,
+                            message: message.clone(),
+                        },
+                    );
+                }
+            }
+            self.save_warning = warning;
+        }
+        let pending = std::mem::take(&mut self.pending_saves);
+        for (id, request_id, target) in pending {
+            if !self.clients.contains_key(&id) {
+                continue;
+            }
+            if status.durable_sequence >= target {
+                self.ack(id, &request_id, None);
+            } else if let Some(message) = &status.error {
+                self.send(
+                    id,
+                    ServerMessage::Error {
+                        request_id: Some(request_id),
+                        code: ErrorCode::StorageFailure,
+                        message: message.clone(),
+                    },
+                );
+            } else {
+                self.pending_saves.push((id, request_id, target));
+            }
+        }
+    }
+    pub(crate) fn flush_handle(&self) -> Option<crate::storage::Store> {
+        self.engine.flush_handle()
+    }
     pub(crate) fn shutdown(&mut self) {
         for id in self.clients.keys().copied().collect::<Vec<_>>() {
             self.disconnect(id);

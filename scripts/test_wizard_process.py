@@ -1,4 +1,5 @@
 """Wizard acceptance through the actual server, text client and native ASCII window."""
+from test_text_process import flush_save
 import json
 import os
 from pathlib import Path
@@ -73,6 +74,7 @@ class WizardProcesses(unittest.TestCase):
         for command in ["wizard rewind initial", "wizard item tablet 1 1 1 0", "note Forbidden"]:
             self.assertIn("read-only", text_spectator.command(command))
         self.assertIn("read-only", self.key(spectator, "control")["status"])
+        flush_save(self)
         before = self.save.read_bytes()
         self.assertIn("read-only", self.key(spectator, "pickup")["status"])
         self.assertEqual(self.save.read_bytes(), before)

@@ -36,7 +36,7 @@ def expected_actions(regions, actors, history, cycles):
     return result
 
 
-def validate(rows, quick=False):
+def validate(rows, quick=False, phase_b=False):
     cases, samples, ends = {}, defaultdict(list), {}
     for row in rows:
         if row["kind"] == "case": cases[row["case"]] = row
@@ -44,6 +44,9 @@ def validate(rows, quick=False):
         elif row["kind"] == "case_end": ends[row["case"]] = row
     matrix = itertools.product([1,8] if quick else [1,8,64,256],[1,8],[0,100] if quick else [0,100,1000,10000],["memory","durable"])
     expected_cases = {f"r{r}-a{a}-h{h}-{storage}" for r,a,h,storage in matrix}
+    if phase_b:
+        expected_cases = {f"r8-a{a}-h{h}-{s}" for a,h,s in itertools.product([1,8],[100,10000],["memory","durable"])}
+        expected_cases.add("r256-a8-h10000-durable")
     assert set(cases) == set(ends) == expected_cases, "Missing or unexpected completed matrix case"
     for case, meta in cases.items():
         expected = expected_actions(meta["regions"],meta["actors"],meta["history_start"],meta["cycles"])
@@ -65,13 +68,27 @@ def validate(rows, quick=False):
                 assert profile["actors_observed"] <= 2*meta["actors"]
                 assert profile["revision_comparisons"] <= meta["actors"]
                 assert profile["records_serialized"] <= history
-                if meta["storage"] != "memory":
+                if meta["storage"] == "background_sqlite_journal":
+                    assert profile["records_serialized"] == 1
+                    assert all(profile[k] == 0 for k in ("bytes_written","file_writes","file_flushes","file_syncs","file_replacements"))
+                    status = sample["save_status"]
+                    assert status["accepted_sequence"] == history
+                    assert status["durable_sequence"] <= history and status["error"] is None
+                    assert status["pending_bytes"] <= meta["save_policy"]["queue_bytes"]
+                elif meta["storage"] != "memory":
                     assert profile["file_syncs"] >= 1 and profile["bytes_written"] > 0
                     last_bytes = profile["bytes_written"]
             assert sample["history_end"] == history and sample["rewind_count"] <= 128
         assert ends[case]["history_end"] == history
         if last_bytes: assert last_bytes == ends[case]["final_save_bytes"]
-    for regions in (8,64,256):
+        if meta["storage"] == "background_sqlite_journal":
+            status = ends[case]["save_status"]
+            assert status["accepted_sequence"] == status["durable_sequence"] == history
+            assert status["pending_bytes"] == 0 and status["error"] is None
+            assert status["batches"] > 0 and status["journal_bytes"] > 0
+            final = actual[-1]["save_status"]
+            assert status["journal_bytes"] == final["journal_bytes"] + final["pending_bytes"]
+    for regions in (() if phase_b else (8,64,256)):
         case = f"traversal-r{regions}"
         actual = samples[case]
         cycles = 2 if quick else regions-1
@@ -86,12 +103,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input",type=Path)
     parser.add_argument("--quick",action="store_true")
+    parser.add_argument("--phase-b",action="store_true")
     parser.add_argument("--summary",type=Path)
     args = parser.parse_args()
     opener = gzip.open if args.input.suffix == ".gz" else open
     with opener(args.input,"rt",encoding="utf-8-sig") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
-    cases,samples,ends = validate(rows,args.quick)
+    cases,samples,ends = validate(rows,args.quick,args.phase_b)
     summaries = [r for r in rows if r["kind"] != "sample"]
     if args.summary:
         args.summary.write_text("\n".join(json.dumps(r) for r in summaries)+"\n",encoding="utf-8")

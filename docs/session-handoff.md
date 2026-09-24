@@ -1,104 +1,88 @@
 # Session handoff — 2026-09-24
 
-Phase A is complete. Phase B has not started and is not authorized by this
-handoff. The user authorized publishing the completed work and pre-release
-cleanup, then merging PR #22 after Windows and Linux CI pass.
-The [roadmap](milestones.md) remains the source of truth for project status.
+Phase A and its pre-release cleanup were merged in
+[PR #22](https://github.com/KCall360/thresholds-of-ruin/pull/22), after Windows and
+Linux CI passed. Main's merge is `5745e0f219d90900b7d8260ceb2ef40ce6c0d5a0`.
+The user then authorized Phase B implementation with a revised saving contract:
+performance takes priority over making each acknowledgement durable. Recent
+acknowledged play may be lost on a crash. Save timing must be configurable and
+opportunistic. The [roadmap](milestones.md) remains the status source of truth.
 
-## Original Phase A publication checkpoint
+## Current work
 
-- Workspace: `F:\Codex\Roguelike`.
-- Branch: `codex/performance-harness-phase-a`.
-- Published commit: `5ad0c1e8271ec188060c5b8176f362822062dd75`.
-- [PR #22](https://github.com/KCall360/thresholds-of-ruin/pull/22) was opened as a
-  draft for this checkpoint. Its live status supersedes this historical snapshot.
-- [Windows and Linux CI](https://github.com/KCall360/thresholds-of-ruin/actions/runs/35963342072)
-  both passed on that published commit; this was rechecked during wrap-up.
-- This guide and its index link were added after the published checkpoint above.
-- Pre-existing untracked `target-phase-a/` and `target-playtest/` directories
-  remain untouched. Do not commit them or treat them as newly generated work.
+Workspace: `F:\Codex\Roguelike`. Branch: `codex/background-save-journal`.
+This is the publication checkpoint. The user authorized committing and pushing
+all completed work, then merging only after Windows/Linux CI pass on the final
+PR head. Check the live PR for this branch for publication and merge status;
+do not infer that it still needs merging from this checkpoint document.
 
-## Completed evidence
+Read [background saving](background-saving.md) for the implemented contract:
 
-Read the [Phase A findings](phase-a-findings.md) for results, the
-[harness guide](performance-harness.md) for reproduction, and the
-[persistence review](persistence-review.md) for the proposed storage contract.
-The complete baseline and raw samples are retained under
-`docs/measurements/phase-a-2026-09-24/`.
+- Protocol 12, save format 4, ruleset `diagonal-v11`. Old saves are rejected;
+  no importer, historical rules behavior, or compatibility defaults were added.
+- Ordinary commands publish after bounded in-memory journal admission. Only
+  their new record is encoded. A worker owns SQLite batch I/O outside the
+  engine/session lock; timing uses target age, idle opportunity, maximum age,
+  and queue pressure.
+- Explicit save, normal player-client exit, graceful server shutdown, and wizard
+  enablement retain durability barriers. Spectators cannot save. Saving does not
+  block other clients from acting.
+- SQLite supplies atomic transactions and interrupted-batch recovery. Versioned,
+  checksummed rows add application schema and save-identity validation. Failed
+  saves retain pending data, warn clients, reject further mutation, and allow
+  an explicit retry. Committed corruption fails closed.
+- Full replay, retained history, and state-copy costs remain. Application
+  checkpoints, rotation, and compaction are **not implemented** (Phase C).
 
-The 64-case release matrix covers 1/8/64/256 regions, 1/8 actors,
-0/100/1,000/10,000 retained actions, and memory/durable execution. Timed actions
-include ordinary and rotated boundary crossings in both directions, stairs,
-cardinal/diagonal movement, doors, blocked attempts, and visibility changes.
-Separate discovery walks traverse the 8/64/256-region worlds. Actual clients
-also completed a mixed workload in a 256-region world; that run is not a claim
-that the real clients explored all 256 regions.
+The [Phase A review](persistence-review.md) is historical evidence. Its proposed
+synchronous acknowledgement and separate-file installation scheme is superseded.
+SQLite barriers depend on filesystem/device behavior; process-kill tests do not
+prove power-loss durability, and new parent-directory durability is not separately
+established by the application.
 
-Whole-save persistence is the principal measured bottleneck. The largest case
-wrote 12.42 GiB for a final 5.69 MiB archive. Growing client map memory also raises
-update costs. The actual-client request-to-ack p95 was 236 ms across mixed
-actions, including diagnostic overhead; it is not an isolated crossing metric.
+## Verification and measurements
 
-TDD and local debug/release, lint, architecture, documentation, actual-client,
-and desktop-launcher verification are complete. The native debug mouse test
-required an interactive permission rerun; see the findings for the precise
-verification boundaries. All four Windows launchers were verified. Local
-credentials, saves, helper scripts, and diagnostic logs remain ignored.
+Phase A raw results remain unchanged in `docs/measurements/phase-a-2026-09-24/`.
+Phase B uses the [focused subset](performance-persistence.md#phase-b-verification-and-measurement):
+eight-region cases at 100/10,000 actions and one/eight actors, matched memory
+cases, one 256-region/eight-actor/10,000-action saved case, and an actual-client run.
+The worker's application byte counts are not physical SQLite I/O measurements.
+See [Phase B findings](phase-b-findings.md) and the retained manifest/raw samples.
 
-Production still uses protocol 11, save format 3, and ruleset `diagonal-v11`.
-The readiness-revision fix can cause older multi-actor archives to fail strict
-replay; failures preserve the original file. Current process recovery tests do
-not establish power-loss durability or durable installation of replacement names.
+Storage and process tests cover unsaved-tail rollback, explicit save, shutdown,
+queue admission, failed saves/retry, strict frame validation, immutable prior rows,
+receipts, private notes, retained branches, and permanent wizard marking.
+Ordinary restart test helpers now save explicitly; dedicated crash tests bypass
+that helper and kill without saving.
 
-## Pre-Phase B cleanup
+Local logs and launcher helpers remain ignored under `.local/`. Existing
+`target-phase-a/`, `target-playtest/`, and prior saves remain untouched. Do not
+commit credentials or local playtest output. Follow `CONTRIBUTING.md` for final
+checks, launcher verification, and Windows/Linux CI before any future merge.
 
-The user authorized a focused Phase B measurement plan and pre-release cleanup,
-followed by publication and CI-gated merge, not Phase B implementation. Saves need not remain compatible across revisions;
-retain only current rules and reject unsupported versions. The local cleanup
-removes historical ray visibility implementations, moves geometry coverage and
-the visibility benchmark to shadowcasting, removes the missing-region save
-fallback, and replaces the retired-ruleset catalogue with general rejection
-coverage. Feature guides now describe current behavior. Existing Phase A
-measurements remain evidence for their recorded commit. Local build directories
-`target-phase-a/` and `target-playtest/` are now ignored and remain untouched.
+## Completed local checks
 
-Cleanup verification: debug world, simulation, and server tests passed, as did
-workspace Clippy, formatting, architecture and documentation checks. Actual-client
-shadowcasting/resume and wizard scenarios passed. All workspace binaries were
-rebuilt and all four desktop launchers verified, including the 256-region
-spectator demonstration and owned-process cleanup. The launcher verifier needed
-process-query permission and a refreshed process inventory to avoid a text-client
-startup race. Publication checks additionally passed all 192 Rust tests in each of debug and
-release, plus the required lint, formatting, architecture, and rustdoc checks.
-The full Python debug suite passed 62 of 63 tests and the release frontend suite
-passed 51 of 52. The native mouse test was blocked locally: the sandbox denied
-`SetCursorPos`; elevated runs found another window over the intended click target.
-The assertion remains intact. Final Windows/Linux CI must validate it before merge.
-No new release performance matrix was run; the published Phase A measurements
-above refer to their original commit.
+- All 200 Rust tests pass in debug and release.
+- Workspace Clippy, formatting, architecture boundaries, warning-free rustdoc,
+  documentation links/index, and diff whitespace checks pass.
+- The full debug Python suite passed 67 of 68 tests before the final reconnect
+  regression was added; all six background-save process tests then passed on the
+  final implementation. The release frontend suite passed 57 of 58 tests,
+  including the new reconnect regression.
+- Both Python suite failures are the unchanged native mouse test: the sandbox
+  denies `SetCursorPos`. An elevated debug rerun reached that API but another
+  window covered the click target (`WindowFromPoint` mismatch). This is not
+  recorded as a pass; Windows/Linux CI must validate it before any merge.
+- All four desktop launchers passed real connection, fresh-save retention, and
+  owned-process cleanup checks. The 256-region demonstration completed at least
+  three cycles before its spectator window was closed and cleanup verified.
+- The focused release benchmark validated nine cases and 13,798 ordered attempts.
+  The separate actual-client run completed three cycles and 205 accepted actions.
 
-## Next session
+## Next work
 
-1. Read this handoff, `CONTRIBUTING.md`, the roadmap, findings, and storage review.
-   Check the current branch, worktree, and PR before changing anything.
-2. Check the live status of Phase A PR #22. The user authorized merging after
-   Windows/Linux CI pass on its final head; do not repeat an already completed merge.
-3. When the user explicitly authorizes Phase B, follow TDD for the append journal.
-   Resolve and verify the Windows/Linux bootstrap durability contract first.
-   Cover framing and strict decoding, interrupted writes, corruption, uncertain
-   I/O, lost acknowledgements, duplicate/conflicting retries, retained branches,
-   annotations, and permanent wizard marking with failing behavior tests.
-4. Implement the reviewed format-4 replay base, append journal, wizard marker,
-   and recovery/publication ordering. Reject old formats; no importer is planned.
-   Preserve evidence and fail closed when a corrupt tail cannot be proved safe.
-5. Reuse the Phase A workloads with the focused Phase B measurement subset in
-   [the plan](performance-persistence.md#phase-b-verification-and-measurement).
-   Keep comprehensive storage correctness and applicable real-client tests;
-   expand measurements only when results or changed paths justify it. Update
-   the findings and roadmap, and verify Windows/Linux CI before any merge.
-   **Stop before Phase C** unless the user broadens the scope.
-
-Periodic checkpoints and rotation belong to Phase C. State-copy/observation
-scaling belongs to Phase D; client responsiveness work belongs to Phase E.
-Do not rerun the entire baseline merely to resume the session: the published
-measurements are complete, and a new run should evaluate an actual change.
+Check the branch PR and fetch `main` before starting more work. If the PR is
+already merged, continue from updated `main`; do not repeat publication or merge.
+If it is open, the user has authorized resolving CI failures and merging after
+Windows/Linux CI pass on its final head. Stop before Phase C unless the user
+broadens scope. Local credentials, saves, and diagnostic logs remain ignored.

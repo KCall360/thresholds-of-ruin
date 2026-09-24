@@ -1,7 +1,7 @@
 # Symmetric shadowcasting
 
 The current rules use symmetric shadowcasting and finite stone enclosure.
-Protocol 11 exposes floor/ceiling surfaces; saves use format 3 and
+Protocol 12 exposes floor/ceiling surfaces; saves use format 4 and
 `diagonal-v11`. Older rulesets are rejected. See [material volumes](material-volumes.md).
 
 ## Geometry and behavior

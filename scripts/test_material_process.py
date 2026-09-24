@@ -1,4 +1,5 @@
 """Finite material enclosure through actual server and all three frontends."""
+from test_text_process import inspect_save
 import json
 import os
 from pathlib import Path
@@ -41,7 +42,7 @@ class MaterialProcesses(unittest.TestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(json.loads(self.save.read_text())["ruleset"], "diagonal-v11")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "diagonal-v11")
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)

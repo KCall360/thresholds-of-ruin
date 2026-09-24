@@ -78,7 +78,8 @@ the present fixture has only two items. Richer item inspection is future work.
 4. Press Right five times to enter the far room with the token.
 5. Press R in ASCII and enter `control` in text to switch back.
 
-Accepted actions and notes are committed automatically by the server. Restart
+Accepted actions and notes are saved in background batches. Normal player-window
+exit waits for saving; a crash can lose recent play. See [background saving](background-saving.md). Restart
 the server with the same save path and relaunch either frontend to resume.
 The GUI keeps its last view with a disconnected status if the connection fails;
 close and relaunch to reconnect. An uncertain request is not automatically retried.
@@ -137,7 +138,7 @@ inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
 does not restrict that credential. Server and clients must all use protocol
-version 11. Real process tests cover live spectator
+version 12. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -146,7 +147,7 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 11.
+and selections from an abandoned branch. Server and clients must use protocol 12.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in

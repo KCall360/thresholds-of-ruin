@@ -50,8 +50,8 @@ Public wizard history retains sanitized summaries, not hidden marker locations.
 
 ## Compatibility and verification
 
-Only the current `diagonal-v11` ruleset and save format 3 are supported.
-All connected binaries must use protocol 11. Normal games are never implicitly
+Only the current `diagonal-v11` ruleset and save format 4 are supported.
+All connected binaries must use protocol 12. Normal games are never implicitly
 promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale
