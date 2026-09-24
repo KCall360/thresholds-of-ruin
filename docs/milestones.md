@@ -72,15 +72,16 @@ place knowledge will be added when interactions require them.
 
 ### 3p — Performance and scalable persistence
 
-Status: **next milestone**.
+Status: **Phase A in progress; representative workload coverage incomplete**.
 
 Before adding more gameplay, establish representative performance baselines and
 remove work whose cost grows with save history or total dungeon size from the
-interactive action path. The initial harness covers percentile latency for a
-64-region connected layout, portal movement, perception, in-memory commands, and
-durable commands. It already shows that simulation and perception are
-sub-millisecond while whole-archive durable rewrites dominate action latency and
-produce much larger tail stalls.
+interactive action path. The current harness constructs 1/8/64/256-region worlds
+and 0/100/1,000/10,000-action histories, but its timed actions are waits. It has
+identified candidate-copy and whole-archive work; it has not established costs
+for traversal, changing LOS, doors, elevation, or representative durable actions.
+Complete the [focused and mixed workload plan](performance-harness.md), including
+a matching 256-region spectator demonstration, before closing Phase A.
 
 Scope and sequencing are defined in the
 [performance and persistence plan](performance-persistence.md). The milestone

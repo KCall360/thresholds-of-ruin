@@ -7,13 +7,11 @@ before dungeon gameplay expands the world, entity count, and action history. It
 does not weaken deterministic simulation, actor-specific disclosure, idempotent
 requests, or wizard rewind.
 
-The first release measurement is decisive: a 64-region scene takes about 0.02 ms,
-observation about 0.06 ms, and portal movement plus navigation refresh about
-0.22 ms. In-memory server commands remain below 1 ms in the sampled history,
-whereas disk-backed commands grow from roughly 14 ms to 23 ms mean latency and
-show stalls above 80 ms. Persistence and whole-state copying are therefore the
-first targets. These figures are diagnostic observations from one machine, not
-portable acceptance thresholds.
+Early measurements identified whole-archive persistence and state copying as
+likely bottlenecks. Phase A remains incomplete: the current harness mostly waits
+and does not measure representative boundary, door, elevation, or mixed action
+traces. Follow the [harness completion plan and session handoff](performance-harness.md)
+before treating those observations as a complete baseline or beginning Phase B.
 
 ## Recorded decisions and guiding criteria
 
@@ -135,29 +133,28 @@ Complete the scale matrix, add phase timings, encode the recorded durability and
 format decisions in tests, and add recovery fixtures. No storage behavior changes
 in this phase.
 
-#### Phase A results (2026-09-22)
+#### Preliminary Phase A measurements and limitations
 
-The checked-in harness is `crates/server/examples/latency_bench.rs` and emits
-diagnostic CSV with mean, p50, p95, and maximum timings. It covers 1, 8, 64,
-and 256 connected two-level regions with portals, obstacles, a door, and up to
-8 actors; server histories are seeded at 0, 100, 1,000, and 10,000 actions.
-The command profile isolates simulation transition, perception, revision
-detection, candidate/rollback capture, serialization, write, and sync. The
-client-common update path and ASCII renderer are measured separately. Stable
-contracts assert actor-proportional observation/comparison counts and record /
-byte accounting rather than machine-specific timings. Recovery fixtures cover
-partial/corrupt final frames and checkpoint install/rotation interruption
-boundaries; existing save-failure tests continue to verify publication atomicity.
+The checked-in harness is `crates/server/examples/latency_bench.rs`. It constructs
+1/8/64/256-region fixtures and seeds two-room histories at 0/100/1,000/10,000
+actions, with 1/8 actors. Timed transitions are waits; static queries do not prove
+portal, door, elevation, or changing-LOS behavior. The region and history cases
+are separate, and persistence is a single save after each memory-command batch.
+Phase reporting has overlapping perception/revision intervals, missing navigation
+timing, and means without per-phase percentile distributions. The current client
+sample includes harness clones. Existing operation/byte assertions and recovery
+models are a starting point, not complete scaling or storage-fault coverage.
 
-Release measurements on the development Windows host found perception and
-revision detection scale with actor count (about 0.36 ms and 0.18 ms for one
-actor versus 3.2 ms and 1.6 ms for eight in the 10,000-action case). The
-candidate clone grows from about 0.05 ms at an empty history to about 10.6 ms at
-10,000 records; durable sync is roughly 0.10 ms to 4.2–5.0 ms. Region count is
-not the dominant term in this fixture, while actor count and full-archive
-copy/serialization are. These are diagnostic observations, not CI thresholds.
+The initial Windows release run observed candidate cloning grow from roughly
+0.05 ms in the first batch to 10.6 ms near 10,000 retained actions. Counts show
+two revision views per actor and full-archive encoding on save. These support
+investigating history and actor scaling, but do not establish total durable
+latency or the cost of traversal. The previously quoted sync numbers were
+incorrectly divided by 100 when a single save was aggregated with 100 commands;
+withdraw those numbers and remeasure using separate samples. Retain raw results
+and update findings after implementing the [mixed-workload plan](performance-harness.md).
 
-#### Reviewed Phase B design
+#### Draft Phase B design — review pending completion of Phase A
 
 Advance the save format to version 4 and reject version 3. The append journal
 uses little-endian frames:
@@ -165,13 +162,15 @@ uses little-endian frames:
 `magic[4] = "TORJ" | format:u16 = 4 | kind:u16 | sequence:u64 |
 payload_len:u32 | crc32c:u32 | payload[payload_len]`
 
-The 24-byte header is followed by canonical serde payload bytes. `kind=1` is a
+The proposed 24-byte header is followed by versioned JSON payload bytes. `kind=1` is a
 committed command/annotation record; reserved kinds are rejected. The checksum
-covers the header fields after `magic` plus payload, and sequence numbers are
-strictly increasing. Startup scans only complete, checksum-valid frames and
-truncates an incomplete/corrupt final frame; an acknowledged sequence must be
-present in a durable frame. A failed append or sync leaves the in-memory
-publication, receipt index, and request identity untouched.
+covers the version, kind, sequence, length, and payload (excluding the checksum
+field itself). Sequence numbers must be contiguous. Before implementation,
+specify maximum lengths, exact payload schema/encoding, save/generation identity,
+and recovery rules for torn tails versus corruption in previously durable data.
+Do not silently discard acknowledged records. A failed append/sync must not
+publish state or consume request identity in memory; define recovery of complete
+but unacknowledged frames and safe retry after an uncertain I/O result.
 
 Checkpoints are separate files containing the authoritative replay base,
 receipt index, branch metadata, rewind boundaries, and deterministic world
@@ -181,6 +180,11 @@ rotated. Recovery chooses the newest valid checkpoint and replays subsequent
 valid frames. Phase B should preserve current filtering, idempotency, branch,
 rewind, annotation, wizard, and lock behavior before Phase C adds rotation and
 compaction.
+
+This is a proposal, not an implemented or fully reviewed recovery contract.
+Resolve platform-specific directory/rename durability, checkpoint contents and
+selection, retained branches/receipts, and fault schedules before Phase B. The
+current toy recovery fixture does not implement this CRC32C framing contract.
 
 ### Phase B — Append journal
 

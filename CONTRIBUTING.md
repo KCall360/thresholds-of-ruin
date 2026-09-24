@@ -72,3 +72,14 @@ addition to parser, input-model, presentation-model, and protocol tests. The
 graphical tests need an explicitly configured display environment in CI.
 
 Never commit credentials, local saves, or private configuration.
+
+On the Windows development machine, keep the user's desktop launchers current
+whenever the build is updated: Text, ASCII, Text + ASCII Spectator, and the
+256 Region Spectator demonstration. Verify each launcher's helper scripts and
+actual executable targets, build every required binary, and check a real client
+connection. `cargo check` alone does not update executables. Preserve fresh saves
+per launch, prior saves, separate spectator credentials, and owned-process
+cleanup. Machine-local links, credentials, and saves stay outside Git; reusable
+scenario specifications/drivers belong in version control. See the
+[harness plan](docs/performance-harness.md#observable-256-region-run-and-desktop-maintenance)
+for the pending demonstration and the next-session handoff.
