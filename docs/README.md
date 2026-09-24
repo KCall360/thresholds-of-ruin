@@ -21,6 +21,7 @@ until its guide and the roadmap are updated together.
 | --- | --- |
 | Understand the project and run checks | [Repository README](../README.md) |
 | See what works and what comes next | [Project status and roadmap](milestones.md) |
+| Resume after the Phase A session | [Session handoff](session-handoff.md) |
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Run the server or integrate a client | [Protocol and persistence](protocol.md) |
 | Play in a terminal | [Text client](text-client.md) |
