@@ -36,6 +36,13 @@ For example, place a mob and equipment, teleport into position, then use ordinar
 combat actions to verify combat. Test a wizard feature through its own privileged
 commands. Include save/resume or rewind when relevant to the feature.
 
+Once scenario packages are implemented, use ordinary validated packages for
+authored initial setup in unit, integration, and real-client process tests.
+Keep assertions/action sequences in the test harness, with stable entity/anchor
+references checked against the fixture. Wizard commands remain appropriate for
+testing privileged behavior and deliberate runtime mutations, not as a substitute
+for the scenario format. Test checkpoints are ordinary reproducibly created saves.
+
 Wizard scenarios complement focused unit/protocol tests and normal-play coverage.
 Setup shortcuts must not bypass the behavior under test, and wizard success does
 not establish that the feature works or is properly restricted in a normal game.
@@ -67,6 +74,9 @@ When protocol, save, or rules formats change, update callers and fixtures togeth
 the project supports only the current versions. During pre-release, saves are
 disposable across revisions: do not add importers, compatibility readers,
 historical rules implementations, or defaults solely to load older saves.
+The future scenario design records exact dependencies and anticipates multiple
+installed ruleset/generator versions; this is a later explicit compatibility
+milestone, not an exception to the current pre-release policy.
 Keep version rejection and strict current-rules replay checks; update fixtures
 with the implementation instead of preserving obsolete behavior.
 Preserve original code and content;

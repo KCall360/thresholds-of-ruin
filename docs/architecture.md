@@ -13,6 +13,10 @@ roadmap or changelog. The [project status and roadmap](milestones.md) identifies
 implemented and planned scope; the [documentation index](README.md) links to the
 current behavioral specifications.
 
+The [game design plan](game-design-plan.md) records accepted future requirements
+and explicitly deferred decisions. Those requirements are not claims of current
+runtime support; use the roadmap to distinguish planned work from the slice.
+
 ## Workspace boundaries
 
 | Crate | Responsibility |
@@ -58,8 +62,18 @@ Portals connect apertures and transform coordinates and orientation. Initial
 transforms allow translation and quarter-turn rotations around the vertical
 axis. The world needs no consistent global embedding: overlapping regions and
 rooms larger inside than outside are supported conceptually. Multiple elevations,
-stairs, and vertical movement are part of the first dungeon. Arbitrary gravity
-and reflections are deferred.
+stairs, and vertical movement are supported by the slice. Planned geometry extends
+aperture rotations beyond the current restrictions and separates stairs from
+portal topology. Reflections remain deferred.
+
+Planned bodies occupy discrete multi-cell footprints/heights. Gravity is a
+region-local six-axis field with strength and absolute sparse cell overrides.
+Aggregate occupied-cell contributions can yield diagonal acceleration; persistent
+velocity drives scheduled cell crossings, with terminal speed, drift, and
+component-wise collision response. Region gravity may change discontinuously.
+Entity orientation is not a gameplay requirement, but transformed footprints,
+velocity, and support across portals need explicit handling. See the
+[gravity requirements](game-design-plan.md#portal-geometry-bodies-and-gravity).
 
 [Doors](doors.md) are implemented interactive world entities, independent of
 portals. A door may occupy an interior opening or obstruct a portal aperture.
@@ -105,6 +119,13 @@ unresolved noun ambiguities do not consume time; in-world failed attempts follow
 the relevant action rule. Multiplayer waiting and simultaneous input policies
 are deferred.
 
+Future timed actions share progress and interruption semantics across all actors.
+Interruption need not erase progress: damage interrupts, waiting preserves valid
+progress, and retrying resumes. Other actions, movement, or relevant target changes
+generally invalidate it. Policies can vary by action; existing travel cancellation
+remains supported. Physics and long actions must fit deterministic event boundaries
+and recoverable state without tying simulation time to client presentation.
+
 ## Protocol and streaming
 
 The initial network target is versioned JSON over WebSockets. Local and remote
@@ -141,6 +162,14 @@ permitted history. They receive live actor-perspective actions/results but canno
 control, act, annotate, or invoke future wizard mutations. A player's `--observe`
 startup option is separate from this enforced permission boundary.
 
+Planned asset palettes are separate, independently revisioned messages on this
+same connection. They forecast top-level asset IDs from broad themes within the
+player's preload horizon, without disclosing entity instances. Attachment and
+reconnect send a full palette; subsequent deltas and independently requested
+snapshots need no acknowledgements. Clients resolve assets and dependencies,
+manage retention, and use fallbacks/retry for unexpected assets. Palette state is
+recomputed after loading and is not authoritative gameplay state.
+
 ## Annotations
 
 The action/event history also contains sparse, non-simulating annotations from
@@ -160,6 +189,13 @@ action against current state, even if previously advertised as available.
 
 Containment, inventory, equipment, doors, locks, and object properties are explicit
 world relationships. Implement a small coherent interaction set first.
+
+The next item core supports stack quantities, pickup/drop/inventory, archetypes
+and instance overrides, and multiple items per cell. Only marked-stackable items
+with matching relevant properties merge. Keep hidden identity distinct from
+per-character identification and deterministic per-game appearances; clients
+receive only known facts. Equipment, item use, capacity, containers, and locks
+are later extensions.
 
 ## Travel
 
@@ -197,6 +233,16 @@ at startup and remain in memory. Periodic checkpoints, compaction, and reduced
 state-copy costs are later phases. Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 
+Future scenario games persist activated regions and their full simulation state,
+while unactivated areas remain references to pinned scenario/generator inputs.
+Frozen activated regions can remain serialized outside memory; reload the saved
+active preload set first. Persist RNG, velocities, AI memory, action progress,
+and identification so continued gameplay is equivalent after recovery. Require
+fresh input after recovery, preserving valid saved progress rather than
+automatically restarting interrupted work. Exact dependency selection and future
+multiple-version support are design goals; current pre-release formats still
+reject historical saves. See the [persistence requirements](game-design-plan.md#region-activation-and-persistence).
+
 ## Wizard mode
 
 [Wizard mode](wizard-mode.md) is a server-enabled development capability for
@@ -227,17 +273,37 @@ branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII
 displays wizard status and follows explicit setup/rewind snapshots.
 
+With scenario packages, wizard lineage and validation status remain distinct.
+Enabling wizard authority still permanently marks the lineage; only mutations
+that break scenario validation mark the running state unvalidated. Journal those
+mutations and status changes. Wizard games may start from packages or saves;
+ordinary test scenarios use the same package format as normal games.
+
 ## Initial content and deferred decisions
 
-Use original code and content with NetHack as a gameplay reference. A world schema
-defines a generation model and its content rules. A scenario defines a particular
-starting world and may be fully authored, fully generated from a schema, or
-authored with marked procedural-generation regions. Use deterministic scenarios
-for integration tests and wizard-mode setups. Start with hand-authored scenarios,
-then seeded procedural generation. First dungeon: several rooms across two
-elevations, stairs, an unusual portal connection, doors/keys/containers,
-inventory/equipment, melee, two enemies, death, and an exit. Hunger,
-identification, ranged combat, multiplayer, and a 3D client follow later.
+Use original code and content with NetHack as a gameplay reference. Planned
+self-contained scenario packages describe worlds/zones, region-local portals,
+geometry, gravity, anchors, authored placements, themes, and objectives. An
+explicit offline validator binds content hashes and exact dependencies to
+author-controlled major.minor versions. Any authored change requires revalidation;
+startup performs lightweight checks and refuses unvalidated inputs by default.
+
+Start with authored scenarios and mobs. The first loop is explore, fight,
+retrieve, escape: a named exit cell optionally requires a specific authored item.
+Scenarios configure objective disclosure and post-victory continuation. Actors
+differ by controller assignment, not separate player/mob types. Initial combat
+uses timed d20 attacks versus physical defense, typed HP damage, immunity/flat
+reductions, and search/attack/flee AI using perception and expiring memory.
+Death leaves an ordinary corpse item and separately dropped inventory.
+
+Later deterministic generation uses fixed neighboring structural metadata and
+activates within the preload horizon. Activated results persist permanently;
+distant regions freeze all actors/effects. Reactivation batches deferred updates
+deterministically before normal scheduling. Theme palettes describe possibilities
+even before content is instantiated. The [design plan](game-design-plan.md)
+contains acceptance intent and open considerations. Equipment, containers,
+locks/keys, item use, and richer identification gameplay follow the item core;
+hunger, ranged combat, multiplayer, and the 3D frontend remain later work.
 
 The ASCII client uses minifb for a native pixel-buffer window and font8x8 for
 bitmap glyphs, with Win32 and X11 backends. UI input/presentation stay separate
