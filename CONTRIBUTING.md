@@ -64,7 +64,12 @@ Each actor has explicit identity and control ownership. Avoid a global player.
 Doors are independent entities; they need not be on portal apertures.
 
 When protocol, save, or rules formats change, update callers and fixtures together;
-the project supports only the current versions. Preserve original code and content;
+the project supports only the current versions. During pre-release, saves are
+disposable across revisions: do not add importers, compatibility readers,
+historical rules implementations, or defaults solely to load older saves.
+Keep version rejection and strict current-rules replay checks; update fixtures
+with the implementation instead of preserving obsolete behavior.
+Preserve original code and content;
 NetHack is a gameplay reference, not a source to copy.
 
 Frontend milestones must include tests launching the actual applications in

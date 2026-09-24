@@ -51,7 +51,7 @@ fn main() {
             1,
         )
         .unwrap();
-    println!("scenario,radius,ray_us,shadow_us");
+    println!("scenario,radius,shadow_us");
     for (name, world, origin) in [
         ("open", open, at(1, 32, 32)),
         ("pillars", pillars, at(1, 32, 32)),
@@ -59,19 +59,14 @@ fn main() {
         ("cycle", cycle, at(1, 1, 1)),
     ] {
         for radius in [8, 16] {
-            let mut elapsed = Vec::new();
-            for shadow in [false, true] {
+            let elapsed = {
                 let start = Instant::now();
                 for _ in 0..10000 {
-                    black_box(if shadow {
-                        world.shadow_scene(black_box(origin), 0, radius)
-                    } else {
-                        world.scene(black_box(origin), 0, radius)
-                    });
+                    black_box(world.shadow_scene(black_box(origin), 0, radius));
                 }
-                elapsed.push(start.elapsed().as_secs_f64() * 100.0);
-            }
-            println!("{name},{radius},{:.3},{:.3}", elapsed[0], elapsed[1]);
+                start.elapsed().as_secs_f64() * 100.0
+            };
+            println!("{name},{radius},{elapsed:.3}");
         }
     }
 }

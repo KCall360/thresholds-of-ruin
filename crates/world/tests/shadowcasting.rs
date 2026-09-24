@@ -25,10 +25,6 @@ fn closed_door_allows_corner_vision_but_blocks_straight_ahead() {
     assert!(sees(&world, at(2, 3), at(3, 2)));
     assert!(sees(&world, at(2, 3), at(3, 3)));
     assert!(!sees(&world, at(2, 3), at(4, 3)));
-    assert!(!world
-        .scene(at(2, 3), 0, 8)
-        .iter()
-        .any(|c| c.location == at(3, 2)));
     world.set_door(at(3, 3), true);
     assert!(sees(&world, at(2, 3), at(4, 3)));
 }

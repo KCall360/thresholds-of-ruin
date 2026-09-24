@@ -1,4 +1,6 @@
 /target/
+/target-phase-a/
+/target-playtest/
 *.pdb
 *.log
 /saves/

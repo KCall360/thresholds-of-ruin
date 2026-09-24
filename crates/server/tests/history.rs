@@ -485,9 +485,21 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     let mut unsupported = original.clone();
     unsupported["version"] = 999.into();
+    let mut missing_regions = original.clone();
+    missing_regions["scenario"]
+        .as_object_mut()
+        .unwrap()
+        .remove("regions");
+    let mut unsupported_rules = original.clone();
+    unsupported_rules["ruleset"] = "unsupported-rules".into();
     let mut inconsistent = original;
     inconsistent["records"][0]["entry"]["tick"] = 1000.into();
-    for bad in [unsupported, inconsistent] {
+    for bad in [
+        unsupported,
+        unsupported_rules,
+        missing_regions,
+        inconsistent,
+    ] {
         let bytes = serde_json::to_vec(&bad).unwrap();
         std::fs::write(&path, &bytes).unwrap();
         assert_eq!(

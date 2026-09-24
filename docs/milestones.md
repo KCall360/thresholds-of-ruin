@@ -96,6 +96,9 @@ Scope and sequencing are defined in the
 will replace whole-save rewrites with an append-oriented journal plus bounded
 snapshot/checkpoint work, remove avoidable full-state cloning, profile client
 state application and rendering, and add scale-sensitive regression checks.
+Phase B uses the [focused verification subset](performance-persistence.md#phase-b-verification-and-measurement)
+against the retained Phase A baseline; a full characterization is conditional on
+regressions or broader changes. Storage correctness coverage remains comprehensive.
 Caching, alternate collections, and speculative presentation will be adopted
 only for measured hot paths and must preserve determinism, disclosure, retry,
 rewind, and crash-recovery behavior.

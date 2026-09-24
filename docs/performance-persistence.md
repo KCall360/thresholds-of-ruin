@@ -165,6 +165,36 @@ Introduce framed records and recovery scanning behind focused storage tests.
 Preserve command atomicity, duplicate-request recovery, history filtering,
 branch identity, and current publication ordering.
 
+#### Phase B verification and measurement
+
+Keep comprehensive storage correctness coverage: bootstrap durability on Windows
+and Linux, interrupted writes, corruption, uncertain I/O, lost acknowledgements,
+duplicate/conflicting retries, retained branches, annotation privacy, and permanent
+wizard marking. Process-restart tests alone do not prove power-loss durability.
+
+Reuse Phase A workload definitions and retained baseline results with this focused
+performance subset; do not routinely repeat the full 64-case characterization:
+
+- Measure per-action encoded and written bytes at 100 and 10,000 retained actions.
+  Assert that only the new frame is appended, previous journal bytes remain intact,
+  and the replay base is unchanged. Persistence work must scale with new data.
+- Run the mixed durable workload at eight regions, one/eight actors, and
+  100/10,000 retained actions (four cases). Compare encoding, write/flush, sync,
+  and total p50/p95/maximum with the matching Phase A samples. Add matched memory
+  cases when needed to isolate remaining engine costs.
+- Run one 256-region, eight-actor, 10,000-action durable case and a representative
+  actual-client workload, using the established timing boundaries.
+- Measure normal restart/replay and verify recovered state for each selected save.
+  Bounded startup work belongs to Phase C.
+
+Repeat the broader matrix or discovery/rendering study only for unexplained
+regressions, inconsistent focused results, or changes affecting those paths.
+Record the selected cases, results, and any expanded investigation in the findings.
+Full-history candidate copying and disposal remain Phase D work, and file-sync
+latency can remain substantial. Phase B must remove history-dependent persistence
+encoding/write amplification without weakening durability; it need not meet every
+later phase's total-latency or startup target.
+
 ### Phase C — Checkpoints and compaction
 
 Add periodic atomic checkpoints, bounded journal rotation, startup replay timing,

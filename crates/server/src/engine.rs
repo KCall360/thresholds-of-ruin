@@ -112,7 +112,6 @@ pub struct ActorSetup {
 pub struct Scenario {
     pub seed: u64,
     pub actors: Vec<ActorSetup>,
-    #[serde(default = "default_region_count")]
     pub regions: u64,
     #[serde(default)]
     pub workload_version: Option<u32>,
@@ -157,10 +156,6 @@ impl Scenario {
                 .collect(),
         })
     }
-}
-
-fn default_region_count() -> u64 {
-    2
 }
 
 fn scenario_game(scenario: &Scenario) -> Game {

@@ -41,9 +41,10 @@ These pages describe current behavior rather than proposals.
 | Engineering plans | [Performance and scalable persistence](performance-persistence.md), [performance harness](performance-harness.md), [Phase A findings](phase-a-findings.md), [persistence design review](persistence-review.md) |
 | Development tools | [Wizard mode](wizard-mode.md) |
 
-Feature guides may identify the version in which behavior first appeared for
-historical context. Runtime support is limited to the current protocol, save
-format, and ruleset listed in [the roadmap](milestones.md#current-implementation).
+Feature guides describe current behavior. Runtime support is limited to the current
+protocol, save format, and ruleset listed in
+[the roadmap](milestones.md#current-implementation). Pre-release revisions need not
+preserve save compatibility or historical rules implementations.
 
 ## Documentation maintenance
 

@@ -30,8 +30,8 @@ fn dividing_a_space_into_regions_does_not_change_the_visible_scene() {
             2,
         )
         .unwrap();
-    let expected = whole.scene(at(1, 3, 2, 0), 0, 8);
-    let actual = split.scene(at(1, 3, 2, 0), 0, 8);
+    let expected = whole.shadow_scene(at(1, 3, 2, 0), 0, 8);
+    let actual = split.shadow_scene(at(1, 3, 2, 0), 0, 8);
     assert_eq!(
         actual
             .iter()
@@ -69,7 +69,7 @@ fn wide_rotated_joins_project_remote_cells_and_validate_the_entire_area_atomical
         world.step(at(1, 4, 2, 0), Direction::East),
         Some(at(2, 2, 0, 1))
     );
-    let seen = world.scene(at(1, 3, 2, 0), 0, 8);
+    let seen = world.shadow_scene(at(1, 3, 2, 0), 0, 8);
     assert!(seen
         .iter()
         .any(|c| c.location == at(2, 2, 2, 1) && c.offset == Position { x: 4, y: 0, z: 0 }));
@@ -90,7 +90,7 @@ fn the_same_cell_can_have_multiple_visible_appearances_without_unbounded_cycles(
             1,
         )
         .unwrap();
-    let seen = world.scene(at(1, 1, 1, 0), 0, 8);
+    let seen = world.shadow_scene(at(1, 1, 1, 0), 0, 8);
     let appearances: Vec<_> = seen
         .iter()
         .filter(|c| c.location == at(1, 1, 1, 0))
@@ -118,7 +118,7 @@ fn a_door_on_a_wide_join_matches_an_interior_door_without_becoming_a_wall() {
     split.place_door(at(2, 0, 2, 0), 1, false).unwrap();
     let projection = |world: &World| {
         world
-            .scene(at(1, 3, 2, 0), 0, 8)
+            .shadow_scene(at(1, 3, 2, 0), 0, 8)
             .iter()
             .map(|c| (c.offset, c.wall, world.door(c.location)))
             .collect::<Vec<_>>()

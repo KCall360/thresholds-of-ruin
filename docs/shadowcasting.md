@@ -1,11 +1,8 @@
 # Symmetric shadowcasting
 
-Symmetric shadowcasting was introduced in **shadowcasting-v7**. New games use
-**diagonal-v11**, which keeps that perception and adds finite stone
-enclosure to the doorway-v8 fixture. Protocol 10 adds floor/ceiling surfaces;
-save format 3 is unchanged. See [material volumes](material-volumes.md).
-The six earlier rulesets retain their original behavior, including doors-v6's
-strict cell-centre rays. Restarting an old save does not upgrade its perception.
+The current rules use symmetric shadowcasting and finite stone enclosure.
+Protocol 11 exposes floor/ceiling surfaces; saves use format 3 and
+`diagonal-v11`. Older rulesets are rejected. See [material volumes](material-volumes.md).
 
 ## Geometry and behavior
 
@@ -55,30 +52,13 @@ There is no persistent visibility cache to invalidate after a door edit or rewin
 area and tests every floor pair for reciprocity. It also checks door corners,
 straight shadows, convex room walls, diagonal blockers, rotated split-room
 invariance from both sides, and bounded repeated appearances through cycles.
-Server tests preserve doors-v6 versus shadowcasting-v7 through save/resume and
-rewind. `scripts/scenarios/shadowcasting.json` and
+Server tests verify current perception through save/resume and rewind. `scripts/scenarios/shadowcasting.json` and
 `scripts/test_shadowcasting_process.py` drive real text, headless and native ASCII
 clients and check disclosure, stale memory, ordinary door actions and resume.
 These tests are included in Windows/Linux CI discovery for debug and release.
 
-Run `cargo run -p tor-world --release --example fov_bench` to measure complete
-scene construction, including topology and sorting, against the earlier rays.
-The benchmark covers open rooms, pillars, a broad rotated join, and a cycle at
-radii 8 and 16. Timings are diagnostic, not flaky pass/fail thresholds.
-
-A local Windows release run (10,000 scenes per case; microseconds per scene,
-including topology and sorting) measured:
-
-| Scene | Radius | Previous rays | Shadowcasting |
-| --- | ---: | ---: | ---: |
-| Open room | 8 | 16.8 | 6.7 |
-| Pillars | 8 | 42.2 | 10.2 |
-| Rotated join | 8 | 34.1 | 22.7 |
-| Cycle | 8 | 10.2 | 5.5 |
-| Open room | 16 | 113.3 | 27.3 |
-| Pillars | 16 | 240.8 | 36.9 |
-| Rotated join | 16 | 214.4 | 140.8 |
-| Cycle | 16 | 42.1 | 17.3 |
-
-These are local diagnostic measurements, not a cross-platform performance promise
-or a benchmark of networking, observation serialization, or all observing actors.
+Run `cargo run -p tor-world --release --example fov_bench` to measure current
+scene construction, including topology and sorting. The benchmark covers open
+rooms, pillars, a broad rotated join, and a cycle at radii 8 and 16. Timings are
+diagnostic, not pass/fail thresholds. Historical ray implementations and their
+comparison benchmark have been removed.

@@ -53,7 +53,7 @@ hall stored with region 1; stone shells extend one cell beyond the interiors. Su
 
 | Command | Behavior |
 | --- | --- |
-| `wizard door 1 0 0 0 closed` | Place a closed door (doors-v6 and later); use ordinary open/close to interact |
+| `wizard door 1 0 0 0 closed` | Place a closed door; use ordinary open/close to interact |
 | `wizard item token 1 1 1 0` | Place a copper token on the ground |
 | `wizard item tablet 1 1 1 0` | Place a stone tablet on the ground |
 | `wizard actor 75 1 2 1 0` | Spawn an ordinary actor with base recovery 75 ticks |
@@ -114,7 +114,7 @@ The fixture has no evolving RNG; future RNG state belongs in these boundaries.
 ## Verification
 
 Behavior tests cover atomic setup, duration/knowledge preservation, failed marker
-commits, permanent promotion with no commands, copies, disabled restart, migration,
+commits, permanent promotion with no commands, copies, disabled restart, unsupported-save rejection,
 corrupt replay, bounded targets, privacy, retained annotations, and deterministic
 identity restoration. Raw WebSocket tests exercise every command with wizard,
 player, and spectator roles, disabled mode, same-user retry bypasses, stale branch
@@ -259,9 +259,7 @@ existing fixtures and process tests must still verify each new feature.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
-[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
-Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
-now adds text travel and approach-then-pickup.
+[Backend travel](travel.md) supports known-cell destinations. The
+[text adventure interface](text-adventure.md) supports travel and approach-then-pickup.
 
-Use `wizard chamber <id> <width> <depth> <height> <name>` in new-rule games
-to author enclosed interiors; see [material volumes](material-volumes.md).
+Use `wizard chamber <id> <width> <depth> <height> <name>` to author enclosed interiors; see [material volumes](material-volumes.md).

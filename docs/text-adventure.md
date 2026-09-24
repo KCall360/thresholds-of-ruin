@@ -127,11 +127,9 @@ Spectators receive prose but remain read-only.
 
 ## Compatibility and acceptance
 
-The original text slice used protocol 8, save format **3** and rules **travel-v5**:
-appearances are deterministic presentation facts, and the text client
-composes existing travel and pickup requests. Existing rulesets retain their
-behavior. Rules predating travel continue rejecting travel; use `step` and take
-reachable items, or start a fresh game for the full adventure interface.
+The text client uses the current protocol and rules. Appearances are deterministic
+presentation facts, and the client composes travel and pickup requests.
+Older save formats and rulesets are unsupported.
 
 `--script` preserves the original deterministic text command interface: single-cell
 directions, immediate-only pickup, detailed diagnostic output, and `Ready.` framing.
