@@ -81,5 +81,5 @@ connection. `cargo check` alone does not update executables. Preserve fresh save
 per launch, prior saves, separate spectator credentials, and owned-process
 cleanup. Machine-local links, credentials, and saves stay outside Git; reusable
 scenario specifications/drivers belong in version control. See the
-[harness plan](docs/performance-harness.md#observable-256-region-run-and-desktop-maintenance)
-for the pending demonstration and the next-session handoff.
+[harness guide](docs/performance-harness.md#observable-256-region-run-and-desktop-maintenance)
+for the shared demonstration and verification procedure.

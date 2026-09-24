@@ -4,6 +4,7 @@ mod adapt;
 mod developer;
 mod engine;
 pub mod journal;
+pub mod performance_fixture;
 mod session;
 mod transport;
 pub use engine::{ActorSetup, CommandProfile, CommandResult, Engine, Failure, Scenario};

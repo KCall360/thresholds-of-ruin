@@ -18,6 +18,14 @@ def dependency(name, **options):
 
 
 class ArchitectureTests(unittest.TestCase):
+    def test_server_dev_edges_are_explicit_and_never_runtime_edges(self):
+        for target in ("tor-client-common", "tor-client-ascii", "tor-test-support"):
+            for kind in (None, "build", "dev"):
+                graph = metadata([package("tor-server", [dependency(target, kind=kind)]), package(target)])
+                self.assertEqual(violations(graph), [] if kind == "dev" else [f"tor-server -> {target} is forbidden"])
+        graph = metadata([package("tor-server", [dependency("outside-helper", kind="dev")])])
+        self.assertEqual(violations(graph), ["tor-server -> outside-helper is forbidden"])
+
     def test_clients_can_use_shared_protocol(self):
         graph = metadata([
             package("tor-client-text", [dependency("tor-client-common")]),

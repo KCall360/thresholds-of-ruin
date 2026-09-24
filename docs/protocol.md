@@ -143,6 +143,10 @@ for every delivered update; the action revision increments only when that actor'
 disclosed observation changes. A private note neither advances another user's
 sequence nor invalidates anyone's pending action revision.
 
+Readiness is part of that disclosed state. A same-tick turn handoff advances the
+revisions of the actors whose readiness changes, even when their geometry and
+tick remain unchanged.
+
 Actions currently have one semantic result. Their history timestamp is when the
 action took effect; the accompanying observation reflects the next decision
 time. The transport supports multiple updates between user decisions as richer

@@ -22,6 +22,8 @@ ALLOWED = {
     },
 }
 
+ALLOWED_DEV = {"tor-server": {"tor-client-common", "tor-client-ascii", "tor-test-support"}}
+
 
 def violations(metadata):
     members = set(metadata["workspace_members"])
@@ -37,7 +39,7 @@ def violations(metadata):
             target = dependency["name"]  # Cargo preserves the real name for aliases.
             # Performance examples may compose the server with presentation
             # clients, but those edges must never enter the runtime graph.
-            if name == "tor-server" and dependency.get("kind") == "dev":
+            if dependency.get("kind") == "dev" and target in ALLOWED_DEV.get(name, set()):
                 continue
             if target in names or dependency.get("path") is not None:
                 if target not in ALLOWED[name]:

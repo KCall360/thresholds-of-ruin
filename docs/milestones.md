@@ -72,16 +72,22 @@ place knowledge will be added when interactions require them.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phase A in progress; representative workload coverage incomplete**.
+Status: **Phase A implementation under final verification; Phase B not started**.
 
-Before adding more gameplay, establish representative performance baselines and
-remove work whose cost grows with save history or total dungeon size from the
-interactive action path. The current harness constructs 1/8/64/256-region worlds
-and 0/100/1,000/10,000-action histories, but its timed actions are waits. It has
-identified candidate-copy and whole-archive work; it has not established costs
-for traversal, changing LOS, doors, elevation, or representative durable actions.
-Complete the [focused and mixed workload plan](performance-harness.md), including
-a matching 256-region spectator demonstration, before closing Phase A.
+The shared versioned fixture drives focused and mixed movement, normal/rotated
+crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
+The release matrix combines 1/8/64/256 regions, 1/8 actors, and
+0/100/1,000/10,000 retained actions in memory and durable modes. It measures
+exclusive command phases, client application/rendering, actual I/O counts,
+bytes, and normal restart/replay; a separate discovery trace grows map memory.
+
+The [harness guide](performance-harness.md) describes reproduction, the real
+headless/ASCII driver, and the verified 256-region spectator demonstration.
+Current-writer fault injection replaces the toy scanner. The
+[storage review](persistence-review.md) documents a missing name-durability
+barrier and the reviewed future framing/checkpoint contract. Process recovery
+coverage does not establish power-loss durability. No new persistence layout
+is implemented in Phase A.
 
 Scope and sequencing are defined in the
 [performance and persistence plan](performance-persistence.md). The milestone

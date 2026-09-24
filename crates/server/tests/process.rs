@@ -9,6 +9,25 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
 
 struct ChildGuard(Child);
+
+#[test]
+fn performance_region_cli_documents_bounds_and_rejects_invalid_counts() {
+    let help = ProcessCommand::new(env!("CARGO_BIN_EXE_tor-server"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let text = String::from_utf8(help.stdout).unwrap();
+    assert!(text.contains("--regions") && text.contains("1..=256") && text.contains("--actors"));
+    for regions in ["0", "257"] {
+        let output = ProcessCommand::new(env!("CARGO_BIN_EXE_tor-server"))
+            .args(["--regions", regions])
+            .env_remove("TOR_WIZARD_TOKEN")
+            .env("TOR_SERVER_TOKEN", "performance-cli-test-token")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+    }
+}
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();

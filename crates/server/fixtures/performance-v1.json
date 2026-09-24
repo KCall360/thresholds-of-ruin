@@ -1,0 +1,876 @@
+{
+  "version": 1,
+  "seed": 42,
+  "geometry": {
+    "extent": [
+      9,
+      9,
+      2
+    ],
+    "walls": [
+      [
+        4,
+        0,
+        0
+      ],
+      [
+        4,
+        1,
+        0
+      ],
+      [
+        4,
+        2,
+        0
+      ],
+      [
+        4,
+        3,
+        0
+      ],
+      [
+        4,
+        5,
+        0
+      ],
+      [
+        4,
+        6,
+        0
+      ],
+      [
+        4,
+        7,
+        0
+      ],
+      [
+        4,
+        8,
+        0
+      ],
+      [
+        2,
+        2,
+        0
+      ]
+    ],
+    "doors": [
+      [
+        4,
+        4,
+        0
+      ]
+    ],
+    "stairs": [
+      {
+        "from": [
+          2,
+          4,
+          0
+        ],
+        "to": [
+          2,
+          4,
+          1
+        ],
+        "direction": "up",
+        "turns": 0
+      },
+      {
+        "from": [
+          2,
+          4,
+          1
+        ],
+        "to": [
+          2,
+          4,
+          0
+        ],
+        "direction": "down",
+        "turns": 0
+      }
+    ],
+    "joins": [
+      {
+        "from": [
+          8,
+          4,
+          0
+        ],
+        "to": [
+          0,
+          4,
+          0
+        ],
+        "direction": "east",
+        "return_direction": "west",
+        "turns": 0
+      },
+      {
+        "from": [
+          4,
+          0,
+          1
+        ],
+        "to": [
+          0,
+          4,
+          1
+        ],
+        "direction": "north",
+        "return_direction": "west",
+        "turns": 1
+      }
+    ],
+    "items": [
+      {
+        "at": [
+          2,
+          1,
+          0
+        ],
+        "name": "occluded marker"
+      },
+      {
+        "at": [
+          6,
+          4,
+          0
+        ],
+        "name": "far marker"
+      },
+      {
+        "at": [
+          2,
+          5,
+          1
+        ],
+        "name": "upper marker"
+      },
+      {
+        "at": [
+          4,
+          8,
+          1
+        ],
+        "name": "rotated hide marker",
+        "region": 1
+      },
+      {
+        "at": [
+          8,
+          4,
+          1
+        ],
+        "name": "rotated reveal marker",
+        "region": 2
+      }
+    ],
+    "actors": [
+      [
+        2,
+        4,
+        0
+      ],
+      [
+        6,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        0
+      ],
+      [
+        3,
+        0,
+        0
+      ],
+      [
+        5,
+        0,
+        0
+      ],
+      [
+        6,
+        0,
+        0
+      ]
+    ]
+  },
+  "steps": [
+    {
+      "label": "wait_same_region",
+      "action": {
+        "type": "wait"
+      },
+      "expected": "waited"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south_west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north_west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north_east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south_east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "blocked_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "blocked"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_near_obstacle",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "change_elevation",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "change_elevation",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "blocked_door",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "blocked"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": true
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": false
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": true
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": false
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": true
+      },
+      "expected": "door_changed",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": false
+      },
+      "expected": "door_changed",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "cross_region_boundary",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "cross_region_boundary",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": true
+      },
+      "expected": "door_changed",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": false
+      },
+      "expected": "door_changed",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "change_elevation",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "cross_boundary_with_los_change",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "cross_boundary_with_los_change",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    },
+    {
+      "label": "change_elevation",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "expected": "moved",
+      "min_regions": 2
+    }
+  ],
+  "secondary": [
+    {
+      "label": "multi_actor_visibility_change",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "multi_actor_visibility_change",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "multi_actor_visibility_change",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "multi_actor_visibility_change",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "expected": "moved"
+    }
+  ],
+  "traversal": [
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": true
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "open_or_close_door",
+      "action": {
+        "type": "door",
+        "open": false
+      },
+      "expected": "door_changed"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "cross_region_boundary",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    },
+    {
+      "label": "move_same_region",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "expected": "moved"
+    }
+  ]
+}

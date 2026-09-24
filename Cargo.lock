@@ -743,6 +743,7 @@ dependencies = [
  "tor-client-common",
  "tor-protocol",
  "tor-simulation",
+ "tor-test-support",
  "tor-world",
  "uuid",
 ]
@@ -758,6 +759,8 @@ dependencies = [
 name = "tor-test-support"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tor-client-common",
  "tor-protocol",
  "tor-simulation",

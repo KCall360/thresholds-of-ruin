@@ -3,6 +3,7 @@
 //! [`Game`] and [`ActionOutcome`] are backend-only types. Network adapters must
 //! disclose observations and filter events; they must not serialize raw game state.
 
+pub mod diagnostics;
 mod fixture;
 mod observation;
 mod travel;

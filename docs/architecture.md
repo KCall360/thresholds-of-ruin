@@ -32,6 +32,13 @@ dependencies. The protocol owns DTOs independent of internal simulation state.
 The server translates authoritative state into actor-specific observations.
 The client crates cannot depend on world or simulation crates.
 
+Server diagnostic examples/tests have explicitly reviewed development edges to
+client-common, client-ascii, and test-support. Those edges are not permitted as
+runtime/build dependencies; other server development dependencies receive the
+same boundary checks as every crate. Shared diagnostic traces belong in fixture
+data and test-support orchestration. Thread-local simulation call counters are
+outside persisted game state, read no clock, and never affect rule decisions.
+
 ## Geometry and barriers
 
 Regions are bounded rectangular 3D volumes with integer local coordinates.
