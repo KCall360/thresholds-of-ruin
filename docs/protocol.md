@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 11)
+# Server protocol and annotations (version 12)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -67,7 +67,7 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 11 requires a backend-resolved observer-relative scene. Positions
+Protocol version 12 requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
 Cells also carry terrain `material` (empty for carved voids) and nullable
@@ -76,7 +76,7 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Saves must use format 3 and ruleset `diagonal-v11`; older formats
+must upgrade. Saves must use format 4 and ruleset `diagonal-v11`; older formats
 and rulesets are rejected. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
@@ -86,7 +86,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":11,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":12,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -244,17 +244,20 @@ timestamps. Unknown format/rules versions and inconsistent journals fail to load
 they are never replaced with an empty game. Tokens and live connection ownership
 are not saved.
 
-Every accepted action or note is committed by writing a same-directory temporary
-file through a buffered writer, explicitly flushing that buffer, syncing the file
-to disk, then replacing the journal before publishing updates
-or acknowledging success. A failed write leaves in-memory state and history
-unchanged. A sidecar `.lock` file prevents concurrent writers and remains on disk
-after shutdown; the OS lock is released when the process exits.
+Ordinary actions and notes publish after bounded in-memory journal admission.
+A background worker saves atomic batches. Acknowledged unsaved play can be lost
+on a crash. Explicit save, normal player-client exit, and graceful server shutdown
+wait for persistence; enabling wizard authority also waits for its permanent
+marker. A sidecar `.lock` file prevents concurrent server writers. See
+[background saving](background-saving.md) for policy, failure handling, format 4,
+and the tested durability boundaries.
 
-This first implementation rewrites and replays the complete journal, making it
-suitable for the small scenario. Periodic snapshots and more efficient long-history
-storage are still planned. Process-termination recovery is tested; hardware power
-loss durability also depends on the filesystem and operating system.
+```json
+{"type":"request","request_id":"save-1","request":{"type":"save"}}
+```
+
+The save acknowledgement covers the accepted prefix at request time. It does not
+hold the session lock while disk I/O runs. Spectators cannot request saves.
 
 ## Validation
 
@@ -322,5 +325,5 @@ See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
 surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
-Only protocol 11, save format 3, and `diagonal-v11` are supported; there are no
+Only protocol 12, save format 4, and `diagonal-v11` are supported; there are no
 historical rules implementations or save importers.

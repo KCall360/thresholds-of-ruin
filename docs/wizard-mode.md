@@ -106,7 +106,7 @@ the original receipt without replaying the operation.
 Save format **3** preserves the root branch, permanent marker, and chronological
 records with authenticated receipts. Replaying the records reconstructs all
 branches and the bounded decision cache; the final branch is determined by the
-rewind records. Only format-3, `diagonal-v11` saves load; older formats and
+rewind records. Only format-4, `diagonal-v11` saves load; older formats and
 rulesets are rejected. Rewind restores complete
 simulation state, including scheduler, knowledge, inventory, and ID allocation.
 The fixture has no evolving RNG; future RNG state belongs in these boundaries.

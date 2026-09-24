@@ -12,17 +12,19 @@ validated baseline. The harness measures ordinary mixed commands through a share
 fixture, including boundaries, doors, elevations, LOS changes, and multiple
 actors. The [harness guide](performance-harness.md) defines reproducible commands
 and measurement boundaries. The [storage review](persistence-review.md) separates
-verified process recovery from the current missing name-durability barrier.
-Phase B requires separate authorization.
+the historical Phase A writer from the revised [background-save contract](background-saving.md).
+The user authorized Phase B with asynchronous acknowledgements and performance as a primary driver.
+The [Phase B findings](phase-b-findings.md) retain the focused comparison.
 
 ## Recorded decisions and guiding criteria
 
 The milestone uses these product decisions:
 
-1. **Acknowledgement durability is mandatory.** An accepted action is not
-   acknowledged or presented as committed until it is durably recoverable after
-   an OS or power failure. Append and group-commit implementations are allowed,
-   but every affected acknowledgement waits for the corresponding durable flush.
+1. **Ordinary acknowledgements are asynchronous.** They follow successful bounded
+   queue admission and in-memory publication. Recent acknowledged play may be
+   lost after a crash. Configurable target age, idle opportunity, maximum age,
+   and queue pressure schedule background saves. Explicit save, normal client
+   exit, graceful server shutdown, and wizard enablement retain durable barriers.
 2. **Old saves are intentionally unsupported.** This is a pre-release project,
    so the new persistence layout will advance the save format and reject older
    formats. There will be no format-3 importer or compatibility reader. Tests,
@@ -36,8 +38,8 @@ The milestone uses these product decisions:
 The governing criteria are **scalable and fast**, in that order when a tradeoff
 is unavoidable. Work proportional to newly committed data is preferred over work
 proportional to total history, dungeon size, or retained branches. Within that
-constraint, minimize absolute and tail latency without weakening durability,
-determinism, disclosure, or recovery. CI enforces scale and regression ratios
+constraint, minimize absolute and tail latency under the chosen save contract while preserving
+determinism, disclosure, and consistent recovery. CI enforces scale and regression ratios
 rather than fragile machine-specific wall-clock numbers.
 
 ## Measurement model
@@ -63,32 +65,21 @@ automated regression tests.
 
 ## Persistence design
 
-Use an append-oriented journal and periodic atomic checkpoints:
+Phase B uses the implemented [format-4 background journal](background-saving.md):
 
-1. A journal frame contains a length, format/version marker, monotonic sequence,
-   payload, and checksum. A partial or corrupt final frame is detectable and can
-   be handled according to the reviewed recovery contract. Unknown durable
-   frontiers fail closed; never silently discard possibly acknowledged data.
-2. An accepted command is validated and simulated in a transactional candidate.
-   Only the new record is encoded and appended; the complete archive is not
-   serialized for each action.
-3. Publication occurs at the durability boundary chosen above. Failed appends or
-   syncs do not mutate the published engine or consume a request identity.
-4. A checkpoint stores the authoritative replay base, receipt index, branches,
-   and other required deterministic state. It is written to a temporary file,
-   synced, and atomically installed. The journal is rotated only after the new
-   checkpoint is recoverable.
-5. Checkpoint creation is triggered by bounded journal bytes or record count,
-   not by every command. Expensive serialization operates from an immutable
-   snapshot outside the action critical section where ownership permits.
-6. Startup loads the newest valid checkpoint and replays subsequent valid
-   frames. Recovery explicitly tests interruption before append, during a frame,
-   after frame flush, during checkpoint creation, after checkpoint installation,
-   and during journal rotation.
-
-Do not introduce acknowledgement before durability. Background checkpoint and
-compaction work may lag behind, but the journal record needed to recover every
-acknowledged action must already be durable.
+1. Validate and simulate in a transactional candidate, encode only the new record,
+   and admit it to the bounded pending queue. Rejection leaves published state
+   and request identity unchanged.
+2. Publish immediately after admission. One worker owns SQLite batch transactions
+   outside the engine/session lock. Idle opportunities defer normal saving;
+   maximum age and queue pressure force progress under continuing activity.
+3. Explicit saves wait for the accepted sequence captured by the request. Failed
+   background saves retain pending records and block new mutations until retry.
+4. Startup recovers SQLite transactions, validates every frame, and replays the
+   complete saved prefix, including receipts, abandoned branches, and private
+   notes. The permanent wizard marker is saved before authority is enabled.
+5. Application checkpoints and rotation remain Phase C. SQLite rollback journals
+   implement atomic batch recovery and do not compact application history.
 
 ## State and rollback work
 
@@ -135,8 +126,8 @@ cost.
 ### Phase A — Baseline and contracts
 
 The shared fixture and trace, combined scale matrix, exclusive phase timings,
-actual-client driver, and current-writer fault tests are implemented. Production
-storage remains the version-3 whole archive; buffered streaming serialization
+actual-client driver, and current-writer fault tests are implemented. At that checkpoint,
+storage used the version-3 whole archive; buffered streaming serialization
 has been restored to measure the intended writer. No append journal, checkpoint,
 rotation, or caching implementation is included.
 
@@ -153,17 +144,18 @@ The [storage review](persistence-review.md) specifies the proposed version-4
 frame layout, checksum coverage, maximum payload, save/generation identity,
 uncertain-write reconciliation, conservative corrupt-tail handling, checkpoint
 contents/selection, and future file fault schedules. It also records the missing
-Windows/Linux name-durability guarantee in the current writer. Passing restart
+Windows/Linux name-durability guarantee in the Phase A writer. Passing restart
 tests does not meet the full OS/power-failure contract.
 
-This reviewed proposal is a handoff for later work, not an implemented format.
-Phase A stops here; Phase B and C remain unimplemented.
+That review records Phase A evidence. The current Phase B contract supersedes its
+synchronous publication and two-file installation proposal. Phase C remains deferred.
 
 ### Phase B — Append journal
 
-Introduce framed records and recovery scanning behind focused storage tests.
-Preserve command atomicity, duplicate-request recovery, history filtering,
-branch identity, and current publication ordering.
+Implement framed append records in atomic background batches. Preserve command
+atomicity, saved-receipt recovery, history filtering, and branch identity while
+allowing publication before persistence. Policy and storage details are in the
+[background-saving guide](background-saving.md).
 
 #### Phase B verification and measurement
 
@@ -175,9 +167,9 @@ wizard marking. Process-restart tests alone do not prove power-loss durability.
 Reuse Phase A workload definitions and retained baseline results with this focused
 performance subset; do not routinely repeat the full 64-case characterization:
 
-- Measure per-action encoded and written bytes at 100 and 10,000 retained actions.
-  Assert that only the new frame is appended, previous journal bytes remain intact,
-  and the replay base is unchanged. Persistence work must scale with new data.
+- Measure per-action encoded bytes and committed batch bytes at 100 and 10,000 retained actions.
+  Assert that only the new frame is appended, previous row payloads remain intact,
+  and the replay base is unchanged. SQLite physical page writes are a separate metric. Persistence work must scale with new data.
 - Run the mixed durable workload at eight regions, one/eight actors, and
   100/10,000 retained actions (four cases). Compare encoding, write/flush, sync,
   and total p50/p95/maximum with the matching Phase A samples. Add matched memory
@@ -192,7 +184,7 @@ regressions, inconsistent focused results, or changes affecting those paths.
 Record the selected cases, results, and any expanded investigation in the findings.
 Full-history candidate copying and disposal remain Phase D work, and file-sync
 latency can remain substantial. Phase B must remove history-dependent persistence
-encoding/write amplification without weakening durability; it need not meet every
+encoding/write amplification under the revised asynchronous save contract; it need not meet every
 later phase's total-latency or startup target.
 
 ### Phase C — Checkpoints and compaction
@@ -215,7 +207,8 @@ verify native input remains responsive while the server saves or checkpoints.
 
 The milestone is complete when:
 
-- every accepted acknowledgement satisfies the chosen durability contract;
+- ordinary acknowledgements follow queue admission; explicit save acknowledgements
+  follow a committed batch covering their captured prefix;
 - interrupted writes recover the last valid committed boundary without duplicate
   action execution or disclosure inconsistency;
 - append and checkpoint growth are bounded and restart replay is measured;

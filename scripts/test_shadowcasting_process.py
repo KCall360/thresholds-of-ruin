@@ -1,4 +1,5 @@
 """Shadowcasting disclosure through real text, headless and graphical clients."""
+from test_text_process import inspect_save
 import json
 import os
 from pathlib import Path
@@ -58,7 +59,7 @@ class ShadowcastingProcesses(unittest.TestCase):
         self.assertEqual(window.child.wait(timeout=10),0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         text.stop(); observer.stop(); wizard.stop(); server.stop()
-        self.assertEqual(json.loads(self.save.read_text())["ruleset"],"diagonal-v11")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"diagonal-v11")
         self.server(wizard=True)
         _, resumed=self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],closed["state"])

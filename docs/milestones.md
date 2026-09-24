@@ -8,7 +8,7 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **11**, save format **3**, and ruleset
+two-room fixture. New games use protocol **12**, save format **4**, and ruleset
 **`diagonal-v11`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
@@ -72,7 +72,7 @@ place knowledge will be added when interactions require them.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phase A complete; Phase B not started**.
+Status: **Phase A complete; Phase B implemented and locally verified**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -85,11 +85,17 @@ The [measured findings](phase-a-findings.md) retain the validated 64-case releas
 baseline, growing discovery and actual-client samples. The
 [harness guide](performance-harness.md) describes reproduction, the real
 headless/ASCII driver, and the verified 256-region spectator demonstration.
-Current-writer fault injection replaces the toy scanner. The
-[storage review](persistence-review.md) documents a missing name-durability
-barrier and the reviewed future framing/checkpoint contract. Process recovery
-coverage does not establish power-loss durability. No new persistence layout
-is implemented in Phase A.
+The [storage review](persistence-review.md) retains historical Phase A evidence.
+Phase B replaces whole-save rewrites with an atomic SQLite append journal and a
+bounded background worker. Ordinary acknowledgements can precede persistence;
+explicit save, normal client exit, graceful server shutdown, and wizard enablement
+wait for their saved prefix. See [background saving](background-saving.md).
+The [Phase B findings](phase-b-findings.md) retain the nine-case comparison and
+actual-client run. All 200 Rust tests pass in debug/release; local client suites
+pass except the native mouse test blocked by desktop access/occlusion. All four
+desktop launchers are verified. Windows/Linux CI is required before merge; see
+[the publication handoff](session-handoff.md) and the live PR for its status.
+Process recovery tests do not establish hardware power-loss behavior.
 
 Scope and sequencing are defined in the
 [performance and persistence plan](performance-persistence.md). The milestone
@@ -103,7 +109,7 @@ Caching, alternate collections, and speculative presentation will be adopted
 only for measured hot paths and must preserve determinism, disclosure, retry,
 rewind, and crash-recovery behavior.
 
-Acceptance requires acknowledgement only after durable recovery is possible;
+Acceptance requires consistent crash rollback and durable explicit-save barriers;
 bounded p95 and maximum action latency as journal history and dungeon size grow;
 recovery tests at every write boundary; equivalent replay, retry, and rewind
 behavior; and actual-client tests proving the ASCII and text clients remain

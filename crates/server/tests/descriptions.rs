@@ -26,6 +26,6 @@ fn appearance_is_disclosed_with_objects_and_survives_replay_without_changing_rul
     drop(engine);
     let resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
     assert_eq!(resumed.observation(ActorId(1)).unwrap(), view);
-    let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let archive: serde_json::Value = tor_server::inspect_save(path).unwrap();
     assert_eq!(archive["ruleset"], "diagonal-v11");
 }

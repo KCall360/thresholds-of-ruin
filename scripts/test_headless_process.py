@@ -1,4 +1,5 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
+from test_text_process import flush_save
 import json
 from pathlib import Path
 import unittest
@@ -62,6 +63,7 @@ class HeadlessProcesses(unittest.TestCase):
         seen = self.frame(spectator, lambda f: f["state"]["revision"] == taken["state"]["revision"])
         self.assertEqual(seen["state"], taken["state"])
         self.assertEqual(seen["message"]["update"]["body"]["event"]["content"]["event"]["type"], "taken")
+        flush_save(self)
         before = self.save.read_bytes()
         denied = self.act(spectator, {"type": "wait"})
         self.assertIn("read-only", denied["error"])
@@ -120,6 +122,7 @@ class HeadlessProcesses(unittest.TestCase):
         player, initial = self.client()
         observer, attached = self.client()
         self.assertFalse(attached["has_control"])
+        flush_save(self)
         before = self.save.read_bytes()
         player.child.stdin.write("not JSON\n")
         player.child.stdin.flush()

@@ -1,0 +1,32 @@
+{
+  "base_commit": "5745e0f219d90900b7d8260ceb2ef40ce6c0d5a0",
+  "dirty": true,
+  "branch": "codex/background-save-journal",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.10",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "command": "target/release/examples/latency_bench.exe --phase-b --cycles 5 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+  "benchmark_binary_sha256": "c0d99fbb0bb3a30fff2ec223dcd3a444b7b0f388c4fab2785d0a57203a620316",
+  "notes": [
+    "Measured local uncommitted implementation based on the recorded merge commit.",
+    "Post-benchmark changes are warning routing at client attachment, tests, docs, and removal of a redundant serde default; no measured command-path behavior changed.",
+    "No competing builds or test suites were running during the benchmark. Normal desktop activity was not controlled.",
+    "SQLite application bytes do not measure physical filesystem I/O.",
+    "The revised contract acknowledges admitted in-memory actions; Phase A awaited storage."
+  ],
+  "actual_client_command": "python scripts/performance_driver.py --bin-dir target/release --output .local/phase-b/actual-client --regions 256 --actors 1 --cycles 3 --pace-ms 0",
+  "artifacts": {
+    "actual-client.json": {
+      "bytes": 79330,
+      "sha256": "3a80b28cef4ba212984e5cce100a997856ed21f234921ded264ea1ea06aceb91"
+    },
+    "matrix-summary.json": {
+      "bytes": 55195,
+      "sha256": "c923f9db9a83c8d0844302f680295316f902f728de72f24c1b5ffc73d9a1d760"
+    },
+    "samples.jsonl.gz": {
+      "bytes": 1476372,
+      "sha256": "1cf09d9fa5b9f5fdde4a0ea1c4204ca2af3dd67f65c366efbce6db37d01419b9"
+    }
+  }
+}

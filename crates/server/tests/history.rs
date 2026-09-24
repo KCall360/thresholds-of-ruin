@@ -1,3 +1,4 @@
+mod support;
 use tempfile::tempdir;
 use tor_protocol::*;
 use tor_server::journal::Command;
@@ -257,56 +258,52 @@ fn a_save_cannot_be_opened_by_two_writers() {
 }
 
 #[test]
-fn failed_save_does_not_publish_or_mutate_a_command() {
+fn failed_background_save_keeps_accepted_state_and_retries_the_same_record() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("game.json");
-    let backup = dir.path().join("committed.json");
+    let path = dir.path().join("game.db");
     let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    let blocker = rusqlite::Connection::open(&path).unwrap();
+    blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
     let branch = engine.branch().clone();
-    let before = engine.observation(ActorId(1)).unwrap();
-    std::fs::rename(&path, &backup).unwrap();
-    std::fs::create_dir(&path).unwrap();
-    assert_eq!(
-        engine
-            .command(
-                "alice",
-                "text",
-                ActorId(1),
-                "failure",
-                &branch,
-                Command::Act {
-                    expected_revision: 0,
-                    action: Action::Wait
-                }
-            )
-            .unwrap_err()
-            .code,
-        ErrorCode::StorageFailure
-    );
-    assert_eq!(engine.observation(ActorId(1)).unwrap(), before);
+    let command = Command::Act {
+        expected_revision: 0,
+        action: Action::Wait,
+    };
+    let accepted = engine
+        .command("alice", "text", ActorId(1), "one", &branch, command.clone())
+        .unwrap();
+    assert_eq!(engine.observation(ActorId(1)).unwrap().tick, 100);
+    assert!(engine.flush().is_err());
+    assert!(engine.save_status().error.is_some());
     assert!(engine
-        .history(ActorId(1), "alice", None, 100)
-        .unwrap()
-        .entries
-        .is_empty());
-    std::fs::remove_dir(&path).unwrap();
-    std::fs::rename(&backup, &path).unwrap();
+        .command(
+            "alice",
+            "text",
+            ActorId(1),
+            "two",
+            &branch,
+            Command::Act {
+                expected_revision: 1,
+                action: Action::Wait
+            }
+        )
+        .is_err());
     assert!(
-        !engine
-            .command(
-                "alice",
-                "text",
-                ActorId(1),
-                "failure",
-                &branch,
-                Command::Act {
-                    expected_revision: 0,
-                    action: Action::Wait
-                }
-            )
+        engine
+            .command("alice", "text", ActorId(1), "one", &branch, command.clone())
             .unwrap()
             .duplicate
     );
+    blocker.execute_batch("ROLLBACK").unwrap();
+    drop(blocker);
+    engine.flush().unwrap();
+    drop(engine);
+    let mut resumed = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    let retry = resumed
+        .command("alice", "text", ActorId(1), "one", &branch, command)
+        .unwrap();
+    assert!(retry.duplicate);
+    assert_eq!(retry.entry.id, accepted.entry.id);
 }
 
 #[test]
@@ -481,8 +478,7 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
         )
         .unwrap();
     drop(engine);
-    let original: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let original: serde_json::Value = support::read(&path);
     let mut unsupported = original.clone();
     unsupported["version"] = 999.into();
     let mut missing_regions = original.clone();
@@ -500,8 +496,8 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
         missing_regions,
         inconsistent,
     ] {
-        let bytes = serde_json::to_vec(&bad).unwrap();
-        std::fs::write(&path, &bytes).unwrap();
+        support::write(&path, bad);
+        let bytes = std::fs::read(&path).unwrap();
         assert_eq!(
             Engine::open(&path, Scenario::two_room(0)).unwrap_err().code,
             ErrorCode::InvalidArchive

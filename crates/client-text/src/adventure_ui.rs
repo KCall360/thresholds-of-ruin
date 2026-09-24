@@ -99,7 +99,7 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
             _ = tokio::signal::ctrl_c() => break,
         }
     }
-    connection.close().await;
+    connection.close().await?;
     println!("Goodbye.");
     Ok(())
 }

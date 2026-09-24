@@ -39,7 +39,7 @@ Start the server in PowerShell:
 
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
-cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.json
+cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.db
 ```
 
 In another PowerShell terminal, set the same token and choose a client:
@@ -56,6 +56,9 @@ See the [text client guide](docs/text-client.md),
 [headless client contract](docs/headless-client.md) for controls and other roles.
 The server accepts numeric loopback addresses only; remote deployment and account
 administration are not implemented.
+
+Ordinary acknowledgements do not wait for disk. See [background saving](docs/background-saving.md)
+for configurable save timing, crash rollback, and explicit save/normal-exit barriers.
 
 ## Development
 

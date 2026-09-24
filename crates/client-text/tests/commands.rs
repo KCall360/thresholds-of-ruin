@@ -2,6 +2,14 @@ use tor_client_text::{parse, Input};
 use tor_protocol::*;
 
 #[test]
+fn save_is_a_protocol_barrier_request() {
+    assert_eq!(
+        parse("save", &state()).unwrap(),
+        Input::Request(Request::Save)
+    );
+}
+
+#[test]
 fn developer_commands_are_opaque_revision_checked_text() {
     for text in [
         "room 3 5 5 2 Upper gallery",

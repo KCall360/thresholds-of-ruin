@@ -86,7 +86,7 @@ rejected. Door identity and state rewind with the world. Privileged coordinates
 remain backend-only; ordinary history contains sanitized wizard summaries.
 
 Only the current fixture and rules are supported. Older saves are not migrated.
-All clients must use protocol 11.
+All clients must use protocol 12.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 

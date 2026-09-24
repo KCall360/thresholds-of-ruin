@@ -1,4 +1,5 @@
 """The ordinary adventure interface through real server and text processes."""
+from test_text_process import flush_save
 import json
 from pathlib import Path
 import unittest
@@ -116,6 +117,7 @@ class AdventureProcesses(unittest.TestCase):
         self.server()
         player, _ = self.adventure()
         spectator, _ = self.adventure(support.SPECTATOR_TOKEN)
+        flush_save(self)
         before = self.save.read_bytes()
         self.assertIn("read-only", self.say(spectator, "take tablet"))
         self.assertIn("read-only", self.say(spectator, "stop"))
@@ -183,6 +185,7 @@ class AdventureProcesses(unittest.TestCase):
         self.server(wizard=True)
         wizard = self.wizard("text-adventure.json", "clarification")
         player, _ = self.adventure()
+        flush_save(self)
         before = self.save.read_bytes()
         question = self.say(player, "take token")
         self.assertIn("Which do you mean?", question)

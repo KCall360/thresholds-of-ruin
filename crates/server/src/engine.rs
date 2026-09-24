@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::fs;
-use std::io::{BufWriter, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,13 +16,9 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 3;
+const ARCHIVE_VERSION: u32 = 4;
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = "diagonal-v11";
-
-#[cfg(test)]
-#[path = "storage_fault_tests.rs"]
-mod storage_fault_tests;
 
 #[cfg(test)]
 mod seed_equivalence_tests {
@@ -67,18 +62,6 @@ mod seed_equivalence_tests {
     }
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StorageFault {
-    BeforeWrite,
-    PartialWrite,
-    AfterFlush,
-    AfterSync,
-    BeforeReplace,
-    AfterReplace,
-    BeforePublication,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
     pub code: ErrorCode,
@@ -113,7 +96,6 @@ pub struct Scenario {
     pub seed: u64,
     pub actors: Vec<ActorSetup>,
     pub regions: u64,
-    #[serde(default)]
     pub workload_version: Option<u32>,
 }
 
@@ -222,7 +204,7 @@ fn scenario_game(scenario: &Scenario) -> Game {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Receipt {
+pub(crate) struct Receipt {
     user: String,
     frontend: String,
     request_id: String,
@@ -233,21 +215,21 @@ struct Receipt {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Record {
-    entry: HistoryEntry,
-    receipt: Option<Receipt>,
+pub(crate) struct Record {
+    pub(crate) entry: HistoryEntry,
+    pub(crate) receipt: Option<Receipt>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Archive {
-    view_salt: String,
-    wizard_game: bool,
-    version: u32,
-    ruleset: String,
-    scenario: Scenario,
-    branch: BranchId,
-    records: Vec<Record>,
+pub(crate) struct Archive {
+    pub(crate) view_salt: String,
+    pub(crate) wizard_game: bool,
+    pub(crate) version: u32,
+    pub(crate) ruleset: String,
+    pub(crate) scenario: Scenario,
+    pub(crate) branch: BranchId,
+    pub(crate) records: Vec<Record>,
 }
 
 #[derive(Clone, Debug)]
@@ -290,6 +272,12 @@ pub struct CommandProfile {
     pub file_replacements: usize,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct BootstrapProfile {
+    pub total: Duration,
+    pub records_serialized: usize,
+}
+
 impl CommandProfile {
     /// Exclusive top-level phases. Nested simulation perception belongs to the
     /// simulation phase; navigation perception belongs to navigation.
@@ -305,46 +293,6 @@ impl CommandProfile {
             + self.journal_sync
             + self.journal_replace
             + self.publication
-    }
-}
-
-/// Counts and times actual underlying file calls while retaining buffered,
-/// streaming JSON serialization. Encoding excludes time spent inside file I/O.
-struct MeasuredWriter<W> {
-    inner: W,
-    elapsed: Duration,
-    bytes: u64,
-    writes: usize,
-    flushes: usize,
-    #[cfg(test)]
-    fail_after: Option<u64>,
-}
-impl<W: Write> Write for MeasuredWriter<W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        #[cfg(test)]
-        let bytes = if let Some(limit) = self.fail_after {
-            if self.bytes >= limit {
-                return Err(std::io::Error::other("injected partial write"));
-            }
-            &bytes[..bytes.len().min((limit - self.bytes) as usize)]
-        } else {
-            bytes
-        };
-        let start = Instant::now();
-        let result = self.inner.write(bytes);
-        self.elapsed += start.elapsed();
-        self.writes += 1;
-        if let Ok(count) = result {
-            self.bytes += count as u64;
-        }
-        result
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        let start = Instant::now();
-        let result = self.inner.flush();
-        self.elapsed += start.elapsed();
-        self.flushes += 1;
-        result
     }
 }
 
@@ -367,19 +315,10 @@ pub struct Engine {
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
-    #[cfg(test)]
-    storage_fault: Option<StorageFault>,
+    store: Option<crate::storage::Store>,
 }
 
 impl Engine {
-    #[cfg(test)]
-    fn fail_at(&self, point: StorageFault) -> Result<(), Failure> {
-        if self.storage_fault == Some(point) {
-            Err(storage_failure())
-        } else {
-            Ok(())
-        }
-    }
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
         if !(1..=256).contains(&scenario.regions) {
             return Err(invalid_archive());
@@ -416,8 +355,7 @@ impl Engine {
             receipts: BTreeMap::new(),
             path: None,
             lock: None,
-            #[cfg(test)]
-            storage_fault: None,
+            store: None,
             archive: Archive {
                 view_salt: Uuid::new_v4().to_string(),
                 wizard_game: false,
@@ -432,20 +370,48 @@ impl Engine {
 
     /// Existing saves own their scenario; `scenario` is used only for a new file.
     pub fn open(path: impl AsRef<Path>, scenario: Scenario) -> Result<Self, Failure> {
+        Self::open_with_policy(path, scenario, crate::SavePolicy::default())
+    }
+    pub fn open_with_policy(
+        path: impl AsRef<Path>,
+        scenario: Scenario,
+        policy: crate::SavePolicy,
+    ) -> Result<Self, Failure> {
+        policy.validate()?;
         let (path, lock) = lock_save(path.as_ref())?;
-        let mut engine = match fs::read(&path) {
-            Ok(bytes) => {
-                let archive: Archive =
-                    serde_json::from_slice(&bytes).map_err(|_| invalid_archive())?;
-                Self::replay(archive)?
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::memory(scenario)?,
-            Err(_) => return Err(storage_failure()),
-        };
+        let (store, archive) = crate::storage::Store::open(
+            &path,
+            || Self::memory(scenario).map(|engine| engine.archive),
+            policy,
+            lock.clone(),
+        )?;
+        let mut engine = Self::replay(archive)?;
         engine.path = Some(path);
         engine.lock = Some(lock);
-        engine.persist()?;
+        engine.store = Some(store);
         Ok(engine)
+    }
+    /// Wait for the records accepted before this call to become durable.
+    pub fn flush(&self) -> Result<(), Failure> {
+        match &self.store {
+            Some(store) => store.flush(),
+            None => Ok(()),
+        }
+    }
+    pub fn save_status(&self) -> crate::SaveStatus {
+        self.store
+            .as_ref()
+            .map(|store| store.status())
+            .unwrap_or_default()
+    }
+    pub fn request_save(&self) -> u64 {
+        self.store
+            .as_ref()
+            .map(|store| store.request_flush())
+            .unwrap_or(0)
+    }
+    pub(crate) fn flush_handle(&self) -> Option<crate::storage::Store> {
+        self.store.clone()
     }
 
     fn replay(archive: Archive) -> Result<Self, Failure> {
@@ -509,11 +475,16 @@ impl Engine {
     }
     /// Trusted administration operation. The marker commits before authority changes.
     pub fn enable_wizard(&mut self) -> Result<(), Failure> {
-        let mut candidate = self.candidate();
-        candidate.archive.wizard_game = true;
-        candidate.persist()?;
-        candidate.wizard_enabled = true;
-        *self = candidate;
+        if !self.archive.wizard_game {
+            if let Some(store) = &self.store {
+                store.wizard()?;
+            }
+            // Once promotion is admitted it cannot be cleared, even if the
+            // following durable barrier fails. Authority remains disabled.
+            self.archive.wizard_game = true;
+        }
+        self.flush()?;
+        self.wizard_enabled = true;
         Ok(())
     }
     pub fn wizard_enabled(&self) -> bool {
@@ -730,7 +701,14 @@ impl Engine {
 
     /// Attach a detached, seeded fixture to a new, exclusively locked save.
     /// Setup persists before any timed ordinary command can publish state.
-    pub fn attach_profile_save(mut self, path: impl AsRef<Path>) -> Result<Self, Failure> {
+    pub fn attach_profile_save(self, path: impl AsRef<Path>) -> Result<Self, Failure> {
+        self.attach_profile_save_with_policy(path, crate::SavePolicy::default())
+    }
+    pub fn attach_profile_save_with_policy(
+        mut self,
+        path: impl AsRef<Path>,
+        policy: crate::SavePolicy,
+    ) -> Result<Self, Failure> {
         if self.path.is_some() {
             return Err(storage_failure());
         }
@@ -738,23 +716,29 @@ impl Engine {
         if path.exists() {
             return Err(storage_failure());
         }
+        let (store, _) =
+            crate::storage::Store::open(&path, || Ok(self.archive.clone()), policy, lock.clone())?;
         self.path = Some(path);
         self.lock = Some(lock);
-        self.persist()?;
+        self.store = Some(store);
         Ok(self)
     }
 
-    /// Persist the current archive to a diagnostic target and report the same
-    /// serialization/write/sync phases used by normal saves. The target should
-    /// be disposable; this does not attach it to the engine or publish state.
-    pub fn profile_persistence(&self, path: impl AsRef<Path>) -> Result<CommandProfile, Failure> {
-        let (path, lock) = lock_save(path.as_ref())?;
+    /// Persist the current archive to a disposable diagnostic target. The returned
+    /// duration is complete bootstrap work, not command encoding or physical I/O.
+    /// This does not attach the target to the engine or publish state.
+    pub fn profile_persistence(&self, path: impl AsRef<Path>) -> Result<BootstrapProfile, Failure> {
+        let started = Instant::now();
         let mut candidate = self.candidate();
-        candidate.path = Some(path);
-        candidate.lock = Some(lock);
-        let mut profile = CommandProfile::default();
-        candidate.persist_profiled(Some(&mut profile))?;
-        Ok(profile)
+        candidate.path = None;
+        candidate.lock = None;
+        candidate.store = None;
+        let candidate = candidate.attach_profile_save(path)?;
+        candidate.flush()?;
+        Ok(BootstrapProfile {
+            total: started.elapsed(),
+            records_serialized: self.archive.records.len(),
+        })
     }
 
     /// Populate an in-memory diagnostic fixture in linear time. Records are
@@ -1066,8 +1050,6 @@ impl Engine {
             }
         }
         candidate.persist_profiled(profile.as_deref_mut())?;
-        #[cfg(test)]
-        candidate.fail_at(StorageFault::BeforePublication)?;
         let started = Instant::now();
         *self = candidate;
         if let Some(profile) = profile {
@@ -1361,8 +1343,7 @@ impl Engine {
             receipts: self.receipts.clone(),
             path: self.path.clone(),
             lock: self.lock.clone(),
-            #[cfg(test)]
-            storage_fault: self.storage_fault,
+            store: self.store.clone(),
         }
     }
 
@@ -1370,64 +1351,14 @@ impl Engine {
         self.persist_profiled(None)
     }
 
-    fn persist_profiled(&self, mut profile: Option<&mut CommandProfile>) -> Result<(), Failure> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        fs::create_dir_all(parent).map_err(|_| storage_failure())?;
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(parent).map_err(|_| storage_failure())?;
-        #[cfg(test)]
-        self.fail_at(StorageFault::BeforeWrite)?;
-        let mut measured = MeasuredWriter {
-            inner: temporary.as_file_mut(),
-            elapsed: Duration::ZERO,
-            bytes: 0,
-            writes: 0,
-            flushes: 0,
-            #[cfg(test)]
-            fail_after: (self.storage_fault == Some(StorageFault::PartialWrite)).then_some(127),
-        };
-        let started = Instant::now();
-        {
-            let mut writer = BufWriter::new(&mut measured);
-            serde_json::to_writer(&mut writer, &self.archive).map_err(|_| storage_failure())?;
-            writer.flush().map_err(|_| storage_failure())?;
-        }
-        if let Some(profile) = profile.as_mut() {
-            profile.journal_serialization += started.elapsed().saturating_sub(measured.elapsed);
-            profile.journal_write += measured.elapsed;
-            profile.records_serialized += self.archive.records.len();
-            profile.bytes_written += measured.bytes;
-            profile.file_writes += measured.writes;
-            profile.file_flushes += measured.flushes;
-        }
-        #[cfg(test)]
-        self.fail_at(StorageFault::AfterFlush)?;
-        let started = Instant::now();
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|_| storage_failure())?;
-        #[cfg(test)]
-        self.fail_at(StorageFault::AfterSync)?;
-        if let Some(profile) = profile.as_mut() {
-            profile.journal_sync += started.elapsed();
-            profile.file_syncs += 1;
-        }
-        let started = Instant::now();
-        #[cfg(test)]
-        self.fail_at(StorageFault::BeforeReplace)?;
-        temporary.persist(path).map_err(|_| storage_failure())?;
-        #[cfg(test)]
-        self.fail_at(StorageFault::AfterReplace)?;
-        if let Some(profile) = profile.as_mut() {
-            profile.journal_replace += started.elapsed();
-            profile.file_replacements += 1;
+    fn persist_profiled(&self, profile: Option<&mut CommandProfile>) -> Result<(), Failure> {
+        if let Some(store) = &self.store {
+            let started = Instant::now();
+            store.enqueue(self.archive.records.last().ok_or_else(storage_failure)?)?;
+            if let Some(profile) = profile {
+                profile.journal_serialization += started.elapsed();
+                profile.records_serialized += 1;
+            }
         }
         Ok(())
     }
@@ -1442,13 +1373,13 @@ fn new_id() -> EntryId {
 fn invalid_anchor() -> Failure {
     Failure::new(ErrorCode::InvalidAnchor, "Annotation target is unavailable")
 }
-fn storage_failure() -> Failure {
+pub(crate) fn storage_failure() -> Failure {
     Failure::new(
         ErrorCode::StorageFailure,
         "Could not commit the game journal",
     )
 }
-fn invalid_archive() -> Failure {
+pub(crate) fn invalid_archive() -> Failure {
     Failure::new(
         ErrorCode::InvalidArchive,
         "Unsupported or inconsistent game journal",

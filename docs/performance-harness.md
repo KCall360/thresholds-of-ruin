@@ -43,7 +43,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 11, archive 3, and `diagonal-v11` remain in use. Multi-actor archives
+Protocol 12, archive 3, and `diagonal-v11` remain in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
@@ -86,14 +86,15 @@ navigation's scene work belongs to navigation. These nested calls are counted
 at their actual simulation call sites, without adding their time twice.
 `unattributed` accounts for the rest of total authoritative command latency.
 
-The production writer uses buffered streaming JSON. A measured underlying writer
-counts successful bytes and actual write/flush calls. Encoding time subtracts
-underlying I/O time; replacement is separate from sync. `Write::flush` is buffer
-flush, not the durability barrier. File sync remains separately mandatory in the
-current command path. Whole-archive work and broad candidate clones remain
-measured defects for later phases; tests bound regressions while allowing their
-removal. Allocation counts are omitted because no low-impact allocator
-instrumentation is established under the workspace's unsafe-code prohibition.
+Phase A's retained results measured buffered whole-archive JSON writes, sync,
+and replacement. Current Phase B command timing measures record encoding/queue
+admission in `serialization`; command-path write/flush, sync, and replacement
+counts are zero. Worker `save_status` reports accepted/durable sequences, pending
+bytes/age, batches, application bytes committed, and last batch duration. These
+bytes are not SQLite physical I/O. Final flush is outside action timing and
+reported separately. Broad candidate clones remain measured costs.
+Allocation counts are omitted because no low-impact allocator instrumentation
+is established under the workspace's unsafe-code prohibition.
 
 Client application uses a persistent actor-1 observer, sequential updates, and
 growing remembered cells. Harness update construction is outside the timer;
@@ -110,7 +111,7 @@ fixture acquires the save lock and persists it before timed commands. Diagnostic
 saves also acquire the lock, including attempts to overwrite an active save.
 
 Every matrix case records final save size and normal restart/replay time, which
-includes `Engine::open`'s existing startup save. Replay is not replaced with the
+includes strict frame validation and full replay; current startup does not rewrite the archive. Replay is not replaced with the
 fixture seeding shortcut. The report validates disclosed state after restart.
 Raw samples must be retained with the source/build that produced them.
 
@@ -164,8 +165,21 @@ and release. Windows native mouse tests require an interactive desktop; sandbox
 API denial is an environment failure and must be reported or rerun with desktop
 access, never silently skipped. Windows/Linux CI is required before merging.
 
-The actual current-writer fault tests and platform barrier review are in
-[persistence review](persistence-review.md). Process tests do not prove power-loss
-durability. The missing name durability barrier remains a documented finding;
-Phase A does not introduce a new storage format, journal, checkpoint or cache.
-Stop at corrected findings and the reviewed proposal until Phase B is authorized.
+The [background-saving guide](background-saving.md) describes current storage
+and recovery tests. The [persistence review](persistence-review.md) retains
+historical Phase A evidence. Process tests do not prove hardware power-loss
+behavior. Application checkpoints and compaction remain deferred.
+
+## Focused Phase B run
+
+```powershell
+cargo run --release --locked -p tor-server --example latency_bench -- --phase-b --cycles 5 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > phase-b.jsonl
+```
+
+This selects eight-region cases at 100/10,000 actions and one/eight actors,
+matched memory cases, and one 256-region/eight-actor/10,000-action saved case.
+The short policy deliberately exercises saves during the mixed workload.
+Production defaults remain configurable and are listed in
+[background saving](background-saving.md). Use the current raw schema when
+interpreting asynchronous worker metrics; the Phase A report's physical I/O
+counts are not interchangeable with application journal bytes.

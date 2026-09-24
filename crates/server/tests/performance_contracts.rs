@@ -70,7 +70,7 @@ fn revision_and_rollback_operation_counts_scale_only_with_actors() {
 }
 
 #[test]
-fn current_whole_archive_save_growth_is_recorded_as_a_phase_b_regression_target() {
+fn journal_setup_growth_is_bounded() {
     let directory = tempdir().unwrap();
     let mut engine = Engine::memory(scenario(1)).unwrap();
     let empty = engine
@@ -84,19 +84,15 @@ fn current_whole_archive_save_growth_is_recorded_as_a_phase_b_regression_target(
         .unwrap();
     assert_eq!(empty.records_serialized, 0);
     assert!(hundred.records_serialized <= 100);
-    assert_eq!(
-        empty.bytes_written,
-        std::fs::metadata(directory.path().join("empty.json"))
-            .unwrap()
-            .len()
-    );
-    assert_eq!(
-        hundred.bytes_written,
+    assert!(
         std::fs::metadata(directory.path().join("hundred.json"))
             .unwrap()
             .len()
+            <= std::fs::metadata(directory.path().join("empty.json"))
+                .unwrap()
+                .len()
+                * 200
     );
-    assert!(hundred.bytes_written <= empty.bytes_written * 200);
 }
 
 #[test]
@@ -146,7 +142,7 @@ fn seeded_history_matches_normal_execution_and_restart() {
 }
 
 #[test]
-fn durable_command_measures_exclusive_phases_and_actual_io() {
+fn ordinary_command_profiles_encoding_without_disk_io() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("profile.json");
     let mut engine = Engine::open(&path, scenario(1)).unwrap();
@@ -157,11 +153,18 @@ fn durable_command_measures_exclusive_phases_and_actual_io() {
     assert_eq!(p.navigation_refreshes, 1);
     assert!(p.perception_calls >= p.actors_observed);
     assert!(p.scene_calls >= p.perception_calls);
-    assert!(p.file_writes > 0);
     assert_eq!(
-        (p.file_flushes, p.file_syncs, p.file_replacements),
-        (1, 1, 1)
+        (
+            p.file_writes,
+            p.file_flushes,
+            p.file_syncs,
+            p.file_replacements
+        ),
+        (0, 0, 0, 0)
     );
-    assert_eq!(p.bytes_written, std::fs::metadata(&path).unwrap().len());
+    assert_eq!(p.bytes_written, 0);
+    assert_eq!(p.records_serialized, 1);
+    engine.flush().unwrap();
+    assert_eq!(engine.save_status().batches, 1);
     assert_eq!(engine.profile_counts(), (1, 2));
 }

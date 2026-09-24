@@ -21,7 +21,7 @@ pub enum Event {
 pub struct Network {
     pub commands: async_mpsc::Sender<Request>,
     pub events: Receiver<Event>,
-    worker: JoinHandle<()>,
+    worker: JoinHandle<Result<(), String>>,
 }
 
 impl Network {
@@ -34,9 +34,10 @@ impl Network {
                 .build()
                 .map_err(|e| -> Error { e.into() })
                 .and_then(|runtime| runtime.block_on(run(address, token, actor, observe, rx, &tx)));
-            if let Err(error) = result {
+            if let Err(error) = &result {
                 let _=tx.try_send(Event::Fatal(format!("Connection ended: {error}. Relaunch to reconnect; inspect history before retrying.")));
             }
+            result.map_err(|error| error.to_string())
         });
         Self {
             commands,
@@ -45,11 +46,14 @@ impl Network {
         }
     }
 
-    pub fn shutdown(self) {
+    pub fn shutdown(self) -> Result<(), Error> {
         drop(self.commands);
-        // Drop the event receiver too, so no background publication can stall exit.
-        drop(self.events);
-        let _ = self.worker.join();
+        // Drain presentation while the worker performs save-and-quit.
+        for _ in self.events {}
+        self.worker
+            .join()
+            .map_err(|_| "Network worker failed")?
+            .map_err(Into::into)
     }
 }
 
@@ -87,7 +91,7 @@ async fn run(
         tokio::select! {
             message=connection.next()=>{present(&connection,message?,tx)?;},
             request=rx.recv()=>{
-                let Some(request)=request else {connection.close().await;return Ok(());};
+                let Some(request)=request else {connection.close().await?;return Ok(());};
                 transact(&mut connection,request,tx).await?;
                 publish(tx,Event::Ready)?;
             },
@@ -133,7 +137,9 @@ fn present(
         }
         ServerMessage::Ack { .. } => publish(
             tx,
-            Event::Status("Ready. Your accepted actions and notes are saved automatically.".into()),
+            Event::Status(
+                "Ready. Background saving is enabled; closing normally saves pending play.".into(),
+            ),
         ),
         ServerMessage::Error { code, message, .. } => {
             publish(tx, Event::Status(format!("{code:?}: {message}")))
