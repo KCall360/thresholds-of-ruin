@@ -1,0 +1,54 @@
+{
+  "recorded_utc": "2026-09-24T20:11:14.486699+00:00",
+  "base_commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+  "working_tree_dirty": true,
+  "platform": "Windows-11-10.0.26200-SP0",
+  "architecture": "AMD64",
+  "logical_processors": 12,
+  "save_volume": "C:",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "binary_sha256": {
+    "initial_baseline": "7ac804467597dc20a3ea870b27bca2d423d7e459b67e17737eb8dd735fef2d0f",
+    "final_benchmark": "b59eaac6a0154240d2c5d0e24453093f840bd9457dd612b0d6a5a659aea7c69a"
+  },
+  "commands": {
+    "baseline": "latency_bench --phase-c --cycles 3 --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "frequent": "latency_bench --phase-c --cycles 3 --checkpoint-interval 64 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "default-interval": "latency_bench --phase-c --cycles 3 --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "paired-disabled": "latency_bench --phase-c --case r256-a8-h10000-durable --cycles 3 --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "paired-default": "latency_bench --phase-c --case r256-a8-h10000-durable --cycles 3 --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1"
+  },
+  "artifacts": {
+    "baseline.jsonl.gz": {
+      "sha256": "7cf92385c506382cc9512e1ebdf1a4ec7d990a236941392eee389214e3954e53",
+      "cases": 5,
+      "ordered_attempts": 4897
+    },
+    "frequent.jsonl.gz": {
+      "sha256": "3cfa0d9e2a45f9b0b57663fbef25b90cd1e31e4effc5de5d080b7ff5f2192164",
+      "cases": 5,
+      "ordered_attempts": 4897
+    },
+    "default-interval.jsonl.gz": {
+      "sha256": "11db2c0a76816116076e91cb1af63faa359915ba59686bdc7b81c48e6f7320b2",
+      "cases": 5,
+      "ordered_attempts": 4897
+    },
+    "paired-disabled.jsonl.gz": {
+      "sha256": "2cf5e8bebd4007038a2aae5b8e70e7736cb085c6ee6961ab90d9c2bb5c356ef6",
+      "cases": 1,
+      "ordered_attempts": 1505
+    },
+    "paired-default.jsonl.gz": {
+      "sha256": "4fd8155b63029b161dd7f9d536abd199318aa7d0ffdd4165c2c0668fa2374f7b",
+      "cases": 1,
+      "ordered_attempts": 1505
+    }
+  },
+  "limits": [
+    "Local Windows diagnostics; machine activity and timing variance are not CI gates.",
+    "The initial five-case reference preceded checkpoint compaction refinements; consecutive paired runs use the same final binary.",
+    "All runs use aggressive 10/50/1 ms save timing. Default-interval refers only to the 1024-entry checkpoint interval.",
+    "Application frame/checkpoint bytes are not physical SQLite I/O."
+  ]
+}

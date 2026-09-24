@@ -36,7 +36,7 @@ def expected_actions(regions, actors, history, cycles):
     return result
 
 
-def validate(rows, quick=False, phase_b=False):
+def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None):
     cases, samples, ends = {}, defaultdict(list), {}
     for row in rows:
         if row["kind"] == "case": cases[row["case"]] = row
@@ -44,9 +44,14 @@ def validate(rows, quick=False, phase_b=False):
         elif row["kind"] == "case_end": ends[row["case"]] = row
     matrix = itertools.product([1,8] if quick else [1,8,64,256],[1,8],[0,100] if quick else [0,100,1000,10000],["memory","durable"])
     expected_cases = {f"r{r}-a{a}-h{h}-{storage}" for r,a,h,storage in matrix}
-    if phase_b:
+    if phase_b or phase_c:
         expected_cases = {f"r8-a{a}-h{h}-{s}" for a,h,s in itertools.product([1,8],[100,10000],["memory","durable"])}
         expected_cases.add("r256-a8-h10000-durable")
+    if phase_c:
+        expected_cases = {case for case in expected_cases if case.endswith("-durable")}
+    if selected_case is not None:
+        assert selected_case in expected_cases, "Unknown selected case"
+        expected_cases = {selected_case}
     assert set(cases) == set(ends) == expected_cases, "Missing or unexpected completed matrix case"
     for case, meta in cases.items():
         expected = expected_actions(meta["regions"],meta["actors"],meta["history_start"],meta["cycles"])
@@ -88,7 +93,25 @@ def validate(rows, quick=False, phase_b=False):
             assert status["batches"] > 0 and status["journal_bytes"] > 0
             final = actual[-1]["save_status"]
             assert status["journal_bytes"] == final["journal_bytes"] + final["pending_bytes"]
-    for regions in (() if phase_b else (8,64,256)):
+        if phase_c:
+            recovery = ends[case]["recovery"]
+            assert recovery["records_loaded"] == history
+            assert recovery["records_replayed"] == history - recovery["checkpoint_sequence"]
+            captured = [sample["history_end"] for sample in actual
+                        if sample.get("profile") and sample["profile"]["checkpoint_captures"]]
+            assert recovery["checkpoint_sequence"] == (captured[-1] if captured else 0)
+            interval = meta["save_policy"]["checkpoint_interval"]
+            if interval and captured:
+                assert 0 < recovery["checkpoint_sequence"] <= history
+                assert recovery["records_replayed"] < interval
+                assert status["checkpoint_sequence"] == recovery["checkpoint_sequence"]
+                assert status["checkpoint_bytes"] <= 64*1024*1024
+            else:
+                assert recovery["checkpoint_sequence"] == 0
+                assert recovery["records_replayed"] == history
+                if interval:
+                    assert history < interval
+    for regions in (() if phase_b or phase_c or selected_case else (8,64,256)):
         case = f"traversal-r{regions}"
         actual = samples[case]
         cycles = 2 if quick else regions-1
@@ -104,12 +127,14 @@ def main():
     parser.add_argument("input",type=Path)
     parser.add_argument("--quick",action="store_true")
     parser.add_argument("--phase-b",action="store_true")
+    parser.add_argument("--phase-c",action="store_true")
+    parser.add_argument("--case")
     parser.add_argument("--summary",type=Path)
     args = parser.parse_args()
     opener = gzip.open if args.input.suffix == ".gz" else open
     with opener(args.input,"rt",encoding="utf-8-sig") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
-    cases,samples,ends = validate(rows,args.quick,args.phase_b)
+    cases,samples,ends = validate(rows,args.quick,args.phase_b,args.phase_c,args.case)
     summaries = [r for r in rows if r["kind"] != "sample"]
     if args.summary:
         args.summary.write_text("\n".join(json.dumps(r) for r in summaries)+"\n",encoding="utf-8")

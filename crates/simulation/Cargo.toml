@@ -11,3 +11,4 @@ workspace = true
 
 [dependencies]
 tor-world.workspace = true
+serde.workspace = true

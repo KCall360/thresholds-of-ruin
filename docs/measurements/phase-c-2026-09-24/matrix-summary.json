@@ -1,0 +1,4330 @@
+{
+  "baseline": [
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h100-durable",
+        "final_flush_ms": 59.8209,
+        "final_save_bytes": 217088,
+        "history_end": 283,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 283,
+          "records_replayed": 283,
+          "total": {
+            "nanos": 149727100,
+            "secs": 0
+          }
+        },
+        "restart_replay_ms": 149.7276,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 283,
+          "batches": 13,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 283,
+          "error": null,
+          "journal_bytes": 123620,
+          "last_batch_ms": 44,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9680000000000002,
+          "mean_ms": 0.6906224043715847,
+          "n": 183,
+          "p50_ms": 0.6377,
+          "p95_ms": 1.2306000000000001,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.37629999999999997,
+          "mean_ms": 0.11696120218579235,
+          "n": 183,
+          "p50_ms": 0.10880000000000001,
+          "p95_ms": 0.22369999999999998,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6447999999999999,
+          "mean_ms": 0.27828306010928955,
+          "n": 183,
+          "p50_ms": 0.2707,
+          "p95_ms": 0.4607,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9684,
+          "mean_ms": 0.6909715846994539,
+          "n": 183,
+          "p50_ms": 0.638,
+          "p95_ms": 1.2309,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3549,
+          "mean_ms": 0.11758797814207651,
+          "n": 183,
+          "p50_ms": 0.1085,
+          "p95_ms": 0.2082,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.988,
+          "mean_ms": 0.28811366120218573,
+          "n": 183,
+          "p50_ms": 0.19269999999999998,
+          "p95_ms": 0.5419,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.23220000000000002,
+          "mean_ms": 0.06390819672131148,
+          "n": 183,
+          "p50_ms": 0.0555,
+          "p95_ms": 0.1392,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9069,
+          "mean_ms": 0.7580158469945354,
+          "n": 183,
+          "p50_ms": 0.6612,
+          "p95_ms": 1.2906,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0157,
+          "mean_ms": 0.0002699453551912571,
+          "n": 183,
+          "p50_ms": 9.999999999999999e-05,
+          "p95_ms": 0.0005,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.24449999999999997,
+          "mean_ms": 0.04249234972677596,
+          "n": 183,
+          "p50_ms": 0.022500000000000003,
+          "p95_ms": 0.1041,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.1095,
+          "mean_ms": 0.01043879781420765,
+          "n": 183,
+          "p50_ms": 0.008199999999999999,
+          "p95_ms": 0.0183,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.48910000000000003,
+          "mean_ms": 0.027178688524590162,
+          "n": 183,
+          "p50_ms": 0.001,
+          "p95_ms": 0.2041,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.09050000000000001,
+          "mean_ms": 0.023671584699453553,
+          "n": 183,
+          "p50_ms": 0.0152,
+          "p95_ms": 0.057800000000000004,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h10000-durable",
+        "final_flush_ms": 33.664899999999996,
+        "final_save_bytes": 6029312,
+        "history_end": 10183,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 10183,
+          "records_replayed": 10183,
+          "total": {
+            "nanos": 75847500,
+            "secs": 46
+          }
+        },
+        "restart_replay_ms": 46075.848,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 10183,
+          "batches": 38,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 10183,
+          "error": null,
+          "journal_bytes": 124352,
+          "last_batch_ms": 23,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 26.920099999999998,
+          "mean_ms": 9.308737704918034,
+          "n": 183,
+          "p50_ms": 9.2191,
+          "p95_ms": 10.1697,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 18.394000000000002,
+          "mean_ms": 5.251917486338798,
+          "n": 183,
+          "p50_ms": 4.9125000000000005,
+          "p95_ms": 5.955399999999999,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.021,
+          "mean_ms": 0.2874874316939891,
+          "n": 183,
+          "p50_ms": 0.2953,
+          "p95_ms": 0.3545,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 26.921,
+          "mean_ms": 9.30936174863388,
+          "n": 183,
+          "p50_ms": 9.2201,
+          "p95_ms": 10.170200000000001,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3522,
+          "mean_ms": 0.11896284153005465,
+          "n": 183,
+          "p50_ms": 0.108,
+          "p95_ms": 0.20149999999999998,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0861,
+          "mean_ms": 0.28937540983606547,
+          "n": 183,
+          "p50_ms": 0.20579999999999998,
+          "p95_ms": 0.5429999999999999,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.8450999999999995,
+          "mean_ms": 2.5406300546448097,
+          "n": 183,
+          "p50_ms": 2.2973999999999997,
+          "p95_ms": 3.4727,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.6705999999999999,
+          "mean_ms": 0.8710442622950819,
+          "n": 183,
+          "p50_ms": 0.8428,
+          "p95_ms": 1.2339,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0007,
+          "mean_ms": 0.0003147540983606561,
+          "n": 183,
+          "p50_ms": 0.0003,
+          "p95_ms": 0.0006,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2899,
+          "mean_ms": 0.06789398907103826,
+          "n": 183,
+          "p50_ms": 0.0543,
+          "p95_ms": 0.1552,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0448,
+          "mean_ms": 0.014362841530054639,
+          "n": 183,
+          "p50_ms": 0.013900000000000001,
+          "p95_ms": 0.0202,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6684,
+          "mean_ms": 0.02728961748633879,
+          "n": 183,
+          "p50_ms": 0.0017000000000000001,
+          "p95_ms": 0.2053,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9435,
+          "mean_ms": 0.9979907103825136,
+          "n": 183,
+          "p50_ms": 0.9285,
+          "p95_ms": 1.5759,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h100-durable",
+        "final_flush_ms": 81.5159,
+        "final_save_bytes": 1101824,
+        "history_end": 1603,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 1603,
+          "records_replayed": 1603,
+          "total": {
+            "nanos": 846645800,
+            "secs": 3
+          }
+        },
+        "restart_replay_ms": 3846.6463,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 1603,
+          "batches": 181,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 1603,
+          "error": null,
+          "journal_bytes": 896918,
+          "last_batch_ms": 47,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.3399,
+          "mean_ms": 2.5546612774451094,
+          "n": 1503,
+          "p50_ms": 2.503,
+          "p95_ms": 3.5564,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.933,
+          "mean_ms": 0.4149314703925479,
+          "n": 1503,
+          "p50_ms": 0.4052,
+          "p95_ms": 0.7558,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.1488,
+          "mean_ms": 0.2900820930232557,
+          "n": 430,
+          "p50_ms": 0.2828,
+          "p95_ms": 0.4484,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.3406,
+          "mean_ms": 2.554949035262806,
+          "n": 1503,
+          "p50_ms": 2.5032,
+          "p95_ms": 3.5568,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5342,
+          "mean_ms": 0.4259310711909514,
+          "n": 1503,
+          "p50_ms": 0.4039,
+          "p95_ms": 0.6053000000000001,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.7069,
+          "mean_ms": 1.332034264803727,
+          "n": 1503,
+          "p50_ms": 1.2389000000000001,
+          "p95_ms": 1.75,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.3673,
+          "mean_ms": 0.2459145043246842,
+          "n": 1503,
+          "p50_ms": 0.2266,
+          "p95_ms": 0.45830000000000004,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.3892,
+          "mean_ms": 0.8207286046511617,
+          "n": 430,
+          "p50_ms": 0.8179,
+          "p95_ms": 1.3072,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0714,
+          "mean_ms": 0.0054491683300066426,
+          "n": 1503,
+          "p50_ms": 0.005699999999999999,
+          "p95_ms": 0.0112,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3276,
+          "mean_ms": 0.04421709913506314,
+          "n": 1503,
+          "p50_ms": 0.0391,
+          "p95_ms": 0.09280000000000001,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0737,
+          "mean_ms": 0.007997804391217566,
+          "n": 1503,
+          "p50_ms": 0.0073,
+          "p95_ms": 0.0118,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3067,
+          "mean_ms": 0.003762075848303391,
+          "n": 1503,
+          "p50_ms": 0.00039999999999999996,
+          "p95_ms": 0.0018,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.36900000000000005,
+          "mean_ms": 0.07442381902860948,
+          "n": 1503,
+          "p50_ms": 0.0468,
+          "p95_ms": 0.1607,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h10000-durable",
+        "final_flush_ms": 7.845400000000001,
+        "final_save_bytes": 6909952,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 11499,
+          "records_replayed": 11499,
+          "total": {
+            "nanos": 31105900,
+            "secs": 79
+          }
+        },
+        "restart_replay_ms": 79031.1064,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 659,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 7,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 24.708299999999998,
+          "mean_ms": 11.304280720480332,
+          "n": 1499,
+          "p50_ms": 11.2041,
+          "p95_ms": 12.7183,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 14.0269,
+          "mean_ms": 5.538805537024683,
+          "n": 1499,
+          "p50_ms": 5.3739,
+          "p95_ms": 6.630999999999999,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5884,
+          "mean_ms": 0.31565944055944034,
+          "n": 429,
+          "p50_ms": 0.30729999999999996,
+          "p95_ms": 0.4743,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 24.7095,
+          "mean_ms": 11.30480233488993,
+          "n": 1499,
+          "p50_ms": 11.204699999999999,
+          "p95_ms": 12.7204,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.8182,
+          "mean_ms": 0.43893942628418847,
+          "n": 1499,
+          "p50_ms": 0.4179,
+          "p95_ms": 0.5821999999999999,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.3917,
+          "mean_ms": 1.3601067378252176,
+          "n": 1499,
+          "p50_ms": 1.2653,
+          "p95_ms": 1.8125,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.6583,
+          "mean_ms": 2.79137638425617,
+          "n": 1499,
+          "p50_ms": 2.6172999999999997,
+          "p95_ms": 3.8707,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.4991000000000003,
+          "mean_ms": 0.9092822843822839,
+          "n": 429,
+          "p50_ms": 0.8513000000000001,
+          "p95_ms": 1.39,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0636,
+          "mean_ms": 0.006213008672448317,
+          "n": 1499,
+          "p50_ms": 0.0063999999999999994,
+          "p95_ms": 0.012700000000000001,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.507,
+          "mean_ms": 0.08572955303535681,
+          "n": 1499,
+          "p50_ms": 0.0743,
+          "p95_ms": 0.20359999999999998,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.059,
+          "mean_ms": 0.014396330887258144,
+          "n": 1499,
+          "p50_ms": 0.0135,
+          "p95_ms": 0.0236,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.36469999999999997,
+          "mean_ms": 0.004242428285523679,
+          "n": 1499,
+          "p50_ms": 0.0007,
+          "p95_ms": 0.0023,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.1831000000000005,
+          "mean_ms": 1.064471314209474,
+          "n": 1499,
+          "p50_ms": 0.9948999999999999,
+          "p95_ms": 1.5968,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r256-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 256,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r256-a8-h10000-durable",
+        "final_flush_ms": 91.4839,
+        "final_save_bytes": 6909952,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 11499,
+          "records_replayed": 11499,
+          "total": {
+            "nanos": 439069500,
+            "secs": 94
+          }
+        },
+        "restart_replay_ms": 94439.0699,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 801,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 41,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 25.666700000000002,
+          "mean_ms": 12.787832888592398,
+          "n": 1499,
+          "p50_ms": 12.7203,
+          "p95_ms": 14.100200000000001,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 12.5751,
+          "mean_ms": 5.786938025350235,
+          "n": 1499,
+          "p50_ms": 5.6333,
+          "p95_ms": 6.8684,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0698,
+          "mean_ms": 0.31047505827505795,
+          "n": 429,
+          "p50_ms": 0.3122,
+          "p95_ms": 0.4824,
+          "phase": "client_application"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 25.6675,
+          "mean_ms": 12.78835690460308,
+          "n": 1499,
+          "p50_ms": 12.7209,
+          "p95_ms": 14.1006,
+          "phase": "command_call"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.2957999999999998,
+          "mean_ms": 0.5036955303535687,
+          "n": 1499,
+          "p50_ms": 0.4827,
+          "p95_ms": 0.7033,
+          "phase": "navigation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.9844,
+          "mean_ms": 2.061506137424948,
+          "n": 1499,
+          "p50_ms": 1.9197000000000002,
+          "p95_ms": 2.7841,
+          "phase": "perception"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.9484,
+          "mean_ms": 3.00268885923949,
+          "n": 1499,
+          "p50_ms": 2.8443,
+          "p95_ms": 4.079700000000001,
+          "phase": "publication"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.3257999999999996,
+          "mean_ms": 0.9106829836829834,
+          "n": 429,
+          "p50_ms": 0.8553000000000001,
+          "p95_ms": 1.385,
+          "phase": "rendering"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.07440000000000001,
+          "mean_ms": 0.00631781187458306,
+          "n": 1499,
+          "p50_ms": 0.0065,
+          "p95_ms": 0.0129,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0510000000000002,
+          "mean_ms": 0.3372042695130088,
+          "n": 1499,
+          "p50_ms": 0.3396,
+          "p95_ms": 0.5833,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.048,
+          "mean_ms": 0.011125083388925932,
+          "n": 1499,
+          "p50_ms": 0.0102,
+          "p95_ms": 0.0147,
+          "phase": "serialization"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6839,
+          "mean_ms": 0.006364709806537688,
+          "n": 1499,
+          "p50_ms": 0.0007999999999999999,
+          "p95_ms": 0.0036,
+          "phase": "simulation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.4044000000000003,
+          "mean_ms": 1.0719924616410952,
+          "n": 1499,
+          "p50_ms": 1.0013999999999998,
+          "p95_ms": 1.6577,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    }
+  ],
+  "frequent": [
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 64,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h100-durable",
+        "final_flush_ms": 183.43019999999999,
+        "final_save_bytes": 3088384,
+        "history_end": 283,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 229,
+          "records_loaded": 283,
+          "records_replayed": 54,
+          "total": {
+            "nanos": 172815500,
+            "secs": 0
+          }
+        },
+        "restart_replay_ms": 172.816,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 283,
+          "batches": 7,
+          "checkpoint_bytes": 1548548,
+          "checkpoint_sequence": 229,
+          "checkpoints": 3,
+          "durable_sequence": 283,
+          "error": null,
+          "journal_bytes": 123620,
+          "last_batch_ms": 64,
+          "last_checkpoint_ms": 11,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.3568000000000002,
+          "mean_ms": 0.6816978142076502,
+          "n": 183,
+          "p50_ms": 0.6122000000000001,
+          "p95_ms": 1.1165,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.5074,
+          "mean_ms": 0.11388797814207646,
+          "n": 183,
+          "p50_ms": 0.1034,
+          "p95_ms": 0.19469999999999998,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0743,
+          "mean_ms": 0.0006316939890710383,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.8471000000000001,
+          "mean_ms": 0.2808125683060109,
+          "n": 183,
+          "p50_ms": 0.26689999999999997,
+          "p95_ms": 0.4731,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.3579,
+          "mean_ms": 0.6819524590163935,
+          "n": 183,
+          "p50_ms": 0.6124999999999999,
+          "p95_ms": 1.1169,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3393,
+          "mean_ms": 0.11874480874316944,
+          "n": 183,
+          "p50_ms": 0.1094,
+          "p95_ms": 0.20980000000000001,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5369,
+          "mean_ms": 0.29197322404371584,
+          "n": 183,
+          "p50_ms": 0.1912,
+          "p95_ms": 0.545,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2881,
+          "mean_ms": 0.053244262295081966,
+          "n": 183,
+          "p50_ms": 0.048,
+          "p95_ms": 0.1009,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.8553,
+          "mean_ms": 0.7092633879781421,
+          "n": 183,
+          "p50_ms": 0.6553,
+          "p95_ms": 1.0812,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.02,
+          "mean_ms": 0.0002573770491803279,
+          "n": 183,
+          "p50_ms": 9.999999999999999e-05,
+          "p95_ms": 0.0003,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2398,
+          "mean_ms": 0.042582513661202186,
+          "n": 183,
+          "p50_ms": 0.0223,
+          "p95_ms": 0.1139,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.21660000000000001,
+          "mean_ms": 0.009524590163934426,
+          "n": 183,
+          "p50_ms": 0.0073,
+          "p95_ms": 0.0133,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.5599999999999999,
+          "mean_ms": 0.026702732240437156,
+          "n": 183,
+          "p50_ms": 0.0009,
+          "p95_ms": 0.2102,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2808,
+          "mean_ms": 0.02414863387978141,
+          "n": 183,
+          "p50_ms": 0.0144,
+          "p95_ms": 0.0577,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 64,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h10000-durable",
+        "final_flush_ms": 84.649,
+        "final_save_bytes": 11829248,
+        "history_end": 10183,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 10129,
+          "records_loaded": 10183,
+          "records_replayed": 54,
+          "total": {
+            "nanos": 81041100,
+            "secs": 1
+          }
+        },
+        "restart_replay_ms": 1081.0415,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 10183,
+          "batches": 17,
+          "checkpoint_bytes": 1549326,
+          "checkpoint_sequence": 10129,
+          "checkpoints": 3,
+          "durable_sequence": 10183,
+          "error": null,
+          "journal_bytes": 124352,
+          "last_batch_ms": 59,
+          "last_checkpoint_ms": 15,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 16.3992,
+          "mean_ms": 9.102706557377047,
+          "n": 183,
+          "p50_ms": 8.7911,
+          "p95_ms": 11.263499999999999,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 10.494200000000001,
+          "mean_ms": 5.195911475409835,
+          "n": 183,
+          "p50_ms": 4.9588,
+          "p95_ms": 6.4736,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.23240000000000002,
+          "mean_ms": 0.0014497267759562844,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.8727,
+          "mean_ms": 0.29804098360655734,
+          "n": 183,
+          "p50_ms": 0.2879,
+          "p95_ms": 0.5479999999999999,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 16.3997,
+          "mean_ms": 9.103112021857926,
+          "n": 183,
+          "p50_ms": 8.7914,
+          "p95_ms": 11.2642,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3326,
+          "mean_ms": 0.11735846994535518,
+          "n": 183,
+          "p50_ms": 0.1098,
+          "p95_ms": 0.1993,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0626,
+          "mean_ms": 0.2836846994535519,
+          "n": 183,
+          "p50_ms": 0.196,
+          "p95_ms": 0.5423,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.1767,
+          "mean_ms": 2.51116994535519,
+          "n": 183,
+          "p50_ms": 2.2834000000000003,
+          "p95_ms": 3.8731,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.6241,
+          "mean_ms": 0.8294360655737708,
+          "n": 183,
+          "p50_ms": 0.8125,
+          "p95_ms": 1.0398,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0135,
+          "mean_ms": 0.0003939890710382511,
+          "n": 183,
+          "p50_ms": 0.0003,
+          "p95_ms": 0.0005,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.18330000000000002,
+          "mean_ms": 0.0547502732240437,
+          "n": 183,
+          "p50_ms": 0.045399999999999996,
+          "p95_ms": 0.12689999999999999,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0781,
+          "mean_ms": 0.012220765027322408,
+          "n": 183,
+          "p50_ms": 0.0102,
+          "p95_ms": 0.0185,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2941,
+          "mean_ms": 0.02529289617486339,
+          "n": 183,
+          "p50_ms": 0.0015,
+          "p95_ms": 0.2061,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5448,
+          "mean_ms": 0.9004743169398909,
+          "n": 183,
+          "p50_ms": 0.8687,
+          "p95_ms": 1.1142,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 64,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h100-durable",
+        "final_flush_ms": 55.9913,
+        "final_save_bytes": 2424832,
+        "history_end": 1603,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 1573,
+          "records_loaded": 1603,
+          "records_replayed": 30,
+          "total": {
+            "nanos": 220588900,
+            "secs": 0
+          }
+        },
+        "restart_replay_ms": 220.58939999999998,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 1603,
+          "batches": 113,
+          "checkpoint_bytes": 513157,
+          "checkpoint_sequence": 1573,
+          "checkpoints": 24,
+          "durable_sequence": 1603,
+          "error": null,
+          "journal_bytes": 896918,
+          "last_batch_ms": 24,
+          "last_checkpoint_ms": 7,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.7448,
+          "mean_ms": 2.764017431803058,
+          "n": 1503,
+          "p50_ms": 2.6112,
+          "p95_ms": 4.398,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9115,
+          "mean_ms": 0.46867232202262105,
+          "n": 1503,
+          "p50_ms": 0.4355,
+          "p95_ms": 1.0719,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.1384,
+          "mean_ms": 0.0008337990685296075,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.9084,
+          "mean_ms": 0.30603348837209293,
+          "n": 430,
+          "p50_ms": 0.28400000000000003,
+          "p95_ms": 0.6279,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.7453,
+          "mean_ms": 2.7642929474384585,
+          "n": 1503,
+          "p50_ms": 2.6113999999999997,
+          "p95_ms": 4.3984000000000005,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.3068000000000002,
+          "mean_ms": 0.44330259481037876,
+          "n": 1503,
+          "p50_ms": 0.4106,
+          "p95_ms": 0.7192000000000001,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.3392,
+          "mean_ms": 1.4764117764471054,
+          "n": 1503,
+          "p50_ms": 1.3034999999999999,
+          "p95_ms": 2.2971,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.7202000000000002,
+          "mean_ms": 0.24273306719893536,
+          "n": 1503,
+          "p50_ms": 0.20929999999999999,
+          "p95_ms": 0.5585,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.8679000000000001,
+          "mean_ms": 0.8273058139534886,
+          "n": 430,
+          "p50_ms": 0.8197,
+          "p95_ms": 1.2273,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0553,
+          "mean_ms": 0.005482302062541577,
+          "n": 1503,
+          "p50_ms": 0.0053,
+          "p95_ms": 0.012799999999999999,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2316,
+          "mean_ms": 0.04540239520958084,
+          "n": 1503,
+          "p50_ms": 0.0374,
+          "p95_ms": 0.0982,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0448,
+          "mean_ms": 0.007772388556220895,
+          "n": 1503,
+          "p50_ms": 0.007,
+          "p95_ms": 0.0122,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3778,
+          "mean_ms": 0.003974517631403858,
+          "n": 1503,
+          "p50_ms": 0.00039999999999999996,
+          "p95_ms": 0.002,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3564,
+          "mean_ms": 0.06943226879574181,
+          "n": 1503,
+          "p50_ms": 0.045899999999999996,
+          "p95_ms": 0.1532,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 64,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h10000-durable",
+        "final_flush_ms": 9.1602,
+        "final_save_bytes": 12025856,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 11473,
+          "records_loaded": 11499,
+          "records_replayed": 26,
+          "total": {
+            "nanos": 727675600,
+            "secs": 0
+          }
+        },
+        "restart_replay_ms": 727.6761,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 642,
+          "checkpoint_bytes": 515340,
+          "checkpoint_sequence": 11473,
+          "checkpoints": 24,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 11,
+          "last_checkpoint_ms": 9,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 38.727900000000005,
+          "mean_ms": 12.24224716477651,
+          "n": 1499,
+          "p50_ms": 11.5033,
+          "p95_ms": 18.4934,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 14.129299999999999,
+          "mean_ms": 6.117930620413619,
+          "n": 1499,
+          "p50_ms": 5.6304,
+          "p95_ms": 10.3661,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.25270000000000004,
+          "mean_ms": 0.001369646430953969,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.9588,
+          "mean_ms": 0.3479745920745923,
+          "n": 429,
+          "p50_ms": 0.31760000000000005,
+          "p95_ms": 0.7142999999999999,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 38.728899999999996,
+          "mean_ms": 12.24272835223482,
+          "n": 1499,
+          "p50_ms": 11.5039,
+          "p95_ms": 18.4942,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.1341,
+          "mean_ms": 0.4628172781854578,
+          "n": 1499,
+          "p50_ms": 0.4324,
+          "p95_ms": 0.7524,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.5206999999999997,
+          "mean_ms": 1.5116066044029353,
+          "n": 1499,
+          "p50_ms": 1.3403,
+          "p95_ms": 2.368,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 7.0475,
+          "mean_ms": 3.0140108072048037,
+          "n": 1499,
+          "p50_ms": 2.6976999999999998,
+          "p95_ms": 5.3419,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5695,
+          "mean_ms": 0.9012650349650345,
+          "n": 429,
+          "p50_ms": 0.8547,
+          "p95_ms": 1.2421000000000002,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0383,
+          "mean_ms": 0.006256837891927957,
+          "n": 1499,
+          "p50_ms": 0.0062,
+          "p95_ms": 0.0138,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3275,
+          "mean_ms": 0.07851547698465647,
+          "n": 1499,
+          "p50_ms": 0.068,
+          "p95_ms": 0.16019999999999998,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.14229999999999998,
+          "mean_ms": 0.0143273515677118,
+          "n": 1499,
+          "p50_ms": 0.013600000000000001,
+          "p95_ms": 0.0237,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6066999999999999,
+          "mean_ms": 0.005051501000667105,
+          "n": 1499,
+          "p50_ms": 0.0007,
+          "p95_ms": 0.0025,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 18.088,
+          "mean_ms": 1.0303610406937949,
+          "n": 1499,
+          "p50_ms": 0.9626,
+          "p95_ms": 1.3763,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r256-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 256,
+        "save_policy": {
+          "checkpoint_interval": 64,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r256-a8-h10000-durable",
+        "final_flush_ms": 7.3186,
+        "final_save_bytes": 12648448,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 11473,
+          "records_loaded": 11499,
+          "records_replayed": 26,
+          "total": {
+            "nanos": 189070100,
+            "secs": 1
+          }
+        },
+        "restart_replay_ms": 1189.0706,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 867,
+          "checkpoint_bytes": 1152514,
+          "checkpoint_sequence": 11473,
+          "checkpoints": 24,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 7,
+          "last_checkpoint_ms": 25,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 26.876,
+          "mean_ms": 14.813303202134747,
+          "n": 1499,
+          "p50_ms": 13.601,
+          "p95_ms": 23.0069,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 13.5218,
+          "mean_ms": 6.9212437625083405,
+          "n": 1499,
+          "p50_ms": 6.1724,
+          "p95_ms": 11.8457,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.43600000000000005,
+          "mean_ms": 0.004415543695797199,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0157,
+          "mean_ms": 0.37386013986013983,
+          "n": 429,
+          "p50_ms": 0.32880000000000004,
+          "p95_ms": 0.7234,
+          "phase": "client_application"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 26.877000000000002,
+          "mean_ms": 14.813858105403611,
+          "n": 1499,
+          "p50_ms": 13.6017,
+          "p95_ms": 23.0074,
+          "phase": "command_call"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.4308999999999998,
+          "mean_ms": 0.5614680453635759,
+          "n": 1499,
+          "p50_ms": 0.5127,
+          "p95_ms": 0.8993,
+          "phase": "navigation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.9067,
+          "mean_ms": 2.3704607071380894,
+          "n": 1499,
+          "p50_ms": 2.1305,
+          "p95_ms": 3.7225,
+          "phase": "perception"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 8.2089,
+          "mean_ms": 3.5158063375583763,
+          "n": 1499,
+          "p50_ms": 3.0707,
+          "p95_ms": 6.0133,
+          "phase": "publication"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.153,
+          "mean_ms": 0.9724804195804205,
+          "n": 429,
+          "p50_ms": 0.8968,
+          "p95_ms": 1.3668,
+          "phase": "rendering"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0557,
+          "mean_ms": 0.007124683122081389,
+          "n": 1499,
+          "p50_ms": 0.0067,
+          "p95_ms": 0.0153,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.8421000000000001,
+          "mean_ms": 0.35636430953969267,
+          "n": 1499,
+          "p50_ms": 0.3475,
+          "p95_ms": 0.559,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0429,
+          "mean_ms": 0.012062508338892606,
+          "n": 1499,
+          "p50_ms": 0.011,
+          "p95_ms": 0.018000000000000002,
+          "phase": "serialization"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6161,
+          "mean_ms": 0.0068104736490993975,
+          "n": 1499,
+          "p50_ms": 0.0007999999999999999,
+          "p95_ms": 0.0039,
+          "phase": "simulation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.8597,
+          "mean_ms": 1.0575468312208127,
+          "n": 1499,
+          "p50_ms": 0.9947,
+          "p95_ms": 1.3871,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    }
+  ],
+  "default-interval": [
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h100-durable",
+        "final_flush_ms": 101.61330000000001,
+        "final_save_bytes": 217088,
+        "history_end": 283,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 283,
+          "records_replayed": 283,
+          "total": {
+            "nanos": 149346100,
+            "secs": 0
+          }
+        },
+        "restart_replay_ms": 149.3467,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 283,
+          "batches": 29,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 283,
+          "error": null,
+          "journal_bytes": 123620,
+          "last_batch_ms": 37,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5483,
+          "mean_ms": 0.6924874316939894,
+          "n": 183,
+          "p50_ms": 0.6183,
+          "p95_ms": 1.1972,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.304,
+          "mean_ms": 0.12186338797814199,
+          "n": 183,
+          "p50_ms": 0.1167,
+          "p95_ms": 0.175,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.8249000000000001,
+          "mean_ms": 0.28461366120218573,
+          "n": 183,
+          "p50_ms": 0.29050000000000004,
+          "p95_ms": 0.38249999999999995,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5488,
+          "mean_ms": 0.6928049180327868,
+          "n": 183,
+          "p50_ms": 0.6185999999999999,
+          "p95_ms": 1.1974,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3215,
+          "mean_ms": 0.11906065573770491,
+          "n": 183,
+          "p50_ms": 0.1093,
+          "p95_ms": 0.2103,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.957,
+          "mean_ms": 0.2870300546448088,
+          "n": 183,
+          "p50_ms": 0.1957,
+          "p95_ms": 0.5613,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.2183,
+          "mean_ms": 0.062420218579234944,
+          "n": 183,
+          "p50_ms": 0.0588,
+          "p95_ms": 0.097,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.6418,
+          "mean_ms": 0.7878961748633881,
+          "n": 183,
+          "p50_ms": 0.7858,
+          "p95_ms": 1.0005000000000002,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.005,
+          "mean_ms": 0.00020874316939890729,
+          "n": 183,
+          "p50_ms": 0.00019999999999999998,
+          "p95_ms": 0.0003,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.18939999999999999,
+          "mean_ms": 0.04100437158469944,
+          "n": 183,
+          "p50_ms": 0.0248,
+          "p95_ms": 0.1065,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0706,
+          "mean_ms": 0.011440437158469952,
+          "n": 183,
+          "p50_ms": 0.0104,
+          "p95_ms": 0.016,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3421,
+          "mean_ms": 0.02682349726775957,
+          "n": 183,
+          "p50_ms": 0.0012,
+          "p95_ms": 0.2165,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0764,
+          "mean_ms": 0.022636065573770493,
+          "n": 183,
+          "p50_ms": 0.0177,
+          "p95_ms": 0.0499,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 1,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a1-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          "multi_actor"
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a1-h10000-durable",
+        "final_flush_ms": 382.4067,
+        "final_save_bytes": 11829248,
+        "history_end": 10183,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 10001,
+          "records_loaded": 10183,
+          "records_replayed": 182,
+          "total": {
+            "nanos": 167475200,
+            "secs": 2
+          }
+        },
+        "restart_replay_ms": 2167.476,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 10183,
+          "batches": 61,
+          "checkpoint_bytes": 78226,
+          "checkpoint_sequence": 10001,
+          "checkpoints": 1,
+          "durable_sequence": 10183,
+          "error": null,
+          "journal_bytes": 124352,
+          "last_batch_ms": 74,
+          "last_checkpoint_ms": 2,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 15.9598,
+          "mean_ms": 9.36245191256831,
+          "n": 183,
+          "p50_ms": 9.0166,
+          "p95_ms": 12.6549,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 11.0575,
+          "mean_ms": 5.340986338797811,
+          "n": 183,
+          "p50_ms": 5.0038,
+          "p95_ms": 7.255199999999999,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0257,
+          "mean_ms": 0.00014043715846994535,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0176,
+          "mean_ms": 0.3134256830601092,
+          "n": 183,
+          "p50_ms": 0.31129999999999997,
+          "p95_ms": 0.49319999999999997,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 15.9604,
+          "mean_ms": 9.362974316939889,
+          "n": 183,
+          "p50_ms": 9.0173,
+          "p95_ms": 12.6556,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3675,
+          "mean_ms": 0.12424863387978138,
+          "n": 183,
+          "p50_ms": 0.1111,
+          "p95_ms": 0.2181,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.7649999999999999,
+          "mean_ms": 0.2933994535519126,
+          "n": 183,
+          "p50_ms": 0.2086,
+          "p95_ms": 0.5651,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.6359,
+          "mean_ms": 2.545977049180329,
+          "n": 183,
+          "p50_ms": 2.4072,
+          "p95_ms": 3.1513999999999998,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.6222,
+          "mean_ms": 0.9144377049180326,
+          "n": 183,
+          "p50_ms": 0.8746,
+          "p95_ms": 1.3305,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0007999999999999999,
+          "mean_ms": 0.00038743169398907116,
+          "n": 183,
+          "p50_ms": 0.00039999999999999996,
+          "p95_ms": 0.0006,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.34299999999999997,
+          "mean_ms": 0.0632377049180328,
+          "n": 183,
+          "p50_ms": 0.047599999999999996,
+          "p95_ms": 0.1457,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0465,
+          "mean_ms": 0.014074316939890707,
+          "n": 183,
+          "p50_ms": 0.011600000000000001,
+          "p95_ms": 0.0224,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3167,
+          "mean_ms": 0.027000000000000003,
+          "n": 183,
+          "p50_ms": 0.002,
+          "p95_ms": 0.21760000000000002,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.7474,
+          "mean_ms": 0.9530005464480873,
+          "n": 183,
+          "p50_ms": 0.9008,
+          "p95_ms": 1.2647,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a1-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 183,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h100-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 100,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h100-durable",
+        "final_flush_ms": 42.0168,
+        "final_save_bytes": 2011136,
+        "history_end": 1603,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 1024,
+          "records_loaded": 1603,
+          "records_replayed": 579,
+          "total": {
+            "nanos": 248961300,
+            "secs": 2
+          }
+        },
+        "restart_replay_ms": 2248.9627,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 1603,
+          "batches": 287,
+          "checkpoint_bytes": 612162,
+          "checkpoint_sequence": 1024,
+          "checkpoints": 1,
+          "durable_sequence": 1603,
+          "error": null,
+          "journal_bytes": 896918,
+          "last_batch_ms": 22,
+          "last_checkpoint_ms": 15,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.7498000000000005,
+          "mean_ms": 2.811518163672651,
+          "n": 1503,
+          "p50_ms": 2.6444,
+          "p95_ms": 4.117,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.738,
+          "mean_ms": 0.46809946773120475,
+          "n": 1503,
+          "p50_ms": 0.431,
+          "p95_ms": 1.0351,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0746,
+          "mean_ms": 4.9634065202927475e-05,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.955,
+          "mean_ms": 0.31521511627906973,
+          "n": 430,
+          "p50_ms": 0.2932,
+          "p95_ms": 0.6332,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.7504,
+          "mean_ms": 2.81185116433799,
+          "n": 1503,
+          "p50_ms": 2.6448,
+          "p95_ms": 4.1175,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.9738,
+          "mean_ms": 0.4468301397205586,
+          "n": 1503,
+          "p50_ms": 0.4234,
+          "p95_ms": 0.6769000000000001,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.2879,
+          "mean_ms": 1.489556087824351,
+          "n": 1503,
+          "p50_ms": 1.3359,
+          "p95_ms": 2.2736,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0645,
+          "mean_ms": 0.2682102461743179,
+          "n": 1503,
+          "p50_ms": 0.2356,
+          "p95_ms": 0.6153000000000001,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.0646,
+          "mean_ms": 0.8668909302325583,
+          "n": 430,
+          "p50_ms": 0.8335,
+          "p95_ms": 1.2997,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.050899999999999994,
+          "mean_ms": 0.005703792415169667,
+          "n": 1503,
+          "p50_ms": 0.0055,
+          "p95_ms": 0.0126,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.23120000000000002,
+          "mean_ms": 0.044940186294078435,
+          "n": 1503,
+          "p50_ms": 0.040299999999999996,
+          "p95_ms": 0.0851,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.032,
+          "mean_ms": 0.008352827677977386,
+          "n": 1503,
+          "p50_ms": 0.007700000000000001,
+          "p95_ms": 0.0135,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3836,
+          "mean_ms": 0.00436387225548902,
+          "n": 1503,
+          "p50_ms": 0.0005,
+          "p95_ms": 0.002,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.3411,
+          "mean_ms": 0.07541190951430472,
+          "n": 1503,
+          "p50_ms": 0.0492,
+          "p95_ms": 0.1651,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h100-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1503,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r8-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 8,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r8-a8-h10000-durable",
+        "final_flush_ms": 11.312600000000002,
+        "final_save_bytes": 12021760,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 11025,
+          "records_loaded": 11499,
+          "records_replayed": 474,
+          "total": {
+            "nanos": 906844200,
+            "secs": 6
+          }
+        },
+        "restart_replay_ms": 6906.8447,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 803,
+          "checkpoint_bytes": 368128,
+          "checkpoint_sequence": 11025,
+          "checkpoints": 2,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 10,
+          "last_checkpoint_ms": 9,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 24.6355,
+          "mean_ms": 12.79905210140092,
+          "n": 1499,
+          "p50_ms": 12.0359,
+          "p95_ms": 19.008899999999997,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 12.555200000000001,
+          "mean_ms": 6.45321054036024,
+          "n": 1499,
+          "p50_ms": 5.8726,
+          "p95_ms": 11.0175,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.1023,
+          "mean_ms": 0.00011454302868579054,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0432,
+          "mean_ms": 0.3704048951048952,
+          "n": 429,
+          "p50_ms": 0.3259,
+          "p95_ms": 0.7087,
+          "phase": "client_application"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 24.6362,
+          "mean_ms": 12.799565110073376,
+          "n": 1499,
+          "p50_ms": 12.036399999999999,
+          "p95_ms": 19.009700000000002,
+          "phase": "command_call"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.8208,
+          "mean_ms": 0.47644663108739205,
+          "n": 1499,
+          "p50_ms": 0.4393,
+          "p95_ms": 0.7572,
+          "phase": "navigation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 4.9195,
+          "mean_ms": 1.5815711140760482,
+          "n": 1499,
+          "p50_ms": 1.413,
+          "p95_ms": 2.4678,
+          "phase": "perception"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 7.018199999999999,
+          "mean_ms": 3.1463755837224787,
+          "n": 1499,
+          "p50_ms": 2.7813,
+          "p95_ms": 5.4822,
+          "phase": "publication"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9968,
+          "mean_ms": 0.9460435897435899,
+          "n": 429,
+          "p50_ms": 0.8893,
+          "p95_ms": 1.3094000000000001,
+          "phase": "rendering"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0388,
+          "mean_ms": 0.006825150100066708,
+          "n": 1499,
+          "p50_ms": 0.0066,
+          "p95_ms": 0.0147,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.903,
+          "mean_ms": 0.08910220146764505,
+          "n": 1499,
+          "p50_ms": 0.0823,
+          "p95_ms": 0.1719,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.064,
+          "mean_ms": 0.015385190126751167,
+          "n": 1499,
+          "p50_ms": 0.0146,
+          "p95_ms": 0.0247,
+          "phase": "serialization"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.4757,
+          "mean_ms": 0.004636490993995991,
+          "n": 1499,
+          "p50_ms": 0.0007,
+          "p95_ms": 0.0027,
+          "phase": "simulation"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.1201000000000003,
+          "mean_ms": 1.0253846564376246,
+          "n": 1499,
+          "p50_ms": 0.9789,
+          "p95_ms": 1.3420999999999998,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r8-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r256-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 256,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r256-a8-h10000-durable",
+        "final_flush_ms": 27.7892,
+        "final_save_bytes": 12644352,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 11025,
+          "records_loaded": 11499,
+          "records_replayed": 474,
+          "total": {
+            "nanos": 151783500,
+            "secs": 7
+          }
+        },
+        "restart_replay_ms": 7151.7844000000005,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 775,
+          "checkpoint_bytes": 987630,
+          "checkpoint_sequence": 11025,
+          "checkpoints": 2,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 15,
+          "last_checkpoint_ms": 27,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 29.7397,
+          "mean_ms": 14.354709606404263,
+          "n": 1499,
+          "p50_ms": 13.2552,
+          "p95_ms": 24.2986,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 19.415499999999998,
+          "mean_ms": 6.717203068712468,
+          "n": 1499,
+          "p50_ms": 6.054,
+          "p95_ms": 12.2013,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.381,
+          "mean_ms": 0.0004422948632421615,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.2539,
+          "mean_ms": 0.3568764568764566,
+          "n": 429,
+          "p50_ms": 0.3125,
+          "p95_ms": 0.7327,
+          "phase": "client_application"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 29.7405,
+          "mean_ms": 14.35523749166112,
+          "n": 1499,
+          "p50_ms": 13.2558,
+          "p95_ms": 24.2993,
+          "phase": "command_call"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.5417,
+          "mean_ms": 0.5501917278185452,
+          "n": 1499,
+          "p50_ms": 0.4975,
+          "p95_ms": 0.9105,
+          "phase": "navigation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.2968,
+          "mean_ms": 2.2975455637091398,
+          "n": 1499,
+          "p50_ms": 2.0728999999999997,
+          "p95_ms": 3.8243,
+          "phase": "perception"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 7.483,
+          "mean_ms": 3.3917061374249466,
+          "n": 1499,
+          "p50_ms": 2.9871,
+          "p95_ms": 6.2111,
+          "phase": "publication"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.6520000000000001,
+          "mean_ms": 0.9328083916083918,
+          "n": 429,
+          "p50_ms": 0.8656999999999999,
+          "p95_ms": 1.2832,
+          "phase": "rendering"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0457,
+          "mean_ms": 0.006608138759172794,
+          "n": 1499,
+          "p50_ms": 0.0063,
+          "p95_ms": 0.0148,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.9197,
+          "mean_ms": 0.34451280853902655,
+          "n": 1499,
+          "p50_ms": 0.3373,
+          "p95_ms": 0.5493,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0539,
+          "mean_ms": 0.010954769846564363,
+          "n": 1499,
+          "p50_ms": 0.0098,
+          "p95_ms": 0.0163,
+          "phase": "serialization"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0028000000000001,
+          "mean_ms": 0.007051367578385586,
+          "n": 1499,
+          "p50_ms": 0.0007,
+          "p95_ms": 0.0037,
+          "phase": "simulation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.1941,
+          "mean_ms": 1.0284937291527678,
+          "n": 1499,
+          "p50_ms": 0.9689,
+          "p95_ms": 1.3684,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    }
+  ],
+  "paired-disabled": [
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r256-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 256,
+        "save_policy": {
+          "checkpoint_interval": 0,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r256-a8-h10000-durable",
+        "final_flush_ms": 12.9682,
+        "final_save_bytes": 6909952,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 0,
+          "records_loaded": 11499,
+          "records_replayed": 11499,
+          "total": {
+            "nanos": 2927700,
+            "secs": 119
+          }
+        },
+        "restart_replay_ms": 119002.9281,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 927,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 12,
+          "last_checkpoint_ms": 0,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 28.392400000000002,
+          "mean_ms": 15.370730086724498,
+          "n": 1499,
+          "p50_ms": 14.387,
+          "p95_ms": 23.6079,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 14.65,
+          "mean_ms": 7.046683789192788,
+          "n": 1499,
+          "p50_ms": 6.4253,
+          "p95_ms": 11.861,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.8191,
+          "mean_ms": 0.3766340326340325,
+          "n": 429,
+          "p50_ms": 0.3326,
+          "p95_ms": 0.6998,
+          "phase": "client_application"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 28.3931,
+          "mean_ms": 15.371351834556354,
+          "n": 1499,
+          "p50_ms": 14.3876,
+          "p95_ms": 23.6087,
+          "phase": "command_call"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.577,
+          "mean_ms": 0.5503767178118741,
+          "n": 1499,
+          "p50_ms": 0.5091,
+          "p95_ms": 0.8608,
+          "phase": "navigation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 5.2252,
+          "mean_ms": 2.343652968645763,
+          "n": 1499,
+          "p50_ms": 2.0953999999999997,
+          "p95_ms": 3.8594,
+          "phase": "perception"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 7.4129000000000005,
+          "mean_ms": 3.5713991327551753,
+          "n": 1499,
+          "p50_ms": 3.1356,
+          "p95_ms": 5.9752,
+          "phase": "publication"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.9277,
+          "mean_ms": 0.9656006993006995,
+          "n": 429,
+          "p50_ms": 0.8928999999999999,
+          "p95_ms": 1.2982,
+          "phase": "rendering"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0477,
+          "mean_ms": 0.007122148098732501,
+          "n": 1499,
+          "p50_ms": 0.0067,
+          "p95_ms": 0.0158,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0016999999999998,
+          "mean_ms": 0.30315323549032713,
+          "n": 1499,
+          "p50_ms": 0.273,
+          "p95_ms": 0.4706,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.1071,
+          "mean_ms": 0.01232908605737157,
+          "n": 1499,
+          "p50_ms": 0.011600000000000001,
+          "p95_ms": 0.0188,
+          "phase": "serialization"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.861,
+          "mean_ms": 0.006974783188792534,
+          "n": 1499,
+          "p50_ms": 0.0009,
+          "p95_ms": 0.004,
+          "phase": "simulation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.8701999999999996,
+          "mean_ms": 1.5290382254836572,
+          "n": 1499,
+          "p50_ms": 1.5096,
+          "p95_ms": 2.3474,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    }
+  ],
+  "paired-default": [
+    {
+      "metadata": {
+        "actors": 8,
+        "architecture": "x86_64",
+        "build_profile": "release",
+        "case": "r256-a8-h10000-durable",
+        "client_observer": 1,
+        "commit": "5a79c3a8080807ca52687439221f00da124c57b0",
+        "cycles": 3,
+        "dirty": true,
+        "history_start": 10000,
+        "kind": "case",
+        "not_applicable": [
+          null,
+          null
+        ],
+        "platform": "windows",
+        "regions": 256,
+        "save_policy": {
+          "checkpoint_interval": 1024,
+          "idle_ms": 1,
+          "max_ms": 50,
+          "queue_bytes": 8388608,
+          "target_ms": 10
+        },
+        "seed": 42,
+        "storage": "background_sqlite_journal",
+        "trace_version": 1,
+        "warmup": 0
+      },
+      "end": {
+        "case": "r256-a8-h10000-durable",
+        "final_flush_ms": 34.5967,
+        "final_save_bytes": 12644352,
+        "history_end": 11499,
+        "kind": "case_end",
+        "recovery": {
+          "checkpoint_sequence": 11025,
+          "records_loaded": 11499,
+          "records_replayed": 474,
+          "total": {
+            "nanos": 20052600,
+            "secs": 7
+          }
+        },
+        "restart_replay_ms": 7020.053,
+        "rewind_count": 128,
+        "save_status": {
+          "accepted_sequence": 11499,
+          "batches": 820,
+          "checkpoint_bytes": 987630,
+          "checkpoint_sequence": 11025,
+          "checkpoints": 2,
+          "durable_sequence": 11499,
+          "error": null,
+          "journal_bytes": 898482,
+          "last_batch_ms": 29,
+          "last_checkpoint_ms": 26,
+          "overdue": false,
+          "pending_bytes": 0,
+          "saving": false,
+          "unsaved_age_ms": 0
+        }
+      },
+      "mixed": [
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 25.9623,
+          "mean_ms": 14.179725683789188,
+          "n": 1499,
+          "p50_ms": 13.9657,
+          "p95_ms": 16.2047,
+          "phase": "authoritative_total"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 13.1158,
+          "mean_ms": 6.371770980653764,
+          "n": 1499,
+          "p50_ms": 6.1605,
+          "p95_ms": 7.5403,
+          "phase": "candidate_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.5834,
+          "mean_ms": 0.0007759839893262175,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "checkpoint_capture"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.0929,
+          "mean_ms": 0.31778275058275046,
+          "n": 429,
+          "p50_ms": 0.31980000000000003,
+          "p95_ms": 0.4567,
+          "phase": "client_application"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 25.9629,
+          "mean_ms": 14.180352234823227,
+          "n": 1499,
+          "p50_ms": 13.966299999999999,
+          "p95_ms": 16.2058,
+          "phase": "command_call"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 1.4302,
+          "mean_ms": 0.5256185456971311,
+          "n": 1499,
+          "p50_ms": 0.49410000000000004,
+          "p95_ms": 0.7647,
+          "phase": "navigation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 4.8111999999999995,
+          "mean_ms": 2.150200466977985,
+          "n": 1499,
+          "p50_ms": 2.0006999999999997,
+          "p95_ms": 2.8157,
+          "phase": "perception"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 6.5644,
+          "mean_ms": 3.1440420947298158,
+          "n": 1499,
+          "p50_ms": 2.9704,
+          "p95_ms": 4.1392,
+          "phase": "publication"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 2.3297,
+          "mean_ms": 0.9531834498834513,
+          "n": 429,
+          "p50_ms": 0.8824,
+          "p95_ms": 1.4291,
+          "phase": "rendering"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "replacement"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0395,
+          "mean_ms": 0.006792128085390245,
+          "n": 1499,
+          "p50_ms": 0.0067,
+          "p95_ms": 0.0156,
+          "phase": "revision_comparison"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.9162,
+          "mean_ms": 0.27572421614409603,
+          "n": 1499,
+          "p50_ms": 0.25129999999999997,
+          "p95_ms": 0.43770000000000003,
+          "phase": "rewind_snapshot"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.045000000000000005,
+          "mean_ms": 0.011492995330220131,
+          "n": 1499,
+          "p50_ms": 0.010499999999999999,
+          "p95_ms": 0.0161,
+          "phase": "serialization"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.6023,
+          "mean_ms": 0.006423615743829229,
+          "n": 1499,
+          "p50_ms": 0.0007999999999999999,
+          "p95_ms": 0.0038,
+          "phase": "simulation"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "sync"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 3.7463,
+          "mean_ms": 1.6868846564376243,
+          "n": 1499,
+          "p50_ms": 1.5927,
+          "p95_ms": 2.3584,
+          "phase": "unattributed"
+        },
+        {
+          "case": "r256-a8-h10000-durable",
+          "kind": "summary",
+          "label": "mixed",
+          "max_ms": 0.0,
+          "mean_ms": 0.0,
+          "n": 1499,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "phase": "write_flush"
+        }
+      ]
+    }
+  ]
+}

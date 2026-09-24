@@ -8,13 +8,14 @@ execution; a request lost with the unsaved tail may execute again after restart.
 
 ## Policy and controls
 
-The server exposes these startup options (milliseconds except the queue limit):
+The server exposes these startup options (ages in milliseconds, queue in bytes):
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--save-target-ms` | 30000 | Prefer saving once the oldest pending record reaches this age |
 | `--save-max-ms` | 60000 | Start saving even if activity continues |
 | `--save-idle-ms` | 750 | Quiet time since the last accepted record before a target-age save |
+| `--checkpoint-interval` | 1024 | Accepted journal entries between checkpoint captures; 0 disables |
 | `--save-queue-bytes` | 8388608 | Bound encoded pending data, including the batch being written |
 
 Saving also starts at 75% queue capacity. This uses activity and queue pressure as
@@ -50,20 +51,21 @@ must be saved before privileged commands can execute. Once queued, the lineage
 remains marked even if the first flush fails; authority stays disabled until a
 successful retry. Rewind cannot clear the marker.
 
-## Format 4
+## Format 5
 
-Only the current format is supported; old JSON saves are rejected without an
+Only the current format is supported; old JSON and format-4 SQLite saves are rejected without an
 importer. The filename extension is immaterial. The database uses bundled SQLite
-through `rusqlite`, confined to the server crate. A `journal` table holds an
-immutable replay base at sequence zero and appended records at contiguous global
-sequences. SQLite transactions commit complete batches. The database uses
+through `rusqlite`, confined to the server crate. The `journal` table holds the
+immutable replay base at sequence zero and the active tail; `history` holds records
+covered by the selected checkpoint. Global sequence numbers remain contiguous
+across both tables. SQLite transactions commit complete batches. The database uses
 `journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and
-`user_version=4`. SQLite's temporary rollback journal is part of transaction
+`user_version=5`. SQLite's temporary rollback journal is part of transaction
 recovery and must not be manually deleted after a crash.
 
 Each row contains a 24-byte little-endian frame header:
 
-`magic | format:u16=4 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
+`magic | format:u16=5 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
 
 The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the permanent
 wizard marker uses kind 2. CRC32C covers header bytes 4–19 and the payload, with
@@ -90,9 +92,10 @@ application-level durability barrier. Do not claim stronger bootstrap guarantees
 
 The application never rewrites prior records during normal saves. Database page
 and rollback-journal writes are SQLite's responsibility and are not equal to
-encoded frame bytes. No application checkpoint, rotation, or compaction is
-implemented. Full-history replay, candidate copies, and the 128-boundary rewind
-window retain their existing costs; those belong to later performance phases.
+encoded frame bytes. Periodic [checkpoints and logical compaction](checkpoints.md)
+move covered records unchanged into retained history and replace the current
+snapshot atomically. Startup restores the checkpoint and simulates only its tail;
+all history remains readable and retryable. Candidate copying remains Phase D work.
 
 ## Verification
 

@@ -852,6 +852,7 @@ dependencies = [
 name = "tor-simulation"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tor-world",
 ]
 
@@ -870,6 +871,9 @@ dependencies = [
 [[package]]
 name = "tor-world"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "tungstenite"

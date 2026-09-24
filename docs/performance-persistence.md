@@ -27,7 +27,7 @@ The milestone uses these product decisions:
    exit, graceful server shutdown, and wizard enablement retain durable barriers.
 2. **Old saves are intentionally unsupported.** This is a pre-release project,
    so the new persistence layout will advance the save format and reject older
-   formats. There will be no format-3 importer or compatibility reader. Tests,
+   formats. There is no historical-format importer or compatibility reader. Tests,
    fixtures, documentation, and the sample saves move to the new format together.
 3. **Latency targets are provisional.** Initial release-build goals are p95 below
    8 ms and maximum below 33 ms for an ordinary locally saved action, with no
@@ -43,6 +43,16 @@ determinism, disclosure, and consistent recovery. CI enforces scale and regressi
 rather than fragile machine-specific wall-clock numbers.
 
 ## Measurement model
+
+Profiling remains maintained after milestone 3p. Every later gameplay and client
+feature must keep instrumentation and report validation working and add relevant
+representative workloads when it introduces new performance-sensitive behavior.
+Use targeted release-build comparisons to check that new features do not add
+material action or presentation latency; a full matrix is reserved for broad
+changes or evidence that focused checks are insufficient. Record matched cases,
+sample counts, p50/p95/maximum, scale/operation counts, and unresolved regressions.
+Follow [development practices](../CONTRIBUTING.md) for workload versioning,
+before/after comparisons, and escalation. Correctness checks remain required.
 
 The checked-in Phase A harness measures:
 
@@ -65,7 +75,8 @@ automated regression tests.
 
 ## Persistence design
 
-Phase B uses the implemented [format-4 background journal](background-saving.md):
+The [background journal](background-saving.md) introduced in Phase B now uses
+format 5 with Phase C checkpoints:
 
 1. Validate and simulate in a transactional candidate, encode only the new record,
    and admit it to the bounded pending queue. Rejection leaves published state
@@ -75,11 +86,12 @@ Phase B uses the implemented [format-4 background journal](background-saving.md)
    maximum age and queue pressure force progress under continuing activity.
 3. Explicit saves wait for the accepted sequence captured by the request. Failed
    background saves retain pending records and block new mutations until retry.
-4. Startup recovers SQLite transactions, validates every frame, and replays the
-   complete saved prefix, including receipts, abandoned branches, and private
-   notes. The permanent wizard marker is saved before authority is enabled.
-5. Application checkpoints and rotation remain Phase C. SQLite rollback journals
-   implement atomic batch recovery and do not compact application history.
+4. Startup recovers SQLite transactions, validates every frame, restores the
+   selected checkpoint and replays its tail. Receipts, abandoned branches, and
+   private notes remain retained. The permanent wizard marker is saved before authority is enabled.
+5. Phase C atomically selects a checkpoint and moves its covered journal rows
+   into retained history. SQLite rollback journals protect this entire transaction;
+   obsolete checkpoint pages are reused without deleting history.
 
 ## State and rollback work
 
@@ -148,7 +160,8 @@ Windows/Linux name-durability guarantee in the Phase A writer. Passing restart
 tests does not meet the full OS/power-failure contract.
 
 That review records Phase A evidence. The current Phase B contract supersedes its
-synchronous publication and two-file installation proposal. Phase C remains deferred.
+synchronous publication and two-file installation proposal. Phase C uses the same
+SQLite transaction boundary for checkpoint selection and rotation.
 
 ### Phase B — Append journal
 
@@ -189,8 +202,21 @@ later phase's total-latency or startup target.
 
 ### Phase C — Checkpoints and compaction
 
-Add periodic atomic checkpoints, bounded journal rotation, startup replay timing,
-and fault injection at all file transition boundaries.
+Implemented and locally verified. See [checkpoints](checkpoints.md) for the
+contract and [Phase C findings](phase-c-findings.md) for retained measurements.
+Periodic background checkpoints retain simulation/navigation, revisions, current
+branch and all 128 rewind boundaries. History frames and receipts move unchanged
+into retained storage in the same transaction that installs the snapshot and
+rotates the journal. Startup reads history but only simulates the remaining tail.
+
+Focused release verification uses `latency_bench --phase-c`: the four saved
+eight-region cases at one/eight actors and 100/10,000 retained actions, plus the
+256-region/eight-actor/10,000-action case. Run matched checkpoint-disabled and
+enabled policies with identical workloads and save timing. Record capture cost,
+worker encoding size/time, p50/p95/maximum command latency and restart/replayed
+record counts. Validate with `performance_report.py --phase-c`. Include actual
+text/ASCII/headless restart and unsaved-tail rollback tests. Full matrix expansion
+is conditional on unexplained regressions or broader changes.
 
 ### Phase D — State-copy and observation scaling
 

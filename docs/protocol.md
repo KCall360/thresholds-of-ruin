@@ -76,7 +76,7 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Saves must use format 4 and ruleset `diagonal-v11`; older formats
+must upgrade. Saves must use format 5 and ruleset `diagonal-v11`; older formats
 and rulesets are rejected. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
@@ -249,7 +249,7 @@ A background worker saves atomic batches. Acknowledged unsaved play can be lost
 on a crash. Explicit save, normal player-client exit, and graceful server shutdown
 wait for persistence; enabling wizard authority also waits for its permanent
 marker. A sidecar `.lock` file prevents concurrent server writers. See
-[background saving](background-saving.md) for policy, failure handling, format 4,
+[background saving](background-saving.md) for policy, failure handling, format 5,
 and the tested durability boundaries.
 
 ```json
@@ -325,5 +325,5 @@ See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
 surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
-Only protocol 12, save format 4, and `diagonal-v11` are supported; there are no
+Only protocol 12, save format 5, and `diagonal-v11` are supported; there are no
 historical rules implementations or save importers.

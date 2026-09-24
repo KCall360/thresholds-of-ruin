@@ -27,7 +27,9 @@ until its guide and the roadmap are updated together.
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Review accepted future game requirements | [Game design plan](game-design-plan.md) |
 | Review background-save measurements | [Phase B findings](phase-b-findings.md) |
+| Review checkpoint and startup measurements | [Phase C findings](phase-c-findings.md) |
 | Configure saves and understand crash recovery | [Background saving](background-saving.md) |
+| Understand bounded replay and retained history | [Checkpoints](checkpoints.md) |
 | Run the server or integrate a client | [Protocol and persistence](protocol.md) |
 | Play in a terminal | [Text client](text-client.md) |
 | Play in a native window | [Graphical ASCII client](ascii-client.md) |

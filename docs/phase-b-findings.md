@@ -1,5 +1,8 @@
 # Phase B findings — 2026-09-24
 
+This report records the pre-checkpoint Phase B implementation. See the
+[Phase C findings](phase-c-findings.md) for subsequent checkpoint and restart work.
+
 Background persistence removes disk waits and whole-history encoding from ordinary
 acknowledgements. The focused release comparison completed all nine cases and
 13,798 ordered attempts using the unchanged version-1 mixed workload. Every saved

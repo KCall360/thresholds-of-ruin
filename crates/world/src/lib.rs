@@ -1,5 +1,6 @@
 //! Region-local geometry, independent of rendering and transport.
 
+pub mod checkpoint_map;
 mod scene;
 mod shadowcasting;
 mod topology;
@@ -10,10 +11,14 @@ pub use material::{Material, Terrain};
 /// Physical scale shared by horizontal and vertical world cells.
 pub const CELL_SIZE_FEET: u32 = 5;
 
+pub use topology::checkpoint as checkpoint_worlds;
 pub use topology::{Direction, Door, Location, Passage, Region, RegionId, World, WorldError};
 
 /// Integer position in a region's local coordinate system.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(deny_unknown_fields)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -22,7 +27,8 @@ pub struct Position {
 
 /// Positive dimensions and an origin; authored interiors start at zero, while
 /// their material shells include negative coordinates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Extent {
     origin: Position,
     width: i32,

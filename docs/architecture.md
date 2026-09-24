@@ -228,9 +228,12 @@ Simulation remains deterministic and independent of storage and wall-clock time.
 Framed records add application versioning, checksums, and save identity to SQLite's
 transaction boundary. There is no historical save importer or rules implementation.
 
-The immutable initial replay base and complete retained records currently replay
-at startup and remain in memory. Periodic checkpoints, compaction, and reduced
-state-copy costs are later phases. Wizard undo preserves abandoned branches and
+Startup validates the immutable replay base and retained records, restores the
+latest [checkpoint](checkpoints.md), and simulates only its tail. Snapshot selection,
+history retention and journal rotation share a SQLite transaction. Deterministic
+backend snapshot types use Serde without I/O or clocks; they never enter protocol
+messages. Complete history remains in memory for existing queries and retries;
+reduced state-copy costs remain Phase D work. Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 
 Future scenario games persist activated regions and their full simulation state,
@@ -266,7 +269,7 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 12, save format 4, and ruleset `diagonal-v11` are the only supported
+version 12, save format 5, and ruleset `diagonal-v11` are the only supported
 runtime formats. Older saves and rulesets are rejected rather than migrated.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses

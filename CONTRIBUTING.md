@@ -21,6 +21,33 @@ and an integration acceptance scenario for its complete user-visible behavior.
 Add regression tests for bug fixes. Update the project documentation and milestone
 status with the behavior, limitations, and how the feature is verified.
 
+Treat performance as an ongoing feature requirement, not a one-time milestone.
+Maintain the profiling instrumentation, versioned workload fixtures, real-client
+drivers, and report validators as production code changes. When adding a feature,
+extend the representative workloads to exercise its latency-sensitive paths and
+relevant scale dimensions; keep existing workload versions and recorded baselines
+meaningful instead of silently changing their meaning.
+
+Run targeted release-build performance checks for changes to simulation,
+perception, persistence, protocol delivery, or client application/rendering.
+Choose cases that exercise the changed behavior plus a representative existing
+interaction, and compare matching before/after cases on the same machine and
+configuration. Include small/large cases for affected scale dimensions such as
+history, regions, actors, items, or remembered cells. Record the selected cases,
+sample counts, p50/p95/maximum latency, relevant operation/byte counts, and any
+limitations. Investigate material regressions and tail spikes before considering
+the feature complete; do not silently relax targets to accommodate new features.
+Preserve determinism, disclosure, recovery, and input responsiveness while
+optimizing. See the [performance plan](docs/performance-persistence.md) for the
+current provisional latency targets and measurement boundaries.
+
+The full performance matrix is not required for every change. Expand the focused
+checks when results are inconsistent, a regression is unexplained, or the change
+affects several subsystems. Documentation-only changes do not require latency
+benchmarks. Targeted profiling does not replace required correctness tests or the
+pre-publication verification below. Keep stable scale/operation-count regressions
+in automated tests; machine-dependent timing measurements remain diagnostic.
+
 Keep documentation roles distinct. `docs/milestones.md` is the status and roadmap
 source of truth, `docs/architecture.md` records durable boundaries and rationale,
 and feature guides specify implemented behavior. Link every guide from

@@ -8,7 +8,7 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **12**, save format **4**, and ruleset
+two-room fixture. New games use protocol **12**, save format **5**, and ruleset
 **`diagonal-v11`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
@@ -78,7 +78,7 @@ must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phase A complete; Phase B implemented and locally verified**.
+Status: **Phases A and B complete and merged; Phase C implemented and locally verified; CI pending**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -97,10 +97,12 @@ bounded background worker. Ordinary acknowledgements can precede persistence;
 explicit save, normal client exit, graceful server shutdown, and wizard enablement
 wait for their saved prefix. See [background saving](background-saving.md).
 The [Phase B findings](phase-b-findings.md) retain the nine-case comparison and
-actual-client run. All 200 Rust tests pass in debug/release; local client suites
-pass except the native mouse test blocked by desktop access/occlusion. All four
-desktop launchers are verified. Windows/Linux CI is required before merge; see
-[the publication handoff](session-handoff.md) and the live PR for its status.
+actual-client run. Phase B merged in PR #23 after Windows and Linux CI passed.
+Phase C adds periodic atomic checkpoints, logical journal compaction with retained
+history, and bounded tail replay. The [Phase C findings](phase-c-findings.md)
+retain focused release measurements and their limits. See [checkpoints](checkpoints.md) for the format,
+recovery contract, tests and limits. State-copy costs and client responsiveness
+remain Phases D and E; the broader performance milestone is not complete.
 Process recovery tests do not establish hardware power-loss behavior.
 
 Scope and sequencing are defined in the
@@ -292,6 +294,14 @@ deployment, multiplayer input policy, hunger, and ranged combat
 are also outside the current milestone sequence.
 
 ## How the roadmap changes
+
+Performance remains a completion criterion throughout all later milestones.
+Maintain the profiling code and evolve versioned workloads with new features;
+run focused release-build latency and scaling comparisons on the affected paths.
+Investigate material regressions before completing a feature. The full benchmark
+matrix is not required for every change; broaden it for cross-cutting changes or
+unexplained results. See [development practices](../CONTRIBUTING.md) for the
+ongoing profiling and targeted verification requirements.
 
 Every feature must add behavior tests at the layers it changes and an end-to-end
 acceptance scenario using the real applications. Update this file when status or

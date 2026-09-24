@@ -16,7 +16,10 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 4;
+const ARCHIVE_VERSION: u32 = 5;
+#[path = "checkpoint.rs"]
+mod checkpoint;
+pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = "diagonal-v11";
 
@@ -248,6 +251,8 @@ pub struct CommandProfile {
     pub scene_calls: usize,
     pub authoritative_total: Duration,
     pub rollback_capture: Duration,
+    pub checkpoint_capture: Duration,
+    pub checkpoint_captures: usize,
     pub simulation_transition: Duration,
     pub navigation_refresh: Duration,
     pub perception: Duration,
@@ -272,6 +277,15 @@ pub struct CommandProfile {
     pub file_replacements: usize,
 }
 
+/// Startup measurements; retained history is read but only the checkpoint tail is simulated.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct RecoveryProfile {
+    pub total: Duration,
+    pub records_loaded: usize,
+    pub records_replayed: usize,
+    pub checkpoint_sequence: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct BootstrapProfile {
     pub total: Duration,
@@ -283,6 +297,7 @@ impl CommandProfile {
     /// simulation phase; navigation perception belongs to navigation.
     pub fn exclusive_duration(&self) -> Duration {
         self.rollback_capture
+            + self.checkpoint_capture
             + self.simulation_transition
             + self.navigation_refresh
             + self.perception
@@ -306,6 +321,7 @@ struct Boundary {
 /// Durable chronological journal, including retained futures and explicit forks.
 #[derive(Debug)]
 pub struct Engine {
+    recovery: RecoveryProfile,
     current_branch: BranchId,
     wizard_enabled: bool,
     boundaries: VecDeque<Arc<Boundary>>,
@@ -347,6 +363,7 @@ impl Engine {
             revisions: revisions.clone(),
         });
         Ok(Self {
+            recovery: RecoveryProfile::default(),
             current_branch: branch.clone(),
             wizard_enabled: false,
             boundaries: VecDeque::from([initial]),
@@ -377,15 +394,30 @@ impl Engine {
         scenario: Scenario,
         policy: crate::SavePolicy,
     ) -> Result<Self, Failure> {
+        let started = Instant::now();
         policy.validate()?;
         let (path, lock) = lock_save(path.as_ref())?;
-        let (store, archive) = crate::storage::Store::open(
+        let (store, archive, checkpoint) = crate::storage::Store::open(
             &path,
             || Self::memory(scenario).map(|engine| engine.archive),
             policy,
             lock.clone(),
         )?;
-        let mut engine = Self::replay(archive)?;
+        let records_loaded = archive.records.len();
+        let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
+        let records_replayed = records_loaded
+            - checkpoint
+                .as_ref()
+                .map(|c| c.record_count)
+                .unwrap_or(0)
+                .min(records_loaded);
+        let mut engine = Self::replay(archive, checkpoint)?;
+        engine.recovery = RecoveryProfile {
+            total: started.elapsed(),
+            records_loaded,
+            records_replayed,
+            checkpoint_sequence,
+        };
         engine.path = Some(path);
         engine.lock = Some(lock);
         engine.store = Some(store);
@@ -398,6 +430,10 @@ impl Engine {
             None => Ok(()),
         }
     }
+    pub fn recovery_profile(&self) -> &RecoveryProfile {
+        &self.recovery
+    }
+
     pub fn save_status(&self) -> crate::SaveStatus {
         self.store
             .as_ref()
@@ -414,7 +450,7 @@ impl Engine {
         self.store.clone()
     }
 
-    fn replay(archive: Archive) -> Result<Self, Failure> {
+    fn replay(mut archive: Archive, checkpoint: Option<DiskCheckpoint>) -> Result<Self, Failure> {
         if archive.version != ARCHIVE_VERSION
             || Uuid::parse_str(&archive.view_salt).is_err()
             || archive.ruleset != RULESET
@@ -422,13 +458,21 @@ impl Engine {
         {
             return Err(invalid_archive());
         }
-        let mut engine = Self::memory(archive.scenario)?;
-        engine.archive.view_salt = archive.view_salt;
-        engine.current_branch = archive.branch.clone();
-        engine.archive.wizard_game = archive.wizard_game;
-        engine.wizard_enabled = archive.wizard_game;
-        engine.archive.branch = archive.branch;
-        for record in archive.records {
+        let (mut engine, records) = if let Some(checkpoint) = checkpoint {
+            if checkpoint.record_count > archive.records.len() {
+                return Err(invalid_archive());
+            }
+            let records = archive.records.split_off(checkpoint.record_count);
+            (checkpoint.restore(archive)?, records)
+        } else {
+            let records = std::mem::take(&mut archive.records);
+            let mut engine = Self::memory(archive.scenario.clone())?;
+            engine.current_branch = archive.branch.clone();
+            engine.archive = archive;
+            (engine, records)
+        };
+        engine.wizard_enabled = engine.archive.wizard_game;
+        for record in records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
                 || engine
                     .archive
@@ -716,7 +760,7 @@ impl Engine {
         if path.exists() {
             return Err(storage_failure());
         }
-        let (store, _) =
+        let (store, _, _) =
             crate::storage::Store::open(&path, || Ok(self.archive.clone()), policy, lock.clone())?;
         self.path = Some(path);
         self.lock = Some(lock);
@@ -1334,6 +1378,7 @@ impl Engine {
     // Clone would allow two independent engines to overwrite each other's journal.
     fn candidate(&self) -> Self {
         Self {
+            recovery: self.recovery.clone(),
             current_branch: self.current_branch.clone(),
             wizard_enabled: self.wizard_enabled,
             boundaries: self.boundaries.clone(),
@@ -1354,9 +1399,22 @@ impl Engine {
     fn persist_profiled(&self, profile: Option<&mut CommandProfile>) -> Result<(), Failure> {
         if let Some(store) = &self.store {
             let started = Instant::now();
-            store.enqueue(self.archive.records.last().ok_or_else(storage_failure)?)?;
+            let mut capture_time = Duration::ZERO;
+            let mut captures = 0;
+            store.enqueue(
+                self.archive.records.last().ok_or_else(storage_failure)?,
+                || {
+                    let capture_started = Instant::now();
+                    let checkpoint = Checkpoint::capture(self);
+                    capture_time = capture_started.elapsed();
+                    captures = 1;
+                    checkpoint
+                },
+            )?;
             if let Some(profile) = profile {
-                profile.journal_serialization += started.elapsed();
+                profile.journal_serialization += started.elapsed() - capture_time;
+                profile.checkpoint_capture += capture_time;
+                profile.checkpoint_captures += captures;
                 profile.records_serialized += 1;
             }
         }

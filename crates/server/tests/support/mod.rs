@@ -5,7 +5,7 @@ use std::path::Path;
 pub fn frame(sequence: u64, value: &Value) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(if sequence == 0 { b"TORB" } else { b"TORJ" });
-    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&5u16.to_le_bytes());
     bytes.extend_from_slice(&(if sequence == 0 { 0u16 } else { 1u16 }).to_le_bytes());
     bytes.extend_from_slice(&sequence.to_le_bytes());
     let payload = serde_json::to_vec(value).unwrap();

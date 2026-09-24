@@ -10,6 +10,7 @@ type Distributions = BTreeMap<(String, String), Vec<f64>>;
 fn phases(p: &CommandProfile) -> BTreeMap<String, f64> {
     [
         ("candidate_capture", p.rollback_capture),
+        ("checkpoint_capture", p.checkpoint_capture),
         ("simulation", p.simulation_transition),
         ("navigation", p.navigation_refresh),
         ("perception", p.perception),
@@ -198,7 +199,14 @@ fn main() {
         .map(|a| a[1].parse::<usize>().unwrap())
         .unwrap_or(5);
     assert!(cycles > 0);
-    let focused = args.iter().any(|arg| arg == "--phase-b");
+    let selected_case = args.iter().position(|arg| arg == "--case").map(|index| {
+        args.get(index + 1)
+            .expect("--case requires a case name")
+            .as_str()
+    });
+    let mut completed_cases = 0;
+    let phase_c = args.iter().any(|arg| arg == "--phase-c");
+    let focused = phase_c || args.iter().any(|arg| arg == "--phase-b");
     let save_ms = |flag: &str, fallback| {
         args.windows(2)
             .find(|a| a[0] == flag)
@@ -206,6 +214,7 @@ fn main() {
             .unwrap_or(fallback)
     };
     let save_policy = tor_server::SavePolicy {
+        checkpoint_interval: save_ms("--checkpoint-interval", 1024),
         target_interval: std::time::Duration::from_millis(save_ms("--save-target-ms", 30000)),
         max_unsaved_age: std::time::Duration::from_millis(save_ms("--save-max-ms", 60000)),
         idle_interval: std::time::Duration::from_millis(save_ms("--save-idle-ms", 750)),
@@ -239,6 +248,9 @@ fn main() {
         for actors in [1, 8] {
             for &history in histories {
                 for durable in [false, true] {
+                    if phase_c && !durable {
+                        continue;
+                    }
                     if focused && regions == 256 && (actors != 8 || history != 10000 || !durable) {
                         continue;
                     }
@@ -246,6 +258,10 @@ fn main() {
                         "r{regions}-a{actors}-h{history}-{}",
                         if durable { "durable" } else { "memory" }
                     );
+                    if selected_case.is_some_and(|selected| selected != case) {
+                        continue;
+                    }
+                    completed_cases += 1;
                     eprintln!("Starting {case}");
                     let scenario = Scenario::performance(trace.seed, regions, actors).unwrap();
                     let mut engine = Engine::memory(scenario.clone()).unwrap();
@@ -263,7 +279,7 @@ fn main() {
             "dirty":!dirty.success(),"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
             "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
-            "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes},
+            "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes,"checkpoint_interval":save_policy.checkpoint_interval},
             "not_applicable":[if regions==1{Some("boundary")}else{None},if actors==1{Some("multi_actor")}else{None}]})
                     );
                     let mut runner = Runner::new(engine, case.clone());
@@ -290,7 +306,7 @@ fn main() {
                     println!(
                         "{}",
                         json!({"kind":"case_end","case":case,"history_end":history_end,"rewind_count":rewind_count,
-            "final_save_bytes":final_save_bytes,"final_flush_ms":flush_ms,"save_status":save_status,"restart_replay_ms":restart_replay_ms})
+            "final_save_bytes":final_save_bytes,"final_flush_ms":flush_ms,"save_status":save_status,"restart_replay_ms":restart_replay_ms,"recovery":resumed.recovery_profile()})
                     );
                     summarize(&case, runner.distributions);
                 }
@@ -298,7 +314,8 @@ fn main() {
         }
     }
     // Separate growing-discovery trace; local cycles cannot establish its scaling.
-    if focused {
+    assert!(completed_cases > 0, "no matching benchmark case");
+    if focused || selected_case.is_some() {
         return;
     }
     for regions in [8, 64, 256] {
