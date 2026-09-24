@@ -86,8 +86,8 @@ cell, including shell cells. Ordinary play has no digging command. Removing a
 shell cell does not allocate space beyond it. Placement rejects solid cells;
 solid edits reject occupied actors, items, and doors. Commands consume no ordinary
 action time and retain existing authority, revision, branch, receipt, replay, and
-rewind checks. Chamber authoring is supported by material-volumes-v9 and material-rims-v10 and diagonal-v11;
-rulesets predating material volumes reject it.
+rewind checks. Chamber authoring uses the current ruleset; older rulesets are
+unsupported.
 
 ## Timing, compatibility, and verification
 

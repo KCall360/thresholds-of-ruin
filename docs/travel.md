@@ -1,8 +1,6 @@
 # Backend travel and ASCII destinations
 
-`travel-v5`, `doors-v6`, `shadowcasting-v7`, `doorway-v8`,
-`material-volumes-v9`, `material-rims-v10`, and `diagonal-v11` games support
-travel to an actor's known cell,
+The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
 region names, and frontend language. Protocol 11 is required. Save format remains 3.
 
@@ -41,8 +39,7 @@ Deterministic minimum-tick search uses only the remembered graph and terrain.
 In diagonal-v11 games, diagonals are composed from disclosed cardinal connections
 through at least one remembered clear side. Their cost is `ceil(base × √2)`.
 Ties use stable discovery order: north/east/south/west/up/down, then
-northeast/southeast/southwest/northwest in the actor's frame. Earlier rulesets
-retain cardinal/vertical routes and their original tie order.
+northeast/southeast/southwest/northwest in the actor's frame.
 Orientation is part of the search state, including rotated joins and self-loops.
 Stairs require a disclosed explicit connection. Neither hidden current terrain
 nor unknown connections can supply a shortcut. Stale routes are validated through
@@ -96,7 +93,7 @@ The server requires control, readiness, a current revision, and a known traversa
 route. Unknown targets and unavailable routes share a generic error. Exact retries
 of an accepted request return its durable receipt without restarting the job,
 including after reconnect, restart, or a later branch change. Role checks precede
-receipt lookup. Older rulesets reject travel while preserving ordinary play.
+receipt lookup.
 
 Snapshots contain nullable `travel`. Ordered `travel` updates carry `status` and
 an optional history `entry` for the accepted request. Status contains the travel
@@ -115,10 +112,8 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-New saves use `diagonal-v11`; `travel-v5` retains travel support. The four earlier
-rulesets retain their original behavior and reject travel. `place-hints-v4`
-continues supporting authored hints and edits.
-No existing save is silently upgraded to new gameplay rules or wizard mode.
+Only the current `diagonal-v11` ruleset is supported. Start a fresh game after
+an incompatible revision; saves are not migrated.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,
 cycles, stale terrain, free rejection, deterministic replay/rewind, receipts,
@@ -130,9 +125,7 @@ is tested separately. Native keyboard and mouse events exercise `_` selection an
 click travel, alongside presentation-model and automated window-input coverage.
 The existing Windows/Linux CI discovery runs these in debug and release.
 
-The hazard-only interruption policy is part of the protocol-7/travel-v5
-slice. It changes session interruption/status behavior, not persisted action
-semantics or save format. Earlier rulesets remain unchanged.
+The hazard-only interruption policy governs session interruption/status behavior.
 
 [Doors](doors.md) add explicit barriers. Travel never opens a closed door; known
 closed doors exclude routes, and stale open-door routes stop on blocked movement.

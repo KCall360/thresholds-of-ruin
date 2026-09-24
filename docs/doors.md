@@ -1,6 +1,6 @@
 # Doors
 
-Doors were introduced in **doors-v6**. New games use **diagonal-v11**, with an
+Games use **diagonal-v11**, with an
 initially open wooden door in a 1x1 hall between two 5x3 rooms. The hall has no
 place hint; each room retains its own interior anchor for text navigation.
 
@@ -85,11 +85,8 @@ rules. Closed placement cannot cover actors or items; duplicate placement is
 rejected. Door identity and state rewind with the world. Privileged coordinates
 remain backend-only; ordinary history contains sanitized wizard summaries.
 
-Existing `two-room-v1`, `portal-sight-v2`, `observer-scene-v3`, `place-hints-v4`, and
-`travel-v5` saves retain their original fixture, replay, and rules, with no doors.
-They reject door placement and manipulation; travel-v5 continues supporting
-travel. The doors-v6 and shadowcasting-v7 fixtures retain their original interior door.
-No existing game is silently upgraded. All clients must use protocol 11.
+Only the current fixture and rules are supported. Older saves are not migrated.
+All clients must use protocol 11.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 
@@ -97,7 +94,7 @@ entities remain future work. A wide join can have individual door cells.
 
 Simulation tests cover obstruction, time, reach, occupancy and atomic failure;
 world tests compare an interior door with the same scene split by a wide join.
-Rotated join interaction, disclosure, old rules, durable retries, replay and rewind
+Rotated join interaction, disclosure, durable retries, replay and rewind
 have focused tests. Shared memory tests cover stale door state and refresh.
 Frontend tests cover clarification, intentions, glyphs, selection and commands.
 Raw WebSocket tests enforce spectator and wizard permissions.

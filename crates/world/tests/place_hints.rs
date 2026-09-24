@@ -15,11 +15,11 @@ fn anchors_are_independent_of_topology_and_terrain_edits() {
         region: RegionId(1),
         position: Position { x: 2, y: 1, z: 0 },
     };
-    let scene = world.scene(at, 0, 8);
+    let scene = world.shadow_scene(at, 0, 8);
     world.set_place_hint(at, true).unwrap();
     world.set_place_hint(at, true).unwrap();
     assert!(world.has_place_hint(at));
-    assert_eq!(world.scene(at, 0, 8), scene);
+    assert_eq!(world.shadow_scene(at, 0, 8), scene);
     let before = world.clone();
     assert!(world
         .set_place_hint(

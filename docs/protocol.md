@@ -73,7 +73,7 @@ opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, 
 Cells also carry terrain `material` (empty for carved voids) and nullable
 `floor`/`ceiling` surfaces; items include `description` and a
 `reachable` flag, and actors carry perceived `name` and `description`. These
-protocol-8 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
+appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
 must upgrade. Saves must use format 3 and ruleset `diagonal-v11`; older formats
@@ -142,6 +142,10 @@ simulation tick. Multiple updates can share a tick. The stream sequence incremen
 for every delivered update; the action revision increments only when that actor's
 disclosed observation changes. A private note neither advances another user's
 sequence nor invalidates anyone's pending action revision.
+
+Readiness is part of that disclosed state. A same-tick turn handoff advances the
+revisions of the actors whose readiness changes, even when their geometry and
+tick remain unchanged.
 
 Actions currently have one semantic result. Their history timestamp is when the
 action took effect; the accompanying observation reflects the next decision
@@ -312,21 +316,11 @@ Filtering remains actor/user scoped and precedes pagination. Notes never move to
 a new branch; new entry anchors cannot reference another branch. Wizard parameters
 are private to their author so normal spectators do not receive hidden setup facts.
 
-See [unnamed place hints](place-hints.md) for the protocol-6 anchor attribute,
-authoring commands, and rules-version compatibility.
-
-See [travel](travel.md) for protocol-7 start/cancel requests, status, durable
-receipts, navigation knowledge, and the `travel-v5` ruleset.
-
-See [doors](doors.md) for protocol-9 door observations, set_door actions,
-door_changed events, privileged placement, and doors-v6 compatibility.
-
-[Material volumes](material-volumes.md) add protocol-10 nullable `floor` and
-`ceiling` surface facts (material and distance in cells), with new
-`material-rims-v10` games. Earlier saves keep their rules and no physical
-surface facts. Wizard `chamber` creates a carved interior with a finite shell.
-
-[Diagonal movement](diagonal-movement.md) adds `north_east`, `south_east`,
-`south_west`, and `north_west` directions in protocol 11. New diagonal-v11 games
-support diagonal actions and door reach; all ten earlier rulesets reject diagonal
-movement and retain their original door reach. Save format remains 3.
+See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
+[travel](travel.md) for start/cancel requests and durable receipts, and
+[doors](doors.md) for observations, actions, events, and privileged placement.
+[Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
+surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
+describes the four diagonal directions and door reach.
+Only protocol 11, save format 3, and `diagonal-v11` are supported; there are no
+historical rules implementations or save importers.

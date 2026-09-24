@@ -7,13 +7,13 @@ before dungeon gameplay expands the world, entity count, and action history. It
 does not weaken deterministic simulation, actor-specific disclosure, idempotent
 requests, or wizard rewind.
 
-The first release measurement is decisive: a 64-region scene takes about 0.02 ms,
-observation about 0.06 ms, and portal movement plus navigation refresh about
-0.22 ms. In-memory server commands remain below 1 ms in the sampled history,
-whereas disk-backed commands grow from roughly 14 ms to 23 ms mean latency and
-show stalls above 80 ms. Persistence and whole-state copying are therefore the
-first targets. These figures are diagnostic observations from one machine, not
-portable acceptance thresholds.
+Phase A is complete. The [measured findings](phase-a-findings.md) retain the
+validated baseline. The harness measures ordinary mixed commands through a shared deterministic
+fixture, including boundaries, doors, elevations, LOS changes, and multiple
+actors. The [harness guide](performance-harness.md) defines reproducible commands
+and measurement boundaries. The [storage review](persistence-review.md) separates
+verified process recovery from the current missing name-durability barrier.
+Phase B requires separate authorization.
 
 ## Recorded decisions and guiding criteria
 
@@ -42,18 +42,20 @@ rather than fragile machine-specific wall-clock numbers.
 
 ## Measurement model
 
-Extend the checked-in harness before changing persistence:
+The checked-in Phase A harness measures:
 
 - retain mean, p50, p95, and maximum rather than aggregate averages;
 - measure 1, 8, 64, and 256 connected regions, including portals, obstacles,
   doors, multiple elevations, and repeated movement across region boundaries;
 - measure histories at 0, 100, 1,000, and 10,000 actions;
-- isolate simulation transition, perception, revision detection, rollback
-  capture, journal encoding/write/sync, client update application, and rendering;
+- isolate simulation transition, navigation, perception, revision detection,
+  candidate capture, rewind snapshot, encoding, write/flush, sync, replacement,
+  publication, client update application, and rendering;
 - add multi-actor cases because revision detection currently observes every
   actor before and after an action; and
-- record save size, bytes written per action, allocations where practical, and
-  restart/replay time.
+- record save size, bytes written per action, and normal restart/replay time.
+  Allocation instrumentation is deferred; its overhead and unsafe-code policy
+  implications have not been resolved.
 
 Wall-clock benchmarks remain diagnostic. Deterministic operation counts, file
 growth bounds, and ratios between small and large cases are suitable for stable
@@ -65,7 +67,8 @@ Use an append-oriented journal and periodic atomic checkpoints:
 
 1. A journal frame contains a length, format/version marker, monotonic sequence,
    payload, and checksum. A partial or corrupt final frame is detectable and can
-   be truncated or ignored according to the recorded recovery contract.
+   be handled according to the reviewed recovery contract. Unknown durable
+   frontiers fail closed; never silently discard possibly acknowledged data.
 2. An accepted command is validated and simulated in a transactional candidate.
    Only the new record is encoded and appended; the complete archive is not
    serialized for each action.
@@ -102,8 +105,8 @@ After append persistence lands, measure and remove the remaining broad clones:
   simulation must not gain hidden geometry or become a second rules engine.
 
 The initial implementation should favor simple, auditable ownership over a
-complex delta system. Append-only persistence removes the largest measured cost
-without requiring simulation redesign.
+complex delta system. Append-oriented persistence removes full-history encoding;
+candidate cloning, file sync, and perception remain separate measured costs.
 
 ## Data structures and caching
 
@@ -131,62 +134,66 @@ cost.
 
 ### Phase A — Baseline and contracts
 
-Complete the scale matrix, add phase timings, encode the recorded durability and
-format decisions in tests, and add recovery fixtures. No storage behavior changes
-in this phase.
+The shared fixture and trace, combined scale matrix, exclusive phase timings,
+actual-client driver, and current-writer fault tests are implemented. Production
+storage remains the version-3 whole archive; buffered streaming serialization
+has been restored to measure the intended writer. No append journal, checkpoint,
+rotation, or caching implementation is included.
 
-#### Phase A results (2026-09-22)
+#### Findings and reviewed proposal
 
-The checked-in harness is `crates/server/examples/latency_bench.rs` and emits
-diagnostic CSV with mean, p50, p95, and maximum timings. It covers 1, 8, 64,
-and 256 connected two-level regions with portals, obstacles, a door, and up to
-8 actors; server histories are seeded at 0, 100, 1,000, and 10,000 actions.
-The command profile isolates simulation transition, perception, revision
-detection, candidate/rollback capture, serialization, write, and sync. The
-client-common update path and ASCII renderer are measured separately. Stable
-contracts assert actor-proportional observation/comparison counts and record /
-byte accounting rather than machine-specific timings. Recovery fixtures cover
-partial/corrupt final frames and checkpoint install/rotation interruption
-boundaries; existing save-failure tests continue to verify publication atomicity.
+The earlier wait-only averages and sync values divided by an unrelated batch
+size are withdrawn. Use only the complete per-command release measurements
+linked from the [harness guide](performance-harness.md). Successful mixed
+commands and intentional blocked attempts have separate distributions; actual
+client acknowledgement/presentation measurements have different boundaries from
+server-only phases.
 
-Release measurements on the development Windows host found perception and
-revision detection scale with actor count (about 0.36 ms and 0.18 ms for one
-actor versus 3.2 ms and 1.6 ms for eight in the 10,000-action case). The
-candidate clone grows from about 0.05 ms at an empty history to about 10.6 ms at
-10,000 records; durable sync is roughly 0.10 ms to 4.2–5.0 ms. Region count is
-not the dominant term in this fixture, while actor count and full-archive
-copy/serialization are. These are diagnostic observations, not CI thresholds.
+The [storage review](persistence-review.md) specifies the proposed version-4
+frame layout, checksum coverage, maximum payload, save/generation identity,
+uncertain-write reconciliation, conservative corrupt-tail handling, checkpoint
+contents/selection, and future file fault schedules. It also records the missing
+Windows/Linux name-durability guarantee in the current writer. Passing restart
+tests does not meet the full OS/power-failure contract.
 
-#### Reviewed Phase B design
-
-Advance the save format to version 4 and reject version 3. The append journal
-uses little-endian frames:
-
-`magic[4] = "TORJ" | format:u16 = 4 | kind:u16 | sequence:u64 |
-payload_len:u32 | crc32c:u32 | payload[payload_len]`
-
-The 24-byte header is followed by canonical serde payload bytes. `kind=1` is a
-committed command/annotation record; reserved kinds are rejected. The checksum
-covers the header fields after `magic` plus payload, and sequence numbers are
-strictly increasing. Startup scans only complete, checksum-valid frames and
-truncates an incomplete/corrupt final frame; an acknowledged sequence must be
-present in a durable frame. A failed append or sync leaves the in-memory
-publication, receipt index, and request identity untouched.
-
-Checkpoints are separate files containing the authoritative replay base,
-receipt index, branch metadata, rewind boundaries, and deterministic world
-state, encoded with the same version marker. They are written to a temporary
-file, flushed and synced, atomically renamed, and only then is the old journal
-rotated. Recovery chooses the newest valid checkpoint and replays subsequent
-valid frames. Phase B should preserve current filtering, idempotency, branch,
-rewind, annotation, wizard, and lock behavior before Phase C adds rotation and
-compaction.
+This reviewed proposal is a handoff for later work, not an implemented format.
+Phase A stops here; Phase B and C remain unimplemented.
 
 ### Phase B — Append journal
 
 Introduce framed records and recovery scanning behind focused storage tests.
 Preserve command atomicity, duplicate-request recovery, history filtering,
 branch identity, and current publication ordering.
+
+#### Phase B verification and measurement
+
+Keep comprehensive storage correctness coverage: bootstrap durability on Windows
+and Linux, interrupted writes, corruption, uncertain I/O, lost acknowledgements,
+duplicate/conflicting retries, retained branches, annotation privacy, and permanent
+wizard marking. Process-restart tests alone do not prove power-loss durability.
+
+Reuse Phase A workload definitions and retained baseline results with this focused
+performance subset; do not routinely repeat the full 64-case characterization:
+
+- Measure per-action encoded and written bytes at 100 and 10,000 retained actions.
+  Assert that only the new frame is appended, previous journal bytes remain intact,
+  and the replay base is unchanged. Persistence work must scale with new data.
+- Run the mixed durable workload at eight regions, one/eight actors, and
+  100/10,000 retained actions (four cases). Compare encoding, write/flush, sync,
+  and total p50/p95/maximum with the matching Phase A samples. Add matched memory
+  cases when needed to isolate remaining engine costs.
+- Run one 256-region, eight-actor, 10,000-action durable case and a representative
+  actual-client workload, using the established timing boundaries.
+- Measure normal restart/replay and verify recovered state for each selected save.
+  Bounded startup work belongs to Phase C.
+
+Repeat the broader matrix or discovery/rendering study only for unexplained
+regressions, inconsistent focused results, or changes affecting those paths.
+Record the selected cases, results, and any expanded investigation in the findings.
+Full-history candidate copying and disposal remain Phase D work, and file-sync
+latency can remain substantial. Phase B must remove history-dependent persistence
+encoding/write amplification without weakening durability; it need not meet every
+later phase's total-latency or startup target.
 
 ### Phase C — Checkpoints and compaction
 

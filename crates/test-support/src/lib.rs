@@ -1,1 +1,2 @@
-//! test-support boundary for Thresholds of Ruin. Implementation follows the milestone plan.
+//! Deterministic test and diagnostic orchestration, outside the simulation.
+pub mod performance;

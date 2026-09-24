@@ -71,6 +71,7 @@ impl Game {
     /// A free read using bounded symmetric shadowcasting through rotated portals.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
+        crate::diagnostics::observation();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         let cells = self
             .scene(id)?
@@ -265,6 +266,7 @@ impl Game {
 
     /// Backend-resolved view occurrences. A location may be seen at several offsets.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
+        crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(self
             .world

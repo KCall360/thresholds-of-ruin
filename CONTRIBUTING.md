@@ -64,7 +64,12 @@ Each actor has explicit identity and control ownership. Avoid a global player.
 Doors are independent entities; they need not be on portal apertures.
 
 When protocol, save, or rules formats change, update callers and fixtures together;
-the project supports only the current versions. Preserve original code and content;
+the project supports only the current versions. During pre-release, saves are
+disposable across revisions: do not add importers, compatibility readers,
+historical rules implementations, or defaults solely to load older saves.
+Keep version rejection and strict current-rules replay checks; update fixtures
+with the implementation instead of preserving obsolete behavior.
+Preserve original code and content;
 NetHack is a gameplay reference, not a source to copy.
 
 Frontend milestones must include tests launching the actual applications in
@@ -72,3 +77,14 @@ addition to parser, input-model, presentation-model, and protocol tests. The
 graphical tests need an explicitly configured display environment in CI.
 
 Never commit credentials, local saves, or private configuration.
+
+On the Windows development machine, keep the user's desktop launchers current
+whenever the build is updated: Text, ASCII, Text + ASCII Spectator, and the
+256 Region Spectator demonstration. Verify each launcher's helper scripts and
+actual executable targets, build every required binary, and check a real client
+connection. `cargo check` alone does not update executables. Preserve fresh saves
+per launch, prior saves, separate spectator credentials, and owned-process
+cleanup. Machine-local links, credentials, and saves stay outside Git; reusable
+scenario specifications/drivers belong in version control. See the
+[harness guide](docs/performance-harness.md#observable-256-region-run-and-desktop-maintenance)
+for the shared demonstration and verification procedure.

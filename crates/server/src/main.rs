@@ -13,18 +13,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut seed = 0;
     let mut wizard = false;
     let mut save = PathBuf::from("saves/game.json");
-    let mut regions = 2u64;
+    let mut regions = None;
+    let mut actors = 1usize;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
+                println!("Diagnostic fixture: --regions 1..=256 [--actors 1..=8] selects performance trace version 1.");
                 println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.json]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
             }
             "--wizard" => wizard = true,
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
             "--seed" => seed = args.next().ok_or("Missing --seed value")?.parse()?,
-            "--regions" => regions = args.next().ok_or("Missing --regions value")?.parse()?,
+            "--regions" => regions = Some(args.next().ok_or("Missing --regions value")?.parse()?),
+            "--actors" => actors = args.next().ok_or("Missing --actors value")?.parse()?,
             "--save" => save = args.next().ok_or("Missing --save value")?.into(),
             _ => return Err(format!("Unknown argument: {argument}").into()),
         }
@@ -74,8 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(std::env::VarError::NotPresent) if !wizard => None,
         Err(_) => return Err("--wizard requires TOR_WIZARD_TOKEN".into()),
     };
-    let mut scenario = Scenario::two_room(seed);
-    scenario.regions = regions.max(2);
+    let scenario = match regions {
+        Some(regions) => Scenario::performance(seed, regions, actors)?,
+        None if actors == 1 => Scenario::two_room(seed),
+        None => return Err("--actors requires --regions".into()),
+    };
     let mut engine = Engine::open(save, scenario)?;
     if wizard {
         engine.enable_wizard()?;

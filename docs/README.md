@@ -21,6 +21,7 @@ until its guide and the roadmap are updated together.
 | --- | --- |
 | Understand the project and run checks | [Repository README](../README.md) |
 | See what works and what comes next | [Project status and roadmap](milestones.md) |
+| Resume after the Phase A session | [Session handoff](session-handoff.md) |
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Run the server or integrate a client | [Protocol and persistence](protocol.md) |
 | Play in a terminal | [Text client](text-client.md) |
@@ -37,12 +38,13 @@ These pages describe current behavior rather than proposals.
 | Geometry and perception | [Portal geometry](portal-geometry.md), [shadowcasting](shadowcasting.md), [material volumes](material-volumes.md), [place hints](place-hints.md) |
 | Client knowledge and presentation | [ASCII memory](ascii-memory.md), [text adventure](text-adventure.md) |
 | Navigation | [Backend travel](travel.md) |
-| Engineering plans | [Performance and scalable persistence](performance-persistence.md) |
+| Engineering plans | [Performance and scalable persistence](performance-persistence.md), [performance harness](performance-harness.md), [Phase A findings](phase-a-findings.md), [persistence design review](persistence-review.md) |
 | Development tools | [Wizard mode](wizard-mode.md) |
 
-Feature guides may identify the version in which behavior first appeared for
-historical context. Runtime support is limited to the current protocol, save
-format, and ruleset listed in [the roadmap](milestones.md#current-implementation).
+Feature guides describe current behavior. Runtime support is limited to the current
+protocol, save format, and ruleset listed in
+[the roadmap](milestones.md#current-implementation). Pre-release revisions need not
+preserve save compatibility or historical rules implementations.
 
 ## Documentation maintenance
 

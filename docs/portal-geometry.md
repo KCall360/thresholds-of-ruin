@@ -15,8 +15,8 @@ clockwise quarter turns around z and translation map observer offsets across
 joins. Crossing consumes distance, including self-links and cycles. A physical
 cell may have multiple visible occurrences in non-Euclidean geometry. The scene
 preserves those occurrences at distinct offsets. The world API caps sight radius
-at 16; the current game fixes it at eight. Earlier rules retain their original
-cell-centre rays and corner restrictions.
+at 16; the current game fixes it at eight. Only current shadowcasting rules are
+supported.
 
 A rectangular join glues an entire aperture with one affine transform. Every
 constituent crossing is validated before any mutation commits. Horizontal joins
@@ -75,7 +75,7 @@ Setup consumes no action time. Authorization, revisions, idempotent receipts,
 branch checks, durable replay, and rewind apply to entire joins. The private
 journal retains full commands/results. Public wizard history exposes only a
 summary, so it cannot leak internal geometry even to an ordinary client using
-the same identity. Wide joins require the new ruleset.
+the same identity. Wide joins are supported by the current ruleset.
 
 ## Protocol and memory
 
@@ -117,6 +117,5 @@ memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
-[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
-Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
-now adds text travel and approach-then-pickup.
+[Backend travel](travel.md) supports known-cell destinations. The
+[text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

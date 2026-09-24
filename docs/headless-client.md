@@ -108,6 +108,5 @@ text/ASCII process coverage remains required alongside this headless frontend.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
 [the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
 
-[Backend travel](travel.md) adds protocol 7 and `travel-v5` for new games.
-Earlier rules retain their behavior. The [text adventure interface](text-adventure.md)
-now adds text travel and approach-then-pickup.
+[Backend travel](travel.md) supports known-cell destinations. The
+[text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

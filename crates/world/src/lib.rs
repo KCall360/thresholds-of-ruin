@@ -5,7 +5,6 @@ mod shadowcasting;
 mod topology;
 pub use scene::SightCell;
 mod material;
-mod visibility;
 pub use material::{Material, Terrain};
 
 /// Physical scale shared by horizontal and vertical world cells.

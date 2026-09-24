@@ -72,21 +72,33 @@ place knowledge will be added when interactions require them.
 
 ### 3p — Performance and scalable persistence
 
-Status: **next milestone**.
+Status: **Phase A complete; Phase B not started**.
 
-Before adding more gameplay, establish representative performance baselines and
-remove work whose cost grows with save history or total dungeon size from the
-interactive action path. The initial harness covers percentile latency for a
-64-region connected layout, portal movement, perception, in-memory commands, and
-durable commands. It already shows that simulation and perception are
-sub-millisecond while whole-archive durable rewrites dominate action latency and
-produce much larger tail stalls.
+The shared versioned fixture drives focused and mixed movement, normal/rotated
+crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
+The release matrix combines 1/8/64/256 regions, 1/8 actors, and
+0/100/1,000/10,000 retained actions in memory and durable modes. It measures
+exclusive command phases, client application/rendering, actual I/O counts,
+bytes, and normal restart/replay; a separate discovery trace grows map memory.
+
+The [measured findings](phase-a-findings.md) retain the validated 64-case release
+baseline, growing discovery and actual-client samples. The
+[harness guide](performance-harness.md) describes reproduction, the real
+headless/ASCII driver, and the verified 256-region spectator demonstration.
+Current-writer fault injection replaces the toy scanner. The
+[storage review](persistence-review.md) documents a missing name-durability
+barrier and the reviewed future framing/checkpoint contract. Process recovery
+coverage does not establish power-loss durability. No new persistence layout
+is implemented in Phase A.
 
 Scope and sequencing are defined in the
 [performance and persistence plan](performance-persistence.md). The milestone
 will replace whole-save rewrites with an append-oriented journal plus bounded
 snapshot/checkpoint work, remove avoidable full-state cloning, profile client
 state application and rendering, and add scale-sensitive regression checks.
+Phase B uses the [focused verification subset](performance-persistence.md#phase-b-verification-and-measurement)
+against the retained Phase A baseline; a full characterization is conditional on
+regressions or broader changes. Storage correctness coverage remains comprehensive.
 Caching, alternate collections, and speculative presentation will be adopted
 only for measured hot paths and must preserve determinism, disclosure, retry,
 rewind, and crash-recovery behavior.

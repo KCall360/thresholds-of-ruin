@@ -16,7 +16,7 @@ fn room(id: u64) -> Region {
 }
 
 #[test]
-fn rays_follow_rotated_portals_and_elevation_offsets_without_revealing_whole_rooms() {
+fn sight_follows_rotated_portals_and_elevation_offsets_without_revealing_whole_rooms() {
     let mut world = World::new(vec![room(1), room(2)], vec![]).unwrap();
     world
         .connect(
@@ -32,28 +32,26 @@ fn rays_follow_rotated_portals_and_elevation_offsets_without_revealing_whole_roo
         world.step(cell(1, 4, 2, 0), Direction::East),
         Some(cell(2, 2, 0, 1))
     );
-    let seen = world.visible_cells(cell(1, 3, 2, 0), 4);
+    let seen = visible(&world, cell(1, 3, 2, 0), 4);
     assert!(seen.contains(&cell(2, 2, 2, 1)));
     assert!(!seen.contains(&cell(2, 4, 4, 1)));
     assert!(!seen.contains(&cell(2, 2, 2, 0)));
     assert!(!seen.contains(&cell(2, 2, 3, 1)));
-    assert_eq!(world.visible_cells(cell(1, 3, 2, 0), 4), seen);
+    assert_eq!(visible(&world, cell(1, 3, 2, 0), 4), seen);
 }
 
 #[test]
-fn walls_occlude_and_diagonal_rays_cannot_cut_blocked_corners() {
+fn walls_occlude_straight_sight_but_allow_corner_vision() {
     let mut world = World::new(vec![room(1)], vec![]).unwrap();
     world.set_wall(cell(1, 2, 1, 0), true).unwrap();
     world.set_wall(cell(1, 1, 2, 0), true).unwrap();
-    let seen = world.visible_cells(cell(1, 1, 1, 0), 4);
+    let seen = visible(&world, cell(1, 1, 1, 0), 4);
     assert!(seen.contains(&cell(1, 2, 1, 0)));
-    assert!(!seen.contains(&cell(1, 2, 2, 0)));
+    assert!(seen.contains(&cell(1, 2, 2, 0)));
     assert!(!seen.contains(&cell(1, 3, 1, 0)));
     assert_eq!(world.step(cell(1, 1, 1, 0), Direction::East), None);
     world.set_wall(cell(1, 2, 1, 0), false).unwrap();
-    assert!(world
-        .visible_cells(cell(1, 1, 1, 0), 4)
-        .contains(&cell(1, 3, 1, 0)));
+    assert!(visible(&world, cell(1, 1, 1, 0), 4).contains(&cell(1, 3, 1, 0)));
 }
 
 #[test]
@@ -69,7 +67,7 @@ fn cycles_are_bounded_and_invalid_setup_is_atomic() {
             0,
         )
         .unwrap();
-    assert!(world.visible_cells(cell(1, 4, 2, 0), 4).len() <= 41);
+    assert!(visible(&world, cell(1, 4, 2, 0), 4).len() <= 41);
     let before = world.clone();
     assert!(world
         .connect(
@@ -112,9 +110,7 @@ fn explicit_vertical_connections_can_start_inside_a_room() {
         world.step(cell(1, 2, 2, 0), Direction::Up),
         Some(cell(2, 2, 2, 1))
     );
-    assert!(world
-        .visible_cells(cell(1, 2, 2, 0), 4)
-        .contains(&cell(2, 2, 2, 1)));
+    assert!(visible(&world, cell(1, 2, 2, 0), 4).contains(&cell(2, 2, 2, 1)));
 }
 
 #[test]
@@ -146,7 +142,15 @@ fn all_quarter_turns_and_reverse_links_preserve_sight_directions() {
                 (4 - turns) % 4,
             )
             .unwrap();
-        assert!(world.visible_cells(cell(1, 3, 2, 0), 3).contains(&beyond));
-        assert!(world.visible_cells(landing, 2).contains(&cell(1, 3, 2, 0)));
+        assert!(visible(&world, cell(1, 3, 2, 0), 3).contains(&beyond));
+        assert!(visible(&world, landing, 2).contains(&cell(1, 3, 2, 0)));
     }
+}
+
+fn visible(world: &World, origin: Location, radius: u8) -> std::collections::BTreeSet<Location> {
+    world
+        .shadow_scene(origin, 0, radius)
+        .into_iter()
+        .map(|cell| cell.location)
+        .collect()
 }
