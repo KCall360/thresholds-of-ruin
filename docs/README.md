@@ -27,6 +27,7 @@ until its guide and the roadmap are updated together.
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Review accepted future game requirements | [Game design plan](game-design-plan.md) |
 | Review 3p closure blockers and saved exploration | [Milestone 3p closeout audit](3p-closeout.md) |
+| Review explored checkpoint reduction and remaining timing gates | [Format-6 findings](3p-checkpoint-growth.md) |
 | Review background-save measurements | [Phase B findings](phase-b-findings.md) |
 | Review client responsiveness and presentation tails | [Phase E findings](phase-e-findings.md) |
 | Review state-copy and observation scaling | [Phase D findings](phase-d-findings.md) |

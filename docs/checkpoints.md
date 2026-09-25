@@ -1,7 +1,7 @@
 # Checkpoints and retained history
 
 Phase C adds periodic snapshots to background saving. Protocol 12 and ruleset
-`diagonal-v11` are unchanged; save format **5** rejects every older format.
+`diagonal-v11` are unchanged; save format **6** rejects every older format.
 Checkpoints preserve the asynchronous acknowledgement and explicit-save contracts
 in [background saving](background-saving.md).
 
@@ -23,8 +23,15 @@ profiling tracks their effect rather than assuming background work is free.
 
 The snapshot contains the current simulation and scheduler state, navigation
 knowledge, identities, current branch, revisions, permanent wizard flag and all
-retained rewind boundaries (at most 128). Identical worlds, navigation maps and item maps across those boundaries
-are encoded once. World geometry is shared independently of door state, so opening
+retained rewind boundaries (at most 128). Identical worlds and item maps across those boundaries are encoded once.
+Format 6 pools navigation cells and edges independently by source region. Each
+navigation instance holds ordered table references; equal region contents are
+stored once even when ownership differs. Reference decoding shares the maps
+without expanding repeated cell/edge payloads. Empty or mixed-region table
+entries, invalid/duplicate/out-of-order references and malformed fields fail closed.
+This preserves historical changes and deletions rather than merging knowledge
+from different rewind boundaries. The explicitly approved pre-release compatibility
+decision rejects format-5 saves; no migration or compatibility reader is included. World geometry is shared independently of door state, so opening
 a door does not duplicate the entire dungeon. Runtime control leases, client-held map memory and active travel
 jobs retain their existing restart behavior and are not restored from this snapshot.
 Backend snapshot types never cross the client protocol boundary.
@@ -72,11 +79,12 @@ capture changes the effective replay bound.
 
 A snapshot exceeding the size limit fails saving rather than publishing an
 unrecoverable checkpoint. The limit bounds encoded bytes, not all in-memory
-snapshot allocations. The [closeout audit](3p-closeout.md) demonstrates that fully
-explored 256-region fixture state would encode to 765 MB, and checkpoint-enabled exploration fails.
-Whole-map navigation deduplication repeats overlapping knowledge across different
-rewind states. This is a current 3p blocker, distinct from later region streaming.
-Runtime sharing alone does not establish an encoded-size bound. SQLite/process
+snapshot allocations. The original [closeout audit](3p-closeout.md) measured 765 MB for the
+format-5 fully explored 256-region fixture. Format 6 removes repeated source-region
+knowledge; regression coverage requires the same complete fixture to fit below
+16 MiB with the production 64 MiB cap unchanged. This is a measured fixture
+bound, not an arbitrary-world guarantee or region streaming implementation.
+SQLite/process
 tests establish transaction recovery, not hardware power-loss guarantees; filesystem/device limitations from the background-save guide apply.
 
 ## Verification and profiling

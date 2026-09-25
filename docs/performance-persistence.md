@@ -76,7 +76,7 @@ automated regression tests.
 ## Persistence design
 
 The [background journal](background-saving.md) introduced in Phase B now uses
-format 5 with Phase C checkpoints:
+format 6 with region-shared checkpoints:
 
 1. Validate and simulate in a transactional candidate, encode only the new record,
    and admit it to the bounded pending queue. Rejection leaves published state
@@ -245,13 +245,13 @@ presentation tail limits. The broader 3p acceptance criteria remain separate.
 
 The [3p closeout audit](3p-closeout.md) records acknowledgement-tail follow-up,
 checkpoint-disabled/enabled saved exploration and the acceptance checklist.
-The milestone remains open: full 256-region exploration produces a 765 MB
-format-5 checkpoint representation, beyond the unchanged 64 MiB cap, and the
-enabled traversal fails saving. Detached discovery and locally bounded capture
-latency did not establish checkpoint bounds. Do not remove this gate by disabling
-checkpoints, raising the cap, or calling it deferred streaming work. The next
-focused change must address checkpoint growth, preserve recovery and supported
-saves, then establish successful explored-world checkpoint/native acceptance.
+The [format-6 follow-up](3p-checkpoint-growth.md) reduces the complete 256-region
+checkpoint from 765 MB to 9.92 MB without changing the 64 MiB cap. The user approved
+format-5 rejection before implementation. Full checkpoint-enabled saved exploration,
+exact recovery, bounded replay and native explored-world acceptance now pass.
+Milestone 3p remains open for recurrent acknowledgement/presentation-tail evidence;
+opt-in server/client/reader correlation records the relevant boundaries. No later
+interaction or travel feature is introduced, and no latency target is relaxed.
 
 ## Verification and completion
 

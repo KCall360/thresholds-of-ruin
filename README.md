@@ -20,7 +20,7 @@ dungeon game. It currently provides:
   client for scripted acceptance tests; and
 - client-held last-seen map memory that never exposes undisclosed world state.
 
-New games use protocol **12**, save format **5**, and ruleset
+New games use protocol **12**, save format **6**, and ruleset
 **`diagonal-v11`**. The server rejects any other protocol, save format, or ruleset.
 The current fixture is deliberately small: two rooms and a connecting hall. It is
 a proving ground for architecture and interaction, not the planned dungeon.

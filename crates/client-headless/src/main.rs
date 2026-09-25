@@ -134,6 +134,9 @@ fn emit(
     message: Option<&ServerMessage>,
     error: Option<&str>,
 ) -> Result<(), Error> {
+    static TIMING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let timing = *TIMING.get_or_init(|| std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some());
+    let started = timing.then(std::time::Instant::now);
     let output = serde_json::json!({
         "type": kind,
         "role": connection.role(),
@@ -151,5 +154,18 @@ fn emit(
     serde_json::to_writer(&mut stdout, &output)?;
     writeln!(stdout)?;
     stdout.flush()?;
+    drop(stdout);
+    if let Some(started) = started {
+        let request_id = match message {
+            Some(ServerMessage::Ack { request_id, .. }) => Some(request_id),
+            _ => None,
+        };
+        eprintln!(
+            "{}",
+            serde_json::json!({"timing_version":1,"event":"headless_report",
+            "kind":kind,"request_id":request_id,"duration_ms":started.elapsed().as_secs_f64()*1000.,
+            "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
+        );
+    }
     Ok(())
 }

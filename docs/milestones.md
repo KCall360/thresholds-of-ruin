@@ -8,7 +8,7 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **12**, save format **5**, and ruleset
+two-room fixture. New games use protocol **12**, save format **6**, and ruleset
 **`diagonal-v11`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
@@ -78,7 +78,7 @@ must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phases A–E merged; closeout audit identifies explored-world checkpoint growth as a blocker**.
+Status: **Phases A–E merged; format-6 checkpoint reduction implemented; latency-tail closure evidence remains open**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -107,13 +107,19 @@ Windows and Linux CI passed. Phase E removes historical-memory copies from clien
 updates and ASCII delivery, indexes rendering, budgets native event work, and adds
 save/checkpoint responsiveness tests; see [its findings](phase-e-findings.md).
 Phase E merged in PR #27 after Windows and Linux CI passed on its final commit.
-The [3p closeout audit](3p-closeout.md) measures genuine saved exploration:
-the full 256-region journal reloads, but its final checkpoint JSON would require
-765 MB against the unchanged 64 MiB cap; checkpoint-enabled traversal fails.
-The broader performance milestone is **not ready to close**. Fix checkpoint growth
-and verify full saved traversal/native responsiveness before expanding milestone 3.
-The audit distinguishes this blocker from explicitly deferred streaming, startup
-history loading, query scaling and diagnostic I/O work.
+The [original closeout audit](3p-closeout.md) identified a 765 MB explored-world
+checkpoint against a 64 MiB cap. The [format-6 follow-up](3p-checkpoint-growth.md)
+reduces that same complete 256-region state to 9.92 MB through source-region
+navigation sharing. The user approved rejecting format-5 saves before this change.
+Enabled traversal now completes with exact durable restart and bounded tail replay;
+native full exploration, ASCII/text continuation and native input during a blocked
+checkpoint also pass. The cap, rewind window and runtime queue limits are unchanged.
+The broader milestone remains **not ready to close** while recurrent diagnostic
+acknowledgement/presentation tails are resolved. The final correlated full native
+traversal still peaks at 2,915 ms, with large intervals in client sending, delivery
+and frame-reader receipt; its server handlers peak at 10.53 ms. Isolate those
+intervals next, then establish the latency disposition before feature expansion.
+This is distinct from deferred streaming, history loading and query scaling.
 Process recovery tests do not establish hardware power-loss behavior.
 
 Scope and sequencing are defined in the

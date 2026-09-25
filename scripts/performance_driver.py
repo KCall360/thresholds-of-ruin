@@ -4,6 +4,7 @@ Pacing, snapshots, and optional progress annotations are outside action timing.
 All child processes and fresh saves belong to this invocation.
 """
 import argparse
+import functools
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,30 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "crates/server/fixtures/performance-v1.json"
 
 
+@functools.lru_cache(maxsize=1)
+def _host_clock_offset():
+    """Calibrate once; no DLL lookup or wall-clock call on each output line."""
+    if os.name == "nt":
+        import ctypes
+        value = ctypes.c_ulonglong()
+        precise_clock = ctypes.windll.kernel32.GetSystemTimePreciseAsFileTime
+        before = time.perf_counter_ns()
+        precise_clock(ctypes.byref(value))
+        after = time.perf_counter_ns()
+        unix_ns = (value.value - 116444736000000000) * 100
+    else:
+        before = time.perf_counter_ns()
+        unix_ns = time.time_ns()
+        after = time.perf_counter_ns()
+    return unix_ns - (before + after)//2
+
+
+def wall_time_ns(counter=None):
+    # Correlation timestamps follow the same monotonic boundaries as durations.
+    offset = _host_clock_offset()
+    return offset + (time.perf_counter_ns() if counter is None else round(counter*1e9))
+
+
 class WindowClosed(RuntimeError):
     pass
 
@@ -27,23 +52,40 @@ class JsonProcess:
         self.name = name
         self.ack_line_received = None
         self.last_line_received = None
+        self.ack_request_id = None
+        self.last_reader_work_ms = 0
+        self.last_queue_delay_ms = 0
+        self.last_frame_profiles = []
         self.lines = queue.Queue()
         self.stderr = (directory / (name + ".stderr.log")).open("w", encoding="utf-8")
         self.log = (directory / (name + ".stdout.jsonl")).open("w", encoding="utf-8")
         self.child = subprocess.Popen([str(binary), *map(str, args)], cwd=ROOT, env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if env.get("TOR_TIMING_DIAGNOSTICS") else self.stderr,
             text=True, encoding="utf-8", bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" and not visible else 0)
+        self.stderr_reader = None
+        if self.child.stderr is not None:
+            self.stderr_reader = threading.Thread(target=self._read_stderr, daemon=True)
+            self.stderr_reader.start()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
+
+    def _read_stderr(self):
+        for line in self.child.stderr:
+            # A bounded file buffer drains small timing records without one
+            # disk write per record; stop() joins the reader and closes it.
+            self.stderr.write(line)
 
     def _read(self):
         try:
             for line in self.child.stdout:
                 received = time.perf_counter()
+                wall_received = wall_time_ns(received)
                 self.log.write(line)
                 self.log.flush()
-                self.lines.put((json.loads(line), received))
+                value = json.loads(line)
+                self.lines.put((value, received, (time.perf_counter()-received)*1000, wall_received))
         except Exception as error:
             self.lines.put(({"type": "fatal", "error": str(error)}, time.perf_counter()))
         finally:
@@ -51,9 +93,16 @@ class JsonProcess:
 
     def until(self, predicate, seconds=30):
         deadline = time.monotonic() + seconds
+        self.last_frame_profiles = []
         while True:
             try:
-                value, received = self.lines.get(timeout=max(0, deadline - time.monotonic()))
+                item = self.lines.get(timeout=max(0, deadline - time.monotonic()))
+                value, received = item[:2]
+                self.last_reader_work_ms = item[2] if len(item) >= 3 else 0
+                self.last_line_unix_ns = item[3] if len(item) >= 4 else None
+                self.last_queue_delay_ms = max(0., (time.perf_counter()-received)*1000 - self.last_reader_work_ms)
+                if value and value.get("profile"):
+                    self.last_frame_profiles.append(value["profile"])
             except queue.Empty:
                 raise RuntimeError("Client readiness/presentation deadline; see retained logs") from None
             if value is None:
@@ -73,11 +122,15 @@ class JsonProcess:
         self.child.stdin.flush()
         acknowledgement = None
         self.ack_line_received = None
+        self.ack_line_unix_ns = None
+        self.ack_request_id = None
         def ready(value):
             nonlocal acknowledgement
             if (value.get("message") or {}).get("type") == "ack":
                 acknowledgement = time.perf_counter()
                 self.ack_line_received = self.last_line_received
+                self.ack_line_unix_ns = self.last_line_unix_ns
+                self.ack_request_id = value["message"]["request_id"] if "request_id" in value["message"] else None
             return value.get("type") == "ready"
         frame, received = self.until(ready)
         return frame, started, acknowledgement, received
@@ -93,6 +146,9 @@ class JsonProcess:
             self.child.kill()
         self.child.wait(timeout=10)
         self.reader.join(timeout=10)
+        if self.stderr_reader is not None:
+            self.stderr_reader.join(timeout=10)
+            self.child.stderr.close()
         self.child.stdin.close()
         self.child.stdout.close()
         self.stderr.close()
@@ -135,13 +191,15 @@ def verify(step, action, before, after):
     assert after["history"][-1]["content"]["event"]["type"] == step["expected"]
 
 
-def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False, capture=True):
+def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False, capture=True, correlate=False):
     bin_dir, output = Path(bin_dir).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     spec = json.loads(SPEC.read_text(encoding="utf-8"))
     assert 1 <= regions <= 256 and 1 <= actors <= 8 and cycles > 0 and pace >= 0
     suffix = ".exe" if os.name == "nt" else ""
     env = {k:v for k,v in os.environ.items() if k not in ("TOR_SERVER_TOKEN","TOR_SPECTATOR_TOKEN","TOR_WIZARD_TOKEN")}
+    if correlate:
+        env["TOR_TIMING_DIAGNOSTICS"] = "1"
     player, spectator_token = uuid.uuid4().hex, uuid.uuid4().hex
     processes = []
     def launch(name, args, token, label, visible=False, extra=None):
@@ -149,7 +207,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         processes.append(process)
         return process
     result = {"trace_version":spec["version"],"seed":spec["seed"],"regions":regions,"actors":actors,
-        "cycles":0,"pace_seconds":pace,"capture":capture,"diagnostics_version":1,"samples":[]}
+        "cycles":0,"pace_seconds":pace,"capture":capture,"diagnostics_version":1,"correlate":correlate,"samples":[]}
     clients = {}
     try:
         server = launch("tor-server", ["--listen","127.0.0.1:0","--seed",spec["seed"],"--regions",regions,
@@ -188,6 +246,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                 annotated, *_ = clients[actor].send({"type":"request","request":progress})
                 assert annotated["error"] is None
                 before = annotated
+            input_unix_ns = wall_time_ns()
             after, start, ack, received = clients[actor].send({"type":"act","action":action})
             verify(step,action,before,after)
             sample = {"cycle":cycle,"step":index,"actor":actor,"label":step["label"],"expected":step["expected"],"action":action,
@@ -204,6 +263,12 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                         validate_presentation_profile(frame["profile"])
                         sample["presentation_profile"] = frame["profile"]
                     result["presented_revision"] = frame["state"]["revision"]
+            if correlate:
+                sample["request_id"] = clients[actor].ack_request_id
+                sample["input_unix_ns"] = input_unix_ns
+                sample["ack_line_unix_ns"] = clients[actor].ack_line_unix_ns
+                sample["ready_reader_work_ms"] = clients[actor].last_reader_work_ms
+                sample["ready_queue_delay_ms"] = clients[actor].last_queue_delay_ms
             result["samples"].append(sample)
             with (output/"samples.jsonl").open("a",encoding="utf-8") as stream:
                 stream.write(json.dumps(sample)+"\n")
@@ -268,11 +333,12 @@ def main():
     parser.add_argument("--pace-ms",type=float,default=250)
     parser.add_argument("--stay-open",action="store_true")
     parser.add_argument("--no-capture",action="store_true")
+    parser.add_argument("--correlate",action="store_true")
     args = parser.parse_args()
     output = args.output or ROOT/"saves/playtests"/("regions-256-"+uuid.uuid4().hex)
     print(f"Performance demo logs and fresh save: {output}",flush=True)
     result = run_demo(args.bin_dir,output,regions=args.regions,actors=args.actors,cycles=args.cycles,
-        pace=args.pace_ms/1000,stay_open=args.stay_open,capture=not args.no_capture)
+        pace=args.pace_ms/1000,stay_open=args.stay_open,capture=not args.no_capture,correlate=args.correlate)
     print(f"Verified {result['cycles']} complete cycles.")
 
 

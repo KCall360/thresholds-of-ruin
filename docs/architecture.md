@@ -247,7 +247,8 @@ a single new record is admitted before publishing the candidate. World collectio
 items and actor navigation use deterministic copy-on-write ownership. Navigation
 shares maps by source region, so discovering a local connection does not copy all
 remembered cells. This sharing
-never crosses the protocol boundary and does not change snapshot encoding.
+never crosses the protocol boundary. Format-6 checkpoints also pool equal source-region
+navigation maps across retained boundaries; decoding restores shared ownership.
 Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 
@@ -284,7 +285,7 @@ The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
 its own authorized response rather than widening normal observations. Protocol
-version 12, save format 5, and ruleset `diagonal-v11` are the only supported
+version 12, save format 6, and ruleset `diagonal-v11` are the only supported
 runtime formats. Older saves and rulesets are rejected rather than migrated.
 The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses

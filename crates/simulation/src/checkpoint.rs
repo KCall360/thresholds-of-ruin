@@ -1,5 +1,5 @@
 //! Backend-only deterministic checkpoint state. Identical worlds and navigation
-//! maps are encoded once. This module does not perform storage or I/O.
+//! regions are encoded once across navigation maps and rewind boundaries. This module does not perform storage or I/O.
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +25,7 @@ pub struct Snapshot {
 pub struct SharedState {
     #[serde(with = "tor_world::checkpoint_worlds")]
     worlds: Vec<World>,
+    #[serde(with = "navigation_regions")]
     navigation: Vec<Navigation>,
     items: Vec<BTreeMap<ItemId, Item>>,
 }
@@ -174,5 +175,76 @@ mod tests {
         let mut broken = game.checkpoint(&mut shared);
         broken.world = usize::MAX;
         assert!(Game::restore_checkpoint(broken, &shared).is_none());
+    }
+}
+
+/// Format-6 navigation pools retain sharing when decoded, including between
+/// independently equal region maps. No historical-format fallback is accepted.
+mod navigation_regions {
+    use super::*;
+    use crate::navigation_map::RegionMap;
+    use serde::{Deserializer, Serializer};
+    use tor_world::{Direction, Location};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Instance {
+        cells: Vec<usize>,
+        edges: Vec<usize>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Regions {
+        cells: Vec<RegionMap<Location, bool>>,
+        edges: Vec<RegionMap<(Location, Direction), (Location, u8)>>,
+        instances: Vec<Instance>,
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        navigation: &[Navigation],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut saved = Regions {
+            cells: Vec::new(),
+            edges: Vec::new(),
+            instances: Vec::new(),
+        };
+        let mut cells = BTreeMap::new();
+        let mut edges = BTreeMap::new();
+        for map in navigation {
+            saved.instances.push(Instance {
+                cells: map.cells.checkpoint_regions(&mut saved.cells, &mut cells),
+                edges: map.edges.checkpoint_regions(&mut saved.edges, &mut edges),
+            });
+        }
+        saved.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Navigation>, D::Error> {
+        let saved = Regions::deserialize(deserializer)?;
+        if saved.cells.iter().any(|map| !map.is_checkpoint_region())
+            || saved.edges.iter().any(|map| !map.is_checkpoint_region())
+        {
+            return Err(serde::de::Error::custom(
+                "invalid checkpoint navigation region",
+            ));
+        }
+        saved
+            .instances
+            .into_iter()
+            .map(|instance| {
+                let cells = RegionMap::restore_regions(&instance.cells, &saved.cells);
+                let edges = RegionMap::restore_regions(&instance.edges, &saved.edges);
+                match (cells, edges) {
+                    (Some(cells), Some(edges)) => Ok(Navigation { cells, edges }),
+                    _ => Err(serde::de::Error::custom(
+                        "invalid checkpoint navigation reference",
+                    )),
+                }
+            })
+            .collect()
     }
 }

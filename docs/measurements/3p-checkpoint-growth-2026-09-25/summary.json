@@ -1,0 +1,62 @@
+{
+  "final-ack": {
+    "request_to_ack_ms": {
+      "n": 1675,
+      "p50_ms": 6.82129999040626,
+      "p95_ms": 21.363599997130223,
+      "max_ms": 30.638700001873076
+    },
+    "request_to_ack_line_ms": {
+      "n": 1675,
+      "p50_ms": 6.078099992009811,
+      "p95_ms": 18.947300006402656,
+      "max_ms": 28.151500009698793
+    },
+    "request_to_presentation_ms": {
+      "n": 205,
+      "p50_ms": 33.80679999827407,
+      "p95_ms": 41.01780000200961,
+      "max_ms": 46.939299994846806
+    },
+    "metadata": {
+      "trace_version": 1,
+      "seed": 42,
+      "regions": 256,
+      "actors": 8,
+      "cycles": 3,
+      "pace_seconds": 0.0,
+      "capture": false,
+      "diagnostics_version": 1,
+      "correlate": true,
+      "spectator_role": "spectator",
+      "initial_revision": 0,
+      "client_memory_start": 44,
+      "presented_revision": 444,
+      "client_memory_end": 581
+    }
+  },
+  "final-native": {
+    "request_to_presentation_ms": {
+      "n": 2805,
+      "p50_ms": 49.50359999202192,
+      "p95_ms": 51.061999998637475,
+      "max_ms": 2914.7556999960216
+    },
+    "metadata": {
+      "trace_version": 1,
+      "seed": 42,
+      "regions": 256,
+      "checkpoint_interval": 64,
+      "correlate": true,
+      "disclosed_cells": 20956,
+      "actions": 2805,
+      "checkpoint_sequence": 2752,
+      "checkpoint_bytes": 9806500,
+      "tail_records": 53,
+      "restart_to_frame_ms": 1775.2049999980954,
+      "restart_equal": true,
+      "continued_after_restart": true,
+      "restart_input_ms": 50.67430000053719
+    }
+  }
+}

@@ -313,38 +313,55 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
 
 #[test]
 fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("explored.db");
-    let trace = Trace::load();
-    let scenario = Scenario::performance(trace.seed, 8, 1).unwrap();
-    let mut engine = Engine::memory(scenario.clone())
-        .unwrap()
-        .attach_profile_save_with_policy(
-            &path,
-            tor_server::SavePolicy {
-                checkpoint_interval: 77,
-                ..tor_server::SavePolicy::default()
-            },
-        )
-        .unwrap();
-    for _ in 0..7 {
-        for action in &trace.traversal {
-            let before = engine.state(ActorId(1)).unwrap();
-            step(&mut engine, action.resolve(&before));
-            action.verify(&before, &engine.state(ActorId(1)).unwrap(), true);
+    for regions in [8, 256] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("explored.db");
+        let trace = Trace::load();
+        let scenario = Scenario::performance(trace.seed, regions, 1).unwrap();
+        let mut engine = Engine::memory(scenario.clone())
+            .unwrap()
+            .attach_profile_save_with_policy(
+                &path,
+                tor_server::SavePolicy {
+                    checkpoint_interval: 64,
+                    ..tor_server::SavePolicy::default()
+                },
+            )
+            .unwrap();
+        for _ in 0..regions - 1 {
+            for action in &trace.traversal {
+                let before = engine.state(ActorId(1)).unwrap();
+                step(&mut engine, action.resolve(&before));
+                action.verify(&before, &engine.state(ActorId(1)).unwrap(), true);
+            }
         }
+        // Finish a periodic capture after fully exploring, then retain a real
+        // nonempty replay tail. This exercises saving throughout traversal.
+        while !engine.profile_counts().0.is_multiple_of(64) {
+            step(&mut engine, Action::Wait);
+        }
+        let before = engine.state(ActorId(1)).unwrap();
+        let counts = engine.profile_counts();
+        let measured = engine.profile_checkpoint_encoding().unwrap().0;
+        assert_eq!(engine.state(ActorId(1)).unwrap(), before);
+        assert_eq!(engine.profile_counts(), counts);
+        assert!(
+            measured < 16 * 1024 * 1024,
+            "explored checkpoint must fit with headroom: {regions} regions, {measured} bytes"
+        );
+        engine.flush().unwrap();
+        assert_eq!(engine.save_status().checkpoint_sequence, counts.0 as u64);
+        assert_eq!(engine.save_status().checkpoint_bytes, measured);
+        for _ in 0..3 {
+            step(&mut engine, Action::Wait);
+        }
+        engine.flush().unwrap();
+        let before = engine.state(ActorId(1)).unwrap();
+        let counts = engine.profile_counts();
+        drop(engine);
+        let resumed = Engine::open(&path, scenario).unwrap();
+        assert_eq!(resumed.state(ActorId(1)).unwrap(), before);
+        assert_eq!(resumed.profile_counts(), counts);
+        assert_eq!(resumed.recovery_profile().records_replayed, 3);
     }
-    let before = engine.state(ActorId(1)).unwrap();
-    let counts = engine.profile_counts();
-    let measured = engine.profile_checkpoint_encoding().unwrap().0;
-    assert_eq!(engine.state(ActorId(1)).unwrap(), before);
-    assert_eq!(engine.profile_counts(), counts);
-    engine.flush().unwrap();
-    assert_eq!(engine.save_status().checkpoint_sequence, 77);
-    assert_eq!(engine.save_status().checkpoint_bytes, measured);
-    drop(engine);
-    let resumed = Engine::open(&path, scenario).unwrap();
-    assert_eq!(resumed.state(ActorId(1)).unwrap(), before);
-    assert_eq!(resumed.profile_counts(), counts);
-    assert_eq!(resumed.recovery_profile().records_replayed, 0);
 }

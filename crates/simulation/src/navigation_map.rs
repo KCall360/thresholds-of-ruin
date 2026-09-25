@@ -65,7 +65,58 @@ impl<K: RegionKey, V: Clone> RegionMap<K, V> {
         }
     }
 }
-// The wire snapshot remains the same strictly ordered flat key/value sequence.
+// Checkpoint tables share whole source-region maps across navigation instances.
+// References are ordered by region, independent of insertion or pointer identity.
+impl<K: RegionKey, V: PartialEq> RegionMap<K, V> {
+    pub(crate) fn checkpoint_regions(
+        &self,
+        pool: &mut Vec<Self>,
+        lookup: &mut BTreeMap<RegionId, Vec<usize>>,
+    ) -> Vec<usize> {
+        self.regions
+            .iter()
+            .map(|(region, map)| {
+                let candidates = lookup.entry(*region).or_default();
+                if let Some(index) = candidates.iter().copied().find(|&index| {
+                    let existing = &pool[index].regions[region];
+                    map.shares_storage(existing) || map == existing
+                }) {
+                    index
+                } else {
+                    let index = pool.len();
+                    pool.push(Self {
+                        regions: BTreeMap::from([(*region, map.clone())]),
+                    });
+                    candidates.push(index);
+                    index
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn is_checkpoint_region(&self) -> bool {
+        self.regions.len() == 1 && self.regions.values().all(|map| !map.is_empty())
+    }
+
+    pub(crate) fn restore_regions(indices: &[usize], pool: &[Self]) -> Option<Self> {
+        let mut regions = BTreeMap::new();
+        let mut previous = None;
+        for &index in indices {
+            let part = pool.get(index)?;
+            if !part.is_checkpoint_region() {
+                return None;
+            }
+            let (&region, map) = part.regions.first_key_value()?;
+            if previous.is_some_and(|before| before >= region) {
+                return None;
+            }
+            regions.insert(region, map.clone());
+            previous = Some(region);
+        }
+        Some(Self { regions })
+    }
+}
+// Each pooled region uses a strictly ordered flat key/value sequence.
 impl<K: RegionKey + Serialize, V: Serialize> Serialize for RegionMap<K, V> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self.iter())
@@ -86,6 +137,37 @@ impl<'de, K: RegionKey + Deserialize<'de>, V: Clone + Deserialize<'de>> Deserial
 mod tests {
     use super::*;
     use tor_world::Position;
+    #[test]
+    fn checkpoint_regions_preserve_changes_deletions_and_shared_ownership() {
+        let key = |region| Location {
+            region: RegionId(region),
+            position: tor_world::Position { x: 1, y: 1, z: 0 },
+        };
+        let mut before = RegionMap::default();
+        before.insert(key(1), false);
+        before.insert(key(2), false);
+        let mut after = before.clone();
+        after.insert(key(1), true);
+        let mut deleted = after.clone();
+        deleted.remove(&key(2));
+        let mut pool = Vec::new();
+        let mut lookup = BTreeMap::new();
+        let snapshots: Vec<_> = [&before, &after, &deleted]
+            .into_iter()
+            .map(|map| map.checkpoint_regions(&mut pool, &mut lookup))
+            .collect();
+        assert_eq!(pool.len(), 3);
+        let restored: Vec<_> = snapshots
+            .iter()
+            .map(|indices| RegionMap::restore_regions(indices, &pool).unwrap())
+            .collect();
+        assert_eq!(restored, vec![before, after, deleted]);
+        assert!(
+            restored[0].regions[&RegionId(2)].shares_storage(&restored[1].regions[&RegionId(2)])
+        );
+        assert!(RegionMap::restore_regions(&[snapshots[0][1], snapshots[0][0]], &pool).is_none());
+    }
+
     #[test]
     fn editing_one_region_preserves_all_other_snapshot_storage_and_order() {
         let key = |region| Location {

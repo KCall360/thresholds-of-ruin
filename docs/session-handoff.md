@@ -1,65 +1,49 @@
-# Session handoff — 2026-09-25 milestone 3p closeout
+# Session handoff — milestone 3p explored checkpoint growth
 
-## Starting publication state
+## Verified starting publication
 
-Phase E merged in [PR #27](https://github.com/KCall360/thresholds-of-ruin/pull/27)
-at `3783326ab3ba730b3c9994aedbff6cfd147f8799`, after Windows and Linux CI passed on
-final head `9e059354b93b2b599d16ed00b7b7676c5e4ffc5d`. Verified through GitHub.
-The closeout branch is `codex/milestone-3p-closeout`. Consult its live PR for final
-publication and CI state; merge only after Windows/Linux CI pass on its final head.
+PR #28 merged at `eff107ce95b7c0f6c8f813597d0fcb94f70fefa5` after Windows and Linux
+CI passed on final head `61372ee1958346a90fe423eb75b6e16f182951cc`. GitHub was
+queried directly. This follow-up uses branch `codex/explored-checkpoint-growth`;
+consult its live PR for final publication and CI state.
 
-Read [the closeout audit](3p-closeout.md), [milestones](milestones.md),
-[the harness](performance-harness.md), [checkpoints](checkpoints.md),
-[the performance plan](performance-persistence.md), [architecture](architecture.md)
-and [development practices](../CONTRIBUTING.md) before continuing.
+Read [the original audit](3p-closeout.md), [this follow-up](3p-checkpoint-growth.md),
+[milestones](milestones.md), [checkpoints](checkpoints.md),
+[the harness](performance-harness.md), [the performance plan](performance-persistence.md),
+[architecture](architecture.md) and [development practices](../CONTRIBUTING.md).
 
-## Findings and next work
+## Implementation and compatibility
 
-**Milestone 3p is not ready to close.** Two native runs cover 3,350 acknowledgements;
-maxima are 26.421/28.172 ms and the previous acknowledgement spikes did not recur.
-Their cause is not proved fixed. Presentation spikes accompany 300/436 ms optional
-diagnostic-report stalls; phase timing separates these from small application/draw work.
+The user explicitly approved advancing to save format **6** and rejecting format 5
+before implementation, following the pre-release policy. No migration/compatibility
+reader was added. Protocol 12 and `diagonal-v11` remain unchanged. Format 6 stores
+equal cell/edge knowledge by source region once across navigation/rewind instances.
+Decoding restores sharing and validates ordered references and table structure.
+Exact boundary/game comparison, malformed-reference tests and full eight/256-region
+saved-exploration regressions cover the changed representation.
 
-Genuine saved 256-region exploration completes 2,805 actions and discloses 20,956
-cells with checkpoints disabled; the 2.32 MB journal reloads exactly. Its final
-checkpoint representation is 765,021,723 bytes, versus the unchanged 64 MiB cap.
-Enabled traversal fails background saving under both default and stress checkpoint
-intervals. Whole-navigation-map deduplication repeats overlapping knowledge across
-rewind boundaries. This is a blocker in the existing fixture, not deferred streaming.
-The audit records raw successful and failed samples, metadata, acceptance evidence,
-limits, and the next step toward milestone 3 interactions/travel.
+The complete 256-region checkpoint falls from 765,021,723 to 9,920,494 bytes.
+Both interval-64 and default-1024 traversal complete all 2,805 actions and 20,956
+cells with exact restart and tails of 53/757 records. The 64 MiB cap, bounded
+queues, resynchronization, disclosure, history and rewind contracts are unchanged.
+The 256 Region Spectator desktop shortcut was removed as requested. Maintain the
+remaining three launchers; preserve the reusable benchmark driver and prior saves.
 
-## Implementation and contracts
+## Closure and next step
 
-Opt-in `latency_bench --saved-discovery` attaches before movement, records save and
-reload metrics, and validates complete saved-prefix/replay accounting. An offline
-counting diagnostic measures current format-5 checkpoint JSON without allocating
-its encoded payload. Tests compare the count to actual writer bytes and reload a
-fully explored eight-region checkpoint. Failed runs remain rejected by the validator.
-Existing workloads/profiling and Phase E timing instrumentation remain intact.
+The checkpoint-size blocker is addressed. Full native explored-save acceptance
+passes, including a 78 ms real-keyboard modal response on the retained 256-region
+save while persistence is blocked. Final acknowledgement maximum is 30.64 ms;
+full native traversal still has a 2,915 ms maximum. Correlation places the largest
+intervals in client request sending, acknowledgement delivery and frame-reader
+receipt; server handlers peak at 10.53 ms. Their root causes and latency disposition
+remain unresolved. Opt-in request/reader timing correlation is maintained with
+the workloads. Non-reproduction does not prove historical spikes fixed. See the
+follow-up for retained raw samples, timings, final verification and remaining
+limitations; keep 3p open while that evidence item remains unresolved.
 
-Protocol 12, format 5 and `diagonal-v11` are unchanged, as are all runtime mutation,
-queue, resynchronization, disclosure, rewind and save contracts. No cap increase,
-checkpoint disablement in ordinary play or format change is introduced. Credentials,
-logs and fresh saves remain outside Git. The full matrix was not warranted for
-this diagnostic/audit change; targeted enabled/disabled saved discovery is retained.
-
-## Verification and publication
-
-Local verification passes: 220 Rust tests in each of debug/release, all 87 Python
-debug checks, all 64 release process tests, formatting, Clippy, architecture and
-documentation checks, and warning-free private-item rustdoc. Debug/release binaries
-were explicitly rebuilt. All four desktop launchers passed real connection, fresh
-save retention and owned-process cleanup checks, including three completed
-256-region demo cycles. Their helpers still target the rebuilt debug binaries.
-See the closeout PR for Windows/Linux CI on its final commit. Prior Phase E verification and measurements
-remain in [its findings](phase-e-findings.md); they do not establish large explored
-checkpoint bounds. Do not mark 3p complete just because the closeout PR passes CI.
-
-The next focused change must reduce checkpoint growth while preserving exact
-recovery, rewind and supported saves, then pass complete saved exploration and
-native input/save/restart checks with checkpoints enabled. Settle any compatibility
-decision explicitly if the chosen representation requires it. Only then reopen
-milestone 3 feature expansion. Query scaling, streaming, linear history loading,
-optional diagnostic I/O and hardware power-loss qualification have separate,
-explicitly deferred dispositions in the audit.
+Next isolate those send/delivery/report-reader intervals with focused diagnostics.
+After 3p gates are satisfied, milestone 3 resumes with shared resumable actions,
+durable place knowledge, semantic narration/interruption, and slow-client
+resynchronization acceptance. No interaction or travel feature is added here.
+Publish through a PR and merge only after Windows/Linux CI pass on its final head.
