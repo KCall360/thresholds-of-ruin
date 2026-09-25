@@ -1,0 +1,84 @@
+{
+  "date": "2026-09-25",
+  "base_commit": "3783326ab3ba730b3c9994aedbff6cfd147f8799",
+  "phase_e_head": "9e059354b93b2b599d16ed00b7b7676c5e4ffc5d",
+  "hardware": {
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "NumberOfCores": 6,
+        "NumberOfLogicalProcessors": 12
+      }
+    ],
+    "os": [
+      {
+        "Caption": "Microsoft Windows 11 Home",
+        "Version": "10.0.26200",
+        "BuildNumber": "26200"
+      }
+    ],
+    "volume": [
+      {
+        "DriveLetter": "F",
+        "FileSystem": "NTFS",
+        "SizeRemaining": 613980463104,
+        "Size": 1000068870144
+      }
+    ],
+    "disk": [
+      {
+        "FriendlyName": "ST1000LM035-1RK172",
+        "BusType": "RAID",
+        "Size": 1000204886016
+      }
+    ]
+  },
+  "method": "Sequential release runs without competing builds/tests. Ordinary desktop/OS activity uncontrolled. Checkpoint policies compared on same binary; no runtime optimization in closeout. Native runs use unchanged Phase E release binaries. Hardware identity inherited; free space is historical Phase E metadata. TMP/TEMP set to F:/Codex/Roguelike/target/tmp for server runs.",
+  "commands": [
+    "latency_bench --saved-discovery --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "latency_bench --saved-discovery --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "latency_bench --saved-discovery --checkpoint-interval 64 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "python scripts/performance_report.py FILE --saved-discovery",
+    "python scripts/performance_driver.py --bin-dir target/release --output NEW_DIRECTORY --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture"
+  ],
+  "limitations": [
+    "Default and stress checkpoint runs intentionally retained as failures, not complete benchmark passes. Failure position varies with asynchronous worker timing.",
+    "Counting diagnostic uses production JSON shape with a same-length dummy UUID; counts full current snapshot, not necessarily last captured checkpoint. Does not allocate the encoded payload, does not bypass production cap.",
+    "Diagnostic checkpoint count occurs after final flush or after failed action, outside action timing. Its duration includes capture/deduplication; differs from worker timing.",
+    "No hardware power-loss, hard real-time, arbitrary-world bound, or keyboard-to-photon claim.",
+    "Native multi-cycle workload explores only a few regions; complete 256-region saved traversal is engine/disclosed-client benchmark, not native input measurement."
+  ],
+  "source_sha256": {
+    "crates/server/examples/latency_bench.rs": "f410e2a0f9c7ab1e9f5b0ac1e6fd5abbfa50d2f1efeaf5814573e671eb336e20",
+    "crates/server/src/engine.rs": "43ff4154c875e9cb328dcb3f31adf89ab50b0be129454c1d14610f17023fd2a0",
+    "scripts/performance_driver.py": "f3f60fa77d44e693aa3a3361b9c9756a1f4a8ee6f0ea28d073dd2923ad16ecf3",
+    "crates/client-ascii/src/main.rs": "b509b73a4a6ecac44db5d7e1c4cd8d07aaf6c7cdd1d5bf7ec6266cb820377a89",
+    "crates/client-ascii/src/network.rs": "186d2f280c50880639abae188874ab363eaa8fca795a75ba715ca20f0efcc8c3"
+  },
+  "binary_sha256": {
+    "target/release/examples/latency_bench.exe": "fbf4deb4cce0b1d7768b2b878a3732c5788a21c6185e7da5e6d60aba3451abfe",
+    "target/release/tor-server.exe": "2c9254e785a8b708058851bdb9684df5af6c32b60dfadbbbee330a363108852f",
+    "target/release/tor-client-headless.exe": "73545acc18b7ebba630ce64c88bcb61681a0742ae7d6757e78c257d9db462304",
+    "target/release/tor-client-ascii.exe": "c16afad2184ab09b903979b40b287dd8d5e0db6b41277919334112f900826d1f"
+  },
+  "artifact_sha256": {
+    "ack-1-frames.json": "f379478d0b5269f6434cb455cc5e28602438c687e3a768e2dbade383ec3b1d42",
+    "ack-1.json": "25a8c7489b3e87dae6c4f6fb3bdba642a34b2748b2d26febbe77c3df60651508",
+    "ack-2-frames.json": "9e7065e56fc2e0ba70aecd392a94d27525ffe879f7c2928b25827e443dba2b2a",
+    "ack-2.json": "277e7668a24c0764a256e064eed7b86480738d528ae4262f0371612ee16e9ec4",
+    "saved-default.jsonl.gz": "a8ca95d0f51ff087e26d23c5942ac81be40736e0a72b761dff59f8e95355daff",
+    "saved-disabled.jsonl.gz": "977f241bd48b3040677e77e46db3be0ac744340c6ddc1579d83f845f6fb75b99",
+    "saved-stress.jsonl.gz": "738d533d25ef6918c3765c7655761bbae22388e8870baf640e508f6bb8095c16",
+    "summary.json": "0bdf63b0f6b422896e4a7a6554d465032b372f77474c84603b5caecc86ce9ce0"
+  },
+  "volume_free_bytes_at_closeout": 603905392640,
+  "native_binary_match": "Server, headless and ASCII SHA256 exactly match retained Phase E final binary hashes.",
+  "measured_source_worktree_sha256": {
+    "crates/server/examples/latency_bench.rs": "d2d4e3d4c25140ad3e4721a3ed95545394b92aa776031bd4268596c9f0f0ab9c",
+    "crates/server/src/engine.rs": "43ff4154c875e9cb328dcb3f31adf89ab50b0be129454c1d14610f17023fd2a0",
+    "scripts/performance_driver.py": "f3f60fa77d44e693aa3a3361b9c9756a1f4a8ee6f0ea28d073dd2923ad16ecf3",
+    "crates/client-ascii/src/main.rs": "b509b73a4a6ecac44db5d7e1c4cd8d07aaf6c7cdd1d5bf7ec6266cb820377a89",
+    "crates/client-ascii/src/network.rs": "186d2f280c50880639abae188874ab363eaa8fca795a75ba715ca20f0efcc8c3"
+  },
+  "source_hash_line_endings": "source_sha256 uses LF-normalized source; measured_source_worktree_sha256 preserves exact measured working-file bytes. Text artifacts use repository LF line endings."
+}

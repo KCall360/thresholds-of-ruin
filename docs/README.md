@@ -26,6 +26,7 @@ until its guide and the roadmap are updated together.
 | Resume implementation work | [Session handoff](session-handoff.md) |
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Review accepted future game requirements | [Game design plan](game-design-plan.md) |
+| Review 3p closure blockers and saved exploration | [Milestone 3p closeout audit](3p-closeout.md) |
 | Review background-save measurements | [Phase B findings](phase-b-findings.md) |
 | Review client responsiveness and presentation tails | [Phase E findings](phase-e-findings.md) |
 | Review state-copy and observation scaling | [Phase D findings](phase-d-findings.md) |

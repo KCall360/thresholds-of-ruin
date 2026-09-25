@@ -78,7 +78,7 @@ must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phases A–E implemented and locally verified; broader 3p acceptance remains open**.
+Status: **Phases A–E merged; closeout audit identifies explored-world checkpoint growth as a blocker**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -106,7 +106,14 @@ scene work; see [its findings](phase-d-findings.md). Phase D merged in PR #26 af
 Windows and Linux CI passed. Phase E removes historical-memory copies from client
 updates and ASCII delivery, indexes rendering, budgets native event work, and adds
 save/checkpoint responsiveness tests; see [its findings](phase-e-findings.md).
-The broader performance milestone is not complete.
+Phase E merged in PR #27 after Windows and Linux CI passed on its final commit.
+The [3p closeout audit](3p-closeout.md) measures genuine saved exploration:
+the full 256-region journal reloads, but its final checkpoint JSON would require
+765 MB against the unchanged 64 MiB cap; checkpoint-enabled traversal fails.
+The broader performance milestone is **not ready to close**. Fix checkpoint growth
+and verify full saved traversal/native responsiveness before expanding milestone 3.
+The audit distinguishes this blocker from explicitly deferred streaming, startup
+history loading, query scaling and diagnostic I/O work.
 Process recovery tests do not establish hardware power-loss behavior.
 
 Scope and sequencing are defined in the
