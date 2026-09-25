@@ -10,7 +10,8 @@ mod storage;
 pub use storage::{inspect_save, SavePolicy, SaveStatus};
 mod transport;
 pub use engine::{
-    ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure, Scenario,
+    ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure, RecoveryProfile,
+    Scenario,
 };
 pub use session::{Account, Service};
 pub use transport::serve;

@@ -6,6 +6,8 @@ This directory separates what exists from what is intended:
   active, and planned work.
 - [Architecture](architecture.md) records the system boundaries and the reasons
   behind them. Statements about future work are explicitly identified there.
+- [Game design plan](game-design-plan.md) consolidates future requirements,
+  architectural considerations, and intentionally deferred details.
 - The implementation guides below describe behavior that exists in the current
   tree, its compatibility constraints, and its verification.
 - [Development practices](../CONTRIBUTING.md) defines how changes are designed,
@@ -23,8 +25,11 @@ until its guide and the roadmap are updated together.
 | See what works and what comes next | [Project status and roadmap](milestones.md) |
 | Resume implementation work | [Session handoff](session-handoff.md) |
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
+| Review accepted future game requirements | [Game design plan](game-design-plan.md) |
 | Review background-save measurements | [Phase B findings](phase-b-findings.md) |
+| Review checkpoint and startup measurements | [Phase C findings](phase-c-findings.md) |
 | Configure saves and understand crash recovery | [Background saving](background-saving.md) |
+| Understand bounded replay and retained history | [Checkpoints](checkpoints.md) |
 | Run the server or integrate a client | [Protocol and persistence](protocol.md) |
 | Play in a terminal | [Text client](text-client.md) |
 | Play in a native window | [Graphical ASCII client](ascii-client.md) |

@@ -2,17 +2,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Extent, Material, Position, Terrain};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[path = "world_checkpoint.rs"]
+pub mod checkpoint;
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct RegionId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(deny_unknown_fields)]
 pub struct Location {
     pub region: RegionId,
     pub position: Position,
 }
 
 /// Directions in the current region's coordinate system; z increases upward.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Direction {
     North,
     East,
@@ -91,7 +101,8 @@ impl Direction {
 }
 
 /// A bounded rectangular volume with region-local coordinates.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Region {
     pub id: RegionId,
     pub name: String,
@@ -101,7 +112,8 @@ pub struct Region {
 /// A directed, single-cell connection. Horizontal apertures are at boundaries;
 /// explicit vertical links can represent stairs within a room. Rotation metadata
 /// is validated by `World::connect`. A passage need not contain a door entity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Passage {
     pub from: Location,
     pub direction: Direction,
@@ -118,12 +130,17 @@ pub enum WorldError {
 }
 
 /// Validated region topology with stable iteration order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct World {
+    #[serde(with = "crate::checkpoint_map")]
     doors: BTreeMap<Location, Door>,
     regions: BTreeMap<RegionId, Region>,
+    #[serde(with = "crate::checkpoint_map")]
     passages: BTreeMap<(Location, Direction), Passage>,
+    #[serde(with = "crate::checkpoint_map")]
     rotations: BTreeMap<(Location, Direction), u8>,
+    #[serde(with = "crate::checkpoint_map")]
     terrain: BTreeMap<Location, Terrain>,
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: BTreeMap<RegionId, Extent>,
@@ -131,13 +148,42 @@ pub struct World {
 }
 
 /// A cell-sized barrier entity, unrelated to portal identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Door {
     pub id: u64,
     pub open: bool,
 }
 
 impl World {
+    /// Structural validation for backend checkpoint restoration.
+    pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
+        let mut ids = BTreeSet::new();
+        self.regions.iter().all(|(id, region)| {
+            *id == region.id && {
+                let (x, y, z) = region.bounds.dimensions();
+                x > 0 && y > 0 && z > 0
+            }
+        }) && self.doors.iter().all(|(location, door)| {
+            self.contains(*location) && door.id > 0 && door.id < next_door_id && ids.insert(door.id)
+        }) && self.terrain.keys().all(|location| self.contains(*location))
+            && self
+                .place_hints
+                .iter()
+                .all(|location| self.contains(*location))
+            && self.chambers.keys().all(|id| self.regions.contains_key(id))
+            && self.passages.iter().all(|((from, direction), passage)| {
+                *from == passage.from
+                    && *direction == passage.direction
+                    && self.contains(*from)
+                    && self.contains(passage.to)
+            })
+            && self
+                .rotations
+                .iter()
+                .all(|(key, rotation)| *rotation < 4 && self.passages.contains_key(key))
+    }
+
     pub fn door(&self, location: Location) -> Option<Door> {
         self.doors.get(&location).copied()
     }

@@ -3,6 +3,7 @@
 //! [`Game`] and [`ActionOutcome`] are backend-only types. Network adapters must
 //! disclose observations and filter events; they must not serialize raw game state.
 
+pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;
 mod observation;
@@ -18,10 +19,14 @@ use std::num::NonZeroU64;
 
 use tor_world::{Direction, Location, Passage, Region, RegionId, World};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ActorId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ItemId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +73,8 @@ pub struct ActionOutcome {
     pub next_tick: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Actor {
     location: Location,
     orientation: u8,
@@ -77,13 +83,14 @@ struct Actor {
     visited: BTreeSet<RegionId>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum ItemLocation {
     Ground(Location),
     Carried(ActorId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Item {
     name: String,
     location: ItemLocation,

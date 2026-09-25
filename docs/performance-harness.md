@@ -1,8 +1,12 @@
 # Performance harness and Phase A verification
 
 Status: Phase A complete, 2026-09-24. The [measured findings](phase-a-findings.md)
-retain the complete release baseline and verification. Phase B
-storage is not implemented or authorized. The governing scope remains
+retain the complete release baseline and verification. Phase B background
+storage is implemented; see the [Phase B findings](phase-b-findings.md).
+Phase C adds [checkpoints](checkpoints.md) and focused `--phase-c` comparisons.
+Maintain this harness as features evolve and use targeted release-build checks
+under the [development practices](../CONTRIBUTING.md); the full matrix is not
+required for every change. The governing scope remains
 [performance and scalable persistence](performance-persistence.md).
 
 ## Shared deterministic fixture and trace
@@ -43,7 +47,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 12, archive 3, and `diagonal-v11` remain in use. Multi-actor archives
+Protocol 12, save format 5, and `diagonal-v11` are currently in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
@@ -78,7 +82,7 @@ Case metadata records seed, trace version, commit, dirty working-tree flag,
 platform, architecture, build profile, storage mode, cycles and warmup (currently
 zero). Small per-label sample counts remain visible and limit tail conclusions.
 
-Measured command phases are exclusive: candidate capture, simulation,
+Measured command phases are exclusive: candidate capture, checkpoint capture, simulation,
 navigation refresh, revision-view perception, revision comparison, rewind
 snapshot, serialization, underlying write/flush, file sync, replacement, and
 publication. Simulation's internal door perception belongs to simulation;
@@ -90,7 +94,11 @@ Phase A's retained results measured buffered whole-archive JSON writes, sync,
 and replacement. Current Phase B command timing measures record encoding/queue
 admission in `serialization`; command-path write/flush, sync, and replacement
 counts are zero. Worker `save_status` reports accepted/durable sequences, pending
-bytes/age, batches, application bytes committed, and last batch duration. These
+bytes/age, batches, application bytes committed, and last batch duration.
+Checkpoint diagnostics add the selected sequence, count, encoded size and encoding
+time. Restart diagnostics separate loaded history records from simulated tail
+records. `--checkpoint-interval` selects the capture interval; zero supplies a
+matched full-replay baseline. These
 bytes are not SQLite physical I/O. Final flush is outside action timing and
 reported separately. Broad candidate clones remain measured costs.
 Allocation counts are omitted because no low-impact allocator instrumentation

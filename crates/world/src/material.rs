@@ -1,6 +1,6 @@
 /// Backend material identity. Future materials add their own physical properties;
 /// appearance strings are never used to determine solidity or interaction rules.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Material {
     Stone,
 }
@@ -14,7 +14,7 @@ impl Material {
 }
 
 /// Empty allocated space is distinct from both solid material and missing space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Terrain {
     Empty,
     Solid(Material),

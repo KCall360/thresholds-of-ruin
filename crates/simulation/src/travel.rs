@@ -13,10 +13,22 @@ const DIRECTIONS: [Direction; 6] = [
     Direction::Down,
 ];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
+    #[serde(with = "tor_world::checkpoint_map")]
     cells: BTreeMap<Location, bool>,
+    #[serde(with = "tor_world::checkpoint_map")]
     edges: BTreeMap<(Location, Direction), (Location, u8)>,
+}
+
+impl Navigation {
+    pub(crate) fn checkpoint_valid(&self, world: &tor_world::World) -> bool {
+        self.cells.keys().all(|location| world.contains(*location))
+            && self.edges.iter().all(|((from, _), (to, turns))| {
+                *turns < 4 && self.cells.contains_key(from) && self.cells.contains_key(to)
+            })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

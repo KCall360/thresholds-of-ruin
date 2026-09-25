@@ -1,7 +1,7 @@
-//! Append-only application journal. SQLite supplies atomic batches and recovery;
+//! Application journal and checkpoints. SQLite supplies atomic batches and recovery;
 //! the worker owns all disk I/O after bootstrap, never the engine/session lock.
 use crate::{
-    engine::{invalid_archive, storage_failure, Archive, Record},
+    engine::{invalid_archive, storage_failure, Archive, Checkpoint, DiskCheckpoint, Record},
     Failure,
 };
 use rusqlite::{params, Connection};
@@ -13,10 +13,13 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const MAX_PAYLOAD: usize = 1024 * 1024;
+const MAX_CHECKPOINT: usize = 64 * MAX_PAYLOAD;
 const APP_ID: i64 = 0x544f524a;
 
 #[derive(Clone, Debug)]
 pub struct SavePolicy {
+    /// Accepted journal entries between snapshots; zero disables checkpointing.
+    pub checkpoint_interval: u64,
     pub target_interval: Duration,
     pub max_unsaved_age: Duration,
     pub idle_interval: Duration,
@@ -25,6 +28,7 @@ pub struct SavePolicy {
 impl Default for SavePolicy {
     fn default() -> Self {
         Self {
+            checkpoint_interval: 1024,
             target_interval: Duration::from_secs(30),
             max_unsaved_age: Duration::from_secs(60),
             idle_interval: Duration::from_millis(750),
@@ -34,7 +38,8 @@ impl Default for SavePolicy {
 }
 impl SavePolicy {
     pub fn validate(&self) -> Result<(), Failure> {
-        if self.target_interval.is_zero()
+        if self.checkpoint_interval > 1_000_000
+            || self.target_interval.is_zero()
             || self.max_unsaved_age < self.target_interval
             || self.max_unsaved_age > Duration::from_secs(86400)
             || self.max_pending_bytes == 0
@@ -57,6 +62,10 @@ impl SavePolicy {
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct SaveStatus {
+    pub checkpoint_sequence: u64,
+    pub checkpoints: u64,
+    pub checkpoint_bytes: u64,
+    pub last_checkpoint_ms: u64,
     pub accepted_sequence: u64,
     pub durable_sequence: u64,
     pub pending_bytes: usize,
@@ -108,7 +117,7 @@ pub(crate) fn frame<T: Serialize>(kind: u16, sequence: u64, value: &T) -> Result
     }
     let mut bytes = Vec::with_capacity(24 + payload.len());
     bytes.extend_from_slice(if kind == 0 { b"TORB" } else { b"TORJ" });
-    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&5u16.to_le_bytes());
     bytes.extend_from_slice(&kind.to_le_bytes());
     bytes.extend_from_slice(&sequence.to_le_bytes());
     bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -124,7 +133,7 @@ fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failure> {
     let kind = u16::from_le_bytes(bytes[6..8].try_into().unwrap());
     let magic = if sequence == 0 { b"TORB" } else { b"TORJ" };
     if &bytes[..4] != magic
-        || bytes[4..6] != 4u16.to_le_bytes()
+        || bytes[4..6] != 5u16.to_le_bytes()
         || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != sequence
         || u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize != bytes.len() - 24
         || crc32c(
@@ -215,14 +224,19 @@ fn connection(path: &Path) -> Result<Connection, Failure> {
     .map_err(|_| storage_failure())?;
     Ok(conn)
 }
-fn append(conn: &mut Connection, entries: &[Pending]) -> Result<(), Failure> {
+fn commit_batch(
+    conn: &mut Connection,
+    entries: &[Pending],
+    checkpoint: Option<(u64, &[u8])>,
+    mut fault: impl FnMut(&Connection, &str) -> Result<(), Failure>,
+) -> Result<(), Failure> {
     let tx = conn.transaction().map_err(|_| storage_failure())?;
     for entry in entries {
         // Retrying an uncertain commit reconciles exact stored bytes. A conflicting
         // sequence is never overwritten and no request can execute twice.
         let existing: Option<Vec<u8>> = tx
             .query_row(
-                "SELECT frame FROM journal WHERE sequence=?1",
+                "SELECT frame FROM journal WHERE sequence=?1 UNION ALL SELECT frame FROM history WHERE sequence=?1",
                 [entry.sequence as i64],
                 |r| r.get(0),
             )
@@ -240,21 +254,125 @@ fn append(conn: &mut Connection, entries: &[Pending]) -> Result<(), Failure> {
             }
         }
     }
-    tx.commit().map_err(|_| storage_failure())
+    fault(&tx, "after_append")?;
+    if let Some((sequence, bytes)) = checkpoint {
+        let current: Option<(i64, Vec<u8>)> = tx
+            .query_row(
+                "SELECT sequence,payload FROM checkpoint WHERE slot=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| storage_failure())?;
+        if current.as_ref().is_some_and(|(seq, old)| {
+            *seq > sequence as i64 || (*seq == sequence as i64 && old != bytes)
+        }) {
+            return Err(invalid_archive());
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO checkpoint VALUES (1,?1,?2,?3)",
+            params![
+                sequence as i64,
+                bytes,
+                i64::from(crc32c(bytes.iter().copied()))
+            ],
+        )
+        .map_err(|_| storage_failure())?;
+        fault(&tx, "after_checkpoint")?;
+        tx.execute(
+            "INSERT INTO history SELECT * FROM journal WHERE sequence>0 AND sequence<=?1",
+            [sequence as i64],
+        )
+        .map_err(|_| storage_failure())?;
+        fault(&tx, "after_history")?;
+        tx.execute(
+            "DELETE FROM journal WHERE sequence>0 AND sequence<=?1",
+            [sequence as i64],
+        )
+        .map_err(|_| storage_failure())?;
+        fault(&tx, "after_rotation")?;
+    }
+    fault(&tx, "before_commit")?;
+    tx.commit().map_err(|_| storage_failure())?;
+    fault(conn, "after_commit")
 }
 use rusqlite::OptionalExtension;
 
-/// Read a format-4 save for diagnostics. Gameplay uses normal strict replay too.
+fn encode_checkpoint(checkpoint: &DiskCheckpoint) -> Result<Vec<u8>, Failure> {
+    struct Bounded(Vec<u8>);
+    impl std::io::Write for Bounded {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.0.len().saturating_add(bytes.len()) > MAX_CHECKPOINT {
+                return Err(std::io::Error::other("checkpoint exceeds size limit"));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = Bounded(Vec::new());
+    serde_json::to_writer(&mut writer, checkpoint).map_err(|_| storage_failure())?;
+    Ok(writer.0)
+}
+
+fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure> {
+    let count: i64 = conn
+        .query_row("SELECT count(*) FROM checkpoint", [], |r| r.get(0))
+        .map_err(|_| invalid_archive())?;
+    if count == 0 {
+        return Ok(None);
+    }
+    if count != 1 {
+        return Err(invalid_archive());
+    }
+    let (sequence, length): (i64, i64) = conn
+        .query_row(
+            "SELECT sequence,length(payload) FROM checkpoint WHERE slot=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| invalid_archive())?;
+    if sequence <= 0 || length <= 0 || length > MAX_CHECKPOINT as i64 {
+        return Err(invalid_archive());
+    }
+    let (bytes, checksum): (Vec<u8>, u32) = conn
+        .query_row(
+            "SELECT payload,checksum FROM checkpoint WHERE slot=1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| invalid_archive())?;
+    if crc32c(bytes.iter().copied()) != checksum {
+        return Err(invalid_archive());
+    }
+    let checkpoint: DiskCheckpoint = strict(&bytes)?;
+    if checkpoint.sequence != sequence as u64 {
+        return Err(invalid_archive());
+    }
+    Ok(Some(checkpoint))
+}
+
+/// Read a format-5 save for diagnostics. Gameplay uses normal strict replay too.
 pub fn inspect_save(path: impl AsRef<Path>) -> Result<serde_json::Value, Failure> {
-    let (_, archive, _, _) = load(path.as_ref())?;
+    let (_, archive, _, _, _) = load(path.as_ref())?;
     serde_json::to_value(archive).map_err(|_| invalid_archive())
 }
-fn load(path: &Path) -> Result<(Connection, Archive, String, u64), Failure> {
+type Loaded = (Connection, Archive, String, u64, Option<DiskCheckpoint>);
+fn load(path: &Path) -> Result<Loaded, Failure> {
     // Refuse JSON and other formats without letting SQLite change the input.
     let mut file = std::fs::File::open(path).map_err(|_| storage_failure())?;
-    let mut header = [0u8; 16];
+    let mut header = [0u8; 18];
     std::io::Read::read_exact(&mut file, &mut header).map_err(|_| invalid_archive())?;
-    if &header != b"SQLite format 3\0" {
+    if &header[..16] != b"SQLite format 3\0" {
+        return Err(invalid_archive());
+    }
+    let page_size = match u16::from_be_bytes([header[16], header[17]]) {
+        1 => 65536u64,
+        size => u64::from(size),
+    };
+    if !(512..=65536).contains(&page_size) || !page_size.is_power_of_two() {
         return Err(invalid_archive());
     }
     let conn = connection(path).map_err(|_| invalid_archive())?;
@@ -267,11 +385,20 @@ fn load(path: &Path) -> Result<(Connection, Archive, String, u64), Failure> {
     let integrity: String = conn
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
         .map_err(|_| invalid_archive())?;
-    if version != 4 || app != APP_ID || integrity != "ok" {
+    // SQLite must get the first opportunity to recover a hot rollback journal,
+    // including a partially extended database page from an interrupted write.
+    if version != 5
+        || app != APP_ID
+        || integrity != "ok"
+        || file.metadata().map_err(|_| storage_failure())?.len() % page_size != 0
+    {
         return Err(invalid_archive());
     }
+    let checkpoint = read_checkpoint(&conn)?;
+    let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
+    let mut checkpoint_records = 0;
     let mut statement = conn
-        .prepare("SELECT sequence,length(frame),frame FROM journal ORDER BY sequence")
+        .prepare("SELECT sequence,length(frame),frame,0 FROM journal UNION ALL SELECT sequence,length(frame),frame,1 FROM history ORDER BY sequence")
         .map_err(|_| invalid_archive())?;
     let mut rows = statement.query([]).map_err(|_| invalid_archive())?;
     let mut archive = None;
@@ -283,6 +410,10 @@ fn load(path: &Path) -> Result<(Connection, Archive, String, u64), Failure> {
         let size: usize = usize::try_from(row.get::<_, i64>(1).map_err(|_| invalid_archive())?)
             .map_err(|_| invalid_archive())?;
         if sequence != next || !(24..=MAX_PAYLOAD + 24).contains(&size) {
+            return Err(invalid_archive());
+        }
+        let retained: bool = row.get(3).map_err(|_| invalid_archive())?;
+        if retained != (sequence > 0 && sequence <= checkpoint_sequence) {
             return Err(invalid_archive());
         }
         let bytes: Vec<u8> = row.get(2).map_err(|_| invalid_archive())?;
@@ -313,6 +444,9 @@ fn load(path: &Path) -> Result<(Connection, Archive, String, u64), Failure> {
                     return Err(invalid_archive());
                 }
                 a.records.push(envelope.record);
+                if sequence <= checkpoint_sequence {
+                    checkpoint_records += 1;
+                }
             }
             2 => {
                 let marker: Marker = strict(payload)?;
@@ -327,11 +461,20 @@ fn load(path: &Path) -> Result<(Connection, Archive, String, u64), Failure> {
     }
     drop(rows);
     drop(statement);
+    if checkpoint.as_ref().is_some_and(|c| {
+        c.save_id != save_id
+            || c.sequence >= next
+            || c.sequence == 0
+            || c.record_count != checkpoint_records
+    }) {
+        return Err(invalid_archive());
+    }
     Ok((
         conn,
         archive.ok_or_else(invalid_archive)?,
         save_id,
         next - 1,
+        checkpoint,
     ))
 }
 
@@ -344,6 +487,8 @@ struct Pending {
 #[derive(Debug)]
 struct State {
     pending: VecDeque<Pending>,
+    checkpoint: Option<(u64, Checkpoint)>,
+    last_checkpoint_requested: u64,
     status: SaveStatus,
     oldest: Option<Instant>,
     last_activity: Instant,
@@ -355,6 +500,7 @@ struct Shared {
     state: Mutex<State>,
     wake: Condvar,
     policy: SavePolicy,
+    save_id: String,
 }
 #[derive(Debug)]
 struct Owner {
@@ -370,9 +516,9 @@ impl Store {
         initial: impl FnOnce() -> Result<Archive, Failure>,
         policy: SavePolicy,
         lock: Arc<std::fs::File>,
-    ) -> Result<(Self, Archive), Failure> {
+    ) -> Result<(Self, Archive, Option<DiskCheckpoint>), Failure> {
         policy.validate()?;
-        let (conn, archive, save_id, sequence) = if path.exists() {
+        let (conn, archive, save_id, sequence, checkpoint) = if path.exists() {
             load(path)?
         } else {
             let initial = initial()?;
@@ -390,7 +536,7 @@ impl Store {
                 },
             )?;
             let tx = conn.transaction().map_err(|_| storage_failure())?;
-            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=4; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT;").map_err(|_| storage_failure())?;
+            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=5; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
             for (index, record) in initial.records.iter().enumerate() {
@@ -412,14 +558,19 @@ impl Store {
             }
             tx.commit().map_err(|_| storage_failure())?;
             let sequence = initial.records.len() as u64;
-            (conn, initial, save_id, sequence)
+            (conn, initial, save_id, sequence, None)
         };
+        let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
         let shared = Arc::new(Shared {
+            save_id: save_id.clone(),
             policy,
             wake: Condvar::new(),
             state: Mutex::new(State {
                 pending: VecDeque::new(),
+                checkpoint: None,
+                last_checkpoint_requested: checkpoint_sequence,
                 status: SaveStatus {
+                    checkpoint_sequence,
                     accepted_sequence: sequence,
                     durable_sequence: sequence,
                     ..SaveStatus::default()
@@ -446,12 +597,22 @@ impl Store {
                 save_id,
             })),
             archive,
+            checkpoint,
         ))
     }
-    pub(crate) fn enqueue(&self, record: &Record) -> Result<usize, Failure> {
-        self.push(1, record)
+    pub(crate) fn enqueue(
+        &self,
+        record: &Record,
+        capture: impl FnOnce() -> Checkpoint,
+    ) -> Result<usize, Failure> {
+        self.push(1, record, Some(capture))
     }
-    fn push<T: Serialize>(&self, kind: u16, record: &T) -> Result<usize, Failure> {
+    fn push<T: Serialize>(
+        &self,
+        kind: u16,
+        record: &T,
+        capture: Option<impl FnOnce() -> Checkpoint>,
+    ) -> Result<usize, Failure> {
         let shared = &self.0.shared;
         let mut s = shared.state.lock().unwrap();
         if s.status.error.is_some() || s.closing {
@@ -493,6 +654,15 @@ impl Store {
                 "Save queue is full; wait for saving to finish before retrying",
             ));
         }
+        if shared.policy.checkpoint_interval > 0
+            && sequence.saturating_sub(s.last_checkpoint_requested)
+                >= shared.policy.checkpoint_interval
+        {
+            if let Some(capture) = capture {
+                s.checkpoint = Some((sequence, capture()));
+                s.last_checkpoint_requested = sequence;
+            }
+        }
         let now = Instant::now();
         s.pending.push_back(Pending {
             sequence,
@@ -507,7 +677,7 @@ impl Store {
         Ok(len)
     }
     pub(crate) fn wizard(&self) -> Result<(), Failure> {
-        self.push(2, &())?;
+        self.push(2, &(), None::<fn() -> Checkpoint>)?;
         Ok(())
     }
     pub(crate) fn status(&self) -> SaveStatus {
@@ -587,25 +757,49 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
             continue;
         }
         let batch: Vec<_> = s.pending.drain(..).collect();
+        let checkpoint = s.checkpoint.take();
         s.status.saving = true;
         drop(s);
         let start = Instant::now();
-        let outcome = if let Some(conn) = &mut conn {
-            append(conn, &batch)
-        } else {
-            match connection(&path) {
-                Ok(mut reopened) => {
-                    let result = append(&mut reopened, &batch);
-                    conn = Some(reopened);
-                    result
-                }
-                Err(error) => Err(error),
+        let checkpoint_started = Instant::now();
+        let encoded = checkpoint
+            .as_ref()
+            .map(|(seq, state)| encode_checkpoint(&state.encode(&shared.save_id, *seq)))
+            .transpose();
+        let checkpoint_ms = checkpoint_started
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+        let checkpoint_bytes = encoded
+            .as_ref()
+            .ok()
+            .and_then(|v| v.as_ref())
+            .map(|b| b.len() as u64)
+            .unwrap_or(0);
+        let outcome = encoded.and_then(|encoded| {
+            if conn.is_none() {
+                conn = Some(connection(&path)?);
             }
-        };
+            commit_batch(
+                conn.as_mut().unwrap(),
+                &batch,
+                checkpoint
+                    .as_ref()
+                    .zip(encoded.as_ref())
+                    .map(|((seq, _), bytes)| (*seq, bytes.as_slice())),
+                |_, _| Ok(()),
+            )
+        });
         let mut s = shared.state.lock().unwrap();
         s.status.saving = false;
         match outcome {
             Ok(()) => {
+                if let Some((seq, _)) = &checkpoint {
+                    s.status.checkpoint_sequence = *seq;
+                    s.status.checkpoints += 1;
+                    s.status.checkpoint_bytes = checkpoint_bytes;
+                    s.status.last_checkpoint_ms = checkpoint_ms;
+                }
                 let bytes = batch.iter().map(|p| p.bytes.len()).sum::<usize>();
                 s.status.pending_bytes -= bytes;
                 s.status.journal_bytes += bytes as u64;
@@ -616,6 +810,9 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 s.oldest = s.pending.front().map(|p| p.queued);
             }
             Err(_) => {
+                if s.checkpoint.is_none() {
+                    s.checkpoint = checkpoint;
+                }
                 for entry in batch.into_iter().rev() {
                     s.pending.push_front(entry);
                 }
@@ -636,6 +833,173 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Engine, Scenario};
+    use tor_protocol::{Action, ActorId};
+
+    fn checkpoint_fixture(path: &Path) -> (Vec<u8>, tor_protocol::StateView) {
+        let mut engine = Engine::open_with_policy(
+            path,
+            Scenario::two_room(42),
+            SavePolicy {
+                checkpoint_interval: 0,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        for index in 0..4 {
+            engine
+                .command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &format!("{index}"),
+                    &engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: engine.revision(ActorId(1)).unwrap(),
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+        }
+        engine.flush().unwrap();
+        let (_, _, save_id, _, _) = load(path).unwrap();
+        let bytes = encode_checkpoint(&Checkpoint::capture(&engine).encode(&save_id, 4)).unwrap();
+        (bytes, engine.state(ActorId(1)).unwrap())
+    }
+
+    #[test]
+    fn checkpoint_transaction_failures_and_uncertain_commits_are_retryable() {
+        for stage in [
+            "after_append",
+            "after_checkpoint",
+            "after_history",
+            "after_rotation",
+            "before_commit",
+            "after_commit",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("fault.db");
+            let (bytes, expected) = checkpoint_fixture(&path);
+            let mut conn = connection(&path).unwrap();
+            assert!(
+                commit_batch(&mut conn, &[], Some((4, &bytes)), |_, at| if at == stage {
+                    Err(storage_failure())
+                } else {
+                    Ok(())
+                })
+                .is_err()
+            );
+            drop(conn);
+            let recovered = Engine::open(&path, Scenario::two_room(0)).unwrap();
+            assert_eq!(recovered.state(ActorId(1)).unwrap(), expected, "{stage}");
+            assert_eq!(
+                recovered.recovery_profile().records_replayed,
+                if stage == "after_commit" { 0 } else { 4 }
+            );
+            drop(recovered);
+            let mut conn = connection(&path).unwrap();
+            commit_batch(&mut conn, &[], Some((4, &bytes)), |_, _| Ok(())).unwrap();
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM checkpoint", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM history", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                4
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_crash_child() {
+        let Ok(path) = std::env::var("TOR_CHECKPOINT_TEST_PATH") else {
+            return;
+        };
+        let stage = std::env::var("TOR_CHECKPOINT_TEST_STAGE").unwrap();
+        let path = Path::new(&path);
+        let bytes = std::fs::read(path.with_extension("checkpoint")).unwrap();
+        let mut conn = connection(path).unwrap();
+        conn.execute_batch("PRAGMA cache_size=1").unwrap();
+        commit_batch(&mut conn, &[], Some((4, &bytes)), |connection, at| {
+            if at == stage {
+                connection.cache_flush().unwrap();
+                std::process::exit(81);
+            }
+            Ok(())
+        })
+        .unwrap();
+        panic!("crash stage was not reached");
+    }
+
+    #[test]
+    fn process_death_at_each_checkpoint_transition_recovers_a_complete_prefix() {
+        for stage in [
+            "after_append",
+            "after_checkpoint",
+            "after_history",
+            "after_rotation",
+            "before_commit",
+            "after_commit",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("crash.db");
+            let (bytes, expected) = checkpoint_fixture(&path);
+            let original_size = std::fs::metadata(&path).unwrap().len();
+            std::fs::write(path.with_extension("checkpoint"), bytes).unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::tests::checkpoint_crash_child",
+                    "--nocapture",
+                ])
+                .env("TOR_CHECKPOINT_TEST_PATH", &path)
+                .env("TOR_CHECKPOINT_TEST_STAGE", stage)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(81));
+            if stage == "after_checkpoint" {
+                let length = std::fs::metadata(&path).unwrap().len();
+                assert!(
+                    length > original_size,
+                    "checkpoint must spill new pages before the crash"
+                );
+                // Model a torn extension while the hot journal still owns the
+                // previous durable prefix. Recovery must precede alignment checks.
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_len(length - 1)
+                    .unwrap();
+            }
+            let mut recovered = Engine::open(&path, Scenario::two_room(0)).unwrap();
+            assert_eq!(recovered.state(ActorId(1)).unwrap(), expected, "{stage}");
+            assert_eq!(
+                recovered.recovery_profile().records_replayed,
+                if stage == "after_commit" { 0 } else { 4 }
+            );
+            assert!(
+                recovered
+                    .command(
+                        "player",
+                        "test",
+                        ActorId(1),
+                        "0",
+                        &recovered.branch().clone(),
+                        crate::journal::Command::Act {
+                            expected_revision: 0,
+                            action: Action::Wait
+                        }
+                    )
+                    .unwrap()
+                    .duplicate
+            );
+        }
+    }
     #[test]
     fn crc_and_frame_corruption() {
         assert_eq!(crc32c(b"123456789".iter().copied()), 0xe3069283);
@@ -659,7 +1023,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = connection(&dir.path().join("retry.db")).unwrap();
         conn.execute_batch(
-            "CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT;",
+            "CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT;",
         )
         .unwrap();
         let mut batch = vec![Pending {
@@ -667,15 +1031,15 @@ mod tests {
             bytes: vec![1, 2, 3],
             queued: Instant::now(),
         }];
-        append(&mut conn, &batch).unwrap();
-        append(&mut conn, &batch).unwrap();
+        commit_batch(&mut conn, &batch, None, |_, _| Ok(())).unwrap();
+        commit_batch(&mut conn, &batch, None, |_, _| Ok(())).unwrap();
         assert_eq!(
             conn.query_row("SELECT count(*) FROM journal", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             1
         );
         batch[0].bytes[0] = 9;
-        assert!(append(&mut conn, &batch).is_err());
+        assert!(commit_batch(&mut conn, &batch, None, |_, _| Ok(())).is_err());
         assert_eq!(
             conn.query_row("SELECT frame FROM journal", [], |r| r.get::<_, Vec<u8>>(0))
                 .unwrap(),

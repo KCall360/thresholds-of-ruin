@@ -21,9 +21,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match argument.as_str() {
             "--help" | "-h" => {
                 println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
+                println!("Checkpoints: --checkpoint-interval 1024 journal entries (0 disables). Retains all history; bounds simulation replay after the latest committed checkpoint.");
                 println!("Diagnostic fixture: --regions 1..=256 [--actors 1..=8] selects performance trace version 1.");
                 println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.db]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
+            }
+            "--checkpoint-interval" => {
+                save_policy.checkpoint_interval =
+                    args.next().ok_or("Missing checkpoint interval")?.parse()?;
             }
             "--save-target-ms" => {
                 save_policy.target_interval = std::time::Duration::from_millis(
