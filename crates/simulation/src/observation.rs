@@ -71,15 +71,33 @@ impl Game {
     /// A free read using bounded symmetric shadowcasting through rotated portals.
     /// Neither querying nor seeing through a portal counts as visiting a place.
     pub fn observe(&self, id: ActorId) -> Result<Observation, GameError> {
+        self.observe_scene(id).map(|(view, _)| view)
+    }
+
+    /// Construct disclosure and its exact projected scene together. Callers can
+    /// reuse the scene without repeating shadowcasting or door-approach queries.
+    pub fn observe_scene(
+        &self,
+        id: ActorId,
+    ) -> Result<(Observation, Vec<tor_world::SightCell>), GameError> {
+        let scene = self.scene(id)?;
+        let view = self.observe_in_scene(id, &scene)?;
+        Ok((view, scene))
+    }
+
+    fn observe_in_scene(
+        &self,
+        id: ActorId,
+        scene: &[tor_world::SightCell],
+    ) -> Result<Observation, GameError> {
         crate::diagnostics::observation();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        let cells = self
-            .scene(id)?
-            .into_iter()
+        let cells = scene
+            .iter()
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
-        let surface_scene = self.scene(id)?;
+        let surface_scene = scene;
         let surface = |location, direction| {
             if !self.material_surfaces {
                 return None;
@@ -102,7 +120,7 @@ impl Game {
         };
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
-        for (&item_id, item) in &self.items {
+        for (&item_id, item) in self.items.iter() {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
@@ -141,7 +159,7 @@ impl Game {
                     door_reachable: self.world.door(location).is_some()
                         && self.door_reachable_from(actor.location, location),
                     door_approaches: if self.world.door(location).is_some() {
-                        self.disclosed_door_approaches(id, location)
+                        self.disclosed_door_approaches(scene, location)
                     } else {
                         vec![]
                     },
@@ -203,10 +221,13 @@ impl Game {
         })
     }
 
-    fn disclosed_door_approaches(&self, actor: ActorId, door: Location) -> Vec<Location> {
-        let scene = self.scene(actor).expect("observed actor");
+    fn disclosed_door_approaches(
+        &self,
+        scene: &[tor_world::SightCell],
+        door: Location,
+    ) -> Vec<Location> {
         let mut approaches = BTreeSet::new();
-        for from in &scene {
+        for from in scene {
             if !self.world.walkable(from.location) {
                 continue;
             }

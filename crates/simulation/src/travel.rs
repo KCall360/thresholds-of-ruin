@@ -1,5 +1,6 @@
 //! Actor knowledge is refreshed only at authoritative perception boundaries.
 //! Planning never reads current terrain or undiscovered topology.
+use crate::navigation_map::RegionMap;
 use crate::{movement_cost, ActorId, Game, GameError};
 use std::collections::{BTreeMap, BTreeSet};
 use tor_world::{Direction, Location, Position};
@@ -16,10 +17,8 @@ const DIRECTIONS: [Direction; 6] = [
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
-    #[serde(with = "tor_world::checkpoint_map")]
-    cells: BTreeMap<Location, bool>,
-    #[serde(with = "tor_world::checkpoint_map")]
-    edges: BTreeMap<(Location, Direction), (Location, u8)>,
+    cells: RegionMap<Location, bool>,
+    edges: RegionMap<(Location, Direction), (Location, u8)>,
 }
 
 impl Navigation {
@@ -43,43 +42,75 @@ impl Game {
     pub fn refresh_navigation(&mut self) {
         for id in self.actors.keys().copied().collect::<Vec<_>>() {
             let scene = self.scene(id).expect("existing actor");
-            let knowledge = self.navigation.entry(id).or_default();
-            let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
-            knowledge
-                .edges
-                .retain(|(from, _), (to, _)| !(visible.contains(from) && visible.contains(to)));
-            for cell in &scene {
-                knowledge
-                    .cells
-                    .insert(cell.location, self.world.opaque(cell.location));
-                if self.world.opaque(cell.location) {
+            self.refresh_navigation_scene(id, &scene);
+        }
+    }
+
+    /// Reuse a scene produced by this game at the current decision boundary.
+    /// This is backend-only; caller-supplied protocol data must never enter here.
+    pub fn refresh_navigation_scene(&mut self, id: ActorId, scene: &[tor_world::SightCell]) {
+        let knowledge = self.navigation.entry(id).or_default();
+        let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
+        let projected: BTreeSet<_> = scene
+            .iter()
+            .filter(|c| !c.wall)
+            .map(|c| (c.location, c.offset, c.rotation))
+            .collect();
+        // Inspect only edges originating in the visible scene, never all remembered
+        // topology. Preserve stale edges when either end is undisclosed.
+        let mut edges = BTreeMap::new();
+        for &from in &visible {
+            for direction in DIRECTIONS {
+                if knowledge
+                    .edges
+                    .get(&(from, direction))
+                    .is_some_and(|(to, _)| visible.contains(to))
+                {
+                    edges.insert((from, direction), None);
+                }
+            }
+        }
+        let mut cells = BTreeMap::new();
+        for cell in scene {
+            let opaque = self.world.opaque(cell.location);
+            if knowledge.cells.get(&cell.location) != Some(&opaque) {
+                cells.insert(cell.location, opaque);
+            }
+            if opaque {
+                continue;
+            }
+            for direction in DIRECTIONS {
+                let local = direction.rotated(cell.rotation);
+                if matches!(local, Direction::Up | Direction::Down)
+                    && self.world.passage(cell.location, local).is_none()
+                {
                     continue;
                 }
-                for direction in DIRECTIONS {
-                    let local = direction.rotated(cell.rotation);
-                    if matches!(local, Direction::Up | Direction::Down)
-                        && self.world.passage(cell.location, local).is_none()
-                    {
-                        continue;
-                    }
-                    let Some(to) = self.world.step(cell.location, local) else {
-                        continue;
-                    };
-                    let turns = self.world.crossing_rotation(cell.location, local);
-                    let (dx, dy, dz) = direction.delta();
-                    let offset = Position {
-                        x: cell.offset.x + dx,
-                        y: cell.offset.y + dy,
-                        z: cell.offset.z + dz,
-                    };
-                    if scene.iter().any(|other| {
-                        other.location == to
-                            && !other.wall
-                            && other.offset == offset
-                            && other.rotation == (cell.rotation + turns) % 4
-                    }) {
-                        knowledge.edges.insert((cell.location, local), (to, turns));
-                    }
+                let Some(to) = self.world.step(cell.location, local) else {
+                    continue;
+                };
+                let turns = self.world.crossing_rotation(cell.location, local);
+                let (dx, dy, dz) = direction.delta();
+                let offset = Position {
+                    x: cell.offset.x + dx,
+                    y: cell.offset.y + dy,
+                    z: cell.offset.z + dz,
+                };
+                if projected.contains(&(to, offset, (cell.rotation + turns) % 4)) {
+                    edges.insert((cell.location, local), Some((to, turns)));
+                }
+            }
+        }
+        edges.retain(|key, value| knowledge.edges.get(key) != value.as_ref());
+        if !cells.is_empty() || !edges.is_empty() {
+            // Copy-on-write detaches only when knowledge actually changes.
+            let knowledge = &mut **knowledge;
+            knowledge.cells.extend(cells);
+            for (key, value) in edges {
+                if let Some(value) = value {
+                    knowledge.edges.insert(key, value);
+                } else {
+                    knowledge.edges.remove(&key);
                 }
             }
         }
@@ -169,5 +200,124 @@ impl Game {
             }
         }
         Err(GameError::Blocked)
+    }
+}
+
+#[cfg(test)]
+impl Game {
+    fn reference_refresh_navigation(&mut self) {
+        for id in self.actors.keys().copied().collect::<Vec<_>>() {
+            let scene = self.scene(id).expect("existing actor");
+            let knowledge = self.navigation.entry(id).or_default();
+            let mut cells: BTreeMap<_, _> = knowledge.cells.iter().map(|(k, v)| (*k, *v)).collect();
+            let mut edges: BTreeMap<_, _> = knowledge.edges.iter().map(|(k, v)| (*k, *v)).collect();
+            let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
+            edges.retain(|(from, _), (to, _)| !(visible.contains(from) && visible.contains(to)));
+            for cell in &scene {
+                cells.insert(cell.location, self.world.opaque(cell.location));
+                if self.world.opaque(cell.location) {
+                    continue;
+                }
+                for direction in DIRECTIONS {
+                    let local = direction.rotated(cell.rotation);
+                    if matches!(local, Direction::Up | Direction::Down)
+                        && self.world.passage(cell.location, local).is_none()
+                    {
+                        continue;
+                    }
+                    let Some(to) = self.world.step(cell.location, local) else {
+                        continue;
+                    };
+                    let turns = self.world.crossing_rotation(cell.location, local);
+                    let (dx, dy, dz) = direction.delta();
+                    let offset = Position {
+                        x: cell.offset.x + dx,
+                        y: cell.offset.y + dy,
+                        z: cell.offset.z + dz,
+                    };
+                    if scene.iter().any(|other| {
+                        other.location == to
+                            && !other.wall
+                            && other.offset == offset
+                            && other.rotation == (cell.rotation + turns) % 4
+                    }) {
+                        edges.insert((cell.location, local), (to, turns));
+                    }
+                }
+            }
+            knowledge.cells = RegionMap::default();
+            knowledge.cells.extend(cells);
+            knowledge.edges = RegionMap::default();
+            knowledge.edges.extend(edges);
+        }
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::*;
+    use crate::Action;
+    use std::num::NonZeroU64;
+    use tor_world::RegionId;
+
+    #[test]
+    fn local_refresh_matches_original_full_scan_with_stale_edges_and_door_changes() {
+        let mut game = Game::two_room_in_stone(42);
+        let location = |region, x, y| Location {
+            region: RegionId(region),
+            position: Position { x, y, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(location(1, 1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let compare = |game: &mut Game| {
+            let mut reference = game.clone();
+            reference.reference_refresh_navigation();
+            game.refresh_navigation();
+            assert_eq!(game.navigation, reference.navigation);
+            for destination in game.known_cells(actor) {
+                assert_eq!(
+                    game.travel_route(actor, destination),
+                    reference.travel_route(actor, destination)
+                );
+            }
+        };
+        compare(&mut game);
+        for _ in 0..4 {
+            game.act(actor, Action::Move(Direction::East)).unwrap();
+            compare(&mut game);
+        }
+        game.act(actor, Action::Move(Direction::East)).unwrap();
+        compare(&mut game);
+        game.act(actor, Action::Move(Direction::East)).unwrap();
+        compare(&mut game);
+        game.teleport(actor, location(1, 4, 1)).unwrap();
+        compare(&mut game);
+        game.act(
+            actor,
+            Action::SetDoor {
+                door: 1,
+                open: false,
+            },
+        )
+        .unwrap();
+        compare(&mut game);
+        game.teleport(actor, location(2, 4, 1)).unwrap();
+        compare(&mut game);
+        game.set_wall(location(2, 3, 1), true).unwrap();
+        compare(&mut game);
+        game.set_wall(location(2, 3, 1), false).unwrap();
+        compare(&mut game);
+        game.teleport(actor, location(1, 4, 1)).unwrap();
+        compare(&mut game);
+        game.act(
+            actor,
+            Action::SetDoor {
+                door: 1,
+                open: true,
+            },
+        )
+        .unwrap();
+        compare(&mut game);
     }
 }

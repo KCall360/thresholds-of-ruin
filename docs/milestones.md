@@ -78,7 +78,7 @@ must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phases A and B complete and merged; Phase C implemented and locally verified; CI pending**.
+Status: **Phases A–C complete and merged; Phase D implemented and locally verified; merge requires final Windows/Linux CI**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -101,8 +101,9 @@ actual-client run. Phase B merged in PR #23 after Windows and Linux CI passed.
 Phase C adds periodic atomic checkpoints, logical journal compaction with retained
 history, and bounded tail replay. The [Phase C findings](phase-c-findings.md)
 retain focused release measurements and their limits. See [checkpoints](checkpoints.md) for the format,
-recovery contract, tests and limits. State-copy costs and client responsiveness
-remain Phases D and E; the broader performance milestone is not complete.
+recovery contract, tests and limits. Phase D removes full-history candidate copies, shares rewind state, and reuses
+scene work; see [its findings](phase-d-findings.md). Client responsiveness remains
+Phase E; the broader performance milestone is not complete.
 Process recovery tests do not establish hardware power-loss behavior.
 
 Scope and sequencing are defined in the

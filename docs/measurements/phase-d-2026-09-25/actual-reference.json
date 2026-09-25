@@ -1,0 +1,6608 @@
+{
+  "trace_version": 1,
+  "seed": 42,
+  "regions": 256,
+  "actors": 8,
+  "cycles": 1,
+  "pace_seconds": 0.0,
+  "samples": [
+    {
+      "cycle": 0,
+      "step": 0,
+      "actor": 1,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.610900000552647,
+      "request_to_ready_ms": 9.771599987288937,
+      "request_to_presentation_ms": 76.72589999856427
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.596899992786348,
+      "request_to_ready_ms": 12.875999993411824,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.956000008969568,
+      "request_to_ready_ms": 10.174900002311915,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.994299991172738,
+      "request_to_ready_ms": 9.143299990682863,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.2641999868210405,
+      "request_to_ready_ms": 7.689299993216991,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.9996999993454665,
+      "request_to_ready_ms": 8.141300000716,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.729100005235523,
+      "request_to_ready_ms": 7.911300010164268,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.42320000124164,
+      "request_to_ready_ms": 10.614400001941249,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 1,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_west"
+      },
+      "request_to_ack_ms": 8.327799994731322,
+      "request_to_ready_ms": 8.506699989084154,
+      "request_to_presentation_ms": 52.55569999280851
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 10.44230000115931,
+      "request_to_ready_ms": 10.651699994923547,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.758899999316782,
+      "request_to_ready_ms": 7.906500002718531,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.188599993241951,
+      "request_to_ready_ms": 7.3379999957978725,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.133499999530613,
+      "request_to_ready_ms": 8.244199998443946,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.719000001088716,
+      "request_to_ready_ms": 7.938099995953962,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.342000000993721,
+      "request_to_ready_ms": 8.49930000549648,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.259499995503575,
+      "request_to_ready_ms": 11.416699999244884,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 9.753799997270107,
+      "request_to_ready_ms": 9.930700005497783,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.430100002442487,
+      "request_to_ready_ms": 8.564800009480678,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.393599997158162,
+      "request_to_ready_ms": 7.578100005048327,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.527599998866208,
+      "request_to_ready_ms": 7.625799989909865,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.593799993628636,
+      "request_to_ready_ms": 7.744799993815832,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.295300005353056,
+      "request_to_ready_ms": 7.538699996075593,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.920500004431233,
+      "request_to_ready_ms": 11.110999999800697,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 2,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_west"
+      },
+      "request_to_ack_ms": 10.803299999679439,
+      "request_to_ready_ms": 10.993299991241656,
+      "request_to_presentation_ms": 76.71329998993315
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 9.409799997229129,
+      "request_to_ready_ms": 9.62979999894742,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.434600003762171,
+      "request_to_ready_ms": 7.894500013208017,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.435999999870546,
+      "request_to_ready_ms": 7.5923999975202605,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.827599998563528,
+      "request_to_ready_ms": 8.009600001969375,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.232500007376075,
+      "request_to_ready_ms": 7.376800000201911,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.53340000321623,
+      "request_to_ready_ms": 8.71559999359306,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.939999992842786,
+      "request_to_ready_ms": 11.368499996024184,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 3,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north_east"
+      },
+      "request_to_ack_ms": 12.918599997647107,
+      "request_to_ready_ms": 13.099200004944578,
+      "request_to_presentation_ms": 68.06190000497736
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 9.611999994376674,
+      "request_to_ready_ms": 10.206000006292015,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.3816000076476485,
+      "request_to_ready_ms": 7.579400000395253,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.216000001993962,
+      "request_to_ready_ms": 8.367899994482286,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.453600002918392,
+      "request_to_ready_ms": 7.575200012070127,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.742499990854412,
+      "request_to_ready_ms": 7.979100002557971,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.147200001985766,
+      "request_to_ready_ms": 8.310699995490722,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.100600011763163,
+      "request_to_ready_ms": 12.285100005101413,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 9.05860000057146,
+      "request_to_ready_ms": 9.298899996792898,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.226600003079511,
+      "request_to_ready_ms": 10.412000003270805,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 772.5757000007434,
+      "request_to_ready_ms": 773.5504000011133,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.456199993612245,
+      "request_to_ready_ms": 7.70879999618046,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.378900005482137,
+      "request_to_ready_ms": 8.749899992835708,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.718599991174415,
+      "request_to_ready_ms": 10.023499999078922,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.910000001080334,
+      "request_to_ready_ms": 12.18459999654442,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 4,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south_east"
+      },
+      "request_to_ack_ms": 12.180000005173497,
+      "request_to_ready_ms": 12.59129999380093,
+      "request_to_presentation_ms": 54.82550000306219
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.692000000039116,
+      "request_to_ready_ms": 12.237599992658943,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.774499990977347,
+      "request_to_ready_ms": 9.269999995012768,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.440699995844625,
+      "request_to_ready_ms": 8.717999997315928,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.87319999653846,
+      "request_to_ready_ms": 8.254800006398,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.750600008876063,
+      "request_to_ready_ms": 7.9600000026402995,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.221099997172132,
+      "request_to_ready_ms": 8.623100002296269,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.131199997384101,
+      "request_to_ready_ms": 12.468300003092736,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 5,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 12.47450000664685,
+      "request_to_ready_ms": 12.860100003308617,
+      "request_to_presentation_ms": 50.17859999497887
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 9.828599999309517,
+      "request_to_ready_ms": 10.269299993524328,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.832699997583404,
+      "request_to_ready_ms": 9.15030000032857,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 19.948700006352738,
+      "request_to_ready_ms": 20.244500003173016,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.632400011061691,
+      "request_to_ready_ms": 7.866900006774813,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.418299996061251,
+      "request_to_ready_ms": 7.729599994490854,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.018299995455891,
+      "request_to_ready_ms": 8.514599991030991,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.050999997882172,
+      "request_to_ready_ms": 12.429900001734495,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 6,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.988700003712438,
+      "request_to_ready_ms": 12.414800003170967,
+      "request_to_presentation_ms": 58.30140000034589
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 9.890000001178123,
+      "request_to_ready_ms": 10.375900004873984,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.034099999349564,
+      "request_to_ready_ms": 8.421299993642606,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.829800000763498,
+      "request_to_ready_ms": 8.155200004694052,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.507100006681867,
+      "request_to_ready_ms": 8.784699995885603,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.187100000213832,
+      "request_to_ready_ms": 8.387900001253001,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.197300008963794,
+      "request_to_ready_ms": 9.519600003841333,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.304300005780533,
+      "request_to_ready_ms": 12.694599994574673,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 7,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.02999999804888,
+      "request_to_ready_ms": 12.471699999878183,
+      "request_to_presentation_ms": 55.1530999946408
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 10.257500005536713,
+      "request_to_ready_ms": 10.78840000263881,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.768799995072186,
+      "request_to_ready_ms": 10.166499996557832,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.427799999481067,
+      "request_to_ready_ms": 8.703499988769181,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.707800003117882,
+      "request_to_ready_ms": 7.97180000517983,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.9882999998517334,
+      "request_to_ready_ms": 8.437000011326745,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.901399992988445,
+      "request_to_ready_ms": 8.507499995175749,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.53069999802392,
+      "request_to_ready_ms": 12.965099987923168,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 8,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.056100007612258,
+      "request_to_ready_ms": 12.481300000217743,
+      "request_to_presentation_ms": 48.832800006493926
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 8.960799998021685,
+      "request_to_ready_ms": 9.432999999262393,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.009799992782064,
+      "request_to_ready_ms": 9.307499989517964,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 6.644699999014847,
+      "request_to_ready_ms": 6.924900008016266,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.605600010720082,
+      "request_to_ready_ms": 7.866300002206117,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.110700000543147,
+      "request_to_ready_ms": 8.503999997628853,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.74370000383351,
+      "request_to_ready_ms": 9.193200006848201,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.865099993883632,
+      "request_to_ready_ms": 12.326399999437854,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 9,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 11.042899990570731,
+      "request_to_ready_ms": 11.56749999790918,
+      "request_to_presentation_ms": 60.435499995946884
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.899500008439645,
+      "request_to_ready_ms": 12.38990000274498,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.661399999051355,
+      "request_to_ready_ms": 7.994700004928745,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.647800001199357,
+      "request_to_ready_ms": 8.887300005881116,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.323799993377179,
+      "request_to_ready_ms": 8.561700000427663,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.986799988429993,
+      "request_to_ready_ms": 8.324999987962656,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.599400007165968,
+      "request_to_ready_ms": 8.202299999538809,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.519599993131123,
+      "request_to_ready_ms": 10.886799995205365,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 10,
+      "actor": 1,
+      "label": "blocked_obstacle",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 3.0746999982511625,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 11,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 12.10390000778716,
+      "request_to_ready_ms": 12.491600005887449,
+      "request_to_presentation_ms": 70.86370000615716
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 10.826700003235601,
+      "request_to_ready_ms": 11.38599999831058,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.746700008283369,
+      "request_to_ready_ms": 8.101300001726486,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.18079999589827,
+      "request_to_ready_ms": 8.512000000337139,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.95990000187885,
+      "request_to_ready_ms": 8.719699995708652,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.461199988028966,
+      "request_to_ready_ms": 7.839999991119839,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.15990001137834,
+      "request_to_ready_ms": 8.522600008291192,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.229399988427758,
+      "request_to_ready_ms": 12.628999989829026,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 12,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.857399993459694,
+      "request_to_ready_ms": 12.341999987256713,
+      "request_to_presentation_ms": 51.4639999892097
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.489299999084324,
+      "request_to_ready_ms": 12.027500008116476,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.14680000662338,
+      "request_to_ready_ms": 10.479300006409176,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.091800002148375,
+      "request_to_ready_ms": 8.421600010478869,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.6757999922847375,
+      "request_to_ready_ms": 7.934699999168515,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.012999998754822,
+      "request_to_ready_ms": 8.381599996937439,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.720300000277348,
+      "request_to_ready_ms": 9.118900008616038,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.615599989658222,
+      "request_to_ready_ms": 13.023299994529225,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 13,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.20319999649655,
+      "request_to_ready_ms": 13.666500002727844,
+      "request_to_presentation_ms": 92.44429999671411
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 15.4375000129221,
+      "request_to_ready_ms": 16.263199999229982,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.276099993963726,
+      "request_to_ready_ms": 8.445899991784245,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.197300005122088,
+      "request_to_ready_ms": 8.544700001948513,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.930800002417527,
+      "request_to_ready_ms": 9.228900002199225,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.251499995822087,
+      "request_to_ready_ms": 8.646999995107763,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.871400001225993,
+      "request_to_ready_ms": 9.257700003217906,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.487900006817654,
+      "request_to_ready_ms": 12.96260001254268,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 14,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.283899999805726,
+      "request_to_ready_ms": 13.758699991740286,
+      "request_to_presentation_ms": 80.11379999516066
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 10.283800002071075,
+      "request_to_ready_ms": 10.803400000440888,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.377000005566515,
+      "request_to_ready_ms": 8.710100009921007,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.308300006319769,
+      "request_to_ready_ms": 8.537200003047474,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.8824999945936725,
+      "request_to_ready_ms": 8.169799999450333,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.26430000597611,
+      "request_to_ready_ms": 8.618300009402446,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.232399995904416,
+      "request_to_ready_ms": 8.839599991915748,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.872799998149276,
+      "request_to_ready_ms": 13.301300001330674,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 15,
+      "actor": 1,
+      "label": "move_near_obstacle",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 12.207399995531887,
+      "request_to_ready_ms": 12.6958999899216,
+      "request_to_presentation_ms": 80.0048999954015
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.220200001844205,
+      "request_to_ready_ms": 11.734499988961034,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.289799996418878,
+      "request_to_ready_ms": 8.661900006700307,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.593700011260808,
+      "request_to_ready_ms": 9.008900000480935,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.3739999934332445,
+      "request_to_ready_ms": 7.917299997643568,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.765799993649125,
+      "request_to_ready_ms": 8.131099995807745,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.089900006074458,
+      "request_to_ready_ms": 9.40670000272803,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.22089999646414,
+      "request_to_ready_ms": 12.602799994056113,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 16,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 15.081699995789677,
+      "request_to_ready_ms": 16.49300000281073,
+      "request_to_presentation_ms": 78.04799999576062
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.41530000010971,
+      "request_to_ready_ms": 15.278899998520501,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.756300002569333,
+      "request_to_ready_ms": 14.295100001618266,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.03199999872595,
+      "request_to_ready_ms": 12.832199994591065,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.28439999895636,
+      "request_to_ready_ms": 8.553799998480827,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 23.024300011456944,
+      "request_to_ready_ms": 23.757900009513833,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.782400007476099,
+      "request_to_ready_ms": 9.423200011951849,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.170799997169524,
+      "request_to_ready_ms": 13.888700006646104,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 17,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 14.221499994164333,
+      "request_to_ready_ms": 15.234299993608147,
+      "request_to_presentation_ms": 72.00449999072589
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 9.845699998550117,
+      "request_to_ready_ms": 10.605600007693283,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.340100001078099,
+      "request_to_ready_ms": 8.70220000797417,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.940300001995638,
+      "request_to_ready_ms": 9.245399996871129,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.74669999757316,
+      "request_to_ready_ms": 9.079099996597506,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.443800008739345,
+      "request_to_ready_ms": 10.019599998486228,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.067899994784966,
+      "request_to_ready_ms": 8.739500000956468,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.471099999151193,
+      "request_to_ready_ms": 13.915400006226264,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 18,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.565300000365824,
+      "request_to_ready_ms": 17.69639999838546,
+      "request_to_presentation_ms": 81.24590000079479
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 11.381300006178208,
+      "request_to_ready_ms": 11.951899999985471,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.15409999631811,
+      "request_to_ready_ms": 8.472800007439218,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.609199998318218,
+      "request_to_ready_ms": 8.995800002594478,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.662099989829585,
+      "request_to_ready_ms": 7.960099988849834,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.142200003727339,
+      "request_to_ready_ms": 7.479399995645508,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.139399990090169,
+      "request_to_ready_ms": 9.587699998519383,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.737099998048507,
+      "request_to_ready_ms": 13.153299994883128,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 19,
+      "actor": 1,
+      "label": "blocked_door",
+      "expected": "blocked",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": null,
+      "request_to_ready_ms": 5.205299996305257,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 20,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 17.457599999033846,
+      "request_to_ready_ms": 18.707099996390752,
+      "request_to_presentation_ms": 67.38360000599641
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 10.922800007392652,
+      "request_to_ready_ms": 11.56480000645388,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.096900001168251,
+      "request_to_ready_ms": 9.48150000476744,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.679599995957687,
+      "request_to_ready_ms": 9.089300001505762,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.588500000769272,
+      "request_to_ready_ms": 8.917899991502054,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.278099994640797,
+      "request_to_ready_ms": 8.842299997922964,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.754999988013878,
+      "request_to_ready_ms": 9.89570000092499,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.48399999551475,
+      "request_to_ready_ms": 14.023800002178177,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 21,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 16.389099997468293,
+      "request_to_ready_ms": 17.5706000009086,
+      "request_to_presentation_ms": 65.59459998970851
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.756900010979734,
+      "request_to_ready_ms": 15.394200003356673,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.885600007488392,
+      "request_to_ready_ms": 9.270000009564683,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.692000000039116,
+      "request_to_ready_ms": 11.856099998112768,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.319899992784485,
+      "request_to_ready_ms": 8.816499990643933,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.56210000347346,
+      "request_to_ready_ms": 9.420399990631267,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.471799989114515,
+      "request_to_ready_ms": 9.908699998049997,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.063800001167692,
+      "request_to_ready_ms": 14.470099995378405,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 22,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.730799998389557,
+      "request_to_ready_ms": 18.84210000571329,
+      "request_to_presentation_ms": 52.878400005283765
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.015499997185543,
+      "request_to_ready_ms": 14.649299992015585,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.550699993269518,
+      "request_to_ready_ms": 10.175999996135943,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.014599993359298,
+      "request_to_ready_ms": 11.342700003297068,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.377900005551055,
+      "request_to_ready_ms": 10.954299999866635,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.829400005401112,
+      "request_to_ready_ms": 10.186200001044199,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.557999986805953,
+      "request_to_ready_ms": 9.38079999468755,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.285699998959899,
+      "request_to_ready_ms": 16.353900005924515,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 23,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 18.406299990601838,
+      "request_to_ready_ms": 19.77269999042619,
+      "request_to_presentation_ms": 76.20419999875594
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.613200004328974,
+      "request_to_ready_ms": 14.219200005754828,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.52450000133831,
+      "request_to_ready_ms": 10.914099999354221,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.539099996094592,
+      "request_to_ready_ms": 10.918999993009493,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.993499995791353,
+      "request_to_ready_ms": 8.55260000389535,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.50449999072589,
+      "request_to_ready_ms": 9.743499991600402,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.589900000719354,
+      "request_to_ready_ms": 10.037700005341321,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.946600010967813,
+      "request_to_ready_ms": 14.436400000704452,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 24,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 17.985300000873394,
+      "request_to_ready_ms": 19.54969999496825,
+      "request_to_presentation_ms": 50.3030999971088
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.739399990299717,
+      "request_to_ready_ms": 14.414199991733767,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.923499994329177,
+      "request_to_ready_ms": 10.286500008078292,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.877899996354245,
+      "request_to_ready_ms": 10.262499999953434,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.119800000917166,
+      "request_to_ready_ms": 9.425299998838454,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.133200004929677,
+      "request_to_ready_ms": 10.837800000444986,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.338799998862669,
+      "request_to_ready_ms": 10.779500007629395,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.076200008275919,
+      "request_to_ready_ms": 15.218000000459142,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 25,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 17.497399996500462,
+      "request_to_ready_ms": 18.985700007760897,
+      "request_to_presentation_ms": 68.27309999789577
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.553400003933348,
+      "request_to_ready_ms": 15.273700002580881,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.490299988305196,
+      "request_to_ready_ms": 10.904299997491762,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.025899998960085,
+      "request_to_ready_ms": 9.77269999566488,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.237299989559688,
+      "request_to_ready_ms": 8.587999996962026,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.569400004693307,
+      "request_to_ready_ms": 9.974200002034195,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.388100006617606,
+      "request_to_ready_ms": 10.058700005174614,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.521000004606321,
+      "request_to_ready_ms": 15.024399996036664,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 26,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.1315999943763,
+      "request_to_ready_ms": 19.812099999398924,
+      "request_to_presentation_ms": 74.05139999173116
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.368799991440028,
+      "request_to_ready_ms": 14.05450000311248,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.733800001209602,
+      "request_to_ready_ms": 9.2274000053294,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.680500002810732,
+      "request_to_ready_ms": 9.032000001752749,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.297899996046908,
+      "request_to_ready_ms": 7.838399993488565,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.081299998797476,
+      "request_to_ready_ms": 9.502499990048818,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.028000000398606,
+      "request_to_ready_ms": 9.475200000451878,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.754100000369363,
+      "request_to_ready_ms": 14.268099999753758,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 27,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 16.495800009579398,
+      "request_to_ready_ms": 18.3895000081975,
+      "request_to_presentation_ms": 49.370699998689815
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 10.692500000004657,
+      "request_to_ready_ms": 11.267900001257658,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.53840000834316,
+      "request_to_ready_ms": 8.194900001399219,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.310800010804087,
+      "request_to_ready_ms": 8.679400008986704,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.419699996826239,
+      "request_to_ready_ms": 13.02100000611972,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.679500009748153,
+      "request_to_ready_ms": 9.056000009877607,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.285399995860644,
+      "request_to_ready_ms": 9.721199996420182,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.2995000021765,
+      "request_to_ready_ms": 13.720899994950742,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 28,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 16.934400002355687,
+      "request_to_ready_ms": 18.2595000078436,
+      "request_to_presentation_ms": 77.33700000972021
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.745900003006682,
+      "request_to_ready_ms": 12.412800002493896,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.251199993537739,
+      "request_to_ready_ms": 8.667300004162826,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.119900005520321,
+      "request_to_ready_ms": 10.583000010228716,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.328700001584366,
+      "request_to_ready_ms": 8.863499999279156,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.248999995179474,
+      "request_to_ready_ms": 9.936499991454184,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.908300005714409,
+      "request_to_ready_ms": 9.355799993500113,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.451500006136484,
+      "request_to_ready_ms": 13.521000000764616,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 29,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.624600004637614,
+      "request_to_ready_ms": 19.3174000014551,
+      "request_to_presentation_ms": 78.33930000197142
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.874100004206412,
+      "request_to_ready_ms": 12.571600003866479,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.03720000537578,
+      "request_to_ready_ms": 11.317000011331402,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.839399990392849,
+      "request_to_ready_ms": 9.255199998733588,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.562699989648536,
+      "request_to_ready_ms": 8.145699990564026,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.256700006313622,
+      "request_to_ready_ms": 8.830799997667782,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.4363000059966,
+      "request_to_ready_ms": 8.906100003514439,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.49220000358764,
+      "request_to_ready_ms": 14.960999993490987,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 30,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 17.82449999882374,
+      "request_to_ready_ms": 18.787199995131232,
+      "request_to_presentation_ms": 54.39689999911934
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.252799995825626,
+      "request_to_ready_ms": 14.00120000471361,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.732099992106669,
+      "request_to_ready_ms": 11.075899994466454,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.517200000118464,
+      "request_to_ready_ms": 10.05040000018198,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.015600004815497,
+      "request_to_ready_ms": 12.494100010371767,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.812500007683411,
+      "request_to_ready_ms": 10.309700010111555,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.284800005843863,
+      "request_to_ready_ms": 9.710400001495145,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.567699992563576,
+      "request_to_ready_ms": 14.075799990678206,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 31,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.554999998537824,
+      "request_to_ready_ms": 19.031399991945364,
+      "request_to_presentation_ms": 57.9689000005601
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.6826999951154,
+      "request_to_ready_ms": 14.384599999175407,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.91269999940414,
+      "request_to_ready_ms": 10.50299999769777,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.481700006290339,
+      "request_to_ready_ms": 9.89329999720212,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.482499993988313,
+      "request_to_ready_ms": 8.863099996233359,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.097900004941039,
+      "request_to_ready_ms": 8.575100000598468,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.622299996204674,
+      "request_to_ready_ms": 9.080899995751679,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.840300001902506,
+      "request_to_ready_ms": 14.319800000521354,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 32,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.74660000228323,
+      "request_to_ready_ms": 19.17179999873042,
+      "request_to_presentation_ms": 66.34400000621099
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.579099992057309,
+      "request_to_ready_ms": 14.208900000085123,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.887800002819858,
+      "request_to_ready_ms": 11.543600005097687,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.043599995900877,
+      "request_to_ready_ms": 11.45879999967292,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.061699995072559,
+      "request_to_ready_ms": 9.348399995360523,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.72149999870453,
+      "request_to_ready_ms": 10.148499990464188,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.29870000295341,
+      "request_to_ready_ms": 11.873399998876266,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.299700007541105,
+      "request_to_ready_ms": 15.513300008024089,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 33,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 19.218300003558397,
+      "request_to_ready_ms": 20.64519999839831,
+      "request_to_presentation_ms": 50.64850000781007
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.554000008502044,
+      "request_to_ready_ms": 15.28580000740476,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.41500001156237,
+      "request_to_ready_ms": 10.903500005952083,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.289100006455556,
+      "request_to_ready_ms": 12.679400009801611,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.223500004736707,
+      "request_to_ready_ms": 9.605600003851578,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.853700001258403,
+      "request_to_ready_ms": 10.297699991497211,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.577599994372576,
+      "request_to_ready_ms": 10.075700003653765,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 17.830999990110286,
+      "request_to_ready_ms": 18.353699997533113,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 34,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 20.02550000906922,
+      "request_to_ready_ms": 21.872700002859347,
+      "request_to_presentation_ms": 48.351400007959455
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.601600007154047,
+      "request_to_ready_ms": 15.349099994637072,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.803199995076284,
+      "request_to_ready_ms": 10.253899992676452,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.306300009484403,
+      "request_to_ready_ms": 9.748200012836605,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.443499991903082,
+      "request_to_ready_ms": 9.999599991715513,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.359100004076026,
+      "request_to_ready_ms": 9.76309999532532,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.087799997767434,
+      "request_to_ready_ms": 11.601999998674728,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.271900003426708,
+      "request_to_ready_ms": 15.799400003743358,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 35,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 17.600300008780323,
+      "request_to_ready_ms": 19.032700001844205,
+      "request_to_presentation_ms": 67.35840000328608
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.338699998916127,
+      "request_to_ready_ms": 15.05840000754688,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.870800004340708,
+      "request_to_ready_ms": 11.26309999381192,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.677300004521385,
+      "request_to_ready_ms": 12.117599995690398,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.419699999853037,
+      "request_to_ready_ms": 9.81869999668561,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.003600007621571,
+      "request_to_ready_ms": 10.420700011309236,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.29500000004191,
+      "request_to_ready_ms": 10.828600003151223,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.428900001803413,
+      "request_to_ready_ms": 15.132100001210347,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 36,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 18.655799998668954,
+      "request_to_ready_ms": 20.193400006974116,
+      "request_to_presentation_ms": 58.36310000449885
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.411500000278465,
+      "request_to_ready_ms": 15.130700005101971,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.774599999422207,
+      "request_to_ready_ms": 11.197900006663986,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.874400002649054,
+      "request_to_ready_ms": 11.501200002385303,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.09650000196416,
+      "request_to_ready_ms": 10.462000005645677,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.873700011870824,
+      "request_to_ready_ms": 11.316900010569952,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.25340000342112,
+      "request_to_ready_ms": 10.79359999857843,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.100799995707348,
+      "request_to_ready_ms": 15.689599997131154,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 37,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 19.461599993519485,
+      "request_to_ready_ms": 21.17109998653177,
+      "request_to_presentation_ms": 47.634499991545454
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.031500002602115,
+      "request_to_ready_ms": 14.796000003116205,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.942899996531196,
+      "request_to_ready_ms": 10.420599995995872,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.403199991444126,
+      "request_to_ready_ms": 13.854099990567192,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.97280000592582,
+      "request_to_ready_ms": 10.377400001743808,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.283299998263828,
+      "request_to_ready_ms": 10.70669999171514,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.813300003064796,
+      "request_to_ready_ms": 11.282200008281507,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 16.06530000572093,
+      "request_to_ready_ms": 17.360300000291318,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 38,
+      "actor": 1,
+      "label": "cross_region_boundary",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.341899998835288,
+      "request_to_ready_ms": 21.152500004973263,
+      "request_to_presentation_ms": 67.37279999651946
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.811799992457964,
+      "request_to_ready_ms": 15.538799998466857,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.920500004431233,
+      "request_to_ready_ms": 11.38770001125522,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.281400002189912,
+      "request_to_ready_ms": 11.751599988201633,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.983699990902096,
+      "request_to_ready_ms": 11.448099990957417,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.08890000230167,
+      "request_to_ready_ms": 10.538799993810244,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.385500005213544,
+      "request_to_ready_ms": 11.078300012741238,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.573399992310442,
+      "request_to_ready_ms": 14.062200003536418,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 39,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 20.904900011373684,
+      "request_to_ready_ms": 22.57080000708811,
+      "request_to_presentation_ms": 75.50630001060199
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.421800002106465,
+      "request_to_ready_ms": 14.876399989589117,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.568800003966317,
+      "request_to_ready_ms": 11.164199997438118,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.398400001577102,
+      "request_to_ready_ms": 10.865200005355291,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.037700001499616,
+      "request_to_ready_ms": 9.718999994220212,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.117700003320351,
+      "request_to_ready_ms": 10.602900001686066,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.358299987274222,
+      "request_to_ready_ms": 10.88539999909699,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.498599994112737,
+      "request_to_ready_ms": 14.915199993993156,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 40,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 20.12970000214409,
+      "request_to_ready_ms": 21.94279999821447,
+      "request_to_presentation_ms": 70.32829998934176
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 16.189999994821846,
+      "request_to_ready_ms": 16.96779999474529,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.954299996024929,
+      "request_to_ready_ms": 10.299899993697181,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.51059999736026,
+      "request_to_ready_ms": 10.981500003254041,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.22290000016801,
+      "request_to_ready_ms": 9.60530000156723,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.527799997362308,
+      "request_to_ready_ms": 11.290800001006573,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.160699996049516,
+      "request_to_ready_ms": 10.66980000177864,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.096100003574975,
+      "request_to_ready_ms": 15.642700003809296,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 41,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 19.76890000514686,
+      "request_to_ready_ms": 21.537000007811002,
+      "request_to_presentation_ms": 75.32860001083463
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 16.25080000667367,
+      "request_to_ready_ms": 17.02720001048874,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.79790000221692,
+      "request_to_ready_ms": 11.308900007861666,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.667999998782761,
+      "request_to_ready_ms": 10.113799988175742,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.187700012465939,
+      "request_to_ready_ms": 10.593400002107956,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.580199999618344,
+      "request_to_ready_ms": 10.053699996205978,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.30759999412112,
+      "request_to_ready_ms": 10.870599988265894,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.406100006657653,
+      "request_to_ready_ms": 15.950000000884756,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 42,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": true
+      },
+      "request_to_ack_ms": 20.73730000120122,
+      "request_to_ready_ms": 22.576999996090308,
+      "request_to_presentation_ms": 69.72660000610631
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.573100008419715,
+      "request_to_ready_ms": 15.340100013418123,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.620200002449565,
+      "request_to_ready_ms": 11.073100002249703,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.697599995182827,
+      "request_to_ready_ms": 11.256099998718128,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.23410000198055,
+      "request_to_ready_ms": 10.707900000852533,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.421500002848916,
+      "request_to_ready_ms": 10.896100007812493,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.746699990704656,
+      "request_to_ready_ms": 11.285899992799386,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.751100006629713,
+      "request_to_ready_ms": 16.028199999709614,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 43,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.702000001212582,
+      "request_to_ready_ms": 20.55790000304114,
+      "request_to_presentation_ms": 70.394700000179
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 14.164299995172769,
+      "request_to_ready_ms": 15.090399989276193,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.1934000083711,
+      "request_to_ready_ms": 9.847699999227189,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.793199999374337,
+      "request_to_ready_ms": 12.295099993934855,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.360500000184402,
+      "request_to_ready_ms": 9.810599993215874,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.66889999108389,
+      "request_to_ready_ms": 10.137699995539151,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.359600011724979,
+      "request_to_ready_ms": 10.946200010948814,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.505800005281344,
+      "request_to_ready_ms": 15.043200008221902,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 44,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.973099999129772,
+      "request_to_ready_ms": 20.755899997311644,
+      "request_to_presentation_ms": 83.34339999419171
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.884199993801303,
+      "request_to_ready_ms": 12.813800000003539,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.713899995200336,
+      "request_to_ready_ms": 9.232099997461773,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.817399997496977,
+      "request_to_ready_ms": 9.332200002972968,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.390100007294677,
+      "request_to_ready_ms": 9.833999996772036,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.1993999958504,
+      "request_to_ready_ms": 9.764599992195144,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.93200000084471,
+      "request_to_ready_ms": 10.347100003855303,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.98920000065118,
+      "request_to_ready_ms": 14.502899997751229,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 45,
+      "actor": 1,
+      "label": "open_or_close_door",
+      "expected": "door_changed",
+      "action": {
+        "type": "set_door",
+        "door": 1,
+        "open": false
+      },
+      "request_to_ack_ms": 18.981200002599508,
+      "request_to_ready_ms": 20.706900002551265,
+      "request_to_presentation_ms": 70.20570000167936
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.825000008684583,
+      "request_to_ready_ms": 12.697099999058992,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.293800001614727,
+      "request_to_ready_ms": 9.79640000150539,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.25930000084918,
+      "request_to_ready_ms": 9.878100012429059,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.660599996801466,
+      "request_to_ready_ms": 9.107200006837957,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.402399999089539,
+      "request_to_ready_ms": 9.865599990007468,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.165599996573292,
+      "request_to_ready_ms": 9.003899991512299,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.594200012856163,
+      "request_to_ready_ms": 16.129100011312403,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 46,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 18.161800006055273,
+      "request_to_ready_ms": 20.81950000138022,
+      "request_to_presentation_ms": 51.05980001098942
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 13.109200008329935,
+      "request_to_ready_ms": 13.919500008341856,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.226699999999255,
+      "request_to_ready_ms": 9.707600009278394,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.429400011664256,
+      "request_to_ready_ms": 8.964400010881945,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.514100005617365,
+      "request_to_ready_ms": 9.977299996535294,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.60820000525564,
+      "request_to_ready_ms": 9.119000009377487,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.789399991859682,
+      "request_to_ready_ms": 10.569999998551793,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.042099996004254,
+      "request_to_ready_ms": 14.646499999798834,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 47,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "up"
+      },
+      "request_to_ack_ms": 20.979400011128746,
+      "request_to_ready_ms": 22.79090000956785,
+      "request_to_presentation_ms": 59.972500006551854
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 17.48090000182856,
+      "request_to_ready_ms": 18.438799990690313,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.011400004965253,
+      "request_to_ready_ms": 9.60970000596717,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.307300002546981,
+      "request_to_ready_ms": 9.82369999110233,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.5895999945933,
+      "request_to_ready_ms": 9.044899998116307,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.215099998982623,
+      "request_to_ready_ms": 9.779700005310588,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.36980000208132,
+      "request_to_ready_ms": 10.944699999527074,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.763300008373335,
+      "request_to_ready_ms": 14.31090000551194,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 48,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 20.556500006932765,
+      "request_to_ready_ms": 22.44480000808835,
+      "request_to_presentation_ms": 85.98519999941345
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 10.958499988191761,
+      "request_to_ready_ms": 11.750299992854707,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.062599987373687,
+      "request_to_ready_ms": 9.639899988542311,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.46230000408832,
+      "request_to_ready_ms": 9.974400003557093,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.102700001676567,
+      "request_to_ready_ms": 9.562499995809048,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 16.26050000777468,
+      "request_to_ready_ms": 17.45640000444837,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.673699991661124,
+      "request_to_ready_ms": 12.31369999004528,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.882200000807643,
+      "request_to_ready_ms": 15.596700002788566,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 49,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 18.362600007094443,
+      "request_to_ready_ms": 20.278399999369867,
+      "request_to_presentation_ms": 70.54729999799747
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.12760001362767,
+      "request_to_ready_ms": 12.94550001330208,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.273300009430386,
+      "request_to_ready_ms": 10.803299999679439,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.018500000820495,
+      "request_to_ready_ms": 9.529400005703792,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.266499997465871,
+      "request_to_ready_ms": 9.739800007082522,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.950299994670786,
+      "request_to_ready_ms": 10.479999997187406,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.60749999305699,
+      "request_to_ready_ms": 11.193699989235029,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.544499998213723,
+      "request_to_ready_ms": 16.23269999981858,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 50,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 20.465199995669536,
+      "request_to_ready_ms": 22.465100002591498,
+      "request_to_presentation_ms": 55.596499994862825
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.409599992679432,
+      "request_to_ready_ms": 13.312900002347305,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.538900005281903,
+      "request_to_ready_ms": 10.07860001118388,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.443400005693547,
+      "request_to_ready_ms": 9.990800012019463,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.491499993600883,
+      "request_to_ready_ms": 10.049100004835054,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.440300000482239,
+      "request_to_ready_ms": 10.976000005030073,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.46970000222791,
+      "request_to_ready_ms": 10.101199994096532,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.150500006508082,
+      "request_to_ready_ms": 14.76580000598915,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 51,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "east"
+      },
+      "request_to_ack_ms": 21.924200002104044,
+      "request_to_ready_ms": 23.950399991008453,
+      "request_to_presentation_ms": 58.13409999245778
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.015500004054047,
+      "request_to_ready_ms": 12.846700003137812,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.973200005129911,
+      "request_to_ready_ms": 9.604999999282882,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.82229999115225,
+      "request_to_ready_ms": 9.36080000246875,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.262100007617846,
+      "request_to_ready_ms": 9.714900006656535,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.669499995652586,
+      "request_to_ready_ms": 10.205399987171404,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.271599992644042,
+      "request_to_ready_ms": 9.863899991614744,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.027199995121919,
+      "request_to_ready_ms": 14.740200000233017,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 52,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 20.097899992833845,
+      "request_to_ready_ms": 22.13149999442976,
+      "request_to_presentation_ms": 63.32780000229832
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 11.771799996495247,
+      "request_to_ready_ms": 12.603099996340461,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.154299987130798,
+      "request_to_ready_ms": 9.703799994895235,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.996499997214414,
+      "request_to_ready_ms": 10.566199998720549,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.558199996012263,
+      "request_to_ready_ms": 11.066199993365444,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.19429999764543,
+      "request_to_ready_ms": 12.883600007626228,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.656299997819588,
+      "request_to_ready_ms": 14.186900007189251,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.634499995736405,
+      "request_to_ready_ms": 16.804600003524683,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 53,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 22.38529999158345,
+      "request_to_ready_ms": 24.615399990580045,
+      "request_to_presentation_ms": 39.18589999375399
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 14.320200003567152,
+      "request_to_ready_ms": 15.21530000900384,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.758000004803762,
+      "request_to_ready_ms": 15.551300006336533,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.905999996699393,
+      "request_to_ready_ms": 15.798599997651763,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.576000001397915,
+      "request_to_ready_ms": 15.00510000914801,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.528399998089299,
+      "request_to_ready_ms": 10.372400007327087,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.950300009222701,
+      "request_to_ready_ms": 10.491399996681139,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.129299990599975,
+      "request_to_ready_ms": 14.958899992052466,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 54,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 21.91530000709463,
+      "request_to_ready_ms": 24.047600003541447,
+      "request_to_presentation_ms": 62.39030000870116
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 17.540200002258644,
+      "request_to_ready_ms": 17.97729999816511,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.337599997408688,
+      "request_to_ready_ms": 13.080899996566586,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.13059999968391,
+      "request_to_ready_ms": 10.876300002564676,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.109099989174865,
+      "request_to_ready_ms": 12.764999992214143,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.267099999007769,
+      "request_to_ready_ms": 12.71519999136217,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 12.656999999308027,
+      "request_to_ready_ms": 13.121500000124797,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 19.407200001296587,
+      "request_to_ready_ms": 20.12690000992734,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 55,
+      "actor": 1,
+      "label": "cross_boundary_with_los_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 26.969200000166893,
+      "request_to_ready_ms": 33.43719999247696,
+      "request_to_presentation_ms": 58.51639999309555
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.768300002790056,
+      "request_to_ready_ms": 13.59460000821855,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.132100007263944,
+      "request_to_ready_ms": 9.96230001328513,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.06020000204444,
+      "request_to_ready_ms": 10.617899999488145,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.889099990483373,
+      "request_to_ready_ms": 9.444099996471778,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.865300003089942,
+      "request_to_ready_ms": 14.542300006723963,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.953799992217682,
+      "request_to_ready_ms": 10.585799987893552,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.8336999991443,
+      "request_to_ready_ms": 16.616599998087622,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 56,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 21.802899995236658,
+      "request_to_ready_ms": 24.14399999543093,
+      "request_to_presentation_ms": 71.23040000442415
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.755000003380701,
+      "request_to_ready_ms": 13.72040000569541,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.229999996023253,
+      "request_to_ready_ms": 9.761299996171147,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.19059999473393,
+      "request_to_ready_ms": 11.595699994359165,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.258399993996136,
+      "request_to_ready_ms": 9.770899996510707,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.656300000846386,
+      "request_to_ready_ms": 11.58700000087265,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.4288999971468,
+      "request_to_ready_ms": 10.04069999908097,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 15.368399996077642,
+      "request_to_ready_ms": 15.881500003160909,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 57,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 22.643700009211898,
+      "request_to_ready_ms": 25.084000008064322,
+      "request_to_presentation_ms": 71.15120001253672
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 13.071299996227026,
+      "request_to_ready_ms": 13.800800006720237,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.124300009920262,
+      "request_to_ready_ms": 10.629900003550574,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.416199987754226,
+      "request_to_ready_ms": 10.032599995611235,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.172399993985891,
+      "request_to_ready_ms": 9.68980000470765,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.163899991312064,
+      "request_to_ready_ms": 10.737099990365095,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.978300004149787,
+      "request_to_ready_ms": 10.642499997629784,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.209100001608022,
+      "request_to_ready_ms": 14.70649999100715,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 58,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 22.95100000628736,
+      "request_to_ready_ms": 25.288800010457635,
+      "request_to_presentation_ms": 75.75489999726415
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.199900011182763,
+      "request_to_ready_ms": 13.116700007230975,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.984200005419552,
+      "request_to_ready_ms": 10.558299996773712,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.929500010912307,
+      "request_to_ready_ms": 10.502100005396642,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.549499998684041,
+      "request_to_ready_ms": 10.066799994092435,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.386899997480214,
+      "request_to_ready_ms": 10.08449999790173,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.762299996917136,
+      "request_to_ready_ms": 12.404499997501262,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 13.814399993862025,
+      "request_to_ready_ms": 15.610699992976151,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 59,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "west"
+      },
+      "request_to_ack_ms": 21.508100006030872,
+      "request_to_ready_ms": 23.95329999853857,
+      "request_to_presentation_ms": 68.66350000200327
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "north"
+      },
+      "request_to_ack_ms": 12.009700003545731,
+      "request_to_ready_ms": 12.905900002806447,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.7378999994834885,
+      "request_to_ready_ms": 8.609299999079667,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.502200002316386,
+      "request_to_ready_ms": 10.248099992168136,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 8.839000001898967,
+      "request_to_ready_ms": 9.290499991038814,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 7.987700009834953,
+      "request_to_ready_ms": 8.831300001475029,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.636099992552772,
+      "request_to_ready_ms": 11.27509999787435,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.436500001465902,
+      "request_to_ready_ms": 15.143199998419732,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 60,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 23.081099992850795,
+      "request_to_ready_ms": 25.542099989252165,
+      "request_to_presentation_ms": 41.42919999139849
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.064399998052977,
+      "request_to_ready_ms": 12.962299995706417,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.912299996358342,
+      "request_to_ready_ms": 10.487199993804097,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.461200010264292,
+      "request_to_ready_ms": 10.074800011352636,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.187600007862784,
+      "request_to_ready_ms": 9.72380000166595,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.072100001503713,
+      "request_to_ready_ms": 9.631499997340143,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.833699998329394,
+      "request_to_ready_ms": 11.475200008135289,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 16.081699999631383,
+      "request_to_ready_ms": 16.75450000038836,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 61,
+      "actor": 1,
+      "label": "move_same_region",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 21.878399988054298,
+      "request_to_ready_ms": 24.323199992068112,
+      "request_to_presentation_ms": 63.96429998858366
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 2,
+      "label": "multi_actor_visibility_change",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "south"
+      },
+      "request_to_ack_ms": 12.236499998834915,
+      "request_to_ready_ms": 13.156999993952923,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 3,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.015699997893535,
+      "request_to_ready_ms": 10.83130000915844,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 4,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 10.866399999940768,
+      "request_to_ready_ms": 11.651900000288151,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 5,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 9.867100001429208,
+      "request_to_ready_ms": 10.218399998848327,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 6,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.349000004585832,
+      "request_to_ready_ms": 15.26499999454245,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 7,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 11.474699989776127,
+      "request_to_ready_ms": 12.220299991895445,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 8,
+      "label": "wait_same_region",
+      "expected": "waited",
+      "action": {
+        "type": "wait"
+      },
+      "request_to_ack_ms": 14.4367000029888,
+      "request_to_ready_ms": 15.086999992490746,
+      "request_to_presentation_ms": null
+    },
+    {
+      "cycle": 0,
+      "step": 62,
+      "actor": 1,
+      "label": "change_elevation",
+      "expected": "moved",
+      "action": {
+        "type": "move",
+        "direction": "down"
+      },
+      "request_to_ack_ms": 23.240299997269176,
+      "request_to_ready_ms": 25.575799998478033,
+      "request_to_presentation_ms": 54.26550000265706
+    }
+  ],
+  "spectator_role": "spectator",
+  "initial_revision": 0,
+  "client_memory_start": 44,
+  "presented_revision": 143,
+  "client_memory_end": 263
+}

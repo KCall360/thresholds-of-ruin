@@ -56,7 +56,7 @@ pub fn serialize<S: Serializer>(worlds: &[World], serializer: S) -> Result<S::Ok
                 });
             Instance {
                 geometry: index,
-                doors: world.doors.clone(),
+                doors: (*world.doors).clone(),
             }
         })
         .collect();
@@ -88,7 +88,7 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Wor
                 .get(instance.geometry)
                 .cloned()
                 .ok_or_else(|| serde::de::Error::custom("unknown checkpoint geometry"))?;
-            world.doors = instance.doors;
+            world.doors = Shared::new(instance.doors);
             Ok(world)
         })
         .collect()

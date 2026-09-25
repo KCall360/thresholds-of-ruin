@@ -233,7 +233,14 @@ latest [checkpoint](checkpoints.md), and simulates only its tail. Snapshot selec
 history retention and journal rotation share a SQLite transaction. Deterministic
 backend snapshot types use Serde without I/O or clocks; they never enter protocol
 messages. Complete history remains in memory for existing queries and retries;
-reduced state-copy costs remain Phase D work. Wizard undo preserves abandoned branches and
+ordinary command candidates contain only decision state, revisions and shared
+rewind boundaries. Retained records and receipt indexes stay owned by the engine;
+a single new record is admitted before publishing the candidate. World collections,
+items and actor navigation use deterministic copy-on-write ownership. Navigation
+shares maps by source region, so discovering a local connection does not copy all
+remembered cells. This sharing
+never crosses the protocol boundary and does not change snapshot encoding.
+Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 
 Future scenario games persist activated regions and their full simulation state,
