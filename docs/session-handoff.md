@@ -32,12 +32,17 @@ remaining three launchers; preserve the reusable benchmark driver and prior save
 ## Closure and next step
 
 The checkpoint-size blocker is addressed. Full native explored-save acceptance
-passes, but recurrent acknowledgement/presentation tails still require an explicit
-closure disposition. Opt-in request/reader timing correlation is maintained with
+passes, including a 78 ms real-keyboard modal response on the retained 256-region
+save while persistence is blocked. Final acknowledgement maximum is 30.64 ms;
+full native traversal still has a 2,915 ms maximum. Correlation places the largest
+intervals in client request sending, acknowledgement delivery and frame-reader
+receipt; server handlers peak at 10.53 ms. Their root causes and latency disposition
+remain unresolved. Opt-in request/reader timing correlation is maintained with
 the workloads. Non-reproduction does not prove historical spikes fixed. See the
 follow-up for retained raw samples, timings, final verification and remaining
 limitations; keep 3p open while that evidence item remains unresolved.
 
+Next isolate those send/delivery/report-reader intervals with focused diagnostics.
 After 3p gates are satisfied, milestone 3 resumes with shared resumable actions,
 durable place knowledge, semantic narration/interruption, and slow-client
 resynchronization acceptance. No interaction or travel feature is added here.

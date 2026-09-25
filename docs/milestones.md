@@ -115,7 +115,10 @@ Enabled traversal now completes with exact durable restart and bounded tail repl
 native full exploration, ASCII/text continuation and native input during a blocked
 checkpoint also pass. The cap, rewind window and runtime queue limits are unchanged.
 The broader milestone remains **not ready to close** while recurrent diagnostic
-acknowledgement/presentation tails are correlated and their disposition established.
+acknowledgement/presentation tails are resolved. The final correlated full native
+traversal still peaks at 2,915 ms, with large intervals in client sending, delivery
+and frame-reader receipt; its server handlers peak at 10.53 ms. Isolate those
+intervals next, then establish the latency disposition before feature expansion.
 This is distinct from deferred streaming, history loading and query scaling.
 Process recovery tests do not establish hardware power-loss behavior.
 

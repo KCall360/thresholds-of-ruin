@@ -1,0 +1,144 @@
+{
+  "date": "2026-09-25",
+  "runtime_source_commit": "f19ed4b11e87659e2d990c2c48cc94b24bc833fc",
+  "baseline_merge": "eff107ce95b7c0f6c8f813597d0fcb94f70fefa5",
+  "baseline_final_head": "61372ee1958346a90fe423eb75b6e16f182951cc",
+  "hardware": {
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "NumberOfCores": 6,
+        "NumberOfLogicalProcessors": 12
+      }
+    ],
+    "os": [
+      {
+        "Caption": "Microsoft Windows 11 Home",
+        "Version": "10.0.26200",
+        "BuildNumber": "26200"
+      }
+    ],
+    "volume": [
+      {
+        "DriveLetter": "F",
+        "FileSystem": "NTFS",
+        "SizeRemaining": 613980463104,
+        "Size": 1000068870144
+      }
+    ],
+    "disk": [
+      {
+        "FriendlyName": "ST1000LM035-1RK172",
+        "BusType": "RAID",
+        "Size": 1000204886016
+      }
+    ]
+  },
+  "free_bytes_at_packaging": 593480040448,
+  "binary_sha256": {
+    "target/release/tor-server.exe": "a6b159de40e21156d11daafedefa7b2c2d362367f7d358818c6d339199044eff",
+    "target/release/tor-client-headless.exe": "ea4438379a1c667e45b3fed8bfed8f21a7325625c405c9e69b969ada73447f12",
+    "target/release/tor-client-ascii.exe": "a4a4d46e316ac3883bbed3f6cd4fc5e2ff3cda7d579d0677dc832e44344e27cb",
+    "target/release/tor-client-text.exe": "4cc411f84348eb899c896b6d2bb9bb5a16e254e411a9f563fe10c70f8c0d3697",
+    "target/release/examples/latency_bench.exe": "78ee62e943991cc44e76fa686aa74a4dc2bd6e6235056d2fe2e222dfb5362f7b",
+    "target/3p-growth/before/latency_bench.exe": "fbf4deb4cce0b1d7768b2b878a3732c5788a21c6185e7da5e6d60aba3451abfe"
+  },
+  "source_sha256": {
+    "crates/simulation/src/checkpoint.rs": "53a44d3ea150af84d3bc6f8adc07f3cabbbc72989d99082f6a5feea5ece7f6c3",
+    "crates/simulation/src/navigation_map.rs": "fe2fcaf28579613799bc7f3aeba58601812dd834ce9754ca506455f42db3911d",
+    "crates/server/src/engine.rs": "3478bb6e4c8622ffa6a6ad24dd667352de0ef5da8a906ba0237c144236c932df",
+    "crates/server/src/transport.rs": "2c33d5ff60fb72e9c64c438f9b7e292cbfdbe41a2e3c0466ecc37d6424ba003c",
+    "crates/client-common/src/lib.rs": "169c2fa6557e4c8496d4a7c2aa6ece12221fa2433f1964f230a4da7232f41ff4",
+    "crates/client-headless/src/main.rs": "39cec82a230863575fc2a46c721cfbc00dd89ed54de6c204cc3671498e78d9d7",
+    "scripts/performance_driver.py": "bcea9b4e44aeb0aae8d564f53097954e656eebe2c02c78be163924aa546ad3f7",
+    "scripts/saved_exploration_driver.py": "7d0b27bbdb93b35fa1d17415ccd19f60cbd99690e0faa320294a7132f3538936",
+    "scripts/timing_correlation.py": "b93cf53071e8f8fbb3fe0d1601dc56f06eac9d3b9180e1dd194c49462b5b2320"
+  },
+  "validation": {
+    "before-disabled": "passed complete ordered coverage, history, byte and recovery accounting",
+    "before-stress": "expected rejection: failed incomplete traversal",
+    "before-mixed": "passed complete ordered coverage, history, byte and recovery accounting",
+    "final-saved-0": "passed complete ordered coverage, history, byte and recovery accounting",
+    "final-saved-64": "passed complete ordered coverage, history, byte and recovery accounting",
+    "final-saved-1024": "passed complete ordered coverage, history, byte and recovery accounting",
+    "final-mixed": "passed complete ordered coverage, history, byte and recovery accounting",
+    "after-mixed": "passed complete ordered coverage, history, byte and recovery accounting",
+    "after-mixed-repeat": "passed complete ordered coverage, history, byte and recovery accounting",
+    "final-native": "passed complete traversal, exact restart, bounded replay and continuation",
+    "final-ack": "passed independent scheduler and full three-cycle fixture with two intervening region traversals: 1681 ordered samples, 1675 accepted requests and correlations"
+  },
+  "method": "Sequential final release runs, no competing builds/tests. Same Windows machine and F: NTFS HDD. Ordinary OS/desktop activity uncontrolled. TMP/TEMP=F:/Codex/Roguelike/target/tmp for backend runs. Timing-only stderr buffered; stdout state logging retained during execution. Runtime/Python workload source f19ed4b; offline native correlator subsequently exposes already-recorded client_send_ms. Final documentation/artifact commit does not change binaries.",
+  "commands": [
+    "latency_bench --saved-discovery --checkpoint-interval {0,64,1024} --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "latency_bench --case r8-a8-h10000-durable --cycles 3 --checkpoint-interval 64 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "python scripts/performance_report.py FILE --saved-discovery",
+    "python scripts/performance_report.py FILE --case r8-a8-h10000-durable",
+    "python scripts/performance_driver.py --bin-dir target/release --output target/3p-growth/final-ack --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture --correlate",
+    "python scripts/saved_exploration_driver.py --bin-dir target/release --output target/3p-growth/final-native --regions 256 --correlate",
+    "python scripts/timing_correlation.py DIRECTORY --output OUTPUT [--native]",
+    "TOR_TEST_PROFILE=release TOR_SAVED_EXPLORATION_REGIONS=256 python -m unittest discover -s scripts -p test_client_responsiveness_process.py -v"
+  ],
+  "limitations": [
+    "Earlier after-mixed/native/ack files are exploratory results from intermediate implementations, not final binaries; their exact binary hashes were not retained. They remain evidence of tails/failure, not final qualification.",
+    "ack-pipe completed three cycles but failed the final save response deadline; 1675 persisted history/journal rows and checkpoint1024 were observed afterward. It is not a successful run.",
+    "Earlier correlation used coarse Windows wall time or per-line clock lookup and synchronous/unbuffered diagnostic writes. Do not combine those deltas with final precise cached clock calibration.",
+    "Native automation timing ends at reader receipt of a reported presented frame. Reporting follows actual presentation; this is not keyboard-to-photon latency. Final real OS keyboard modal check used the already-explored retained save, with SQLite write lock held; see native-input result.",
+    "Full stdout state logs and saves are excluded. Frame/profile projection preserves exact recorded frame IDs, revisions, profiles and completion flags for offline correlation. Stderr artifacts contain timing_version=1 events only.",
+    "No hard-real-time, arbitrary-world bound, hardware power-loss or constant-time full-history loading claim. Checkpoint fixture bound is 16 MiB; production cap remains64MiB.",
+    "Hardware identity inherited from prior manifest; its SizeRemaining is historical. free_bytes_at_packaging is current."
+  ],
+  "artifact_sha256": {
+    "ack-correlated-result.json.gz": "c12f69f2333e19c98347d7812c4a2b1fd2d0cc42c658ac8d1c9dfc8057ad5f78",
+    "ack-correlated.json.gz": "d67249fdae6236040b88de5497e3c8c4952b5d79777052983d5a73e0a190938f",
+    "ack-followup-result.json.gz": "64253345a7e2bfcb2a42d45d3e7d49112864c53bb6b77c9113e14d9cb8f84c81",
+    "ack-pipe-failure.json.gz": "a4b55da7aa0a260c9fd377ec6d218cc5105cce9e0d62b35e5b865b9b9d0d25ab",
+    "ack-pipe-samples.jsonl.gz": "ae9202353b6c0742d429b03b18818a5e6d0fb5f9745703c81eee8d2d418c267f",
+    "after-mixed-repeat.jsonl.gz": "d72fcbb80b6a761906f73ce2ead167dd6248723d0976019fc05cd759ddd8757a",
+    "after-mixed.jsonl.gz": "1bc00ea8796ff8cf0001cd84e55310b776dac795ccc31d183146effc0e01b358",
+    "before-disabled.jsonl.gz": "59ef62914753ffc596bd9fd74aed1ce2e430689c881e566039c2634ea0729c28",
+    "before-mixed.jsonl.gz": "020483ef45dd2ccfc3841b38cb5f065cbc0b790aea801890d9b3c7453f89abd5",
+    "before-stress.jsonl.gz": "7a7e633e81c032d78e755c3b1b0fe477e05b99ea66bee5054d07d55423d2e6e5",
+    "build-debug.log.gz": "79e974e02858c1401be8e58b87b533a75f97440c657dd2389779d389b4613155",
+    "build-final-release.log.gz": "07e097be7e1b01f1ef6b45dd746294a1d03f9c8cc06b63a0bca701a8b22d50dc",
+    "clippy.log.gz": "67d70acbbb44e62c8c7547c6214d95ae5a423138608c79c790440df851d2a9a6",
+    "final-ack-actor-1.stderr.jsonl.gz": "2c9e00864a4b651e4e2457e9eabd1c8b449f28669933dbd5cb4dc04892f9c2ac",
+    "final-ack-actor-2.stderr.jsonl.gz": "024cf0b9d950412e3c2686f30b0c58acfb3babba5c34a619b0308e2de9e384d5",
+    "final-ack-actor-3.stderr.jsonl.gz": "ae0934f7e8ce08a8c7d5d0b63ed4395bfea067e9e182cb401950bb348bf46834",
+    "final-ack-actor-4.stderr.jsonl.gz": "255c67a40076c4b04ffdb7ce69dbf8f19b608fc971cee66b5d3f23380094fd8a",
+    "final-ack-actor-5.stderr.jsonl.gz": "76156e4f76a587f0fe7fa04f1442dfc3d67bfc22d4dd18e3d6efc1f59720d7b1",
+    "final-ack-actor-6.stderr.jsonl.gz": "3cc3ac5cbbec741b1e002e1debfc159886c0b452ea97e5ab03c7774bcb944a17",
+    "final-ack-actor-7.stderr.jsonl.gz": "1e48bb551b0fbd58e95e16529e7b08bf2fc44010ee4bc11375361b3fe56c068d",
+    "final-ack-actor-8.stderr.jsonl.gz": "dc9d74d6eac21c79ef84d6e70ac1ced4970cf60970e555f15764f5a368ed38b9",
+    "final-ack-result.json.gz": "7cc1047b05b5865201119b41dae2462104b8dd0babc1c2e2e4b8410bf3805c96",
+    "final-ack-server.stderr.jsonl.gz": "d1db5e4153860109b62865d33bc9fe031d88be91b8d7f31335a7d06cca22517c",
+    "final-ack-timings.json.gz": "587c242a1747179b0bbd3f9e104b5944bb1e7c948369f6e16e65190401fb268a",
+    "final-correlation-test.log.gz": "f680c964378ed6e04ad04a6368092792b778b7bd267b0614097754352c884858",
+    "final-mixed.jsonl.gz": "bb0f636aa7d6ab5d850553c0571238f29d418d4941d41632367dd8a49abe2122",
+    "final-native-ascii.stderr.jsonl.gz": "88e001e608ce0f5470b213d98d516d20b8e6ac047c538236f5564981955724b4",
+    "final-native-frame-profiles.jsonl.gz": "6e5a7cb0bd51fd2d954fde6cd6fd2b5eb86773b3c74f499c22aebf2019b2e3ac",
+    "final-native-native-input.json.gz": "c3aae720420bd53a9c5be28579352b8c9b30ee39ad37454ce8df11f1dec27e1d",
+    "final-native-observer.stderr.jsonl.gz": "cd8f2b16d82267b357de8586f35a7b0f79e7ba3af4c2b55873d0f3b0ecc0cadc",
+    "final-native-restarted-ascii.stderr.jsonl.gz": "d2cffef8edb02cf40bbe489ef2ab72b24537b97d3b4945aa83df29a48c7269f4",
+    "final-native-restarted-server.stderr.jsonl.gz": "94bd308803c5ce041517ee372d3dcdb2804c5f70aa2e2d2c765af34533f4c82e",
+    "final-native-result.json.gz": "cbed2ce8e2d72db8ad9b9364412b6a3c21e0b6c9748010447e5dcefff026ef35",
+    "final-native-server.stderr.jsonl.gz": "eabe2745e1fb140c8393ae9579a7da9d58b5514a2364fdd28b3e705dabe4fca0",
+    "final-native-timings.json.gz": "da732d8a40ebfdc36a37c5e5ac54775300beaecc8d60b31e9bc02c64724e6e31",
+    "final-saved-0.jsonl.gz": "3e2a289ea7c08de84001c546752bfe67832c0d6d3a2a6f5816888bf8563deaeb",
+    "final-saved-1024.jsonl.gz": "e5fd9f61be4cbd085e87013b1e51f9e2cb749b8c8107bb1406c58066c81893a5",
+    "final-saved-64.jsonl.gz": "54b354596df8ffde31864a0e7b1bca55a5a4a39321cf980dc74397411a0427b4",
+    "launchers.log.gz": "b5539f23ff9e9356a49d61f3e7f1c663779addaa682b1fee69f96123a3a7617c",
+    "native-correlated-result.json.gz": "f0f02ff131c8fcd5653fc5c9d6fb8395486c034298052a12cc9c7f7ee16e3fe9",
+    "native-correlated-timings.json.gz": "882e95418ce8d28bddaf80f50dad2c3d041af86919da99252bea727e770fe887",
+    "native-large-result.json.gz": "60adb9a7889fc4316e30b7d6dd4dedf33bbfa65dea19f3d812ec5ae6fd4d71d7",
+    "native-large-test.log.gz": "2ebfba2ec2897591002a5c2f50addce0d46cd6d3beb2e67585a32ea7cc6fe064",
+    "native-pipe-result.json.gz": "310e5073dcfb4fa6e0abc7c514ab9bebbfa0cdf06d621fde6e6bcf625bd4afeb",
+    "native-pipe-timings.json.gz": "9ceabb32f4441c6ce3ad1a323870e640f9208973ff13c4a069a1480db2269704",
+    "native-small-result.json.gz": "25f059cae7611e4fdf0ff4a734519191188a273d748bfdd6d70f17ece1945937",
+    "python-debug.log.gz": "aa5191202e1a33846a449c7dfd8f826d515ab96f6a1b5661e61c55f0f7c5dddb",
+    "python-release.log.gz": "466c2feaceb0e9c369a3ffb0a07761a23e05d6de358bb0b8814eea6c1273311e",
+    "rustdoc.log.gz": "be9c66c0ffad53830ec6eae5543476bb5bad9b9d45051649af1be74f476837c8",
+    "summary.json": "aa12bb51365ce3f185689a65e1fed072be47054c5170b87d03935989977c3860",
+    "tests-debug.log.gz": "a626841c60b999414b0ab487be3de0c61a6a8dc6f74cb6bfe6d61336d8fbc858",
+    "tests-release.log.gz": "8b8e53984ee994a4781f6e708b3bf2ba72e3580a5a0087a6a6a053f3800d751d"
+  }
+}

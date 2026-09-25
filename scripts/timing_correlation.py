@@ -54,6 +54,7 @@ def correlate_native(directory, result):
     client = events(directory/'ascii.stderr.log')
     requests = {r['revision']:r for r in client if r['event']=='client_request'}
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
+    sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
     # A frame reports the duration of the preceding diagnostic output call.
     # Recover that later sample rather than assigning the previous call to the
     # frame being measured. This read happens offline, after the workload.
@@ -86,6 +87,7 @@ def correlate_native(directory, result):
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],
             input_to_client_request_ms=(request['unix_ns']-sample['input_unix_ns'])/1e6,
+            client_send_ms=sends[request_id]['duration_ms'],
             server_handle_ms=handled['duration_ms'], server_lock_ms=handled['lock_ms'],
             server_handle_to_ack_sent_ms=(sent['unix_ns']-handled['unix_ns'])/1e6,
             server_ack_to_client_ack_ms=(ack['unix_ns']-sent['unix_ns'])/1e6,
