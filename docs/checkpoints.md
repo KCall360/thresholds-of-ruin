@@ -72,9 +72,12 @@ capture changes the effective replay bound.
 
 A snapshot exceeding the size limit fails saving rather than publishing an
 unrecoverable checkpoint. The limit bounds encoded bytes, not all in-memory
-snapshot allocations. Region streaming and further state sharing remain later
-work. SQLite/process tests establish transaction recovery, not hardware power-loss
-guarantees; filesystem/device limitations from the background-save guide apply.
+snapshot allocations. The [closeout audit](3p-closeout.md) demonstrates that fully
+explored 256-region fixture state would encode to 765 MB, and checkpoint-enabled exploration fails.
+Whole-map navigation deduplication repeats overlapping knowledge across different
+rewind states. This is a current 3p blocker, distinct from later region streaming.
+Runtime sharing alone does not establish an encoded-size bound. SQLite/process
+tests establish transaction recovery, not hardware power-loss guarantees; filesystem/device limitations from the background-save guide apply.
 
 ## Verification and profiling
 

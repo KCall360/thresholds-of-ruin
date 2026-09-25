@@ -103,6 +103,17 @@ impl Runner {
             .command_profiled("bench", "headless", actor, &request, &branch, command);
         let command_call_ms = start.elapsed().as_secs_f64() * 1000.;
         let after = self.engine.state(actor).unwrap();
+        if let Err(error) = &result {
+            if step.expected != "blocked" {
+                println!(
+                    "{}",
+                    json!({"kind":"failure","case":self.case,
+                    "history_end":history_start,"error":format!("{error:?}"),
+                    "save_status":self.engine.save_status(),
+                    "current_checkpoint_encoding":self.engine.profile_checkpoint_encoding().ok().map(|(bytes,time)| json!({"bytes":bytes,"ms":time.as_secs_f64()*1000.}))})
+                );
+            }
+        }
         step.verify(&before, &after, result.is_ok());
         let mut timings = BTreeMap::new();
         let mut profile = None;
@@ -206,7 +217,8 @@ fn main() {
     });
     let mut completed_cases = 0;
     let phase_d = args.iter().any(|arg| arg == "--phase-d");
-    let discovery_only = args.iter().any(|arg| arg == "--discovery-only");
+    let saved_discovery = args.iter().any(|arg| arg == "--saved-discovery");
+    let discovery_only = saved_discovery || args.iter().any(|arg| arg == "--discovery-only");
     let phase_c = args.iter().any(|arg| arg == "--phase-c");
     let focused = phase_d || phase_c || args.iter().any(|arg| arg == "--phase-b");
     let save_ms = |flag: &str, fallback| {
@@ -332,11 +344,19 @@ fn main() {
         vec![8, 64, 256]
     } {
         let case = format!("traversal-r{regions}");
-        let engine =
-            Engine::memory(Scenario::performance(trace.seed, regions, 1).unwrap()).unwrap();
+        let scenario = Scenario::performance(trace.seed, regions, 1).unwrap();
+        let path = directory.path().join(format!("{case}.db"));
+        let mut engine = Engine::memory(scenario.clone()).unwrap();
+        if saved_discovery {
+            engine = engine
+                .attach_profile_save_with_policy(&path, save_policy.clone())
+                .unwrap();
+        }
         println!(
             "{}",
             json!({"kind":"traversal","case":case,"regions":regions,"actors":1,
+            "storage":if saved_discovery {"background_sqlite_journal"} else {"memory"},
+            "checkpoint_interval":save_policy.checkpoint_interval,
             "trace_version":trace.version,"seed":trace.seed,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
             "dirty":!dirty.success(),"profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
             "cycles":if quick {2} else {regions-1},"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
@@ -348,10 +368,34 @@ fn main() {
                 runner.scheduled(&trace, step, cycle as usize, index);
             }
         }
+        let mut persistence = serde_json::Value::Null;
+        if saved_discovery {
+            let state = runner.engine.state(ActorId(1)).unwrap();
+            let start = Instant::now();
+            runner.engine.flush().unwrap();
+            let flush_ms = start.elapsed().as_secs_f64() * 1000.;
+            let status = runner.engine.save_status();
+            let (checkpoint_json_bytes, encoding_time) =
+                runner.engine.profile_checkpoint_encoding().unwrap();
+            let bytes = std::fs::metadata(&path).unwrap().len();
+            // Release the save lock before exercising the ordinary load path.
+            let old = std::mem::replace(
+                &mut runner.engine,
+                Engine::memory(scenario.clone()).unwrap(),
+            );
+            drop(old);
+            let start = Instant::now();
+            let resumed = Engine::open(&path, scenario).unwrap();
+            let restart_ms = start.elapsed().as_secs_f64() * 1000.;
+            assert_eq!(resumed.state(ActorId(1)).unwrap(), state);
+            persistence = json!({"checkpoint_json_bytes":checkpoint_json_bytes, "checkpoint_diagnostic_ms":encoding_time.as_secs_f64()*1000.,"final_flush_ms":flush_ms,"final_save_bytes":bytes,
+                "save_status":status,"restart_replay_ms":restart_ms,"recovery":resumed.recovery_profile()});
+            runner.engine = resumed;
+        }
         println!(
             "{}",
             json!({"kind":"traversal_end","case":case,"history_end":runner.engine.profile_counts().0,
-            "client_memory":runner.app.state.as_ref().unwrap().memory().count()})
+            "client_memory":runner.app.state.as_ref().unwrap().memory().count(),"persistence":persistence})
         );
         summarize(&case, runner.distributions);
     }

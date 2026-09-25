@@ -4,6 +4,7 @@ from collections import defaultdict
 import gzip
 import itertools
 import json
+import math
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,11 +37,13 @@ def expected_actions(regions, actors, history, cycles):
     return result
 
 
-def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None, phase_d=False, discovery_only=False):
+def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None, phase_d=False, discovery_only=False, saved_discovery=False):
+    discovery_only = discovery_only or saved_discovery
     cases, samples, ends = {}, defaultdict(list), {}
     traversals, traversal_ends = {}, {}
     tables = {"case": cases, "case_end": ends, "traversal": traversals, "traversal_end": traversal_ends}
     for row in rows:
+        assert row["kind"] != "failure", "Benchmark recorded a failed command"
         if row["kind"] in tables:
             table = tables[row["kind"]]
             assert row["case"] not in table, "Duplicate case metadata or completion"
@@ -140,6 +143,9 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
         assert end["history_end"] == len(actual) and end["client_memory"] == actual[-1]["client_memory"]
         if metadata:
             assert metadata["cycles"] == cycles and metadata["regions"] == regions and metadata["trace_version"] == SPEC["version"]
+        if saved_discovery:
+            assert metadata["storage"] == "background_sqlite_journal"
+            validate_saved_discovery(metadata, actual, end)
         for index, (sample, step) in enumerate(zip(actual, expected)):
             assert sample["actor"] == 1
             if step["action"]["type"] == "door":
@@ -151,6 +157,37 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
             if metadata.get("profile_version", 1) >= 2:
                 validate_work(sample["profile"], sample["action"], 1)
     return cases, samples, ends
+
+
+def validate_saved_discovery(meta, samples, end):
+    """A saved traversal must commit its entire prefix and reload the same boundary."""
+    persistence = end["persistence"]
+    status, recovery = persistence["save_status"], persistence["recovery"]
+    count = len(samples)
+    assert status["error"] is None and status["pending_bytes"] == 0
+    assert status["accepted_sequence"] == status["durable_sequence"] == count
+    assert recovery["records_loaded"] == count
+    captured = [s["history_end"] for s in samples if s["profile"]["checkpoint_captures"]]
+    sequence = captured[-1] if captured else 0
+    assert recovery["checkpoint_sequence"] == status["checkpoint_sequence"] == sequence
+    assert recovery["records_replayed"] == count - sequence
+    interval = meta["checkpoint_interval"]
+    assert sequence == ((count // interval) * interval if interval else 0)
+    if sequence:
+        assert 0 < status["checkpoint_bytes"] <= 64*1024*1024
+    else:
+        assert status["checkpoint_bytes"] == 0
+    assert persistence["final_save_bytes"] > 0
+    assert type(persistence["checkpoint_json_bytes"]) is int and persistence["checkpoint_json_bytes"] > 0
+    for key in ("checkpoint_diagnostic_ms", "final_flush_ms", "restart_replay_ms"):
+        value = persistence[key]
+        assert type(value) in (int, float) and math.isfinite(value) and value >= 0
+    for sample in samples:
+        current = sample["save_status"]
+        assert current["error"] is None
+        assert current["accepted_sequence"] == sample["history_end"]
+        assert current["durable_sequence"] <= current["accepted_sequence"]
+        assert sample["profile"]["records_serialized"] == 1
 
 
 def validate_work(profile, action, actors):
@@ -173,13 +210,14 @@ def main():
     parser.add_argument("--phase-c",action="store_true")
     parser.add_argument("--phase-d",action="store_true")
     parser.add_argument("--discovery-only",action="store_true")
+    parser.add_argument("--saved-discovery",action="store_true")
     parser.add_argument("--case")
     parser.add_argument("--summary",type=Path)
     args = parser.parse_args()
     opener = gzip.open if args.input.suffix == ".gz" else open
     with opener(args.input,"rt",encoding="utf-8-sig") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
-    cases,samples,ends = validate(rows,args.quick,args.phase_b,args.phase_c,args.case,args.phase_d,args.discovery_only)
+    cases,samples,ends = validate(rows,args.quick,args.phase_b,args.phase_c,args.case,args.phase_d,args.discovery_only,args.saved_discovery)
     summaries = [r for r in rows if r["kind"] != "sample"]
     if args.summary:
         args.summary.write_text("\n".join(json.dumps(r) for r in summaries)+"\n",encoding="utf-8")

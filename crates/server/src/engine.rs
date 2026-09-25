@@ -793,6 +793,36 @@ impl Engine {
         Ok(self)
     }
 
+    /// Measure the current format-5 checkpoint JSON without allocating its encoded
+    /// payload or writing a save. Includes capture, deduplication and serialization;
+    /// intended for offline diagnostics, outside measured action intervals. The
+    /// production 64 MiB writer limit remains enforced independently.
+    pub fn profile_checkpoint_encoding(&self) -> Result<(u64, Duration), Failure> {
+        struct Counter(u64);
+        impl std::io::Write for Counter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0 += bytes.len() as u64;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let start = Instant::now();
+        let snapshot = Checkpoint::capture_candidate(
+            &Candidate::capture(self),
+            self.archive.records.len(),
+            self.archive.wizard_game,
+        );
+        let encoded = snapshot.encode(
+            "00000000-0000-0000-0000-000000000000",
+            self.archive.records.len() as u64,
+        );
+        let mut counter = Counter(0);
+        serde_json::to_writer(&mut counter, &encoded).map_err(|_| storage_failure())?;
+        Ok((counter.0, start.elapsed()))
+    }
+
     /// Persist the current archive to a disposable diagnostic target. The returned
     /// duration is complete bootstrap work, not command encoding or physical I/O.
     /// This does not attach the target to the engine or publish state.

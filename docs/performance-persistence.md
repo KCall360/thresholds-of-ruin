@@ -233,13 +233,25 @@ Phase E remains separate client application/rendering work.
 
 ### Phase E — Client responsiveness
 
-Implemented and locally verified. Shared client updates validate before
+Merged in PR #27 after Windows/Linux CI passed on its final commit. Shared client updates validate before
 mutation without cloning historical memory; ASCII delivers ordered updates through
 bounded queues, budgets event work per turn, and indexes rendering lookups.
 The versioned client workload covers large remembered maps and burst updates;
 native process tests exercise blocked saves and checkpoints. See
 [Phase E findings](phase-e-findings.md) for measurements and unresolved native
 presentation tail limits. The broader 3p acceptance criteria remain separate.
+
+## Closeout disposition
+
+The [3p closeout audit](3p-closeout.md) records acknowledgement-tail follow-up,
+checkpoint-disabled/enabled saved exploration and the acceptance checklist.
+The milestone remains open: full 256-region exploration produces a 765 MB
+format-5 checkpoint representation, beyond the unchanged 64 MiB cap, and the
+enabled traversal fails saving. Detached discovery and locally bounded capture
+latency did not establish checkpoint bounds. Do not remove this gate by disabling
+checkpoints, raising the cap, or calling it deferred streaming work. The next
+focused change must address checkpoint growth, preserve recovery and supported
+saves, then establish successful explored-world checkpoint/native acceptance.
 
 ## Verification and completion
 

@@ -251,3 +251,31 @@ also include `request_to_ack_line_ms`, stamped when the reader receives the JSON
 acknowledgement line, before diagnostic log writing/flushing and queue delivery.
 Their difference isolates delay inside the driver; neither is a server-only time.
 Existing retained reports without the new field remain valid.
+
+## Saved-discovery closeout measurement
+
+```sh
+cargo build --release --locked -p tor-server --example latency_bench
+# Complete journal-only comparison; does not meet the checkpoint gate:
+target/release/examples/latency_bench --saved-discovery --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > saved.jsonl
+python scripts/performance_report.py saved.jsonl --saved-discovery
+# Current known failure, retained as evidence rather than a passing workload:
+target/release/examples/latency_bench --saved-discovery --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > checkpoint-failure.jsonl
+```
+
+Use `.exe` on Windows and explicitly select the save volume with TMP/TEMP.
+`--saved-discovery` implies `--discovery-only`: the unchanged full eight/256-region
+traces now attach a real save before any exploration. Successful completion flushes
+and reloads the ordinary save and compares final state. Each completion includes
+save size, flush/restart timing, saved-prefix/replay counts, and an offline count
+of the current checkpoint JSON. The counting writer does not allocate the encoded
+payload, does not write it, and does not bypass the real 64 MiB cap. Its duration
+includes capture and deduplication, outside action/flush timings. It uses an
+equal-length dummy save UUID and the ordinary workload's record count as sequence.
+
+Interval 64 supplies a stress comparison and a successful eight-region checkpoint.
+The current large enabled traversal emits a failure record and exits unsuccessfully;
+the report validator must reject it. Do not report its accepted prefix as a complete
+benchmark pass. Background timing affects the rejection point. Existing detached
+modes, workload ordering and retained report interpretation remain unchanged.
+See the [closeout audit](3p-closeout.md) for retained raw files and blocker disposition.

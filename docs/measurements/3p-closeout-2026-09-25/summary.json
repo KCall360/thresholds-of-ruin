@@ -1,0 +1,398 @@
+{
+  "saved-disabled": {
+    "traversal-r8": {
+      "accepted_samples": 77,
+      "authoritative": {
+        "n": 77,
+        "p50_ms": 0.6641,
+        "p95_ms": 1.1561,
+        "max_ms": 1.3576000000000001
+      },
+      "checkpoint_capture": {
+        "n": 77,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "end": {
+        "case": "traversal-r8",
+        "client_memory": 620,
+        "history_end": 77,
+        "kind": "traversal_end",
+        "persistence": {
+          "checkpoint_diagnostic_ms": 10.7981,
+          "checkpoint_json_bytes": 7457174,
+          "final_flush_ms": 165.9168,
+          "final_save_bytes": 77824,
+          "recovery": {
+            "checkpoint_sequence": 0,
+            "records_loaded": 77,
+            "records_replayed": 77,
+            "total": {
+              "nanos": 57283700,
+              "secs": 0
+            }
+          },
+          "restart_replay_ms": 57.2842,
+          "save_status": {
+            "accepted_sequence": 77,
+            "batches": 4,
+            "checkpoint_bytes": 0,
+            "checkpoint_sequence": 0,
+            "checkpoints": 0,
+            "durable_sequence": 77,
+            "error": null,
+            "journal_bytes": 51719,
+            "last_batch_ms": 95,
+            "last_checkpoint_ms": 0,
+            "overdue": false,
+            "pending_bytes": 0,
+            "saving": false,
+            "unsaved_age_ms": 0
+          }
+        }
+      },
+      "failure": null
+    },
+    "traversal-r256": {
+      "accepted_samples": 2805,
+      "authoritative": {
+        "n": 2805,
+        "p50_ms": 1.0529000000000002,
+        "p95_ms": 1.7616,
+        "max_ms": 5.347700000000001
+      },
+      "checkpoint_capture": {
+        "n": 2805,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "end": {
+        "case": "traversal-r256",
+        "client_memory": 20956,
+        "history_end": 2805,
+        "kind": "traversal_end",
+        "persistence": {
+          "checkpoint_diagnostic_ms": 762.1208,
+          "checkpoint_json_bytes": 765021723,
+          "final_flush_ms": 817.9361,
+          "final_save_bytes": 2318336,
+          "recovery": {
+            "checkpoint_sequence": 0,
+            "records_loaded": 2805,
+            "records_replayed": 2805,
+            "total": {
+              "nanos": 324044900,
+              "secs": 3
+            }
+          },
+          "restart_replay_ms": 3324.0452999999998,
+          "save_status": {
+            "accepted_sequence": 2805,
+            "batches": 128,
+            "checkpoint_bytes": 0,
+            "checkpoint_sequence": 0,
+            "checkpoints": 0,
+            "durable_sequence": 2805,
+            "error": null,
+            "journal_bytes": 1908371,
+            "last_batch_ms": 95,
+            "last_checkpoint_ms": 0,
+            "overdue": false,
+            "pending_bytes": 0,
+            "saving": false,
+            "unsaved_age_ms": 0
+          }
+        }
+      },
+      "failure": null
+    }
+  },
+  "saved-default": {
+    "traversal-r8": {
+      "accepted_samples": 77,
+      "authoritative": {
+        "n": 77,
+        "p50_ms": 0.7200000000000001,
+        "p95_ms": 1.2194,
+        "max_ms": 1.5196
+      },
+      "checkpoint_capture": {
+        "n": 77,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "end": {
+        "case": "traversal-r8",
+        "client_memory": 620,
+        "history_end": 77,
+        "kind": "traversal_end",
+        "persistence": {
+          "checkpoint_diagnostic_ms": 21.971700000000002,
+          "checkpoint_json_bytes": 7457174,
+          "final_flush_ms": 117.27329999999999,
+          "final_save_bytes": 77824,
+          "recovery": {
+            "checkpoint_sequence": 0,
+            "records_loaded": 77,
+            "records_replayed": 77,
+            "total": {
+              "nanos": 67089800,
+              "secs": 0
+            }
+          },
+          "restart_replay_ms": 67.09049999999999,
+          "save_status": {
+            "accepted_sequence": 77,
+            "batches": 4,
+            "checkpoint_bytes": 0,
+            "checkpoint_sequence": 0,
+            "checkpoints": 0,
+            "durable_sequence": 77,
+            "error": null,
+            "journal_bytes": 51719,
+            "last_batch_ms": 94,
+            "last_checkpoint_ms": 0,
+            "overdue": false,
+            "pending_bytes": 0,
+            "saving": false,
+            "unsaved_age_ms": 0
+          }
+        }
+      },
+      "failure": null
+    },
+    "traversal-r256": {
+      "accepted_samples": 1101,
+      "authoritative": {
+        "n": 1101,
+        "p50_ms": 0.9717,
+        "p95_ms": 1.6192,
+        "max_ms": 2.6405
+      },
+      "checkpoint_capture": {
+        "n": 1101,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0039
+      },
+      "end": null,
+      "failure": {
+        "case": "traversal-r256",
+        "current_checkpoint_encoding": {
+          "bytes": 284728803,
+          "ms": 261.398
+        },
+        "error": "Failure { code: StorageFailure, message: \"Could not commit the game journal\" }",
+        "history_end": 1101,
+        "kind": "failure",
+        "save_status": {
+          "accepted_sequence": 1101,
+          "batches": 40,
+          "checkpoint_bytes": 0,
+          "checkpoint_sequence": 0,
+          "checkpoints": 0,
+          "durable_sequence": 1019,
+          "error": "Background save failed; recent play is not saved. Use save to retry.",
+          "journal_bytes": 689632,
+          "last_batch_ms": 106,
+          "last_checkpoint_ms": 0,
+          "overdue": true,
+          "pending_bytes": 55842,
+          "saving": false,
+          "unsaved_age_ms": 452
+        }
+      }
+    }
+  },
+  "saved-stress": {
+    "traversal-r8": {
+      "accepted_samples": 77,
+      "authoritative": {
+        "n": 77,
+        "p50_ms": 0.7109,
+        "p95_ms": 1.2819,
+        "max_ms": 1.8812
+      },
+      "checkpoint_capture": {
+        "n": 77,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0046
+      },
+      "end": {
+        "case": "traversal-r8",
+        "client_memory": 620,
+        "history_end": 77,
+        "kind": "traversal_end",
+        "persistence": {
+          "checkpoint_diagnostic_ms": 25.306700000000003,
+          "checkpoint_json_bytes": 7457174,
+          "final_flush_ms": 1353.6003,
+          "final_save_bytes": 5398528,
+          "recovery": {
+            "checkpoint_sequence": 64,
+            "records_loaded": 77,
+            "records_replayed": 13,
+            "total": {
+              "nanos": 463379600,
+              "secs": 0
+            }
+          },
+          "restart_replay_ms": 463.3801,
+          "save_status": {
+            "accepted_sequence": 77,
+            "batches": 2,
+            "checkpoint_bytes": 5268464,
+            "checkpoint_sequence": 64,
+            "checkpoints": 1,
+            "durable_sequence": 77,
+            "error": null,
+            "journal_bytes": 51719,
+            "last_batch_ms": 923,
+            "last_checkpoint_ms": 29,
+            "overdue": false,
+            "pending_bytes": 0,
+            "saving": false,
+            "unsaved_age_ms": 0
+          }
+        }
+      },
+      "failure": null
+    },
+    "traversal-r256": {
+      "accepted_samples": 654,
+      "authoritative": {
+        "n": 654,
+        "p50_ms": 0.9548,
+        "p95_ms": 1.6803000000000001,
+        "max_ms": 2.7962
+      },
+      "checkpoint_capture": {
+        "n": 654,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "max_ms": 0.0031
+      },
+      "end": null,
+      "failure": {
+        "case": "traversal-r256",
+        "current_checkpoint_encoding": {
+          "bytes": 164580816,
+          "ms": 151.27370000000002
+        },
+        "error": "Failure { code: StorageFailure, message: \"Could not commit the game journal\" }",
+        "history_end": 654,
+        "kind": "failure",
+        "save_status": {
+          "accepted_sequence": 654,
+          "batches": 4,
+          "checkpoint_bytes": 37493248,
+          "checkpoint_sequence": 192,
+          "checkpoints": 2,
+          "durable_sequence": 212,
+          "error": "Background save failed; recent play is not saved. Use save to retry.",
+          "journal_bytes": 143023,
+          "last_batch_ms": 2069,
+          "last_checkpoint_ms": 205,
+          "overdue": true,
+          "pending_bytes": 299336,
+          "saving": false,
+          "unsaved_age_ms": 2451
+        }
+      }
+    }
+  },
+  "ack-1": {
+    "request_to_ack_ms": {
+      "n": 1675,
+      "p50_ms": 6.292500009294599,
+      "p95_ms": 20.56970000558067,
+      "max_ms": 26.421200003824197
+    },
+    "request_to_ack_line_ms": {
+      "n": 1675,
+      "p50_ms": 5.647999991197139,
+      "p95_ms": 18.35389999905601,
+      "max_ms": 23.90660000673961
+    },
+    "request_to_ready_ms": {
+      "n": 1681,
+      "p50_ms": 6.71610000426881,
+      "p95_ms": 22.0988000073703,
+      "max_ms": 32.45969999989029
+    },
+    "request_to_presentation_ms": {
+      "n": 205,
+      "p50_ms": 31.788100008270703,
+      "p95_ms": 40.29209999134764,
+      "max_ms": 333.70600000489503
+    },
+    "driver_delay": {
+      "n": 1675,
+      "p50_ms": 0.6269000004976988,
+      "p95_ms": 2.0810999994864687,
+      "max_ms": 3.700599991134368
+    },
+    "max_previous_report_ms": 300.4257,
+    "actor_2_south_ack": {
+      "n": 106,
+      "p50_ms": 11.378200011677109,
+      "p95_ms": 13.665399994351901,
+      "max_ms": 22.345900011714548
+    },
+    "actor_2_south_ack_line": {
+      "n": 106,
+      "p50_ms": 10.564500000327826,
+      "p95_ms": 12.815599999157712,
+      "max_ms": 20.951500002411194
+    }
+  },
+  "ack-2": {
+    "request_to_ack_ms": {
+      "n": 1675,
+      "p50_ms": 6.359199993312359,
+      "p95_ms": 20.717399995191954,
+      "max_ms": 28.17210000648629
+    },
+    "request_to_ack_line_ms": {
+      "n": 1675,
+      "p50_ms": 5.70490000245627,
+      "p95_ms": 18.551100001786835,
+      "max_ms": 23.660199993173592
+    },
+    "request_to_ready_ms": {
+      "n": 1681,
+      "p50_ms": 6.770299994968809,
+      "p95_ms": 22.267299995291978,
+      "max_ms": 30.784300004597753
+    },
+    "request_to_presentation_ms": {
+      "n": 205,
+      "p50_ms": 31.214200003887527,
+      "p95_ms": 41.117300002952106,
+      "max_ms": 424.2150999925798
+    },
+    "driver_delay": {
+      "n": 1675,
+      "p50_ms": 0.6290000019362196,
+      "p95_ms": 2.06090000574477,
+      "max_ms": 5.928700004005805
+    },
+    "max_previous_report_ms": 435.8118,
+    "actor_2_south_ack": {
+      "n": 106,
+      "p50_ms": 11.217799998121336,
+      "p95_ms": 13.730499995290302,
+      "max_ms": 15.604000000166707
+    },
+    "actor_2_south_ack_line": {
+      "n": 106,
+      "p50_ms": 10.456999996677041,
+      "p95_ms": 12.867700002971105,
+      "max_ms": 14.73239999904763
+    }
+  }
+}

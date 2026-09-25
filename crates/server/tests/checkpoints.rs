@@ -61,6 +61,12 @@ fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
         assert!(profile.exclusive_duration() <= profile.authoritative_total);
         engine.flush().unwrap();
         sizes.push(engine.save_status().checkpoint_bytes);
+        // Counting diagnostics use the production encoding without allocating a
+        // second payload, and must agree byte-for-byte in size with the writer.
+        assert_eq!(
+            engine.profile_checkpoint_encoding().unwrap().0,
+            engine.save_status().checkpoint_bytes
+        );
         let expected = engine.state(ActorId(1)).unwrap();
         drop(engine);
         let restored = Engine::open(&path, Scenario::two_room(0)).unwrap();

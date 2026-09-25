@@ -71,3 +71,33 @@ class DiscoveryValidationTests(unittest.TestCase):
         rows.append(rows[0])
         with self.assertRaises(AssertionError):
             validate(rows, quick=True, discovery_only=True)
+
+class SavedDiscoveryTests(unittest.TestCase):
+    def fixture(self):
+        samples = [dict(history_end=i, profile=dict(checkpoint_captures=int(i % 2 == 0), records_serialized=1),
+                        save_status=dict(error=None, accepted_sequence=i, durable_sequence=0)) for i in range(1,6)]
+        status = dict(error=None, pending_bytes=0, accepted_sequence=5, durable_sequence=5,
+                      checkpoint_sequence=4, checkpoint_bytes=4096)
+        end = dict(persistence=dict(save_status=status, final_save_bytes=8192,
+                   checkpoint_json_bytes=5000, checkpoint_diagnostic_ms=1., final_flush_ms=2., restart_replay_ms=3.,
+                   recovery=dict(records_loaded=5, records_replayed=1, checkpoint_sequence=4)))
+        return dict(checkpoint_interval=2), samples, end
+
+    def test_committed_exploration_and_bounded_replay(self):
+        from performance_report import validate_saved_discovery
+        validate_saved_discovery(*self.fixture())
+
+    def test_unsaved_prefix_missing_checkpoint_and_oversize_fail(self):
+        from performance_report import validate_saved_discovery
+        for field, value in (("durable_sequence",4),("checkpoint_sequence",0),("checkpoint_bytes",64*1024*1024+1)):
+            meta, samples, end = self.fixture()
+            end["persistence"]["save_status"][field] = value
+            with self.assertRaises(AssertionError):
+                validate_saved_discovery(meta,samples,end)
+
+    def test_invalid_diagnostic_timing_fails(self):
+        from performance_report import validate_saved_discovery
+        meta, samples, end = self.fixture()
+        end["persistence"]["checkpoint_diagnostic_ms"] = float("nan")
+        with self.assertRaises(AssertionError):
+            validate_saved_discovery(meta,samples,end)
