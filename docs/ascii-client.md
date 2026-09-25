@@ -155,3 +155,43 @@ They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.
+
+
+## Responsiveness and diagnostic timing
+
+The native loop pumps events at a target 60 Hz and repaints only when state or
+input changes. Each turn consumes at most 16 network events and stops starting
+another event after four milliseconds. A single update, draw, native call or OS
+stall can exceed that budget; this is not a hard real-time deadline.
+
+The dedicated connection worker sends ordered disclosed updates/snapshots through
+a 64-event channel instead of copying historical memory into each event. Full
+presentation queues backpressure that worker; they never discard intermediate
+observations. The window applies all received boundaries before presenting their
+combined result. Server queues remain bounded with their existing slow-client
+disconnect policy. Invalid streams fail explicitly; relaunch establishes a fresh
+snapshot. Automatic reconnect and retained-stream resume are not implemented.
+
+Shared state validates ordering and payload/history consistency before mutation.
+Same-branch snapshots retain connection-local memory, branch changes clear it,
+and changed observations invalidate pending selections. No client-side simulation
+or undisclosed knowledge is added. A stationary aligned map avoids rebuilding
+its coordinate index; moving charts still process at most 4096 retained cells.
+ASCII indexes disclosed cells and occupants once per tile preparation, preserving
+first-occurrence glyph precedence, stale-memory color and visible-only clicking.
+
+Diagnostic frames include `profile.version=1`: update application, drawing,
+native presentation/pacing, framebuffer capture, previous report duration and
+turn interval, in milliseconds, plus the number of consumed network events.
+Native time includes the window library's frame limiter, not just GPU work.
+Reports still follow presentation and optional PPM writing. `previous_report_ms`
+includes capture, JSON construction, stdout writing/flushing for the preceding
+reported frame. Diagnostic I/O is synchronous and can delay input; leave these
+options off for ordinary play. They do not measure physical keyboard-to-photon
+latency. See [Phase E findings](phase-e-findings.md) for measured limits.
+
+`test_client_responsiveness_process.py` verifies native Win32/X11 note input while
+SQLite saving is deliberately blocked, both with and without a pending checkpoint,
+and exercises native input during a 160-action burst, followed by exact final-state,
+history and durable-checkpoint checks.
+These run alongside the existing disclosure, mouse, rewind and restart tests.

@@ -1,0 +1,101 @@
+{
+  "date": "2026-09-25",
+  "reference_commit": "61f9258d7df49355ab7c662bbe72ddefee99dbd0",
+  "hardware": {
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "NumberOfCores": 6,
+        "NumberOfLogicalProcessors": 12
+      }
+    ],
+    "os": [
+      {
+        "Caption": "Microsoft Windows 11 Home",
+        "Version": "10.0.26200",
+        "BuildNumber": "26200"
+      }
+    ],
+    "volume": [
+      {
+        "DriveLetter": "F",
+        "FileSystem": "NTFS",
+        "SizeRemaining": 613980463104,
+        "Size": 1000068870144
+      }
+    ],
+    "disk": [
+      {
+        "FriendlyName": "ST1000LM035-1RK172",
+        "BusType": "RAID",
+        "Size": 1000204886016
+      }
+    ]
+  },
+  "method": "Matched stationary client workload version 1 added unchanged to Phase D reference. Clean measurements, no competing builds/tests. Normal desktop activity uncontrolled. Actual-client reference changes ASCII only; server/headless source unchanged between runs.",
+  "commands": [
+    "cargo run --release --locked -p tor-client-ascii --example client_bench",
+    "python scripts/client_performance_report.py FILE",
+    "python scripts/performance_driver.py --bin-dir BIN_DIR --output OUTPUT --regions 256 --actors 8 --cycles 1 --pace-ms 0 [--no-capture]",
+    "latency_bench --discovery-only --cycles 3",
+    "python scripts/performance_report.py FILE --discovery-only"
+  ],
+  "limitations": [
+    "Synthetic workload initializes disclosed memory outside timing; stationary chart, no native window.",
+    "Actual-client reports include synchronous diagnostic I/O and scheduling. Native input tested separately with SQLite lock and checkpoint pending.",
+    "Initial development runs and stale executable after shared-target reference build excluded; measured final explicitly cleaned and rebuilt with --bins --examples.",
+    "Historical 673/738 ms spikes not reproduced or proved fixed. Observed 116 ms capture stall and secondary actor acknowledgement tails retained.",
+    "Discovery is detached and does not prove checkpoint size bounds; no full matrix or hardware power-loss claim."
+  ],
+  "source_sha256": {
+    "crates/client-common/src/connection.rs": "28d5a56a74cd610edab3ab287289d1ac7f5b3bc471d9ea795025a7c4862e09a8",
+    "crates/client-common/src/lib.rs": "169c2fa6557e4c8496d4a7c2aa6ece12221fa2433f1964f230a4da7232f41ff4",
+    "crates/client-common/src/map_memory.rs": "58bd3bdc81dbf7a97f0e543256eeccad1eb1083add8b442371f930160009993d",
+    "crates/client-common/src/state.rs": "6b5ae34ac2a4a62117758b2ff625a316c8a206bf2470c8549d631c164afcd41c",
+    "crates/client-ascii/src/lib.rs": "c1282b0e89cc72ede9f52acbb2d3cb0bd4671e0eae281bcd38f19da1172a8ffc",
+    "crates/client-ascii/src/main.rs": "61bb4ab1e8b52dc33689c7429ba4acf64c03b06ebb0a2ab21ac9fe92f0f3ee64",
+    "crates/client-ascii/src/model.rs": "38a7406579b24458961c397bb03446d5562e51066ddfd984f9003871a6a6c315",
+    "crates/client-ascii/src/network.rs": "186d2f280c50880639abae188874ab363eaa8fca795a75ba715ca20f0efcc8c3",
+    "crates/client-ascii/src/render.rs": "ff49e28418dd0c6cefaa4e66ff9a08bc22ed16fa2dd99e0e23d32c953bce6742",
+    "crates/client-ascii/examples/client_bench.rs": "7ee7e2cbca51580c44bd880c6d3fba27126c98e5c5ec48223da963b55bcbe02b",
+    "scripts/performance_driver.py": "16c37cda6ce1c95cf3f4ac7a19e92a434d24a7aa8aa9bee3acb59f17d810cb13",
+    "scripts/client_performance_report.py": "a3f08c0024c977e8e50eb884b0b3b9ad4d2de1689ce9ce09b1bb091b267bac6a"
+  },
+  "binary_sha256": {
+    "target/phase-e-reference-client-bench.exe": "af49938bd54e36a2b936714b3fc4b0e4bd188239c515140f5f35cbde13cb7679",
+    "target/release/examples/client_bench.exe": "e1b7c43e54d42935f2ff8e29138b3cba92946b846f2f7024842e9891539100b9",
+    "target/phase-e-reference-ascii.exe": "b9e18e1870457c6b9db56a6a06eb39f44c5017c55f28623ab90083fd3c3e9a9a",
+    "target/release/tor-client-ascii.exe": "c16afad2184ab09b903979b40b287dd8d5e0db6b41277919334112f900826d1f",
+    "target/release/tor-client-headless.exe": "73545acc18b7ebba630ce64c88bcb61681a0742ae7d6757e78c257d9db462304",
+    "target/release/tor-client-text.exe": "54468a71aeebfbde6a1c283a6f0b2c7f5ea41b6b1c6f083620c663732b46fc26",
+    "target/release/tor-server.exe": "2c9254e785a8b708058851bdb9684df5af6c32b60dfadbbbee330a363108852f",
+    "target/phase-e-reference-bins/tor-server.exe": "41e8de40b4fc5687651eb6a45b5567fd74053b361e0d417d7b9b4f3a71e376a5",
+    "target/phase-e-reference-bins/tor-client-headless.exe": "29fd64b9d113a6973b2f5f37a0fca0f5210e9b429f64ab0898d494a1567e56f8"
+  },
+  "artifact_sha256": {
+    "actual-final-frames.json": "8c7b4d328f8a4b64c77d8aac7d035fbce7e2277229f1baf02f4b4ad7247d6399",
+    "actual-final.json": "31a2c88a2c803cd7e6d3f770efb910418a65461c65baf9e5391f040966451d61",
+    "actual-no-capture-frames.json": "3a972fae15a61acb3c1e17ebb69541fa0025854657c7c3ae463c4a84f2dd4443",
+    "actual-no-capture.json": "d1e7900fda4283dc3e5d01e9f6aef4f536084cb986668845aae1151d3f64cbd4",
+    "actual-reference.json": "a37296e6fc9848883ff46bfd2e7ad2cd5caa69f173fd3d5ad27b68a9129284d5",
+    "discovery.jsonl.gz": "c08cd61aa99f8d5d85dbb88e0e3d944aaa629b41482fd8e2e934715b4b08d4c4",
+    "final-client.jsonl.gz": "3eaa7aab3a23e9795750e4335d44d0a8cf47f9843b30a5322e4b6c94ac4f1b1f",
+    "reference-client.jsonl.gz": "3dd890ba4974314642a7a1611635d38857894061c3ee86b07de1d62cc708e33d",
+    "summary.json": "189d7f90836430f2f59cf909ada5f282637de54641ae48b05bc661646bed2f93",
+    "matched-final-frames.json": "9f9df104b4816063e35a72111df3d797570905a93577c897575a814f3f4dc965",
+    "matched-final.json": "81b3be5c869fe9ba90b84c35adfa909368443a4b50c47b1245ace4ef98702cb3",
+    "matched-reference.json": "69f5db58d8536195d9d56a3ba62e31bbd4db23edc3b4e9248d56cf6cb3b6f6f3"
+  },
+  "driver_note": "Python source hashes describe maintained instrumentation at publication. Initial retained runs predate the optional request_to_ack_line_ms field; the legacy acknowledgement metric is unchanged. Follow-up runs use the additional line receipt metric.",
+  "source_hash_note": "Source hashes are raw Windows working-tree bytes; Git normalizes text line endings.",
+  "followup": "Consecutive no-capture reference ASCII versus final ASCII; identical verified-final server/headless binaries for both. Added acknowledgement line timestamp preserves legacy metric and isolates driver delay.",
+  "verification": {
+    "rust_debug": 219,
+    "rust_release": 219,
+    "python_checks": 84,
+    "release_process_tests": 64,
+    "desktop_launchers": 4,
+    "demo_cycles": 3,
+    "note": "Sandbox mouse API denial resolved with desktop access. Cross-client wizard-test readiness race fixed and targeted debug plus full release suites rechecked."
+  }
+}

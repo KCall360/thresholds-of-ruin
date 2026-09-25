@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
+from client_performance_report import validate_presentation_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "crates/server/fixtures/performance-v1.json"
@@ -24,6 +25,8 @@ class WindowClosed(RuntimeError):
 class JsonProcess:
     def __init__(self, binary, args, env, directory, name, visible=False):
         self.name = name
+        self.ack_line_received = None
+        self.last_line_received = None
         self.lines = queue.Queue()
         self.stderr = (directory / (name + ".stderr.log")).open("w", encoding="utf-8")
         self.log = (directory / (name + ".stdout.jsonl")).open("w", encoding="utf-8")
@@ -59,6 +62,7 @@ class JsonProcess:
                 raise RuntimeError("Owned process exited; see retained logs")
             if value.get("type") == "fatal":
                 raise RuntimeError(value["error"])
+            self.last_line_received = received
             if predicate(value):
                 return value, received
 
@@ -68,10 +72,12 @@ class JsonProcess:
         self.child.stdin.write(encoded)
         self.child.stdin.flush()
         acknowledgement = None
+        self.ack_line_received = None
         def ready(value):
             nonlocal acknowledgement
             if (value.get("message") or {}).get("type") == "ack":
                 acknowledgement = time.perf_counter()
+                self.ack_line_received = self.last_line_received
             return value.get("type") == "ready"
         frame, received = self.until(ready)
         return frame, started, acknowledgement, received
@@ -129,7 +135,7 @@ def verify(step, action, before, after):
     assert after["history"][-1]["content"]["event"]["type"] == step["expected"]
 
 
-def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False):
+def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False, capture=True):
     bin_dir, output = Path(bin_dir).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     spec = json.loads(SPEC.read_text(encoding="utf-8"))
@@ -143,14 +149,14 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         processes.append(process)
         return process
     result = {"trace_version":spec["version"],"seed":spec["seed"],"regions":regions,"actors":actors,
-        "cycles":0,"pace_seconds":pace,"samples":[]}
+        "cycles":0,"pace_seconds":pace,"capture":capture,"diagnostics_version":1,"samples":[]}
     clients = {}
     try:
         server = launch("tor-server", ["--listen","127.0.0.1:0","--seed",spec["seed"],"--regions",regions,
             "--actors",actors,"--save",output/"game.json"], player, "server", extra={"TOR_SPECTATOR_TOKEN":spectator_token})
         ready, _ = server.until(lambda f:"address" in f)
         address = ready["address"]
-        spectator = launch("tor-client-ascii", ["--connect",address,"--report-frames","--capture",output/"last-frame.ppm"],
+        spectator = launch("tor-client-ascii", ["--connect",address,"--report-frames",*(["--capture",output/"last-frame.ppm"] if capture else [])],
             spectator_token,"ascii",visible=True)
         initial, _ = spectator.until(lambda f:f.get("state") is not None and not f.get("busy"))
         assert initial["role"] == "spectator" and not initial["has_control"]
@@ -186,6 +192,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
             verify(step,action,before,after)
             sample = {"cycle":cycle,"step":index,"actor":actor,"label":step["label"],"expected":step["expected"],"action":action,
                 "request_to_ack_ms":None if ack is None else (ack-start)*1000,
+                "request_to_ack_line_ms":None if clients[actor].ack_line_received is None else (clients[actor].ack_line_received-start)*1000,
                 "request_to_ready_ms":(received-start)*1000,"request_to_presentation_ms":None}
             if step["expected"] != "blocked":
                 assert ack is not None, "Accepted action missing acknowledgement"
@@ -193,6 +200,9 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                     frame, shown = spectator.until(lambda f:f.get("state") == after["state"])
                     assert frame["role"] == "spectator" and not frame["has_control"]
                     sample["request_to_presentation_ms"] = (shown-start)*1000
+                    if "profile" in frame:
+                        validate_presentation_profile(frame["profile"])
+                        sample["presentation_profile"] = frame["profile"]
                     result["presented_revision"] = frame["state"]["revision"]
             result["samples"].append(sample)
             with (output/"samples.jsonl").open("a",encoding="utf-8") as stream:
@@ -257,11 +267,12 @@ def main():
     parser.add_argument("--cycles",type=int,default=3)
     parser.add_argument("--pace-ms",type=float,default=250)
     parser.add_argument("--stay-open",action="store_true")
+    parser.add_argument("--no-capture",action="store_true")
     args = parser.parse_args()
     output = args.output or ROOT/"saves/playtests"/("regions-256-"+uuid.uuid4().hex)
     print(f"Performance demo logs and fresh save: {output}",flush=True)
     result = run_demo(args.bin_dir,output,regions=args.regions,actors=args.actors,cycles=args.cycles,
-        pace=args.pace_ms/1000,stay_open=args.stay_open)
+        pace=args.pace_ms/1000,stay_open=args.stay_open,capture=not args.no_capture)
     print(f"Verified {result['cycles']} complete cycles.")
 
 

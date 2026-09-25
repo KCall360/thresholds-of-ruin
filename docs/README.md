@@ -27,6 +27,7 @@ until its guide and the roadmap are updated together.
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Review accepted future game requirements | [Game design plan](game-design-plan.md) |
 | Review background-save measurements | [Phase B findings](phase-b-findings.md) |
+| Review client responsiveness and presentation tails | [Phase E findings](phase-e-findings.md) |
 | Review state-copy and observation scaling | [Phase D findings](phase-d-findings.md) |
 | Review checkpoint and startup measurements | [Phase C findings](phase-c-findings.md) |
 | Configure saves and understand crash recovery | [Background saving](background-saving.md) |

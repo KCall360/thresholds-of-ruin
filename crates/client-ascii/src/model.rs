@@ -94,10 +94,48 @@ impl App {
     }
 
     pub fn set_state(&mut self, state: ClientState) {
-        if self
+        let old = self
             .state
             .as_ref()
-            .is_some_and(|old| old.branch() != state.branch())
+            .map(|s| (s.branch().clone(), s.state().revision));
+        self.state = Some(state);
+        self.state_changed(old);
+    }
+
+    /// Apply every disclosed boundary, even when several updates share a frame.
+    pub fn update(&mut self, update: StreamUpdate) -> Result<(), tor_client_common::StreamError> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(tor_client_common::StreamError::InconsistentState)?;
+        let old = Some((state.branch().clone(), state.state().revision));
+        state.apply(update)?;
+        self.state_changed(old);
+        Ok(())
+    }
+
+    pub fn replace_snapshot(
+        &mut self,
+        snapshot: Snapshot,
+    ) -> Result<(), tor_client_common::StreamError> {
+        let old = self
+            .state
+            .as_ref()
+            .map(|s| (s.branch().clone(), s.state().revision));
+        if let Some(state) = &mut self.state {
+            state.replace_snapshot(snapshot)?;
+        } else {
+            self.state = Some(ClientState::from_snapshot(snapshot)?);
+        }
+        self.state_changed(old);
+        Ok(())
+    }
+
+    fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
+        let state = self.state.as_ref().expect("validated state");
+        if old
+            .as_ref()
+            .is_some_and(|(branch, _)| branch != state.branch())
         {
             self.travel_cursor = None;
             self.note = None;
@@ -107,12 +145,7 @@ impl App {
             self.history_scroll = 0;
             self.status = "Timeline changed; pending selections cleared.".into();
         }
-        // Do not let an old selection silently target a changed observation.
-        if self
-            .state
-            .as_ref()
-            .is_some_and(|old| old.state().revision != state.state().revision)
-        {
+        if old.is_some_and(|(_, revision)| revision != state.state().revision) {
             self.pickup.clear();
             self.door_direction = None;
             self.travel_cursor = None;
@@ -122,7 +155,6 @@ impl App {
             self.travel_cursor = None;
         }
         self.connected = true;
-        self.state = Some(state);
     }
 
     pub fn ready(&mut self) {

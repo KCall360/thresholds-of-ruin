@@ -9,6 +9,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::mpsc,
+    time::Instant,
 };
 use tor_client_ascii::{
     render::{Canvas, HEIGHT, WIDTH},
@@ -126,7 +127,7 @@ fn run() -> Result<(), Error> {
             ..WindowOptions::default()
         },
     )?;
-    window.set_target_fps(30);
+    window.set_target_fps(60);
     let text = Rc::new(RefCell::new(String::new()));
     window.set_input_callback(Box::new(TextInput(text.clone())));
     let input = automation.then(automation_input);
@@ -165,15 +166,31 @@ fn window_loop(
     let mut pending_input = None;
     let mut failed = false;
     let mut mouse_down = false;
+    let mut previous_report_ms = 0.;
+    let mut last_turn = Instant::now();
     while window.is_open() {
+        let turn = Instant::now();
+        let turn_interval_ms = turn.duration_since(last_turn).as_secs_f64() * 1000.;
+        last_turn = turn;
+        let mut network_events = 0;
         let mut dirty = frame == 0;
-        loop {
+        // Bound each presentation turn so a continuous producer cannot starve input.
+        for _ in 0..16 {
+            if turn.elapsed() >= std::time::Duration::from_millis(4) {
+                break;
+            }
             match network.events.try_recv() {
                 Ok(event) => {
+                    network_events += 1;
                     dirty = true;
                     match event {
                         Event::Role(role) => app.role = role,
-                        Event::State(state) => app.set_state(*state),
+                        Event::Snapshot(snapshot) => app
+                            .replace_snapshot(*snapshot)
+                            .map_err(|e| format!("Invalid presentation snapshot: {e:?}"))?,
+                        Event::Update(update) => app
+                            .update(*update)
+                            .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
                         Event::Status(status) => app.status = status,
                         Event::Ready => app.ready(),
                         Event::History(page) => {
@@ -197,6 +214,7 @@ fn window_loop(
                 }
             }
         }
+        let apply_ms = turn.elapsed().as_secs_f64() * 1000.;
         let mut inputs = Vec::new();
         let typed = std::mem::take(&mut *text.borrow_mut());
         if input.is_none() {
@@ -268,30 +286,42 @@ fn window_loop(
                 }
             }
         }
+        let mut draw_ms = 0.;
+        let native_started;
         if dirty {
+            let draw_started = Instant::now();
             canvas.draw(&app);
+            draw_ms = draw_started.elapsed().as_secs_f64() * 1000.;
+            native_started = Instant::now();
             window.update_with_buffer(&canvas.pixels, WIDTH, HEIGHT)?;
             frame += 1;
         } else {
             // Pump native events without repainting an unchanged 960,000-pixel
             // framebuffer. State/input changes set `dirty` above.
+            native_started = Instant::now();
             window.update();
         }
+        let native_ms = native_started.elapsed().as_secs_f64() * 1000.;
         // This is intentionally after real native presentation. There is no
         // headless fallback; CI must supply a functioning display environment.
         if report && dirty {
+            let report_started = Instant::now();
             let done = if !app.busy {
                 pending_input.take()
             } else {
                 None
             };
             let state = app.state.as_ref();
+            let capture_started = Instant::now();
             if let Some(path) = &capture {
                 save_frame(path, &canvas)?;
             }
+            let capture_ms = capture_started.elapsed().as_secs_f64() * 1000.;
             println!(
                 "{}",
-                serde_json::json!({"type":"frame","frame":frame,"window_open":window.is_open(),
+                serde_json::json!({"type":"frame","frame":frame,
+                "profile":{"version":1,"network_events":network_events,"apply_ms":apply_ms,"draw_ms":draw_ms,
+                "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
                 "map_tiles":state.map(tor_client_ascii::render::map_tiles),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
@@ -299,6 +329,7 @@ fn window_loop(
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
             );
             io::stdout().flush()?;
+            previous_report_ms = report_started.elapsed().as_secs_f64() * 1000.;
         }
         if quit {
             break;

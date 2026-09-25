@@ -27,7 +27,10 @@ class PerformanceProcesses(unittest.TestCase):
         self.assertTrue({"cross_region_boundary", "cross_boundary_with_los_change",
             "open_or_close_door", "change_elevation", "move_near_obstacle"} <= labels)
         self.assertTrue(all(s["request_to_ack_ms"] >= 0 for s in result["samples"] if s["expected"] != "blocked"))
+        self.assertTrue(all(0 <= s["request_to_ack_line_ms"] <= s["request_to_ack_ms"]
+                            for s in result["samples"] if s["expected"] != "blocked"))
         self.assertTrue(all(s["request_to_presentation_ms"] >= 0 for s in result["samples"] if s["expected"] != "blocked"))
+        self.assertTrue(all(s["presentation_profile"]["version"] == 1 for s in result["samples"] if s["expected"] != "blocked"))
         self.assertTrue((output / "game.json").exists())
         self.assertEqual(json.loads((output / "result.json").read_text())["cycles"], cycles)
 

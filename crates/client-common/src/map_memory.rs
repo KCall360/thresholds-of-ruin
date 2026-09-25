@@ -37,21 +37,24 @@ impl MapMemory {
                 }
             }
         }
-        let old_cells = std::mem::take(&mut self.cells);
-        if let Some((dx, dy, dz)) = shift.filter(|_| !conflict) {
-            for mut cell in old_cells.into_values() {
-                let (Ok(x), Ok(y), Ok(z)) = (
-                    i32::try_from(i64::from(cell.position.x) + dx),
-                    i32::try_from(i64::from(cell.position.y) + dy),
-                    i32::try_from(i64::from(cell.position.z) + dz),
-                ) else {
-                    continue;
-                };
-                cell.position = Position { x, y, z };
-                for item in &mut cell.ground_items {
-                    item.position = cell.position;
+        let translation = shift.filter(|_| !conflict);
+        if translation != Some((0, 0, 0)) {
+            let old_cells = std::mem::take(&mut self.cells);
+            if let Some((dx, dy, dz)) = translation {
+                for mut cell in old_cells.into_values() {
+                    let (Ok(x), Ok(y), Ok(z)) = (
+                        i32::try_from(i64::from(cell.position.x) + dx),
+                        i32::try_from(i64::from(cell.position.y) + dy),
+                        i32::try_from(i64::from(cell.position.z) + dz),
+                    ) else {
+                        continue;
+                    };
+                    cell.position = Position { x, y, z };
+                    for item in &mut cell.ground_items {
+                        item.position = cell.position;
+                    }
+                    self.cells.insert((x, y, z), cell);
                 }
-                self.cells.insert((x, y, z), cell);
             }
         }
         // Seeing a physical cell refreshes all of its retained occurrences.

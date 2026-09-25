@@ -5,13 +5,14 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::mpsc as async_mpsc, time::timeout};
-use tor_client_common::{ClientState, Connection};
+use tor_client_common::Connection;
 use tor_protocol::*;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 pub enum Event {
     Role(AccessRole),
-    State(Box<ClientState>),
+    Snapshot(Box<Snapshot>),
+    Update(Box<StreamUpdate>),
     Status(String),
     Ready,
     History(HistoryPage),
@@ -57,8 +58,11 @@ impl Network {
     }
 }
 
+// Backpressure stays on this dedicated worker, never the native event loop.
+// The server retains its bounded slow-client disconnect/snapshot-on-relaunch
+// contract. Do not drop intermediate observations or grow this queue.
 fn publish(tx: &SyncSender<Event>, event: Event) -> Result<(), Error> {
-    tx.try_send(event)
+    tx.send(event)
         .map_err(|_| "Window stopped consuming network updates".into())
 }
 
@@ -72,7 +76,7 @@ async fn run(
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "ascii").await?;
     publish(tx, Event::Role(connection.role()))?;
-    publish(tx, Event::State(Box::new(connection.state.clone())))?;
+    publish(tx, Event::Snapshot(Box::new(connection.state.snapshot())))?;
     if connection.role() == AccessRole::Spectator {
         publish(
             tx,
@@ -89,7 +93,7 @@ async fn run(
     publish(tx, Event::Ready)?;
     loop {
         tokio::select! {
-            message=connection.next()=>{present(&connection,message?,tx)?;},
+            message=connection.next()=>{present(message?,tx)?;},
             request=rx.recv()=>{
                 let Some(request)=request else {connection.close().await?;return Ok(());};
                 transact(&mut connection,request,tx).await?;
@@ -115,7 +119,7 @@ async fn transact(
                 ServerMessage::Error { request_id, .. } => request_id.as_ref() == Some(&id),
                 _ => false,
             };
-            present(connection, message, tx)?;
+            present(message, tx)?;
             if complete {
                 return Ok::<(), Error>(());
             }
@@ -126,15 +130,10 @@ async fn transact(
     Ok(())
 }
 
-fn present(
-    connection: &Connection,
-    message: ServerMessage,
-    tx: &SyncSender<Event>,
-) -> Result<(), Error> {
+fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> {
     match message {
-        ServerMessage::Update { .. } | ServerMessage::Snapshot { .. } => {
-            publish(tx, Event::State(Box::new(connection.state.clone())))
-        }
+        ServerMessage::Update { update } => publish(tx, Event::Update(update)),
+        ServerMessage::Snapshot { snapshot, .. } => publish(tx, Event::Snapshot(snapshot)),
         ServerMessage::Ack { .. } => publish(
             tx,
             Event::Status(
@@ -149,5 +148,37 @@ fn present(
             publish(tx, Event::Status("History loaded.".into()))
         }
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presentation_backpressure_retains_order_and_disconnects_cleanly() {
+        let (tx, rx) = mpsc::sync_channel(64);
+        for n in 0..64 {
+            publish(&tx, Event::Status(n.to_string())).unwrap();
+        }
+        assert!(matches!(
+            tx.try_send(Event::Ready),
+            Err(mpsc::TrySendError::Full(_))
+        ));
+        let worker =
+            std::thread::spawn(move || publish(&tx, Event::Ready).map_err(|e| e.to_string()));
+        for n in 0..64 {
+            assert!(
+                matches!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), Event::Status(s) if s == n.to_string())
+            );
+        }
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Ready
+        ));
+        assert!(worker.join().unwrap().is_ok());
+        let (tx, rx) = mpsc::sync_channel(1);
+        drop(rx);
+        assert!(publish(&tx, Event::Ready).is_err());
     }
 }
