@@ -1,6 +1,8 @@
 # Milestone 3p closeout audit — 2026-09-25
 
-**Not ready to close.** Phases A–E are implemented, but genuinely explored saved
+**Historical format-5 audit; see the [format-6 follow-up](3p-checkpoint-growth.md)
+for the current reduction and closure assessment.** The original finding was:
+not ready to close. Phases A–E are implemented, but genuinely explored saved
 worlds exceed the existing checkpoint limit within the 256-region fixture.
 Feature expansion in milestone 3 remains paused. This audit adds reproducible
 measurement and records the remaining gate; it does not change persistence,

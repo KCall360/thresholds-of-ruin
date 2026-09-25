@@ -116,8 +116,9 @@ graphical tests need an explicitly configured display environment in CI.
 Never commit credentials, local saves, or private configuration.
 
 On the Windows development machine, keep the user's desktop launchers current
-whenever the build is updated: Text, ASCII, Text + ASCII Spectator, and the
-256 Region Spectator demonstration. Verify each launcher's helper scripts and
+whenever the build is updated: Text, ASCII, and Text + ASCII Spectator.
+The 256 Region Spectator desktop launcher was removed at the user's request;
+retain its reusable benchmark driver, not a desktop shortcut. Verify each launcher's helper scripts and
 actual executable targets, build every required binary, and check a real client
 connection. `cargo check` alone does not update executables. Preserve fresh saves
 per launch, prior saves, separate spectator credentials, and owned-process

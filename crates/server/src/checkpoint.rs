@@ -197,3 +197,89 @@ impl DiskCheckpoint {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explored_checkpoint_preserves_exact_navigation_at_every_rewind_boundary() {
+        let trace = tor_test_support::performance::Trace::load();
+        let mut engine = Engine::memory(Scenario::performance(trace.seed, 16, 1).unwrap()).unwrap();
+        for cycle in 0..15 {
+            for (index, step) in trace.traversal.iter().enumerate() {
+                let before = engine.state(ActorId(1)).unwrap();
+                engine
+                    .command(
+                        "test",
+                        "checkpoint",
+                        ActorId(1),
+                        &format!("{cycle}-{index}"),
+                        &engine.branch().clone(),
+                        Command::Act {
+                            expected_revision: before.revision,
+                            action: step.resolve(&before),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        let bytes = serde_json::to_vec(&Checkpoint::capture(&engine).encode("test", 165)).unwrap();
+        let disk: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            Game::restore_checkpoint(disk.game, &disk.shared),
+            Some(engine.game.clone())
+        );
+        assert_eq!(disk.boundaries.len(), engine.boundaries.len());
+        for (saved, original) in disk.boundaries.into_iter().zip(&engine.boundaries) {
+            assert_eq!(saved.id, original.id);
+            assert_eq!(saved.revisions, original.revisions);
+            assert_eq!(
+                Game::restore_checkpoint(saved.game, &disk.shared),
+                Some(original.game.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn region_references_round_trip_and_reject_malformed_navigation() {
+        let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let checkpoint = Checkpoint::capture(&engine).encode("test", 0);
+        let value = serde_json::to_value(&checkpoint).unwrap();
+        let decoded: DiskCheckpoint = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            Game::restore_checkpoint(decoded.game, &decoded.shared),
+            Some(engine.game.clone())
+        );
+        for damage in ["index", "duplicate", "empty", "unknown", "missing", "flat"] {
+            let mut broken = value.clone();
+            let navigation = &mut broken["shared"]["navigation"];
+            match damage {
+                "index" => navigation["instances"][0]["cells"][0] = serde_json::json!(usize::MAX),
+                "duplicate" => {
+                    let first = navigation["instances"][0]["cells"][0].clone();
+                    navigation["instances"][0]["cells"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(first);
+                }
+                "empty" => navigation["cells"][0] = serde_json::json!([]),
+                "unknown" => {
+                    navigation["instances"][0]["extra"] = serde_json::json!(0);
+                }
+                "missing" => {
+                    navigation["instances"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("edges");
+                }
+                "flat" => *navigation = serde_json::json!([]),
+                _ => unreachable!(),
+            }
+            assert!(
+                serde_json::from_value::<DiskCheckpoint>(broken).is_err(),
+                "{damage}"
+            );
+        }
+    }
+}

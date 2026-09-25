@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 5;
+const ARCHIVE_VERSION: u32 = 6;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -793,7 +793,7 @@ impl Engine {
         Ok(self)
     }
 
-    /// Measure the current format-5 checkpoint JSON without allocating its encoded
+    /// Measure the current format-6 checkpoint JSON without allocating its encoded
     /// payload or writing a save. Includes capture, deduplication and serialization;
     /// intended for offline diagnostics, outside measured action intervals. The
     /// production 64 MiB writer limit remains enforced independently.

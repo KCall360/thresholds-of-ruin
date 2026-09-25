@@ -69,3 +69,5 @@ For every behavior change:
    changed.
 5. Link every new document from this index. Remove superseded prose instead of
    leaving an unlabelled historical plan beside current guidance.
+
+- [Explored-world checkpoint reduction](3p-checkpoint-growth.md) — format-6 representation, regression evidence and closure disposition.

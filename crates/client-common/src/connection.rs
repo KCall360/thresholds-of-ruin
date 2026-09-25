@@ -15,6 +15,7 @@ pub struct Connection {
     socket: Socket,
     pub state: ClientState,
     role: AccessRole,
+    timing: bool,
 }
 
 impl Connection {
@@ -70,6 +71,7 @@ impl Connection {
             socket,
             state,
             role,
+            timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
         })
     }
 
@@ -79,6 +81,10 @@ impl Connection {
 
     pub async fn request(&mut self, request: Request) -> Result<String, ConnectionError> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        let started = self.timing.then(std::time::Instant::now);
+        if self.timing {
+            self.timing_event("client_request", &request_id, None);
+        }
         send(
             &mut self.socket,
             ClientMessage::Request {
@@ -87,6 +93,13 @@ impl Connection {
             },
         )
         .await?;
+        if let Some(started) = started {
+            self.timing_event(
+                "client_request_sent",
+                &request_id,
+                Some(started.elapsed().as_secs_f64() * 1000.),
+            );
+        }
         Ok(request_id)
     }
 
@@ -94,6 +107,11 @@ impl Connection {
     /// to cancel when terminal input becomes available.
     pub async fn next(&mut self) -> Result<ServerMessage, ConnectionError> {
         let message = receive(&mut self.socket).await?;
+        if self.timing {
+            if let ServerMessage::Ack { request_id, .. } = &message {
+                self.timing_event("client_ack", request_id, None);
+            }
+        }
         match &message {
             ServerMessage::Update { update } => self
                 .state
@@ -110,6 +128,17 @@ impl Connection {
             _ => {}
         }
         Ok(message)
+    }
+
+    // Explicitly opt-in host diagnostics; no protocol or simulation-state fields.
+    fn timing_event(&self, event: &str, request_id: &str, duration_ms: Option<f64>) {
+        eprintln!(
+            "{}",
+            serde_json::json!({"timing_version":1,"event":event,
+            "request_id":request_id,"actor":self.state.state().observation.actor,
+            "revision":self.state.state().revision,"duration_ms":duration_ms,
+            "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
+        );
     }
 
     /// Save-and-quit is a durable barrier; abrupt disconnect is not.

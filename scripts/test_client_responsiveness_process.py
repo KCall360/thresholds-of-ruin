@@ -29,12 +29,15 @@ class ClientResponsivenessProcesses(unittest.TestCase):
     def native_during_save(self, interval):
         self.server(interval)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
-        self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
+        initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
+        tick = initial["state"]["observation"]["tick"]
+        with sqlite3.connect(self.save) as db:
+            sequence = db.execute("SELECT max(sequence) FROM (SELECT sequence FROM journal UNION ALL SELECT sequence FROM history)").fetchone()[0]
         key = self.native_keys(window)
         with sqlite3.connect(self.save) as db:
             db.execute("BEGIN EXCLUSIVE")
             key("period", True)
-            acted = self.ascii_frame(window, lambda f: f["state"]["observation"]["tick"] == 100 and not f["busy"])
+            acted = self.ascii_frame(window, lambda f: f["state"]["observation"]["tick"] == tick + 100 and not f["busy"])
             key("period", False)
             # Force the real worker to remain in its save transaction while a
             # native local modal opens. The SQLite timeout is two seconds.
@@ -53,9 +56,9 @@ class ClientResponsivenessProcesses(unittest.TestCase):
         self.assertIsNone(self.request(observer, {"type":"save"})["error"])
         with sqlite3.connect(self.save) as db:
             if interval:
-                self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 1)
+                self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], sequence + 1)
             else:
-                self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], 1)
+                self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], sequence + 1)
         key("Escape", True)
         self.ascii_frame(window, lambda f: f["note"] is None)
         key("Escape", False)
@@ -64,6 +67,19 @@ class ClientResponsivenessProcesses(unittest.TestCase):
         self.native_during_save(0)
 
     def test_native_input_during_checkpointing(self):
+        self.native_during_save(1)
+
+    def test_explored_save_restart_and_native_input_during_checkpointing(self):
+        import os
+        from pathlib import Path
+        from saved_exploration_driver import run_saved_exploration
+        output = self.save.parent / "explored"
+        regions = int(os.environ.get("TOR_SAVED_EXPLORATION_REGIONS", "8"))
+        result = run_saved_exploration(self.bin, output, regions=regions, correlate=True)
+        from timing_correlation import correlate_native
+        self.assertEqual(len(correlate_native(output, result)), result["actions"])
+        self.assertTrue(result["restart_equal"])
+        self.save = Path(output) / "game.db"
         self.native_during_save(1)
 
     def test_burst_preserves_final_state_and_bounded_history(self):

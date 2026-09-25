@@ -138,19 +138,37 @@ async fn connection(socket: TcpStream, service: Arc<Mutex<Service>>, accounts: A
             return;
         }
     };
+    let timing = std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some();
     loop {
         tokio::select! {
             biased;
             _ = client.close.changed() => break,
             outgoing = client.messages.recv() => {
                 let Some(message) = outgoing else { break; };
+                let started = timing.then(std::time::Instant::now);
                 let Ok(text) = serde_json::to_string(&message) else { break; };
                 if !matches!(timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await, Ok(Ok(()))) { break; }
+                if let (Some(started), ServerMessage::Ack { request_id, .. }) = (started, &message) {
+                    timing_event("server_ack_sent", client.id, request_id, 0., started.elapsed().as_secs_f64()*1000.);
+                }
             }
             incoming = socket.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
-                        Ok(ClientMessage::Request { request_id, request }) => service.lock().await.handle(client.id, request_id, request),
+                        Ok(ClientMessage::Request { request_id, request }) => {
+                            if timing {
+                                let started = std::time::Instant::now();
+                                let mut session = service.lock().await;
+                                let lock_ms = started.elapsed().as_secs_f64()*1000.;
+                                let handle_started = std::time::Instant::now();
+                                session.handle(client.id, request_id.clone(), request);
+                                let handle_ms = handle_started.elapsed().as_secs_f64()*1000.;
+                                drop(session);
+                                timing_event("server_handled", client.id, &request_id, lock_ms, handle_ms);
+                            } else {
+                                service.lock().await.handle(client.id, request_id, request);
+                            }
+                        },
                         _ => { send_error(&mut socket, ErrorCode::InvalidRequest, "Invalid request message").await; break; }
                     },
                     Some(Ok(Message::Ping(_))) => {
@@ -195,4 +213,15 @@ async fn send_error(
     if let Ok(text) = serde_json::to_string(&response) {
         let _ = timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await;
     }
+}
+
+// Emit after releasing the session lock. Diagnostic stderr can itself block;
+// timestamps and durations expose that boundary without affecting ordinary play.
+fn timing_event(event: &str, client: u64, request_id: &str, lock_ms: f64, duration_ms: f64) {
+    eprintln!(
+        "{}",
+        serde_json::json!({"timing_version":1,"event":event,"client":client,
+        "request_id":request_id,"lock_ms":lock_ms,"duration_ms":duration_ms,
+        "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
+    );
 }

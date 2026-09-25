@@ -348,7 +348,7 @@ fn damaged_or_misidentified_checkpoint_fails_closed_without_falling_back() {
             "missing" => "DELETE FROM checkpoint",
             "oversized" => "UPDATE checkpoint SET payload=zeroblob(67108865)",
             "history_gap" => "DELETE FROM history WHERE sequence=1",
-            "old_format" => "PRAGMA user_version=4",
+            "old_format" => "PRAGMA user_version=5",
             _ => unreachable!(),
         })
         .unwrap();

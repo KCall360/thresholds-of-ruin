@@ -117,7 +117,7 @@ pub(crate) fn frame<T: Serialize>(kind: u16, sequence: u64, value: &T) -> Result
     }
     let mut bytes = Vec::with_capacity(24 + payload.len());
     bytes.extend_from_slice(if kind == 0 { b"TORB" } else { b"TORJ" });
-    bytes.extend_from_slice(&5u16.to_le_bytes());
+    bytes.extend_from_slice(&6u16.to_le_bytes());
     bytes.extend_from_slice(&kind.to_le_bytes());
     bytes.extend_from_slice(&sequence.to_le_bytes());
     bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -133,7 +133,7 @@ fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failure> {
     let kind = u16::from_le_bytes(bytes[6..8].try_into().unwrap());
     let magic = if sequence == 0 { b"TORB" } else { b"TORJ" };
     if &bytes[..4] != magic
-        || bytes[4..6] != 5u16.to_le_bytes()
+        || bytes[4..6] != 6u16.to_le_bytes()
         || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != sequence
         || u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize != bytes.len() - 24
         || crc32c(
@@ -354,7 +354,7 @@ fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure>
     Ok(Some(checkpoint))
 }
 
-/// Read a format-5 save for diagnostics. Gameplay uses normal strict replay too.
+/// Read a format-6 save for diagnostics. Gameplay uses normal strict replay too.
 pub fn inspect_save(path: impl AsRef<Path>) -> Result<serde_json::Value, Failure> {
     let (_, archive, _, _, _) = load(path.as_ref())?;
     serde_json::to_value(archive).map_err(|_| invalid_archive())
@@ -387,7 +387,7 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
         .map_err(|_| invalid_archive())?;
     // SQLite must get the first opportunity to recover a hot rollback journal,
     // including a partially extended database page from an interrupted write.
-    if version != 5
+    if version != 6
         || app != APP_ID
         || integrity != "ok"
         || file.metadata().map_err(|_| storage_failure())?.len() % page_size != 0
@@ -536,7 +536,7 @@ impl Store {
                 },
             )?;
             let tx = conn.transaction().map_err(|_| storage_failure())?;
-            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=5; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
+            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=6; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
             for (index, record) in initial.records.iter().enumerate() {

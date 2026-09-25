@@ -49,7 +49,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 12, save format 5, and `diagonal-v11` are currently in use. Multi-actor archives
+Protocol 12, save format 6, and `diagonal-v11` are currently in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
@@ -154,10 +154,10 @@ they include transport, native client processing and diagnostic JSON reporting
 GPU timestamps. `request_to_ready_ms` records the complete headless response.
 Pacing, snapshot requests and progress annotations are outside these intervals.
 
-The four machine-local shortcuts are Text, ASCII, Text + ASCII Spectator, and
-256 Region Spectator. Their scripts and icons use the explicitly rebuilt
+The three machine-local shortcuts are Text, ASCII, and Text + ASCII Spectator.
+The 256 Region Spectator shortcut has been removed; its command-line driver remains. Their scripts and icons use the explicitly rebuilt
 `target/debug` binaries. The paired game's text helper uses that same directory.
-The fourth invokes this checked-in driver. Verify real connections and presented
+ Verify real connections and presented
 frames, helper paths, separate spectator credentials, fresh saves and owned
 cleanup whenever updating binaries; `cargo check` is insufficient.
 
@@ -259,7 +259,7 @@ cargo build --release --locked -p tor-server --example latency_bench
 # Complete journal-only comparison; does not meet the checkpoint gate:
 target/release/examples/latency_bench --saved-discovery --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > saved.jsonl
 python scripts/performance_report.py saved.jsonl --saved-discovery
-# Current known failure, retained as evidence rather than a passing workload:
+# Checkpoint-enabled full traversal:
 target/release/examples/latency_bench --saved-discovery --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > checkpoint-failure.jsonl
 ```
 
@@ -274,8 +274,56 @@ includes capture and deduplication, outside action/flush timings. It uses an
 equal-length dummy save UUID and the ordinary workload's record count as sequence.
 
 Interval 64 supplies a stress comparison and a successful eight-region checkpoint.
-The current large enabled traversal emits a failure record and exits unsuccessfully;
-the report validator must reject it. Do not report its accepted prefix as a complete
+Historical format-5 large enabled traversals emitted failure records;
+the report validator continues to reject those incomplete runs. Format 6 must
+complete both enabled intervals. Do not report its accepted prefix as a complete
 benchmark pass. Background timing affects the rejection point. Existing detached
 modes, workload ordering and retained report interpretation remain unchanged.
 See the [closeout audit](3p-closeout.md) for retained raw files and blocker disposition.
+
+
+## Explored-save native acceptance
+
+```sh
+python scripts/saved_exploration_driver.py --bin-dir target/release --regions 256 --checkpoint-interval 64 --output target/explored-native
+```
+
+This opt-in driver uses ordinary native ASCII input events to execute every
+version-1 traversal action, from a newly attached save. It checks each presented
+movement/door result, counts the union of disclosed cells, flushes, restarts,
+compares state/branch/history, and continues through ASCII and text inputs.
+It retains presentation phase samples and exact action order. Its validator
+requires complete coverage, a checkpoint under 16 MiB and a tail shorter than
+the configured interval. UI-event-to-reader timing includes native presentation
+and diagnostic I/O; it is not physical keyboard-to-photon latency.
+
+The process suite runs eight regions and native OS keyboard input during a
+blocked checkpoint on that genuinely explored save. Set
+`TOR_SAVED_EXPLORATION_REGIONS=256` for the complete large acceptance case.
+The restarted client starts with its normal connection-local memory, while the
+traversal client retains every disclosed observation throughout exploration.
+
+
+## Opt-in timing correlation
+
+Pass `--correlate` to either actual-client driver to enable
+`TOR_TIMING_DIAGNOSTICS` only in its child processes. Diagnostic stderr records
+request UUIDs, client request/send/ack boundaries, headless output durations,
+server lock/handler durations and acknowledgement send completion. It omits tokens,
+request bodies, private world state and protocol changes. Server diagnostics are
+written after releasing the session lock. All diagnostic I/O can itself stall.
+
+```sh
+python scripts/performance_driver.py --bin-dir target/release --output target/correlated --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture --correlate
+python scripts/timing_correlation.py target/correlated --output target/correlated-timings.json
+```
+
+The report joins accepted actions by request identity and retains the original
+acknowledgement and line-receipt metrics. Native exploration additionally retains
+all intervening frame profiles and reader work/queue delay. Cross-process timestamps
+use the same host wall clock; the Python reader calibrates its monotonic clock
+once and timestamps the exact recorded boundaries through that offset. Phase
+durations use monotonic clocks. Clock adjustments can limit cross-process attribution. A receiver can
+observe bytes just before the sender returns from sending, so tiny negative deltas
+are retained rather than clamped. These are diagnostic boundaries, not wire-only
+or physical keyboard-to-photon measurements. Ordinary play leaves this option off.

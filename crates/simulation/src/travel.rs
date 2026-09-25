@@ -17,8 +17,8 @@ const DIRECTIONS: [Direction; 6] = [
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
-    cells: RegionMap<Location, bool>,
-    edges: RegionMap<(Location, Direction), (Location, u8)>,
+    pub(super) cells: RegionMap<Location, bool>,
+    pub(super) edges: RegionMap<(Location, Direction), (Location, u8)>,
 }
 
 impl Navigation {

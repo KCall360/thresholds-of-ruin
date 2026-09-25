@@ -51,21 +51,23 @@ must be saved before privileged commands can execute. Once queued, the lineage
 remains marked even if the first flush fails; authority stays disabled until a
 successful retry. Rewind cannot clear the marker.
 
-## Format 5
+## Format 6
 
-Only the current format is supported; old JSON and format-4 SQLite saves are rejected without an
+The format-6 compatibility decision rejects format 5, as explicitly authorized
+for this pre-release checkpoint change. Protocol 12 and `diagonal-v11` are unchanged.
+Only the current format is supported; old JSON and format-4/5 SQLite saves are rejected without an
 importer. The filename extension is immaterial. The database uses bundled SQLite
 through `rusqlite`, confined to the server crate. The `journal` table holds the
 immutable replay base at sequence zero and the active tail; `history` holds records
 covered by the selected checkpoint. Global sequence numbers remain contiguous
 across both tables. SQLite transactions commit complete batches. The database uses
 `journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and
-`user_version=5`. SQLite's temporary rollback journal is part of transaction
+`user_version=6`. SQLite's temporary rollback journal is part of transaction
 recovery and must not be manually deleted after a crash.
 
 Each row contains a 24-byte little-endian frame header:
 
-`magic | format:u16=5 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
+`magic | format:u16=6 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
 
 The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the permanent
 wizard marker uses kind 2. CRC32C covers header bytes 4–19 and the payload, with
