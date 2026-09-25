@@ -92,6 +92,9 @@ class WizardProcesses(unittest.TestCase):
         wizard.command("wizard actor 75 1 2 1 0")
         second, _ = self.text(actor=2)
         wizard.command("wait")
+        # A response on actor 1's socket does not mean actor 2 has consumed its
+        # pushed readiness revision. Establish that boundary before acting.
+        self.assertIn("Ready to act", second.command("sync"))
         self.assertNotIn("Server error", second.command("wait"))
         self.assertNotIn("Server error", wizard.command(f"wizard rewind {target}"))
         restored = self.frame(spectator, lambda f: f["branch"] != alternate["branch"])

@@ -205,7 +205,7 @@ later phase's total-latency or startup target.
 
 ### Phase C — Checkpoints and compaction
 
-Implemented and locally verified. See [checkpoints](checkpoints.md) for the
+Complete and merged in PR #25. See [checkpoints](checkpoints.md) for the
 contract and [Phase C findings](phase-c-findings.md) for retained measurements.
 Periodic background checkpoints retain simulation/navigation, revisions, current
 branch and all 128 rewind boundaries. History frames and receipts move unchanged
@@ -233,9 +233,13 @@ Phase E remains separate client application/rendering work.
 
 ### Phase E — Client responsiveness
 
-Measure shared client-state update application and ASCII rendering with large
-remembered maps and burst updates. Preserve bounded queues and resynchronization;
-verify native input remains responsive while the server saves or checkpoints.
+Implemented and locally verified. Shared client updates validate before
+mutation without cloning historical memory; ASCII delivers ordered updates through
+bounded queues, budgets event work per turn, and indexes rendering lookups.
+The versioned client workload covers large remembered maps and burst updates;
+native process tests exercise blocked saves and checkpoints. See
+[Phase E findings](phase-e-findings.md) for measurements and unresolved native
+presentation tail limits. The broader 3p acceptance criteria remain separate.
 
 ## Verification and completion
 

@@ -545,3 +545,50 @@ fn missing_door_direction_is_rejected_locally_and_escape_cancels() {
         assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
     }
 }
+
+#[test]
+fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    let initial = state().snapshot();
+    app.replace_snapshot(initial.clone()).unwrap();
+    app.ready();
+    for sequence in 1..=64 {
+        let mut view = initial.state.clone();
+        view.revision += sequence;
+        view.observation.tick += sequence;
+        view.observation.visible_cells[0].key = format!("intermediate-{sequence}");
+        app.update(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: initial.cursor.sequence + sequence,
+                tick: view.observation.tick,
+            },
+            body: UpdateBody::Observation {
+                state: Box::new(view),
+                event: None,
+            },
+        })
+        .unwrap();
+    }
+    let current = app.state.as_ref().unwrap();
+    assert!(current.memory().any(|c| c.key == "intermediate-1"));
+    let before = current.clone();
+    let mut wrong = initial.clone();
+    wrong.actor = ActorId(99);
+    assert!(app.replace_snapshot(wrong).is_err());
+    assert_eq!(app.state.as_ref().unwrap(), &before);
+    app.input(Input::Key { key: Key::Note });
+    assert!(app.note.is_some());
+    let mut rewind = initial;
+    rewind.branch = BranchId("rewound".into());
+    app.replace_snapshot(rewind).unwrap();
+    assert!(app.note.is_none());
+    assert!(!app
+        .state
+        .as_ref()
+        .unwrap()
+        .memory()
+        .any(|c| c.key.starts_with("intermediate-")));
+}

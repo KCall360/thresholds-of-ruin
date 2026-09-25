@@ -78,8 +78,8 @@ impl ClientState {
         }
         let mut candidate = Self::from_snapshot(snapshot)?;
         if candidate.branch() == self.branch() {
-            candidate.memory = self.memory.clone();
-            candidate.map_memory = self.map_memory.clone();
+            candidate.memory = std::mem::take(&mut self.memory);
+            candidate.map_memory = std::mem::take(&mut self.map_memory);
             candidate.remember_view();
         }
         *self = candidate;
@@ -122,6 +122,11 @@ impl ClientState {
         self.map_memory.observe(observation, &self.memory);
     }
 
+    /// Current disclosed stream boundary, excluding connection-local memory.
+    pub fn snapshot(&self) -> Snapshot {
+        self.snapshot.clone()
+    }
+
     pub fn travel(&self) -> Option<&TravelStatus> {
         self.snapshot.travel.as_ref()
     }
@@ -149,14 +154,16 @@ impl ClientState {
         if update.branch != self.snapshot.branch {
             return Err(StreamError::WrongBranch);
         }
-        let mut candidate = self.clone();
-        candidate.stream.accept(update.actor, update.cursor)?;
+        // Validate ordering separately. Each payload arm completes all fallible
+        // checks (including history validation) before publishing any changes.
+        let mut stream = self.stream.clone();
+        stream.accept(update.actor, update.cursor)?;
         match update.body {
             UpdateBody::Travel { status, entry } => {
-                if update.cursor.tick != candidate.snapshot.state.observation.tick {
+                if update.cursor.tick != self.snapshot.state.observation.tick {
                     return Err(StreamError::InconsistentState);
                 }
-                if let Some(previous) = candidate
+                if let Some(previous) = self
                     .snapshot
                     .travel
                     .as_ref()
@@ -178,14 +185,14 @@ impl ClientState {
                     {
                         return Err(StreamError::InconsistentState);
                     }
-                    candidate.remember(*entry, update.cursor.tick)?;
+                    self.remember(*entry, update.cursor.tick)?;
                 }
-                candidate.snapshot.travel = Some(status);
+                self.snapshot.travel = Some(status);
             }
             UpdateBody::Observation { state, event } => {
                 if state.observation.actor != update.actor
                     || state.observation.tick != update.cursor.tick
-                    || state.revision <= candidate.snapshot.state.revision
+                    || state.revision <= self.snapshot.state.revision
                 {
                     return Err(StreamError::InconsistentState);
                 }
@@ -193,28 +200,28 @@ impl ClientState {
                     if !matches!(entry.content, HistoryContent::Action { .. }) {
                         return Err(StreamError::InconsistentState);
                     }
-                    candidate.remember(*entry, update.cursor.tick)?;
+                    self.remember(*entry, update.cursor.tick)?;
                 }
-                candidate.snapshot.state = *state;
-                candidate.remember_view();
+                self.snapshot.state = *state;
+                self.remember_view();
             }
             UpdateBody::Annotation { entry } => {
-                if update.cursor.tick != candidate.snapshot.state.observation.tick
+                if update.cursor.tick != self.snapshot.state.observation.tick
                     || !matches!(entry.content, HistoryContent::Annotation { .. })
                 {
                     return Err(StreamError::InconsistentState);
                 }
-                candidate.remember(*entry, update.cursor.tick)?;
+                self.remember(*entry, update.cursor.tick)?;
             }
             UpdateBody::Control { has_control } => {
-                if update.cursor.tick != candidate.snapshot.state.observation.tick {
+                if update.cursor.tick != self.snapshot.state.observation.tick {
                     return Err(StreamError::InconsistentState);
                 }
-                candidate.snapshot.has_control = has_control;
+                self.snapshot.has_control = has_control;
             }
         }
-        candidate.snapshot.cursor = update.cursor;
-        *self = candidate;
+        self.snapshot.cursor = update.cursor;
+        self.stream = stream;
         Ok(())
     }
 

@@ -272,3 +272,26 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
     client.replace_snapshot(rewind).unwrap();
     assert!(client.memory().all(|c| c.door.is_none()));
 }
+
+#[test]
+fn updates_and_same_branch_snapshots_retain_unseen_allocations() {
+    let mut client = ClientState::from_snapshot(snapshot(1, 0, 0)).unwrap();
+    let address = client.memory().next().unwrap().key.as_ptr();
+    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    assert_eq!(
+        client.memory().find(|c| c.key == "1").unwrap().key.as_ptr(),
+        address
+    );
+    client.replace_snapshot(snapshot(2, 100, 1)).unwrap();
+    assert_eq!(
+        client.memory().find(|c| c.key == "1").unwrap().key.as_ptr(),
+        address
+    );
+    let before = client.clone();
+    let mut invalid = update(snapshot(3, 200, 2), 1);
+    if let UpdateBody::Observation { state, .. } = &mut invalid.body {
+        state.observation.actor = ActorId(2);
+    }
+    assert!(client.apply(invalid).is_err());
+    assert_eq!(client, before);
+}

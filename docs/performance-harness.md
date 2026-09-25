@@ -211,3 +211,43 @@ version 2 adds contracts for zero observation/scene work on waits and one scene 
 actual observation on other actions. Retained version-1 profiling remains valid.
 Do not interpret a mixed median dominated by scheduled waits as movement latency;
 retain per-label distributions and individual tails.
+
+
+## Focused Phase E client study
+
+```sh
+cargo run --release --locked -p tor-client-ascii --example client_bench > client.jsonl
+python scripts/client_performance_report.py client.jsonl
+python scripts/performance_driver.py --bin-dir target/release --output target/client-capture --regions 256 --actors 8 --cycles 1 --pace-ms 0
+python scripts/performance_driver.py --bin-dir target/release --output target/client-no-capture --regions 256 --actors 8 --cycles 1 --pace-ms 0 --no-capture
+```
+
+The separate client workload version 1 has 64/20,956 previously disclosed cells,
+a bounded 64/4096-cell chart, 64 current cells, bursts of 1/64 observations and
+20 samples per combination (80 total). It applies all updates before one canvas
+draw. Setup and memory-count inspection are outside timing; update payload cloning
+and validation are included. This stationary synthetic chart isolates historical
+memory and tile lookup costs; it is not an authoritative world/discovery workload.
+Continue `latency_bench --discovery-only` for real movement and growing knowledge.
+The original server fixture/version/order and retained validators are unchanged.
+
+Build a reference checkout with this same example, retain its executable, then
+build the changed implementation. Run matched binaries without competing builds
+or tests. Keep raw samples, sample counts, percentiles, source/binary hashes and
+hardware metadata. The validator enforces exact ordering, version, memory/chart
+counts and finite nonnegative phase timings, not machine-specific latency gates.
+The allocation-retention and glyph-oracle Rust tests provide stable regressions.
+
+Actual-client samples now retain native frame phase diagnostics when available.
+`--no-capture` isolates PPM writing while preserving native presentation and JSON
+reporting. Default capture behavior is unchanged for existing workloads and the
+desktop demonstration. The driver timestamp includes transport, scheduling and
+diagnostic work; it is not interchangeable with pure update/draw timing. See
+[Phase E findings](phase-e-findings.md) and the [ASCII diagnostic boundaries](ascii-client.md#responsiveness-and-diagnostic-timing).
+
+
+`request_to_ack_ms` retains its historical driver-consumption timestamp. New runs
+also include `request_to_ack_line_ms`, stamped when the reader receives the JSON
+acknowledgement line, before diagnostic log writing/flushing and queue delivery.
+Their difference isolates delay inside the driver; neither is a server-only time.
+Existing retained reports without the new field remain valid.

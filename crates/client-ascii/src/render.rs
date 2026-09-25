@@ -1,5 +1,5 @@
 //! Fixed logical canvas, scaled by the native window without changing game state.
-use crate::{glyph_at_level, history_lines, history_text, App};
+use crate::{history_lines, history_text, App};
 use font8x8::{UnicodeFonts, BASIC_FONTS};
 
 pub const WIDTH: usize = 1200;
@@ -58,6 +58,48 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
     view
 }
 
+/// Index each disclosed cell/occupant once instead of scanning every vector for
+/// every viewport tile. First occurrence and glyph precedence match glyph_at_level.
+fn indexed_glyphs(
+    view: &tor_protocol::Observation,
+) -> std::collections::BTreeMap<(i32, i32, i32), char> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let key = |p: tor_protocol::Position| (p.x, p.y, p.z);
+    let actors: BTreeSet<_> = view
+        .visible_actors
+        .iter()
+        .map(|a| key(a.position))
+        .collect();
+    let items: BTreeSet<_> = view.ground_items.iter().map(|i| key(i.position)).collect();
+    let mut glyphs = BTreeMap::new();
+    for cell in &view.visible_cells {
+        let p = key(cell.position);
+        let glyph = if cell.wall {
+            '#'
+        } else if cell.position == view.position {
+            '@'
+        } else if actors.contains(&p) {
+            '&'
+        } else if items.contains(&p) {
+            '!'
+        } else if let Some(door) = &cell.door {
+            if door.open {
+                '/'
+            } else {
+                '+'
+            }
+        } else if cell.stairs_up {
+            '<'
+        } else if cell.stairs_down {
+            '>'
+        } else {
+            '.'
+        };
+        glyphs.entry(p).or_insert(glyph);
+    }
+    glyphs
+}
+
 pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
     let display = display_observation(state);
     let current: std::collections::BTreeSet<_> = state
@@ -67,6 +109,7 @@ pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
+    let glyphs = indexed_glyphs(&display);
     let mut tiles = Vec::new();
     for panel in map_panels(&display) {
         for row in 0..panel.rows {
@@ -76,7 +119,10 @@ pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
                     y: panel.y0 + row as i32,
                     z: panel.z,
                 };
-                let glyph = glyph_at_level(&display, position.x, position.y, position.z);
+                let glyph = glyphs
+                    .get(&(position.x, position.y, position.z))
+                    .copied()
+                    .unwrap_or(' ');
                 if glyph == ' ' {
                     continue;
                 }
@@ -607,5 +653,30 @@ fn travel_label(phase: tor_protocol::TravelPhase) -> &'static str {
         ControlLost => "CONTROL RELEASED",
         WorldChanged => "WORLD CHANGED",
         Failed => "COULD NOT SAVE OR MOVE",
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    #[test]
+    fn index_matches_vector_oracle_including_overlaps_and_precedence() {
+        let view: tor_protocol::Observation = serde_json::from_value(serde_json::json!({
+            "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
+            "visible_cells":(0..128).map(|i|serde_json::json!({
+                "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
+                "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
+            })).collect::<Vec<_>>(),
+            "ground_items":[{"item":{"id":1,"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
+            "visible_actors":[{"id":2,"position":{"x":3,"y":0,"z":0}}],"inventory":[]
+        })).unwrap();
+        let index = super::indexed_glyphs(&view);
+        for z in -1..5 {
+            for x in -1..18 {
+                assert_eq!(
+                    index.get(&(x, 0, z)).copied().unwrap_or(' '),
+                    crate::glyph_at_level(&view, x, 0, z)
+                );
+            }
+        }
     }
 }

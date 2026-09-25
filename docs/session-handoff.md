@@ -1,72 +1,86 @@
 # Session handoff — 2026-09-25
 
-## Current state
+## Publication state
 
-Phase C merged in [PR #25](https://github.com/KCall360/thresholds-of-ruin/pull/25).
-Phase D is implemented on `codex/state-observation-scaling`, based on merged
-`main` at `cea088c`. The user authorized publication and merge after Windows and
-Linux CI pass on the final PR commit. The live PR is authoritative for publication
-status; do not repeat Phase C publication.
+Phase D merged in [PR #26](https://github.com/KCall360/thresholds-of-ruin/pull/26)
+at `61f9258d7df49355ab7c662bbe72ddefee99dbd0`. Both Windows and Linux CI passed.
+Phase E is implemented on `codex/client-responsiveness`, based on that merge.
+The user authorized a PR and merge only after Windows/Linux CI pass on the final
+commit. Consult the live PR for authoritative publication state; do not republish
+Phase D. The implementation and local checks below are complete; the live PR
+records final Windows/Linux CI and publication.
 
-Read [Phase D findings](phase-d-findings.md), the
-[performance plan](performance-persistence.md), [harness](performance-harness.md),
-and [development practices](../CONTRIBUTING.md) before continuing.
+Read [Phase E findings](phase-e-findings.md), [the harness](performance-harness.md),
+[ASCII behavior and timing](ascii-client.md#responsiveness-and-diagnostic-timing),
+[the performance plan](performance-persistence.md) and
+[development practices](../CONTRIBUTING.md) before continuing.
 
-## Phase D implementation
+## Phase E implementation
 
-- Protocol 12, save format 5 and `diagonal-v11` remain unchanged. No migrations,
-  client-side rules or observation cache were introduced. Local saves are retained.
-- Transaction candidates own decision state and shared rewind boundaries, with no
-  journal, receipt index or storage handle. Admission precedes publication and
-  receipt insertion; rejection preserves the full published boundary.
-- World maps, items and navigation use copy-on-write snapshots. Navigation shares
-  source-region maps so local discovery does not copy all prior knowledge.
-- Ordinary waits use explicit time/readiness effects. Other actions conservatively
-  compare every actor, building one scene per observation and reusing it for
-  surfaces, door approaches and navigation. Navigation examines visible edges;
-  region exits use an ordered-map range.
-- The version-1 workload ordering is unchanged. Profiling version 2 asserts zero
-  geometry work for waits and one scene per observation. `--phase-d` runs nine
-  mixed cases plus full 8/256-region discovery; `--discovery-only` isolates growth.
-  The maintained validator also accepts retained Phase A/B/C measurements.
+- Protocol 12, save format 5 and `diagonal-v11` are unchanged; local saves remain.
+- Shared updates validate stream, payload and history consistency before mutation.
+  They no longer clone historical memory; same-branch snapshots move retained
+  memory after validation. Invalid boundaries remain atomic; branch changes clear
+  abandoned memory. Stationary charts reuse their index.
+- ASCII sends ordered disclosed updates/snapshots through a bounded 64-event
+  channel, with backpressure on its dedicated worker. Every intermediate received
+  view still updates memory. The native loop targets 60 Hz, consumes at most 16
+  network events per turn and stops starting more after four milliseconds.
+- Rendering indexes cells/occupants with an existing-vector glyph oracle. Input
+  selection invalidation, visible-only targets and stale-memory colors remain.
+- Frame profiling separates application, drawing, native pacing/presentation,
+  capture and previous reporting time. The original actual-client metric remains;
+  an additional acknowledgement-line timestamp isolates driver queue/log delay.
+- Client workload version 1 covers 64/20,956 historical cells and bursts of 1/64
+  observations, with exact sample/memory/chart/timing validation. Existing server
+  fixtures, profiling versions and retained report validation are unchanged.
 
-## Measurements
+## Measurements and limitations
 
-Retained samples, summaries, source/binary hashes, hardware and commands are in
-`docs/measurements/phase-d-2026-09-25/`. Clean matched reference/final passes each
-validate 8,289 mixed attempts and 2,882 discovery actions. No competing builds or
-test suites ran during these final comparisons.
+Retained samples, summaries and hashes are in
+`docs/measurements/phase-e-2026-09-25/`. Clean matched release client measurements
+show large-history 64-update burst p95 improving from 549.084 to 39.164 ms and
+rendering from 6.554 to 3.031 ms. The real growing-discovery trace validates 2,882
+actions and 20,956 remembered cells, with authoritative 256-region p95 1.801 ms.
 
-The 256-region/eight-actor/10,000-action saved case improves from 14.246 to 2.547 ms
-p95, with maximum 23.772 versus 3.385 ms. Full 256-region discovery improves from
-11.772 to 1.771 ms p95 and reaches 20,956 remembered cells. Selected cases meet the
-provisional server latency targets on this machine. Eight-actor mixed medians are
-dominated by waits; preserve per-label distributions and limitations.
+A final actual-client presentation tail of 148.577 ms follows a measured 116.258 ms
+PPM capture stall. No-capture presentation p95/max are 37.492/43.843 ms. Separate
+182.930/304.187 ms secondary-actor acknowledgement tails remain under investigation.
+A consecutive same-server/headless-binary follow-up has reference/final no-capture
+presentation p95 69.638/37.825 ms and maxima 74.141/38.909 ms, without repeated
+acknowledgement spikes. The historical 673/738 ms tails were not reproduced or proved fixed. All diagnostic
+I/O remains synchronous; ordinary play omits it. No hard real-time guarantee or
+physical keyboard-to-photon measurement is claimed.
 
-An initial optimized discovery run exposed whole-navigation copying. Source-region
-sharing removes that cost. Initial runs are retained explicitly; the earliest
-baseline overlapped compilation and is not the clean comparison.
+Native Win32/X11 tests verify local input during a deliberately blocked SQLite
+writer, both with and without a pending checkpoint in a 256-region world. A
+160-action real-client burst verifies native input, exact final state, retained
+history and the durable checkpoint.
+Unit tests cover allocation retention, atomic rejection, intermediate memory,
+branch resets, bounded backpressure and glyph equivalence.
 
-The actual-client comparison retains isolated presentation tails (738/673 ms in
-current runs) despite approximately 81 ms matched p95. A reference run had a 773 ms
-acknowledgement outlier. These include native presentation, diagnostic framebuffer
-I/O and driver scheduling; the precise source is unresolved. Keep this evidence
-for Phase E rather than treating server-only timing as client responsiveness.
+## Completion and next work
 
-## Verification and next work
+Formatting, Clippy, architecture/documentation checks, warning-free private-item
+rustdoc and all 219 Rust tests in each of debug/release pass. All 84 Python checks
+have been verified, including native mouse input with desktop access, and the full
+64-test release process suite passes. The desktop debug discovery exposed a
+cross-client wizard-test race: actor 2 acted before consuming actor 1's readiness
+handoff. The test now requests its snapshot before acting; both affected debug
+scenarios and the full release suite pass. Expanded responsiveness tests also pass
+in debug/release. No product rule or stale-revision check was relaxed.
 
-Workspace formatting, Clippy, 215 Rust tests in each of debug/release, warning-free
-private-item rustdoc, architecture/documentation checks and all 77 Python tests
-pass locally. All 61 release process tests also pass. All four desktop launchers
-passed real connection, fresh-save retention and owned-process cleanup checks,
-including three completed cycles of the 256-region spectator demonstration.
-Publication still requires Windows/Linux CI on the final commit. Keep diagnostic logs, credentials and local saves outside Git.
+All four desktop launchers passed actual connection, fresh-save retention and
+owned-process cleanup checks, including three completed 256-region demo cycles.
+Their existing helper paths still target the rebuilt debug binaries.
+Keep logs, credentials and fresh local saves outside Git.
+The full 64-case matrix is not required for this client-focused change.
 
-Phase E client responsiveness is next. Non-wait observations still scale with
-actors; item inspection, visited places, travel searches, history queries and
-startup loading still scale with their inputs. Checkpoint encoding and the 64 MiB
-limit remain unchanged; detached discovery does not prove bounded checkpoint size
-for arbitrary explored worlds. Future features must maintain instrumentation,
-workloads and validators, with targeted release comparisons during development.
-The broader milestone 3p is not complete and the full 64-case matrix is not required
-on every change.
+The broader milestone 3p remains incomplete. Historical memory grows with disclosed
+cells; moving charts still process their bounded cache. Diagnostic I/O, OS/driver
+scheduling and remaining acknowledgement tails need separate interpretation.
+Server non-wait observations still scale with actors; item/visited-place/history
+queries, travel searches and startup loading scale with inputs. Checkpoint encoding
+and the 64 MiB cap are unchanged. Detached discovery does not prove arbitrary-world
+checkpoint bounds. Maintain instrumentation, versioned workloads and validators,
+with focused release comparisons for future changes.
