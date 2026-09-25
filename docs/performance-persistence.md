@@ -95,28 +95,31 @@ format 5 with Phase C checkpoints:
 
 ## State and rollback work
 
-After append persistence lands, measure and remove the remaining broad clones:
+Phase D removes broad command candidates and repeated scene construction:
 
-- replace full `Engine` candidate cloning with a transaction that owns only the
-  changed game state, revision changes, receipt, record, and rollback material;
-- represent the 128 rewind boundaries with structural sharing or compact deltas
-  where measurement justifies it;
-- avoid computing complete before/after observations for unaffected actors;
-  maintain explicit change impact and verify it conservatively against the old
-  comparison path in tests; and
-- keep rollback internal to the authoritative server. Speculative client
-  simulation must not gain hidden geometry or become a second rules engine.
+- transactions own game state, revisions, current branch and at most 128 shared
+  rewind boundaries; history and receipt indexes are never cloned by commands;
+- world collections, items and actor navigation use copy-on-write ownership;
+- ordinary waits update revisions from explicit time/readiness effects without
+  constructing scenes or observations; full-view oracle tests verify equivalence;
+- other actions conservatively compare every actor, with one scene reused for
+  observation, material surfaces, door approaches and navigation; and
+- navigation refresh examines visible connections and detaches shared knowledge
+  only when facts change, copying the affected source-region maps rather than all
+  discovered cells. Region exits use the existing ordered map's range.
 
-The initial implementation should favor simple, auditable ownership over a
-complex delta system. Append-oriented persistence removes full-history encoding;
-candidate cloning, file sync, and perception remain separate measured costs.
+Rollback stays internal to the authoritative server. Queue rejection discards the
+candidate before changing history, receipts or published game state. No speculative
+client simulation or long-lived observation cache is introduced. Full-history
+copying remains available only to explicit detached persistence diagnostics.
 
 ## Data structures and caching
 
 Ordered collections are currently valuable for deterministic behavior and are
 not globally replaced. Optimize individual access patterns only after profiling:
 
-- add a region-to-exits index if global passage scans grow with total topology;
+- retain the bounded ordered-map range for region exits; add a separate index
+  only if later measurements justify it;
 - index visible cells and occupants for repeated lookup during observation and
   rendering instead of repeatedly scanning vectors;
 - make client update application transactional without cloning the entire
@@ -195,7 +198,7 @@ performance subset; do not routinely repeat the full 64-case characterization:
 Repeat the broader matrix or discovery/rendering study only for unexplained
 regressions, inconsistent focused results, or changes affecting those paths.
 Record the selected cases, results, and any expanded investigation in the findings.
-Full-history candidate copying and disposal remain Phase D work, and file-sync
+These Phase B measurements preceded Phase D candidate-copy removal; file-sync
 latency can remain substantial. Phase B must remove history-dependent persistence
 encoding/write amplification under the revised asynchronous save contract; it need not meet every
 later phase's total-latency or startup target.
@@ -220,8 +223,13 @@ is conditional on unexplained regressions or broader changes.
 
 ### Phase D — State-copy and observation scaling
 
-Remove measured clone and repeated-observation costs. Add multi-actor and large
-map cases before changing collection types or adding caches.
+Implemented; see [Phase D findings](phase-d-findings.md) for measurements and
+limits. `--phase-d` selects the nine focused memory/durable cases plus full growing
+discovery at eight and 256 regions. The original version-1 fixture ordering remains
+unchanged; profiling schema version 2 validates the reduced operation counts.
+Use `--discovery-only` to isolate accumulated map knowledge. Actual-client process,
+rewind, retry, rejection, checkpoint and full-view equivalence tests remain required.
+Phase E remains separate client application/rendering work.
 
 ### Phase E — Client responsiveness
 

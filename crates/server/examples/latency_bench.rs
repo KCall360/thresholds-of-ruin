@@ -205,8 +205,10 @@ fn main() {
             .as_str()
     });
     let mut completed_cases = 0;
+    let phase_d = args.iter().any(|arg| arg == "--phase-d");
+    let discovery_only = args.iter().any(|arg| arg == "--discovery-only");
     let phase_c = args.iter().any(|arg| arg == "--phase-c");
-    let focused = phase_c || args.iter().any(|arg| arg == "--phase-b");
+    let focused = phase_d || phase_c || args.iter().any(|arg| arg == "--phase-b");
     let save_ms = |flag: &str, fallback| {
         args.windows(2)
             .find(|a| a[0] == flag)
@@ -248,6 +250,9 @@ fn main() {
         for actors in [1, 8] {
             for &history in histories {
                 for durable in [false, true] {
+                    if discovery_only {
+                        continue;
+                    }
                     if phase_c && !durable {
                         continue;
                     }
@@ -276,7 +281,7 @@ fn main() {
                         "{}",
                         json!({"kind":"case","case":case,"regions":regions,"actors":actors,"history_start":history,
             "seed":trace.seed,"trace_version":trace.version,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+            "dirty":!dirty.success(),"profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
             "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
             "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes,"checkpoint_interval":save_policy.checkpoint_interval},
@@ -314,14 +319,29 @@ fn main() {
         }
     }
     // Separate growing-discovery trace; local cycles cannot establish its scaling.
-    assert!(completed_cases > 0, "no matching benchmark case");
-    if focused || selected_case.is_some() {
+    assert!(
+        completed_cases > 0 || discovery_only,
+        "no matching benchmark case"
+    );
+    if (focused && !phase_d && !discovery_only) || selected_case.is_some() {
         return;
     }
-    for regions in [8, 64, 256] {
+    for regions in if phase_d || discovery_only {
+        vec![8, 256]
+    } else {
+        vec![8, 64, 256]
+    } {
         let case = format!("traversal-r{regions}");
         let engine =
             Engine::memory(Scenario::performance(trace.seed, regions, 1).unwrap()).unwrap();
+        println!(
+            "{}",
+            json!({"kind":"traversal","case":case,"regions":regions,"actors":1,
+            "trace_version":trace.version,"seed":trace.seed,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
+            "dirty":!dirty.success(),"profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
+            "cycles":if quick {2} else {regions-1},"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
+        );
+        eprintln!("Starting {case}");
         let mut runner = Runner::new(engine, case.clone());
         for cycle in 0..if quick { 2 } else { regions - 1 } {
             for (index, step) in trace.traversal.iter().enumerate() {

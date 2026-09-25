@@ -150,7 +150,7 @@ fn ordinary_command_profiles_encoding_without_disk_io() {
     assert!(p.exclusive_duration() <= p.authoritative_total);
     assert_eq!(p.simulation_transitions, 1);
     assert_eq!(p.candidate_captures, 1);
-    assert_eq!(p.navigation_refreshes, 1);
+    assert_eq!(p.navigation_refreshes, 0);
     assert!(p.perception_calls >= p.actors_observed);
     assert!(p.scene_calls >= p.perception_calls);
     assert_eq!(
@@ -167,4 +167,25 @@ fn ordinary_command_profiles_encoding_without_disk_io() {
     engine.flush().unwrap();
     assert_eq!(engine.save_status().batches, 1);
     assert_eq!(engine.profile_counts(), (1, 2));
+}
+
+#[test]
+fn waits_do_not_rebuild_geometry_at_any_fixture_scale() {
+    for (regions, actors, history) in [(8, 1, 100), (8, 8, 100), (8, 8, 10000), (256, 8, 10000)] {
+        let mut engine =
+            Engine::memory(Scenario::performance(42, regions, actors).unwrap()).unwrap();
+        engine.seed_profile_history(history).unwrap();
+        let actor = engine
+            .actors()
+            .into_iter()
+            .find(|&a| engine.state(a).unwrap().observation.ready)
+            .unwrap();
+        let p = act(&mut engine, actor, "scaled-wait");
+        assert_eq!(
+            (p.perception_calls, p.scene_calls, p.navigation_refreshes),
+            (0, 0, 0)
+        );
+        assert_eq!(p.revision_comparisons, actors);
+        assert_eq!(engine.profile_counts().0, history + 1);
+    }
 }

@@ -3,7 +3,7 @@
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tor_world::World;
+use tor_world::{Shared, World};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,9 +40,9 @@ impl Game {
         let worlds = &mut shared.worlds;
         let world = worlds
             .iter()
-            .position(|w| w == &self.world)
+            .position(|w| w == &*self.world)
             .unwrap_or_else(|| {
-                worlds.push(self.world.clone());
+                worlds.push((*self.world).clone());
                 worlds.len() - 1
             });
         Snapshot {
@@ -55,9 +55,9 @@ impl Game {
                     let index = shared
                         .navigation
                         .iter()
-                        .position(|n| n == navigation)
+                        .position(|n| n == &**navigation)
                         .unwrap_or_else(|| {
-                            shared.navigation.push(navigation.clone());
+                            shared.navigation.push((**navigation).clone());
                             shared.navigation.len() - 1
                         });
                     (*actor, index)
@@ -69,9 +69,9 @@ impl Game {
             items: shared
                 .items
                 .iter()
-                .position(|items| items == &self.items)
+                .position(|items| items == &*self.items)
                 .unwrap_or_else(|| {
-                    shared.items.push(self.items.clone());
+                    shared.items.push((*self.items).clone());
                     shared.items.len() - 1
                 }),
             next_actor_id: self.next_actor_id,
@@ -82,17 +82,19 @@ impl Game {
 
     pub fn restore_checkpoint(snapshot: Snapshot, shared: &SharedState) -> Option<Self> {
         let game = Self {
-            world: shared.worlds.get(snapshot.world)?.clone(),
+            world: Shared::new(shared.worlds.get(snapshot.world)?.clone()),
             material_surfaces: snapshot.material_surfaces,
             navigation: snapshot
                 .navigation
                 .into_iter()
-                .map(|(actor, index)| Some((actor, shared.navigation.get(index)?.clone())))
+                .map(|(actor, index)| {
+                    Some((actor, Shared::new(shared.navigation.get(index)?.clone())))
+                })
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
             actors: snapshot.actors,
-            items: shared.items.get(snapshot.items)?.clone(),
+            items: Shared::new(shared.items.get(snapshot.items)?.clone()),
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,

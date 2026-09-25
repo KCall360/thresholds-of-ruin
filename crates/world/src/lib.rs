@@ -89,3 +89,6 @@ mod tests {
         assert!(Extent::new(1, 1, 1).is_some());
     }
 }
+
+mod shared;
+pub use shared::Shared;

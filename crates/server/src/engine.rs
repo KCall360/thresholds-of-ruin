@@ -30,7 +30,7 @@ mod seed_equivalence_tests {
     fn seeded_waits_preserve_game_navigation_scheduler_and_every_retained_boundary() {
         for actors in [1, 8] {
             let mut seeded = Engine::memory(Scenario::performance(42, 8, actors).unwrap()).unwrap();
-            let mut normal = seeded.candidate();
+            let mut normal = seeded.diagnostic_copy();
             seeded.seed_profile_history(3).unwrap();
             seeded.seed_profile_history(129).unwrap();
             for index in 0..132 {
@@ -318,6 +318,50 @@ struct Boundary {
     revisions: BTreeMap<ActorId, u64>,
 }
 
+/// Private mutable decision state. A transaction never owns retained history,
+/// the receipt index, or a second storage handle.
+#[derive(Clone, Debug)]
+struct Candidate {
+    current_branch: BranchId,
+    boundaries: VecDeque<Arc<Boundary>>,
+    game: Game,
+    revisions: BTreeMap<ActorId, u64>,
+}
+
+impl Candidate {
+    fn capture(engine: &Engine) -> Self {
+        Self {
+            current_branch: engine.current_branch.clone(),
+            boundaries: engine.boundaries.clone(),
+            game: engine.game.clone(),
+            revisions: engine.revisions.clone(),
+        }
+    }
+    fn branch(&self) -> &BranchId {
+        &self.current_branch
+    }
+    fn actors(&self) -> Vec<ActorId> {
+        self.revisions.keys().copied().collect()
+    }
+    fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
+        revision_view(&self.game, actor)
+    }
+    fn publish(self, engine: &mut Engine) {
+        engine.current_branch = self.current_branch;
+        engine.boundaries = self.boundaries;
+        engine.game = self.game;
+        engine.revisions = self.revisions;
+    }
+}
+
+type RevisionView = (tor_simulation::Observation, Vec<tor_world::SightCell>, bool);
+fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
+    let (view, scene) = game
+        .observe_scene(SimActor(actor.0))
+        .map_err(|_| invalid_archive())?;
+    Ok((view, scene, game.next_actor() == Some(SimActor(actor.0))))
+}
+
 /// Durable chronological journal, including retained futures and explicit forks.
 #[derive(Debug)]
 pub struct Engine {
@@ -544,36 +588,17 @@ impl Engine {
             .ok_or_else(|| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
-        let view = self
-            .game
-            .observe(SimActor(actor.0))
-            .map_err(|_| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))?;
+        self.revision(actor)?;
+        let (view, scene, ready) = self.revision_view(actor)?;
         Ok(adapt::observation(
             view,
-            self.game
-                .scene(SimActor(actor.0))
-                .map_err(|_| invalid_archive())?,
+            scene,
             &self.archive.view_salt,
-            self.game.next_actor() == Some(SimActor(actor.0)),
+            ready,
         ))
     }
-    fn revision_view(
-        &self,
-        actor: ActorId,
-    ) -> Result<(tor_simulation::Observation, Vec<tor_world::SightCell>, bool), Failure> {
-        let view = self
-            .game
-            .observe(SimActor(actor.0))
-            .map_err(|_| invalid_archive())?;
-        let scene = self
-            .game
-            .scene(SimActor(actor.0))
-            .map_err(|_| invalid_archive())?;
-        Ok((
-            view,
-            scene,
-            self.game.next_actor() == Some(SimActor(actor.0)),
-        ))
+    fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
+        revision_view(&self.game, actor)
     }
 
     pub fn travel_route(
@@ -773,7 +798,7 @@ impl Engine {
     /// This does not attach the target to the engine or publish state.
     pub fn profile_persistence(&self, path: impl AsRef<Path>) -> Result<BootstrapProfile, Failure> {
         let started = Instant::now();
-        let mut candidate = self.candidate();
+        let mut candidate = self.diagnostic_copy();
         candidate.path = None;
         candidate.lock = None;
         candidate.store = None;
@@ -911,11 +936,21 @@ impl Engine {
         }
         let revision = self.revision(receipt.actor)?;
         let started = Instant::now();
-        let mut candidate = self.candidate();
+        let mut candidate = Candidate::capture(self);
         if let Some(profile) = profile.as_deref_mut() {
             profile.rollback_capture += started.elapsed();
             profile.candidate_captures += 1;
         }
+        // Exhaustive impact decisions: new commands/actions must explicitly
+        // decide whether they can change remembered geometry.
+        let navigation_changed = match &receipt.command {
+            Command::Act { action, .. } => match action {
+                Action::Move { .. } | Action::SetDoor { .. } => true,
+                Action::Wait | Action::Take { .. } => false,
+            },
+            Command::Wizard { .. } => true,
+            Command::Annotate { .. } | Command::Travel { .. } => false,
+        };
         let mut tick = candidate.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
@@ -954,7 +989,8 @@ impl Engine {
                         "Refresh before a wizard operation",
                     ));
                 }
-                let result = candidate.apply_wizard(receipt, operation, &entry_id)?;
+                let result =
+                    candidate.apply_wizard(receipt, operation, &entry_id, &self.archive.records)?;
                 tick = candidate.game.tick();
                 (
                     Author::User {
@@ -978,9 +1014,14 @@ impl Engine {
                     ));
                 }
                 let started = Instant::now();
+                let perception_changed = match action {
+                    Action::Wait => false,
+                    Action::Move { .. } | Action::SetDoor { .. } | Action::Take { .. } => true,
+                };
                 let before: BTreeMap<_, _> = self
                     .actors()
                     .into_iter()
+                    .filter(|_| perception_changed)
                     .map(|actor| Ok((actor, self.revision_view(actor)?)))
                     .collect::<Result<_, Failure>>()?;
                 if let Some(profile) = profile.as_deref_mut() {
@@ -996,12 +1037,41 @@ impl Engine {
                     profile.simulation_transition += started.elapsed();
                     profile.simulation_transitions += 1;
                 }
+                // Wait changes only tick/readiness. Other outcomes retain full
+                // comparison; new action kinds must make their impact explicit.
+                if matches!(outcome.kind, tor_simulation::OutcomeKind::Waited) {
+                    let started = Instant::now();
+                    for (&actor, revision) in &mut candidate.revisions {
+                        if outcome.next_tick != tick
+                            || ((actor == receipt.actor) != (actor.0 == outcome.next_actor.0))
+                        {
+                            *revision = revision.checked_add(1).ok_or_else(|| {
+                                Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
+                            })?;
+                        }
+                        if let Some(profile) = profile.as_deref_mut() {
+                            profile.revision_comparisons += 1;
+                        }
+                    }
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.revision_detection += started.elapsed();
+                    }
+                }
                 for (actor, old) in before {
                     let perception_started = Instant::now();
                     let after = candidate.revision_view(actor)?;
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.perception += perception_started.elapsed();
                         profile.actors_observed += 1;
+                    }
+                    if navigation_changed {
+                        let started = Instant::now();
+                        candidate
+                            .game
+                            .refresh_navigation_scene(SimActor(actor.0), &after.1);
+                        if let Some(profile) = profile.as_deref_mut() {
+                            profile.navigation_refresh += started.elapsed();
+                        }
                     }
                     let started = Instant::now();
                     let changed = after != old;
@@ -1056,10 +1126,17 @@ impl Engine {
             }
         };
         let started = Instant::now();
-        candidate.game.refresh_navigation();
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.navigation_refresh += started.elapsed();
-            profile.navigation_refreshes += 1;
+        if matches!(receipt.command, Command::Wizard { .. }) {
+            candidate.game.refresh_navigation();
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.navigation_refresh += started.elapsed();
+                profile.navigation_refreshes += 1;
+            }
+        }
+        if navigation_changed && matches!(receipt.command, Command::Act { .. }) {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.navigation_refreshes += 1;
+            }
         }
         let entry = HistoryEntry {
             id: entry_id,
@@ -1070,14 +1147,10 @@ impl Engine {
             audience,
             content,
         };
-        candidate.receipts.insert(
-            (receipt.user.clone(), receipt.request_id.clone()),
-            candidate.archive.records.len(),
-        );
-        candidate.archive.records.push(Record {
+        let record = Record {
             entry: entry.clone(),
             receipt: Some(receipt.clone()),
-        });
+        };
         if !matches!(entry.content, HistoryContent::Annotation { .. }) {
             let started = Instant::now();
             candidate.boundaries.push_back(Arc::new(Boundary {
@@ -1093,9 +1166,14 @@ impl Engine {
                 profile.rollback_snapshots += 1;
             }
         }
-        candidate.persist_profiled(profile.as_deref_mut())?;
+        self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();
-        *self = candidate;
+        candidate.publish(self);
+        self.receipts.insert(
+            (receipt.user.clone(), receipt.request_id.clone()),
+            self.archive.records.len(),
+        );
+        self.archive.records.push(record);
         if let Some(profile) = profile {
             profile.publication += started.elapsed();
         }
@@ -1116,11 +1194,201 @@ impl Engine {
         self.backend_note(actor, component, anchor, category, text, None)
     }
 
+    fn backend_note(
+        &mut self,
+        actor: ActorId,
+        component: &str,
+        anchor: Anchor,
+        category: AnnotationCategory,
+        text: &str,
+        recorded_id: Option<EntryId>,
+    ) -> Result<HistoryEntry, Failure> {
+        if !valid_label(component) {
+            return Err(Failure::new(
+                ErrorCode::InvalidAnnotation,
+                "Invalid backend component",
+            ));
+        }
+        self.validate_note(actor, "", Audience::Actor, &anchor, text)?;
+        let entry = HistoryEntry {
+            id: recorded_id.unwrap_or_else(new_id),
+            branch: self.branch().clone(),
+            actor,
+            tick: self.game.tick(),
+            author: Author::Backend {
+                component: component.into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Annotation {
+                anchor,
+                category,
+                text: text.into(),
+            },
+        };
+        let record = Record {
+            entry: entry.clone(),
+            receipt: None,
+        };
+        self.admit(&record, &Candidate::capture(self), None)?;
+        self.archive.records.push(record);
+        Ok(entry)
+    }
+
+    fn validate_note(
+        &self,
+        actor: ActorId,
+        user: &str,
+        audience: Audience,
+        anchor: &Anchor,
+        text: &str,
+    ) -> Result<(), Failure> {
+        let revision = self.revision(actor)?;
+        if text.trim().is_empty()
+            || text.len() > MAX_NOTE_BYTES
+            || text
+                .chars()
+                .any(|c| c.is_control() && c != '\n' && c != '\t')
+        {
+            return Err(Failure::new(
+                ErrorCode::InvalidAnnotation,
+                "Notes require 1â€“4096 bytes of plain text",
+            ));
+        }
+        match anchor {
+            Anchor::State { revision: target } if *target <= revision => Ok(()),
+            Anchor::Entry { id } => {
+                let entry = self
+                    .archive
+                    .records
+                    .iter()
+                    .map(|r| &r.entry)
+                    .find(|entry| &entry.id == id)
+                    .ok_or_else(invalid_anchor)?;
+                if &entry.branch != self.branch()
+                    || !entry.visible_to(actor, user)
+                    || (audience == Audience::Actor && entry.audience == Audience::Private)
+                {
+                    return Err(invalid_anchor());
+                }
+                Ok(())
+            }
+            _ => Err(invalid_anchor()),
+        }
+    }
+
+    // Full history copies are confined to detached diagnostics. Ordinary command
+    // transactions use Candidate, which cannot own history or receipt indexes.
+    fn diagnostic_copy(&self) -> Self {
+        Self {
+            recovery: self.recovery.clone(),
+            current_branch: self.current_branch.clone(),
+            wizard_enabled: self.wizard_enabled,
+            boundaries: self.boundaries.clone(),
+            game: self.game.clone(),
+            archive: self.archive.clone(),
+            revisions: self.revisions.clone(),
+            receipts: self.receipts.clone(),
+            path: self.path.clone(),
+            lock: self.lock.clone(),
+            store: self.store.clone(),
+        }
+    }
+
+    fn admit(
+        &self,
+        record: &Record,
+        candidate: &Candidate,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        if let Some(store) = &self.store {
+            let started = Instant::now();
+            let mut capture_time = Duration::ZERO;
+            let mut captures = 0;
+            store.enqueue(record, || {
+                let capture_started = Instant::now();
+                let checkpoint = Checkpoint::capture_candidate(
+                    candidate,
+                    self.archive.records.len() + 1,
+                    self.archive.wizard_game,
+                );
+                capture_time = capture_started.elapsed();
+                captures = 1;
+                checkpoint
+            })?;
+            if let Some(profile) = profile {
+                profile.journal_serialization += started.elapsed() - capture_time;
+                profile.checkpoint_capture += capture_time;
+                profile.checkpoint_captures += captures;
+                profile.records_serialized += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn valid_label(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+}
+fn new_id() -> EntryId {
+    EntryId(Uuid::new_v4().to_string())
+}
+fn invalid_anchor() -> Failure {
+    Failure::new(ErrorCode::InvalidAnchor, "Annotation target is unavailable")
+}
+pub(crate) fn storage_failure() -> Failure {
+    Failure::new(
+        ErrorCode::StorageFailure,
+        "Could not commit the game journal",
+    )
+}
+pub(crate) fn invalid_archive() -> Failure {
+    Failure::new(
+        ErrorCode::InvalidArchive,
+        "Unsupported or inconsistent game journal",
+    )
+}
+
+fn lock_save(path: &Path) -> Result<(PathBuf, Arc<fs::File>), Failure> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(|_| storage_failure())?;
+    let canonical = match fs::canonicalize(path) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::canonicalize(parent)
+            .map_err(|_| storage_failure())?
+            .join(path.file_name().ok_or_else(storage_failure)?),
+        Err(_) => return Err(storage_failure()),
+    };
+    let mut lock_name = canonical
+        .file_name()
+        .ok_or_else(storage_failure)?
+        .to_os_string();
+    lock_name.push(".lock");
+    let file = fs::File::options()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(canonical.with_file_name(lock_name))
+        .map_err(|_| storage_failure())?;
+    file.try_lock().map_err(|_| {
+        Failure::new(
+            ErrorCode::StorageFailure,
+            "Game journal is already in use or cannot be locked",
+        )
+    })?;
+    Ok((canonical, Arc::new(file)))
+}
+
+impl Candidate {
     fn apply_wizard(
         &mut self,
         receipt: &Receipt,
         operation: &WizardOperation,
         entry_id: &EntryId,
+        history: &[Record],
     ) -> Result<WizardResult, Failure> {
         let invalid = || {
             Failure::new(
@@ -1255,7 +1523,7 @@ impl Engine {
             }
             WizardOperation::Rewind { target } => {
                 if let Some(id) = target {
-                    if !self.archive.records.iter().any(|r| {
+                    if !history.iter().any(|r| {
                         &r.entry.id == id && r.entry.visible_to(receipt.actor, &receipt.user)
                     }) {
                         return Err(invalid());
@@ -1290,190 +1558,121 @@ impl Engine {
         }
         Ok(result)
     }
+}
 
-    fn backend_note(
-        &mut self,
-        actor: ActorId,
-        component: &str,
-        anchor: Anchor,
-        category: AnnotationCategory,
-        text: &str,
-        recorded_id: Option<EntryId>,
-    ) -> Result<HistoryEntry, Failure> {
-        if !valid_label(component) {
-            return Err(Failure::new(
-                ErrorCode::InvalidAnnotation,
-                "Invalid backend component",
-            ));
-        }
-        self.validate_note(actor, "", Audience::Actor, &anchor, text)?;
-        let entry = HistoryEntry {
-            id: recorded_id.unwrap_or_else(new_id),
-            branch: self.branch().clone(),
+#[cfg(test)]
+mod scaling_tests {
+    use super::*;
+    use tor_test_support::performance::Trace;
+
+    fn checked_action(engine: &mut Engine, actor: ActorId, action: Action, request: usize) {
+        let before: Vec<_> = engine
+            .actors()
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    engine.revision(id).unwrap(),
+                    engine.revision_view(id).unwrap(),
+                )
+            })
+            .collect();
+        let mut reference = engine.game.clone();
+        let result = engine.command(
+            "oracle",
+            "test",
             actor,
-            tick: self.game.tick(),
-            author: Author::Backend {
-                component: component.into(),
+            &format!("action-{request}"),
+            &engine.branch().clone(),
+            Command::Act {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: action.clone(),
             },
-            audience: Audience::Actor,
-            content: HistoryContent::Annotation {
-                anchor,
-                category,
-                text: text.into(),
+        );
+        let expected = reference.act(SimActor(actor.0), adapt::action(&action));
+        assert_eq!(result.is_ok(), expected.is_ok());
+        if expected.is_ok() {
+            reference.refresh_navigation();
+        }
+        assert_eq!(
+            engine.game, reference,
+            "optimized navigation must equal a full refresh"
+        );
+        for (id, revision, old) in before {
+            let changed = engine.revision_view(id).unwrap() != old;
+            assert_eq!(engine.revision(id).unwrap(), revision + u64::from(changed));
+        }
+    }
+
+    #[test]
+    fn optimized_decisions_match_full_views_and_navigation_for_every_actor() {
+        let trace = Trace::load();
+        for (regions, actors) in [(8, 1), (8, 8), (256, 8)] {
+            let mut engine =
+                Engine::memory(Scenario::performance(42, regions, actors).unwrap()).unwrap();
+            let mut secondary = 0;
+            let mut request = 0;
+            for step in trace.steps(regions) {
+                while engine.game.next_actor() != Some(SimActor(1)) {
+                    let actor = ActorId(engine.game.next_actor().unwrap().0);
+                    let action = if actor == ActorId(2) {
+                        let action = trace.secondary[secondary % trace.secondary.len()]
+                            .resolve(&engine.state(actor).unwrap());
+                        secondary += 1;
+                        action
+                    } else {
+                        Action::Wait
+                    };
+                    checked_action(&mut engine, actor, action, request);
+                    request += 1;
+                }
+                let action = step.resolve(&engine.state(ActorId(1)).unwrap());
+                checked_action(&mut engine, ActorId(1), action, request);
+                request += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_transactions_preserve_receipts_history_boundaries_and_shared_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = crate::SavePolicy {
+            max_pending_bytes: 1,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(
+            directory.path().join("rejected.db"),
+            Scenario::two_room(42),
+            policy,
+        )
+        .unwrap();
+        let game = engine.game.clone();
+        let branch = engine.branch().clone();
+        let command = Command::Act {
+            expected_revision: 0,
+            action: Action::Move {
+                direction: Direction::East,
             },
         };
-        let mut candidate = self.candidate();
-        candidate.archive.records.push(Record {
-            entry: entry.clone(),
-            receipt: None,
-        });
-        candidate.persist()?;
-        *self = candidate;
-        Ok(entry)
-    }
-
-    fn validate_note(
-        &self,
-        actor: ActorId,
-        user: &str,
-        audience: Audience,
-        anchor: &Anchor,
-        text: &str,
-    ) -> Result<(), Failure> {
-        let revision = self.revision(actor)?;
-        if text.trim().is_empty()
-            || text.len() > MAX_NOTE_BYTES
-            || text
-                .chars()
-                .any(|c| c.is_control() && c != '\n' && c != '\t')
-        {
-            return Err(Failure::new(
-                ErrorCode::InvalidAnnotation,
-                "Notes require 1–4096 bytes of plain text",
-            ));
-        }
-        match anchor {
-            Anchor::State { revision: target } if *target <= revision => Ok(()),
-            Anchor::Entry { id } => {
-                let entry = self
-                    .archive
-                    .records
-                    .iter()
-                    .map(|r| &r.entry)
-                    .find(|entry| &entry.id == id)
-                    .ok_or_else(invalid_anchor)?;
-                if &entry.branch != self.branch()
-                    || !entry.visible_to(actor, user)
-                    || (audience == Audience::Actor && entry.audience == Audience::Private)
-                {
-                    return Err(invalid_anchor());
-                }
-                Ok(())
-            }
-            _ => Err(invalid_anchor()),
+        for _ in 0..2 {
+            assert_eq!(
+                engine
+                    .command(
+                        "p",
+                        "test",
+                        ActorId(1),
+                        "retryable",
+                        &branch,
+                        command.clone()
+                    )
+                    .unwrap_err()
+                    .code,
+                ErrorCode::StorageFailure
+            );
+            assert_eq!(engine.game, game);
+            assert!(engine.receipts.is_empty() && engine.archive.records.is_empty());
+            assert_eq!(engine.boundaries.len(), 1);
+            assert_eq!(engine.revision(ActorId(1)).unwrap(), 0);
         }
     }
-
-    // Only internal transactional candidates may share the save lock. Exposing
-    // Clone would allow two independent engines to overwrite each other's journal.
-    fn candidate(&self) -> Self {
-        Self {
-            recovery: self.recovery.clone(),
-            current_branch: self.current_branch.clone(),
-            wizard_enabled: self.wizard_enabled,
-            boundaries: self.boundaries.clone(),
-            game: self.game.clone(),
-            archive: self.archive.clone(),
-            revisions: self.revisions.clone(),
-            receipts: self.receipts.clone(),
-            path: self.path.clone(),
-            lock: self.lock.clone(),
-            store: self.store.clone(),
-        }
-    }
-
-    fn persist(&self) -> Result<(), Failure> {
-        self.persist_profiled(None)
-    }
-
-    fn persist_profiled(&self, profile: Option<&mut CommandProfile>) -> Result<(), Failure> {
-        if let Some(store) = &self.store {
-            let started = Instant::now();
-            let mut capture_time = Duration::ZERO;
-            let mut captures = 0;
-            store.enqueue(
-                self.archive.records.last().ok_or_else(storage_failure)?,
-                || {
-                    let capture_started = Instant::now();
-                    let checkpoint = Checkpoint::capture(self);
-                    capture_time = capture_started.elapsed();
-                    captures = 1;
-                    checkpoint
-                },
-            )?;
-            if let Some(profile) = profile {
-                profile.journal_serialization += started.elapsed() - capture_time;
-                profile.checkpoint_capture += capture_time;
-                profile.checkpoint_captures += captures;
-                profile.records_serialized += 1;
-            }
-        }
-        Ok(())
-    }
-}
-
-pub(crate) fn valid_label(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
-}
-fn new_id() -> EntryId {
-    EntryId(Uuid::new_v4().to_string())
-}
-fn invalid_anchor() -> Failure {
-    Failure::new(ErrorCode::InvalidAnchor, "Annotation target is unavailable")
-}
-pub(crate) fn storage_failure() -> Failure {
-    Failure::new(
-        ErrorCode::StorageFailure,
-        "Could not commit the game journal",
-    )
-}
-pub(crate) fn invalid_archive() -> Failure {
-    Failure::new(
-        ErrorCode::InvalidArchive,
-        "Unsupported or inconsistent game journal",
-    )
-}
-
-fn lock_save(path: &Path) -> Result<(PathBuf, Arc<fs::File>), Failure> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent).map_err(|_| storage_failure())?;
-    let canonical = match fs::canonicalize(path) {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::canonicalize(parent)
-            .map_err(|_| storage_failure())?
-            .join(path.file_name().ok_or_else(storage_failure)?),
-        Err(_) => return Err(storage_failure()),
-    };
-    let mut lock_name = canonical
-        .file_name()
-        .ok_or_else(storage_failure)?
-        .to_os_string();
-    lock_name.push(".lock");
-    let file = fs::File::options()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(canonical.with_file_name(lock_name))
-        .map_err(|_| storage_failure())?;
-    file.try_lock().map_err(|_| {
-        Failure::new(
-            ErrorCode::StorageFailure,
-            "Game journal is already in use or cannot be locked",
-        )
-    })?;
-    Ok((canonical, Arc::new(file)))
 }

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Extent, Material, Position, Terrain};
+use crate::{Extent, Material, Position, Shared, Terrain};
 
 #[path = "world_checkpoint.rs"]
 pub mod checkpoint;
@@ -133,18 +133,18 @@ pub enum WorldError {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct World {
-    #[serde(with = "crate::checkpoint_map")]
-    doors: BTreeMap<Location, Door>,
-    regions: BTreeMap<RegionId, Region>,
-    #[serde(with = "crate::checkpoint_map")]
-    passages: BTreeMap<(Location, Direction), Passage>,
-    #[serde(with = "crate::checkpoint_map")]
-    rotations: BTreeMap<(Location, Direction), u8>,
-    #[serde(with = "crate::checkpoint_map")]
-    terrain: BTreeMap<Location, Terrain>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    doors: Shared<BTreeMap<Location, Door>>,
+    regions: Shared<BTreeMap<RegionId, Region>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    passages: Shared<BTreeMap<(Location, Direction), Passage>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    rotations: Shared<BTreeMap<(Location, Direction), u8>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    terrain: Shared<BTreeMap<Location, Terrain>>,
     /// Carved interior extents also locate join apertures; storage includes a shell.
-    chambers: BTreeMap<RegionId, Extent>,
-    place_hints: BTreeSet<Location>,
+    chambers: Shared<BTreeMap<RegionId, Extent>>,
+    place_hints: Shared<BTreeSet<Location>>,
 }
 
 /// A cell-sized barrier entity, unrelated to portal identity.
@@ -225,13 +225,13 @@ impl World {
 
     pub fn new(regions: Vec<Region>, passages: Vec<Passage>) -> Result<Self, WorldError> {
         let mut world = Self {
-            doors: BTreeMap::new(),
-            regions: BTreeMap::new(),
-            passages: BTreeMap::new(),
-            rotations: BTreeMap::new(),
-            terrain: BTreeMap::new(),
-            chambers: BTreeMap::new(),
-            place_hints: BTreeSet::new(),
+            doors: Shared::new(BTreeMap::new()),
+            regions: Shared::new(BTreeMap::new()),
+            passages: Shared::new(BTreeMap::new()),
+            rotations: Shared::new(BTreeMap::new()),
+            terrain: Shared::new(BTreeMap::new()),
+            chambers: Shared::new(BTreeMap::new()),
+            place_hints: Shared::new(BTreeSet::new()),
         };
         for region in regions {
             if world.regions.insert(region.id, region).is_some() {
@@ -565,9 +565,25 @@ impl World {
     }
 
     pub fn exits(&self, region: RegionId) -> impl Iterator<Item = &Passage> {
+        let start = Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        };
+        let end = Location {
+            region,
+            position: Position {
+                x: i32::MAX,
+                y: i32::MAX,
+                z: i32::MAX,
+            },
+        };
         self.passages
-            .values()
-            .filter(move |passage| passage.from.region == region)
+            .range((start, Direction::North)..=(end, Direction::Down))
+            .map(|(_, passage)| passage)
     }
 
     /// Actual movement topology, excluding sight-only material rim projection.
@@ -620,5 +636,35 @@ impl World {
     pub fn step(&self, from: Location, direction: Direction) -> Option<Location> {
         let to = self.adjacent(from, direction)?;
         self.walkable(to).then_some(to)
+    }
+}
+
+#[cfg(test)]
+mod sharing_tests {
+    use super::*;
+    #[test]
+    fn door_edits_share_large_geometry_and_keep_the_previous_boundary_unchanged() {
+        let regions = (1..=256)
+            .map(|id| Region {
+                id: RegionId(id),
+                name: format!("room-{id}"),
+                bounds: Extent::new(9, 9, 2).unwrap(),
+            })
+            .collect();
+        let mut world = World::new(regions, vec![]).unwrap();
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 2, y: 2, z: 0 },
+        };
+        world.place_door(at, 1, false).unwrap();
+        let original = world.clone();
+        world.set_door(at, true);
+        assert!(!original.door(at).unwrap().open);
+        assert!(world.door(at).unwrap().open);
+        assert!(!world.doors.shares_storage(&original.doors));
+        assert!(world.regions.shares_storage(&original.regions));
+        assert!(world.passages.shares_storage(&original.passages));
+        assert!(world.terrain.shares_storage(&original.terrain));
+        assert!(world.rotations.shares_storage(&original.rotations));
     }
 }

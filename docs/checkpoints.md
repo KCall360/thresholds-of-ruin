@@ -66,8 +66,8 @@ the commands again. Only the suffix after the checkpoint runs through strict
 deterministic replay. This bounds **simulation replay** by the capture interval
 for ordinary continued play once a checkpoint is committed. Startup is not constant
 in total history: frame validation, history loading and receipt rebuilding remain
-linear in retained records. State-copy costs during suffix replay remain Phase D
-work. Disabling captures, increasing the interval, or waiting to persist a new
+linear in retained records. Suffix replay uses the same bounded transaction candidates and shared state
+as ordinary actions. Disabling captures, increasing the interval, or waiting to persist a new
 capture changes the effective replay bound.
 
 A snapshot exceeding the size limit fails saving rather than publishing an

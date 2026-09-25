@@ -36,15 +36,19 @@ def expected_actions(regions, actors, history, cycles):
     return result
 
 
-def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None):
+def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None, phase_d=False, discovery_only=False):
     cases, samples, ends = {}, defaultdict(list), {}
+    traversals, traversal_ends = {}, {}
+    tables = {"case": cases, "case_end": ends, "traversal": traversals, "traversal_end": traversal_ends}
     for row in rows:
-        if row["kind"] == "case": cases[row["case"]] = row
+        if row["kind"] in tables:
+            table = tables[row["kind"]]
+            assert row["case"] not in table, "Duplicate case metadata or completion"
+            table[row["case"]] = row
         elif row["kind"] == "sample": samples[row["case"]].append(row)
-        elif row["kind"] == "case_end": ends[row["case"]] = row
     matrix = itertools.product([1,8] if quick else [1,8,64,256],[1,8],[0,100] if quick else [0,100,1000,10000],["memory","durable"])
     expected_cases = {f"r{r}-a{a}-h{h}-{storage}" for r,a,h,storage in matrix}
-    if phase_b or phase_c:
+    if phase_b or phase_c or phase_d:
         expected_cases = {f"r8-a{a}-h{h}-{s}" for a,h,s in itertools.product([1,8],[100,10000],["memory","durable"])}
         expected_cases.add("r256-a8-h10000-durable")
     if phase_c:
@@ -52,6 +56,8 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
     if selected_case is not None:
         assert selected_case in expected_cases, "Unknown selected case"
         expected_cases = {selected_case}
+    if discovery_only:
+        expected_cases = set()
     assert set(cases) == set(ends) == expected_cases, "Missing or unexpected completed matrix case"
     for case, meta in cases.items():
         expected = expected_actions(meta["regions"],meta["actors"],meta["history_start"],meta["cycles"])
@@ -72,6 +78,8 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
                 assert profile["candidate_captures"] <= 1 and profile["rollback_snapshots"] <= 1
                 assert profile["actors_observed"] <= 2*meta["actors"]
                 assert profile["revision_comparisons"] <= meta["actors"]
+                if meta.get("profile_version", 1) >= 2:
+                    validate_work(profile, resolved, meta["actors"])
                 assert profile["records_serialized"] <= history
                 if meta["storage"] == "background_sqlite_journal":
                     assert profile["records_serialized"] == 1
@@ -93,7 +101,7 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
             assert status["batches"] > 0 and status["journal_bytes"] > 0
             final = actual[-1]["save_status"]
             assert status["journal_bytes"] == final["journal_bytes"] + final["pending_bytes"]
-        if phase_c:
+        if phase_c or phase_d:
             recovery = ends[case]["recovery"]
             assert recovery["records_loaded"] == history
             assert recovery["records_replayed"] == history - recovery["checkpoint_sequence"]
@@ -109,9 +117,16 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
             else:
                 assert recovery["checkpoint_sequence"] == 0
                 assert recovery["records_replayed"] == history
-                if interval:
+                if interval and meta["storage"] == "background_sqlite_journal":
                     assert history < interval
-    for regions in (() if phase_b or phase_c or selected_case else (8,64,256)):
+    discovery_regions = (8,256) if phase_d or discovery_only else (8,64,256)
+    required_discovery = () if (phase_b or phase_c or selected_case) and not discovery_only else discovery_regions
+    expected_traversals = {f"traversal-r{r}" for r in required_discovery}
+    assert set(samples) == expected_cases | expected_traversals, "Unexpected sample case"
+    assert set(traversal_ends) == expected_traversals, "Missing or unexpected discovery completion"
+    if traversals:
+        assert set(traversals) == expected_traversals, "Missing or unexpected discovery metadata"
+    for regions in required_discovery:
         case = f"traversal-r{regions}"
         actual = samples[case]
         cycles = 2 if quick else regions-1
@@ -119,7 +134,35 @@ def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None
         assert sum(s["label"] == "cross_region_boundary" for s in actual) == cycles
         assert actual[-1]["client_memory"] > actual[0]["client_memory"], (case,"memory must grow")
         assert actual[-1]["history_end"] == len(actual)
+        expected = SPEC["traversal"] * cycles
+        metadata = traversals.get(case, {})
+        end = traversal_ends[case]
+        assert end["history_end"] == len(actual) and end["client_memory"] == actual[-1]["client_memory"]
+        if metadata:
+            assert metadata["cycles"] == cycles and metadata["regions"] == regions and metadata["trace_version"] == SPEC["version"]
+        for index, (sample, step) in enumerate(zip(actual, expected)):
+            assert sample["actor"] == 1
+            if step["action"]["type"] == "door":
+                assert sample["action"]["type"] == "set_door" and sample["action"]["open"] == step["action"]["open"]
+            else:
+                assert sample["action"] == step["action"]
+            assert sample["label"] == step["label"] and sample["expected"] == step["expected"]
+            assert sample["history_start"] == index and sample["history_end"] == index + 1
+            if metadata.get("profile_version", 1) >= 2:
+                validate_work(sample["profile"], sample["action"], 1)
     return cases, samples, ends
+
+
+def validate_work(profile, action, actors):
+    """Version 2 contracts describe actual calls, separate from fixture version 1."""
+    if action["type"] == "wait":
+        assert (profile["actors_observed"], profile["perception_calls"], profile["scene_calls"], profile["navigation_refreshes"]) == (0,0,0,0)
+        assert profile["revision_comparisons"] == actors
+    else:
+        assert profile["actors_observed"] == 2*actors
+        assert profile["scene_calls"] == profile["perception_calls"]
+        assert profile["scene_calls"] <= 2*actors + (action["type"] == "set_door")
+    assert profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1
 
 
 def main():
@@ -128,17 +171,19 @@ def main():
     parser.add_argument("--quick",action="store_true")
     parser.add_argument("--phase-b",action="store_true")
     parser.add_argument("--phase-c",action="store_true")
+    parser.add_argument("--phase-d",action="store_true")
+    parser.add_argument("--discovery-only",action="store_true")
     parser.add_argument("--case")
     parser.add_argument("--summary",type=Path)
     args = parser.parse_args()
     opener = gzip.open if args.input.suffix == ".gz" else open
     with opener(args.input,"rt",encoding="utf-8-sig") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
-    cases,samples,ends = validate(rows,args.quick,args.phase_b,args.phase_c,args.case)
+    cases,samples,ends = validate(rows,args.quick,args.phase_b,args.phase_c,args.case,args.phase_d,args.discovery_only)
     summaries = [r for r in rows if r["kind"] != "sample"]
     if args.summary:
         args.summary.write_text("\n".join(json.dumps(r) for r in summaries)+"\n",encoding="utf-8")
-    print(f"Verified {len(cases)} complete cases, {sum(len(samples[c]) for c in cases)} ordered samples, history and byte accounting.")
+    print(f"Verified {len(cases)} complete cases, {sum(len(values) for values in samples.values())} ordered samples, history and byte accounting.")
     for row in rows:
         if row["kind"] == "summary" and row["label"] == "mixed" and row["phase"] == "authoritative_total":
             print(f"{row['case']}: n={row['n']} mean={row['mean_ms']:.3f} p50={row['p50_ms']:.3f} p95={row['p95_ms']:.3f} max={row['max_ms']:.3f} ms")

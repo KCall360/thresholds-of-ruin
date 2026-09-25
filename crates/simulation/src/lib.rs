@@ -6,6 +6,7 @@
 pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;
+mod navigation_map;
 mod observation;
 mod travel;
 pub use travel::TravelStep;
@@ -17,7 +18,7 @@ pub use observation::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 
-use tor_world::{Direction, Location, Passage, Region, RegionId, World};
+use tor_world::{Direction, Location, Passage, Region, RegionId, Shared, World};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -101,12 +102,12 @@ struct Item {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     material_surfaces: bool,
-    navigation: BTreeMap<ActorId, travel::Navigation>,
-    world: World,
+    navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
+    world: Shared<World>,
     seed: u64,
     tick: u64,
     actors: BTreeMap<ActorId, Actor>,
-    items: BTreeMap<ItemId, Item>,
+    items: Shared<BTreeMap<ItemId, Item>>,
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
@@ -141,11 +142,11 @@ impl Game {
         Self {
             material_surfaces: false,
             navigation: BTreeMap::new(),
-            world,
+            world: Shared::new(world),
             seed,
             tick: 0,
             actors: BTreeMap::new(),
-            items: BTreeMap::new(),
+            items: Shared::default(),
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
@@ -446,5 +447,41 @@ impl Game {
             next_actor,
             next_tick: self.tick,
         })
+    }
+}
+
+#[cfg(test)]
+mod sharing_tests {
+    use super::*;
+    use tor_world::Position;
+    #[test]
+    fn snapshots_share_unchanged_world_items_and_navigation_but_isolate_mutations() {
+        let mut game = Game::two_room(42);
+        let location = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(location, NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.refresh_navigation();
+        let original = game.clone();
+        game.act(actor, Action::Wait).unwrap();
+        game.refresh_navigation();
+        assert!(game.world.shares_storage(&original.world));
+        assert!(game.items.shares_storage(&original.items));
+        assert!(game.navigation[&actor].shares_storage(&original.navigation[&actor]));
+        game.place_item(location, "new token".into()).unwrap();
+        assert_ne!(game.items, original.items);
+        assert!(game.world.shares_storage(&original.world));
+        let scene = game.scene(actor).unwrap();
+        let observation = game.observe(actor).unwrap();
+        let counts = diagnostics::work_counts();
+        let (combined, projected) = game.observe_scene(actor).unwrap();
+        let after = diagnostics::work_counts();
+        assert_eq!(after.scenes - counts.scenes, 1);
+        assert_eq!(after.observations - counts.observations, 1);
+        assert_eq!(combined, observation);
+        assert_eq!(projected, scene);
     }
 }

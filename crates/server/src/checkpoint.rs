@@ -39,14 +39,27 @@ pub(crate) struct DiskCheckpoint {
 }
 
 impl Checkpoint {
+    #[cfg(test)]
     pub(crate) fn capture(engine: &Engine) -> Self {
+        Self::capture_candidate(
+            &Candidate::capture(engine),
+            engine.archive.records.len(),
+            engine.archive.wizard_game,
+        )
+    }
+
+    pub(super) fn capture_candidate(
+        state: &Candidate,
+        record_count: usize,
+        wizard_game: bool,
+    ) -> Self {
         Self {
-            current_branch: engine.current_branch.clone(),
-            game: engine.game.clone(),
-            revisions: engine.revisions.clone(),
-            boundaries: engine.boundaries.clone(),
-            record_count: engine.archive.records.len(),
-            wizard_game: engine.archive.wizard_game,
+            current_branch: state.current_branch.clone(),
+            game: state.game.clone(),
+            revisions: state.revisions.clone(),
+            boundaries: state.boundaries.clone(),
+            record_count,
+            wizard_game,
         }
     }
 

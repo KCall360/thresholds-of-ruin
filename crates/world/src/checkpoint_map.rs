@@ -21,3 +21,25 @@ pub fn deserialize<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>, D: Deser
     }
     Ok(entries.into_iter().collect())
 }
+
+/// Preserve strict ordered-map decoding for copy-on-write backend maps.
+pub mod shared {
+    use super::*;
+    use crate::Shared;
+    pub fn serialize<K: Serialize, V: Serialize, S: Serializer>(
+        map: &Shared<BTreeMap<K, V>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        super::serialize(map, serializer)
+    }
+    pub fn deserialize<
+        'de,
+        K: Deserialize<'de> + Ord,
+        V: Deserialize<'de>,
+        D: Deserializer<'de>,
+    >(
+        deserializer: D,
+    ) -> Result<Shared<BTreeMap<K, V>>, D::Error> {
+        super::deserialize(deserializer).map(Shared::new)
+    }
+}

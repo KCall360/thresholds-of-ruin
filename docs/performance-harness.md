@@ -4,6 +4,8 @@ Status: Phase A complete, 2026-09-24. The [measured findings](phase-a-findings.m
 retain the complete release baseline and verification. Phase B background
 storage is implemented; see the [Phase B findings](phase-b-findings.md).
 Phase C adds [checkpoints](checkpoints.md) and focused `--phase-c` comparisons.
+Phase D adds `--phase-d` state-copy and full growing-discovery checks; see the
+[Phase D findings](phase-d-findings.md).
 Maintain this harness as features evolve and use targeted release-build checks
 under the [development practices](../CONTRIBUTING.md); the full matrix is not
 required for every change. The governing scope remains
@@ -100,7 +102,8 @@ time. Restart diagnostics separate loaded history records from simulated tail
 records. `--checkpoint-interval` selects the capture interval; zero supplies a
 matched full-replay baseline. These
 bytes are not SQLite physical I/O. Final flush is outside action timing and
-reported separately. Broad candidate clones remain measured costs.
+reported separately. Candidate capture now copies decision state with shared
+world/item/navigation ownership, without copying history or receipts.
 Allocation counts are omitted because no low-impact allocator instrumentation
 is established under the workspace's unsafe-code prohibition.
 
@@ -119,7 +122,7 @@ fixture acquires the save lock and persists it before timed commands. Diagnostic
 saves also acquire the lock, including attempts to overwrite an active save.
 
 Every matrix case records final save size and normal restart/replay time, which
-includes strict frame validation and full replay; current startup does not rewrite the archive. Replay is not replaced with the
+includes strict frame validation and checkpoint-tail replay; startup does not rewrite the archive. Replay is not replaced with the
 fixture seeding shortcut. The report validates disclosed state after restart.
 Raw samples must be retained with the source/build that produced them.
 
@@ -176,7 +179,7 @@ access, never silently skipped. Windows/Linux CI is required before merging.
 The [background-saving guide](background-saving.md) describes current storage
 and recovery tests. The [persistence review](persistence-review.md) retains
 historical Phase A evidence. Process tests do not prove hardware power-loss
-behavior. Application checkpoints and compaction remain deferred.
+behavior. Checkpoints and logical compaction are covered by the current recovery tests.
 
 ## Focused Phase B run
 
@@ -191,3 +194,20 @@ Production defaults remain configurable and are listed in
 [background saving](background-saving.md). Use the current raw schema when
 interpreting asynchronous worker metrics; the Phase A report's physical I/O
 counts are not interchangeable with application journal bytes.
+
+## Focused Phase D and growing discovery
+
+```sh
+cargo run --release --locked -p tor-server --example latency_bench -- --phase-d --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > phase-d.jsonl
+python scripts/performance_report.py phase-d.jsonl --phase-d
+```
+
+This runs the nine Phase B scale cases and complete traversal of eight and 256
+regions. `--discovery-only` runs just those two traversals; pass the same flag to
+the report. `--case NAME` still selects one mixed case. Discovery keeps every
+received cell in the same client observer and grows authoritative navigation.
+The original fixture version 1 and action ordering are unchanged. Profiling schema
+version 2 adds contracts for zero observation/scene work on waits and one scene per
+actual observation on other actions. Retained version-1 profiling remains valid.
+Do not interpret a mixed median dominated by scheduled waits as movement latency;
+retain per-label distributions and individual tails.

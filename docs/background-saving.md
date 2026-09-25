@@ -95,7 +95,8 @@ and rollback-journal writes are SQLite's responsibility and are not equal to
 encoded frame bytes. Periodic [checkpoints and logical compaction](checkpoints.md)
 move covered records unchanged into retained history and replace the current
 snapshot atomically. Startup restores the checkpoint and simulates only its tail;
-all history remains readable and retryable. Candidate copying remains Phase D work.
+all history remains readable and retryable. Command transactions retain history in
+place and publish only their new record and decision state after queue admission.
 
 ## Verification
 

@@ -1,0 +1,252 @@
+{
+  "date": "2026-09-25",
+  "base_commit": "cea088c2686c7a837b917bfb5d62a4fbc706bfae",
+  "reference": "Merged Phase C engine at base_commit. Only latency_bench selectors/metadata changed in reference checkout; profile_version=1.",
+  "optimized": "Phase D working tree, recorded source hashes below; profile_version=2. final is the region-shared navigation implementation.",
+  "commands": {
+    "reference": "reference.exe --phase-d --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "final": "final.exe --phase-d --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "baseline": "baseline.exe --phase-b --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1",
+    "optimized-initial": "optimized.exe --phase-d --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1"
+  },
+  "validation": "performance_report.py FILE --phase-d (use --phase-b for baseline)",
+  "save_directory": "F:/Codex/Roguelike/target/phase-d; TMP and TEMP explicitly set here",
+  "hardware": {
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "NumberOfCores": 6,
+        "NumberOfLogicalProcessors": 12
+      }
+    ],
+    "os": [
+      {
+        "Caption": "Microsoft Windows 11 Home",
+        "Version": "10.0.26200",
+        "BuildNumber": "26200"
+      }
+    ],
+    "volume": [
+      {
+        "DriveLetter": "F",
+        "FileSystem": "NTFS",
+        "SizeRemaining": 613980463104,
+        "Size": 1000068870144
+      }
+    ],
+    "disk": [
+      {
+        "FriendlyName": "ST1000LM035-1RK172",
+        "BusType": "RAID",
+        "Size": 1000204886016
+      }
+    ]
+  },
+  "limitations": [
+    "Initial baseline overlapped compilation and is not used for final comparison.",
+    "Clean reference and final measurements had no competing builds or test suites; normal desktop activity was not controlled.",
+    "Discovery is detached; mixed durable cases include background checkpointing and verified restart.",
+    "Mixed percentiles include many scheduled waits; per-label values are retained.",
+    "No full 64-case matrix; no hardware power-loss claim."
+  ],
+  "binaries": {
+    "baseline": "948ef18c89bff54765e704efe4fc5f094df8fad647a3832f488f7fd9880e8e90",
+    "reference": "e7c5011ddcf20a7676175f6b6b0827c4fc2962e82c1a53aab3fdf85128a465f9",
+    "optimized": "54870fc3bf47cad72c12bc370d6fa1309b1d49956d6fafe36a0446caced63b49",
+    "final": "063f3a78ef0f33f5777d1320b65e0a51512e580ea7fc269c4d402406c0b15792"
+  },
+  "source_sha256_lf": {
+    "Cargo.lock": "0b0bc928b538730aa38e5580908f2285ad668d4025b8358534c3956d3c6a4428",
+    "Cargo.toml": "95a3b155052409e818c6d11bafab63e550abd351ebb6120546b8997f204089be",
+    "crates/client-ascii/Cargo.toml": "5380b495b9960b3eb5780d4a7cb2fe6f6a9df06aedaa560e2510599558824bd5",
+    "crates/client-ascii/src/lib.rs": "c1282b0e89cc72ede9f52acbb2d3cb0bd4671e0eae281bcd38f19da1172a8ffc",
+    "crates/client-ascii/src/main.rs": "521ede9add4395a3d89f09e2f239f99aa04738572b68c9cae399fd8c07514d0d",
+    "crates/client-ascii/src/model.rs": "45e32c972faa416e29abe748c191c86fde00543d47b0332c195b933a761acbb6",
+    "crates/client-ascii/src/network.rs": "f5a7288efb775e790652882b77d9a646124f70dea08ef065884464c39dc89bdd",
+    "crates/client-ascii/src/render.rs": "458799e90c09edeae8bf0d6bbe7fd8e0c5ca77529a791483c390fd2b1bb02154",
+    "crates/client-ascii/tests/map_memory.rs": "807361966734cb4d4cbb5e847bc8fb1c2ff94fc60f253fa5d5733f9ec06ca474",
+    "crates/client-ascii/tests/presentation.rs": "f2421b7c06674b7dcd7926637665d4e972bd544d677a11ae1f1cf9563a1c4d00",
+    "crates/client-common/Cargo.toml": "c45fc019fdc36749b753740d32bafb9fde174f59284b6363464dfd87550c36b4",
+    "crates/client-common/src/connection.rs": "28d5a56a74cd610edab3ab287289d1ac7f5b3bc471d9ea795025a7c4862e09a8",
+    "crates/client-common/src/lib.rs": "169c2fa6557e4c8496d4a7c2aa6ece12221fa2433f1964f230a4da7232f41ff4",
+    "crates/client-common/src/map_memory.rs": "4f704f5cb951ec7ada627baca5e585bd2e85cdadd3acbfc6e6f73db77506daa3",
+    "crates/client-common/src/state.rs": "385125b92980f294bc0915171ec8792e05460b7cf3256bf31ac394fd61cdbbe3",
+    "crates/client-common/tests/map_memory.rs": "b532928ae4c61727825d7d8a1cbff3d42a9ccc682dda25e63b0c58f595d176c0",
+    "crates/client-common/tests/memory.rs": "4a68f54e3dd68202ae7bb524c50e71835d3f194558b8b552608854e45669a2a0",
+    "crates/client-common/tests/streamed_notes.rs": "6fd1cbf5bb4886919479b6d21c7c5c904d28469d1eff0d1ac83d4105a4e9a815",
+    "crates/client-common/tests/travel.rs": "f784a9cf7491059e0502169d2e11356d2969cdbcb85316b2eafb28c0a267b961",
+    "crates/client-headless/Cargo.toml": "ab03a53c8365826c341514f45020470582e5c10252b06e2aa1ee92fa84d420d3",
+    "crates/client-headless/src/main.rs": "3c8a322a4a3bb976ba3104660ffe95414ef6e4e2c05a518f770ae589effa8a24",
+    "crates/client-text/Cargo.toml": "90e9132b04b5389428ae63843e0b53a784e8879fb5e0a7fd8913a9c05ae71af4",
+    "crates/client-text/src/adventure.rs": "2935198dafe803dbda330a53c84af0e89b451d856d6d6eaf7e223e76893c0e7e",
+    "crates/client-text/src/adventure_ui.rs": "ac35deeda6a5bc067e4218a0808b09d44ced56e665b872d63b904c31d7f21658",
+    "crates/client-text/src/lib.rs": "1ce7808bca8dcea264c8dd45e7fc195a103fd09b72be9a6ccde79acd347ab80a",
+    "crates/client-text/src/main.rs": "000a47a4eeff10ce8e03b1efc4d24b1a9c8af54c7927f05e396bfb06e740bba7",
+    "crates/client-text/tests/adventure.rs": "32ee1a290f6428f8ba602e24a2f30e34cdc875cd0f0deb7b3fe33f9c12f2009f",
+    "crates/client-text/tests/commands.rs": "90d32283e96739caccd7889b8363d254e478da043250a9ab6015ee3e3db21978",
+    "crates/protocol/Cargo.toml": "da4ee22e16924ef870e5f50824e2ec093cf9e5f2663ded218713f330d3a3e461",
+    "crates/protocol/src/lib.rs": "1e7f8ae8ea30e76587581fec26c77f6147147b9c585c55f1f28f767c7160a15f",
+    "crates/protocol/src/wire.rs": "4046d200737d43d011a5f3676b282a21568cff1852dcab38b24162d2830d6017",
+    "crates/protocol/tests/wire.rs": "24fd3f8ce4f6ebe9231c29c7116340f0aba421942d0d44e66320f2db5a340a7d",
+    "crates/server/Cargo.toml": "81b32d30b40ce0e8dcf1bc09536e5cbf4bae5994cf4d8e7cc5363c7fa5e60a88",
+    "crates/server/examples/latency_bench.rs": "3042ff767df84ff4aecd0ae27d5b4a29dc8091fda106d5855e3d0d1a48ae73c2",
+    "crates/server/src/adapt.rs": "d59b7a434561b98b4a92a1dfe00d20401d8608a988d7a315e34ec74c403a9956",
+    "crates/server/src/checkpoint.rs": "238c5d85885f24a4094bdf5ae61a307965d2d22dbf0d705b5c2655ca58c6dcb2",
+    "crates/server/src/developer.rs": "006d364d34699cea6f71e3ac9e844553cf3cab622e96ef9d66dfbf08dba20101",
+    "crates/server/src/engine.rs": "c272071e76441021126635282bdb06ad3b7b238a6ce574b97147b16ce98abd70",
+    "crates/server/src/journal.rs": "a5d3fccea75f9983896750acb59781a6ebcfe1fc153a6e800f1da29a390a9489",
+    "crates/server/src/lib.rs": "566749fa7201049d8fa785f3071baf3928d0921bdeef7c2bfcd269ec1b75a33e",
+    "crates/server/src/main.rs": "33e8e1cd2faeef617788c4d3fd47d1b135ab38e8da1d0c237ea3ee42540e169d",
+    "crates/server/src/performance_fixture.rs": "e93a32a12e45cb385002bb12c365e1b53649c56282ecc39c0f25f8a98ce071bb",
+    "crates/server/src/session.rs": "3a0e5c50b29d977aadb18c7491b7ce6e08ae1e42858a94b42c795fb73e0c947f",
+    "crates/server/src/storage.rs": "65ad75394c0770472337d3f9cb54b70def44ace400ccdbd8d6ab508a9cf82705",
+    "crates/server/src/transport.rs": "8d802e8b9b83fa04ada286e38910b08cf878f67ff72e3afc5cb6e8a61c37663f",
+    "crates/server/src/travel_tests.rs": "947740e2aedbb102048360392cd507543a021a488e72753719c3f734f77fbc89",
+    "crates/server/tests/background_save.rs": "3410fdd2ffe9a00e001ea012211e8cd463b4819aca6c38c0da9babf8b983d9e3",
+    "crates/server/tests/checkpoints.rs": "495dd0cd60c703a13d41e63455c1166d5e1ecc39f42e05697471f45e2e8a03bc",
+    "crates/server/tests/descriptions.rs": "4de127bb3eb270dcd6ec74d3a01d624fe7a07ceb576b570f48d33bfa237b7016",
+    "crates/server/tests/developer.rs": "dfdfc9f5f043e340652a6b313ce78d1d16db6471aaa9f1c77b4a26b26e0434f3",
+    "crates/server/tests/diagonal.rs": "c7f0a141449369a7850dac6b79714643027c6cdfa0261b7cb931f858bd5bc5ac",
+    "crates/server/tests/doors.rs": "0a042174daf0a6bc94bee2e1e28aa67c37556a681cb8449ca6d994be90ae14d2",
+    "crates/server/tests/geometry.rs": "780ed3fce75f58d225bd4d9dff12da44f738989d2d089e911901c484261c2151",
+    "crates/server/tests/history.rs": "f1e0c14d2b2ddb707868385aa978b4379669b46448399ef5211ebbc45fadf475",
+    "crates/server/tests/materials.rs": "14402e9d48f468c7ce725edfc144e95590e18427020887e1606074fb82057ef8",
+    "crates/server/tests/performance_contracts.rs": "f107a6a47d2f7bcfc553b436e88113fffb5276ad9da117b28afc66dde41ea777",
+    "crates/server/tests/performance_workloads.rs": "427004b8b2ffdc31560f1e39f532121ade638d12d11846ac870959e52d81f8a5",
+    "crates/server/tests/place_hints.rs": "09327e45def3122bee43294e83c7fbb772b8d7e06def129cda315ca0ffb7aff1",
+    "crates/server/tests/process.rs": "5e3a5b6a45597391e46a6a39bb6050caee4834d85ad1c64c0e1867d2b46f2d77",
+    "crates/server/tests/recovery_fixtures.rs": "7c6582a06ca114327914410c873410af3af209afec6bba9a6ba878e8778147cf",
+    "crates/server/tests/support/mod.rs": "66f4d1bbb65b8d4d2f63d76ef57b2d9565b7e61be646703fee8dc9e544dc3be6",
+    "crates/server/tests/travel.rs": "b0128ee2f7d4622e7000ab9fa71c1cb1de6ca679d4f15519dc888e1842fb3bbf",
+    "crates/server/tests/websocket.rs": "780379c21f17eb240a71905285779cb93140561d7223229c15f7a78373e6f265",
+    "crates/server/tests/wizard.rs": "f26db15bad6d6fc679ecf4f1edf50141aaaae9c985f3413ecca1e84658ee6466",
+    "crates/server/tests/wizard_websocket.rs": "dc13dc483aaf7a1b1e6970d0204dba7c3641165270cb33d0b726c4f6dc17d8e2",
+    "crates/simulation/Cargo.toml": "bfe107c8584239af435589d1cbc86f41a1f77d0912e7a9070234fa8aeb2885a5",
+    "crates/simulation/src/checkpoint.rs": "f00b74f3ed4ddf775131b849a5706d186d23e6920f6beea72fa272dd3f816712",
+    "crates/simulation/src/diagnostics.rs": "cabe21a453289365094c4558bae70f3d40f60f350f94641baee0694348fa0a50",
+    "crates/simulation/src/fixture.rs": "18ccf0a095086831ed70b24d72ba5f9424d1d56034e376946ae8510518931ce9",
+    "crates/simulation/src/lib.rs": "d019bd42c25faf400a28914756d1fe65b5e2205d68820779f86c20a5f4ab9eac",
+    "crates/simulation/src/navigation_map.rs": "826abde9903ff387de61234b65c751cf39d646136c4a6d66b359a6e17471ad5e",
+    "crates/simulation/src/observation.rs": "90199fba0f5dddb5dd8a14ca454902d893ef3561dbd8b5ef705b2485b85f856a",
+    "crates/simulation/src/travel.rs": "3e20f785a6dcdf0dab32dd681f8c6772071b6304dc99c5c00b7d5f0783f9c5b3",
+    "crates/simulation/tests/diagonal.rs": "ea345f6b8a0a266f9801ba65df566b1843ca5519a4e993aa36935f75ee9b71f7",
+    "crates/simulation/tests/doors.rs": "db326398a3f26b822f6ff56b876baedf681bc28b2149f3f891493a67c0df168e",
+    "crates/simulation/tests/enclosures.rs": "ea99cc3033bd3c2745c1b1e2770a0b5ab8ac2bd1ee8cf80b7a88c70f1d74774e",
+    "crates/simulation/tests/perception.rs": "ec966a69816ffcf3861ac349dc4c35932f408a8c13d5b82d98cabd1d3c70d765",
+    "crates/simulation/tests/travel.rs": "a323ed69c47ca2c1343e053214843c1fab4d44fa31a43692e5a44bfca66c3885",
+    "crates/simulation/tests/wizard_setup.rs": "7d8ecfeaae6fedf9da2e8b2abc93c0427642e4b0651d7e2c655db8536022b4cd",
+    "crates/test-support/Cargo.toml": "9fb90e4a497666de883cc31c3b798e1fc02b4778c5874bcd823b84a32cba076d",
+    "crates/test-support/src/lib.rs": "0064ceac071c4b665889745194c6b7615e6197c317d4faf1aca75141fb667759",
+    "crates/test-support/src/performance.rs": "dbb2fbf094402c73eef5d38621e0069183e96fb9b40fbddf1d4ab1f3c3a6c035",
+    "crates/test-support/tests/observation_stream.rs": "ad8c2ec0d52e2872e5ce84120511a0583481e6cc49396f2496c5e6ea4153bfc2",
+    "crates/test-support/tests/simulation_slice.rs": "7714e421f4247cf1666bdb85ab541185953d236ca3a7a4e74cb4e26f01b33c36",
+    "crates/world/Cargo.toml": "2f00ba5036587b98a00a208fb8c6d26c654b45a8a1a80a6f814a91e94c303771",
+    "crates/world/examples/fov_bench.rs": "7e439521697412c3d7a959d2d6cc702bb593b42abe061375c7dc32935d67a65f",
+    "crates/world/src/checkpoint_map.rs": "759886668bf7b75d9ce2414a80abdbcaa2256e7b4c973d06cae97c6b6dfcc2af",
+    "crates/world/src/lib.rs": "64ac417edef4bbfd0d494567dc8a920271baaacd433180896af4ab408c8108a3",
+    "crates/world/src/material.rs": "834bddf40a7a0b99c4a6930b6a4d782f3e485d327f87007fc304bcf377e76afa",
+    "crates/world/src/scene.rs": "5c41e409eab054426f6835f10269859fb78398299cfea66820c5f8cd7a011edc",
+    "crates/world/src/shadowcasting.rs": "6795d2cbb9038ccb7131de28a4af58dbb5955f78e078cf28981631ceb85b2d43",
+    "crates/world/src/shared.rs": "3da2aeef93b443ae2622315e0762bdc3d41ee62610aff942574506ac77a2c0d1",
+    "crates/world/src/topology.rs": "3defdf83d513a93c2a0a65409048ea52276fcffe3a892adc6092a4500ec51fd6",
+    "crates/world/src/world_checkpoint.rs": "f2c419dc46156538290c36f4c2379291c72336ff43f263002056f973d8f32c4d",
+    "crates/world/tests/diagonal.rs": "8ebc3742e4f299044a87672e40d55eaa8b0eae1ddca60745054bfa8bf5c67427",
+    "crates/world/tests/materials.rs": "dd8c512374466ea19d9334b71e7192aa6aeeb0d869982951a7e7d91e9643a3fc",
+    "crates/world/tests/passages.rs": "a803aa67610a8d4170ed1882bd06b12294baaa876f9dbeca80dc48ffb0475be6",
+    "crates/world/tests/place_hints.rs": "a2e076c8a202435d6ecfeb4bcaf4bbebb55086e63f523aca17e47a1711419ce5",
+    "crates/world/tests/region_bounds.rs": "86a037e319e428ef31cfd82b772438ac101509abf68b3dbd62cff4c5c504cf1f",
+    "crates/world/tests/scene.rs": "ed0c9583ae264cf94d74da380a435ab33b95e20c27dde044340d835ae447121f",
+    "crates/world/tests/shadowcasting.rs": "5e59e6d80679329702fb7e468d88a7d0919c3969fa82ead928c8160f60b24ff9",
+    "crates/world/tests/visibility.rs": "e5ad94366b7e30fcf52506918e19cee85205f0dc9e046aa75fa15640a7df5870",
+    "scripts/performance_report.py": "96214ccaaf2781f9658c4747fe45e6b8af68dd656e954ea898d88e4f308b8c13",
+    "scripts/test_performance_report.py": "5f636e814719790901caf2ab3cec977ccba9dffa2a44de83286c35ea4c1e79b1",
+    "crates/server/fixtures/performance-v1.json": "7189e826e65a0fd908edbd1d7b59ab3f25467b463d359d1b278e43f9db78fc47"
+  },
+  "artifacts": {
+    "actual-client.json": "d655de288b93bbb97883a31f69ae0e7e04d86f8e0b5b5953b2b94c691c97c356",
+    "actual-reference.json": "d76c0054f2cf712ac2471a4016838cfac3fd7737b49b3210c0755a319d5b34e6",
+    "actual-repeat.json": "e70b032a34dd1068cc328b4163007ae21e2316150d28d2de4514a2b6a51722e0",
+    "baseline.jsonl.gz": "afc224bb1cf0c43b02aa554f34d3d656a3d32cdf79c47b9be31812e5500a8b7f",
+    "final.jsonl.gz": "ecc84dc447ffa155d5cba228c0f25aadfc640956299c4216cc5716479304ae02",
+    "matrix-summary.json": "b311361a61e6cd7cda770357855fb82804d163741225b0e59b103ffe19c9a4be",
+    "optimized-initial.jsonl.gz": "073a55c6bd0dda14f277bff3c58c47ed97fdda91c703ce941d73d59e28230a24",
+    "reference.jsonl.gz": "5eee5d99995ea3ae2fea2e43a0e8b3d15788f76fc20f609765cbf45b66803400"
+  },
+  "actual_client_command": "python scripts/performance_driver.py --bin-dir target/release --output target/phase-d/actual-client --regions 256 --actors 8 --cycles 1 --pace-ms 0",
+  "actual_client_metrics": {
+    "request_to_ack_ms": {
+      "n": 495,
+      "p50_ms": 6.690300011541694,
+      "p95_ms": 18.023100012214854,
+      "max_ms": 24.18999999645166
+    },
+    "request_to_ready_ms": {
+      "n": 495,
+      "p50_ms": 7.241100000101142,
+      "p95_ms": 19.502000010106713,
+      "max_ms": 26.997300010407344
+    },
+    "request_to_presentation_ms": {
+      "n": 61,
+      "p50_ms": 66.59450000734068,
+      "p95_ms": 86.48379999794997,
+      "max_ms": 738.4389999933774
+    }
+  },
+  "actual_client_comparison": {
+    "actual-client": {
+      "request_to_ack_ms": {
+        "n": 495,
+        "p50_ms": 6.690300011541694,
+        "p95_ms": 18.023100012214854,
+        "max_ms": 24.18999999645166
+      },
+      "request_to_presentation_ms": {
+        "n": 61,
+        "p50_ms": 66.59450000734068,
+        "p95_ms": 86.48379999794997,
+        "max_ms": 738.4389999933774
+      }
+    },
+    "actual-reference": {
+      "request_to_ack_ms": {
+        "n": 495,
+        "p50_ms": 10.25340000342112,
+        "p95_ms": 19.407200001296587,
+        "max_ms": 772.5757000007434
+      },
+      "request_to_presentation_ms": {
+        "n": 61,
+        "p50_ms": 67.35840000328608,
+        "p95_ms": 81.24590000079479,
+        "max_ms": 92.44429999671411
+      }
+    },
+    "actual-repeat": {
+      "request_to_ack_ms": {
+        "n": 495,
+        "p50_ms": 6.287800002610311,
+        "p95_ms": 17.837899998994544,
+        "max_ms": 21.83730000979267
+      },
+      "request_to_presentation_ms": {
+        "n": 61,
+        "p50_ms": 60.442699992563576,
+        "p95_ms": 81.08420000644401,
+        "max_ms": 672.510099990177
+      }
+    }
+  },
+  "actual_client_comparison_note": "Consecutive Phase C server/current server runs use the exact same current headless/ASCII binaries, fixture and driver. All frontend sources are unchanged by Phase D. No competing builds/tests/launcher checks ran during these two measurements.",
+  "actual_client_binary_sha256": {
+    "target/phase-d/reference-bin/tor-server.exe": "cb59bac4f3bdc45912782d4b53eeff0730d7117b3d87e641fe26266a50f483c8",
+    "target/release/tor-server.exe": "9cbdd3e59c8a902408372d2d0f7d68d66e00766225e816aac5f1998871437951",
+    "target/release/tor-client-ascii.exe": "b9e18e1870457c6b9db56a6a06eb39f44c5017c55f28623ab90083fd3c3e9a9a",
+    "target/release/tor-client-headless.exe": "14315945749c83c66f7be2dd3e13af7d0ead78741efca3ce258af6d20c6ebad4"
+  },
+  "actual_client_comparison_commands": [
+    "python scripts/performance_driver.py --bin-dir target/phase-d/reference-bin --output target/phase-d/actual-reference --regions 256 --actors 8 --cycles 1 --pace-ms 0",
+    "python scripts/performance_driver.py --bin-dir target/release --output target/phase-d/actual-repeat --regions 256 --actors 8 --cycles 1 --pace-ms 0"
+  ],
+  "artifact_hash_policy": "SHA-256 of repository bytes; JSON artifacts use LF newlines, gzip artifacts retain their original bytes."
+}
