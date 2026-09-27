@@ -25,15 +25,21 @@ def validate_presentation_profile(profile):
                 raise ValueError("Invalid diagnostic report phase duration")
 
 
-def validate(rows):
+def validate(rows, version=1):
+    if version not in (1, 2):
+        raise ValueError('Unsupported client workload version')
     expected = [(cells, burst, sample) for cells in (64, 20956)
                 for burst in (1, 64) for sample in range(20)]
     if [(r["cells"], r["burst"], r["sample"]) for r in rows] != expected:
         raise ValueError("Missing, duplicated or reordered client workload samples")
     groups = {}
     for row in rows:
-        if row["version"] != 1 or row["memory"] != row["cells"] or row["chart"] != min(4096, row["cells"]):
+        if row["version"] != version or row["memory"] != row["cells"] or row["chart"] != min(4096, row["cells"]):
             raise ValueError("Wrong workload version or memory/chart coverage")
+        if version == 2:
+            expected_count = 1 if row['burst'] == 1 and row['sample'] == 0 else 2
+            if type(row.get('narration_count')) is not int or row['narration_count'] != expected_count:
+                raise ValueError('Missing semantic narration coverage')
         for phase in ("apply_ms", "render_ms"):
             value = row[phase]
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
@@ -46,9 +52,10 @@ def validate(rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("samples", type=Path)
+    parser.add_argument('--narration', action='store_true', help='Require version 2 semantic workload')
     args = parser.parse_args()
     rows = [json.loads(line) for line in args.samples.read_text(encoding="utf-8-sig").splitlines()]
-    print(json.dumps(validate(rows), indent=2))
+    print(json.dumps(validate(rows, version=2 if args.narration else 1), indent=2))
 
 
 if __name__ == "__main__":

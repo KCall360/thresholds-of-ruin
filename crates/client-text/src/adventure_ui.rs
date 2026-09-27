@@ -459,10 +459,12 @@ fn present(connection: &Connection, session: &mut Session, message: &ServerMessa
                         .travel()
                         .is_none_or(|t| t.phase != TravelPhase::Active)
                 {
-                    if let Some(entry) = event {
+                    if !connection.state.narration().is_empty() {
+                        for line in connection.state.narration() {
+                            println!("{line}");
+                        }
+                    } else if let Some(entry) = event {
                         println!("{}", adventure::event(entry, connection.state.state()));
-                    } else {
-                        println!("{}", adventure::describe(connection.state.state()));
                     }
                 }
             }

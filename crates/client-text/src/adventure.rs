@@ -658,33 +658,9 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn event(entry: &HistoryEntry, state: &StateView) -> String {
     match &entry.content {
-        HistoryContent::Action {
-            event: Event::DoorChanged { open, .. },
-            ..
-        } => format!(
-            "You {} the wooden door.",
-            if *open { "open" } else { "close" }
-        ),
-        HistoryContent::Action {
-            event: Event::Taken { item },
-            ..
-        } => state
-            .observation
-            .inventory
-            .iter()
-            .find(|i| i.id == *item)
-            .map_or_else(
-                || "Taken.".into(),
-                |i| format!("You pick up the {}.", safe(&i.name)),
-            ),
-        HistoryContent::Action {
-            event: Event::Moved { direction },
-            ..
-        } => format!("You move {}.", direction_name(*direction)),
-        HistoryContent::Action {
-            event: Event::Waited,
-            ..
-        } => "Time passes.".into(),
+        HistoryContent::Action { event, .. } => {
+            tor_client_common::narration::action(event, &state.observation)
+        }
         HistoryContent::Annotation { text, .. } => format!("Note: {}", safe(text)),
         HistoryContent::Wizard { summary, .. } => safe(summary),
         HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", safe(name)),

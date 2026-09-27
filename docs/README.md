@@ -24,6 +24,7 @@ until its guide and the roadmap are updated together.
 | Understand the project and run checks | [Repository README](../README.md) |
 | See what works and what comes next | [Project status and roadmap](milestones.md) |
 | Resume implementation work | [Session handoff](session-handoff.md) |
+| Review milestone 3 acceptance and next steps | [Milestone 3 closeout](milestone-3-closeout.md) |
 | Understand boundaries and design decisions | [Architecture](architecture.md) |
 | Review accepted future game requirements | [Game design plan](game-design-plan.md) |
 | Review 3p closure blockers and saved exploration | [Milestone 3p closeout audit](3p-closeout.md) |

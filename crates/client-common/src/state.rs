@@ -32,6 +32,7 @@ pub struct ClientState {
     stream: ObservationStream,
     memory: BTreeMap<String, RememberedCell>,
     map_memory: crate::map_memory::MapMemory,
+    narration: Vec<String>,
 }
 
 impl ClientState {
@@ -54,6 +55,7 @@ impl ClientState {
             snapshot,
             memory: BTreeMap::new(),
             map_memory: Default::default(),
+            narration: Vec::new(),
         };
         client.remember_view();
         Ok(client)
@@ -134,6 +136,10 @@ impl ClientState {
     pub fn state(&self) -> &StateView {
         &self.snapshot.state
     }
+    /// Latest observation's prose, derived only from disclosed facts. Not history.
+    pub fn narration(&self) -> &[String] {
+        &self.narration
+    }
     pub fn history(&self) -> &[HistoryEntry] {
         &self.snapshot.history.entries
     }
@@ -196,6 +202,10 @@ impl ClientState {
                 {
                     return Err(StreamError::InconsistentState);
                 }
+                let own_action = event.as_ref().and_then(|entry| match &entry.content {
+                    HistoryContent::Action { event, .. } => Some(event.clone()),
+                    _ => None,
+                });
                 if let Some(entry) = event {
                     if !matches!(
                         entry.content,
@@ -205,6 +215,11 @@ impl ClientState {
                     }
                     self.remember(*entry, update.cursor.tick)?;
                 }
+                self.narration = crate::narration::observation(
+                    &self.snapshot.state.observation,
+                    &state.observation,
+                    own_action.as_ref(),
+                );
                 self.snapshot.state = *state;
                 self.remember_view();
             }

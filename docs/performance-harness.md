@@ -128,6 +128,13 @@ Raw samples must be retained with the source/build that produced them.
 
 ## Observable 256-region run and desktop maintenance
 
+For milestone 3 semantic presentation, run `cargo run --release --locked -p
+tor-client-ascii --example client_bench -- --narration` and validate the resulting
+JSON lines with `python scripts/client_performance_report.py FILE --narration`.
+This selects version 2 actor/door sight changes; omitting the flag preserves the
+original version 1 workload. Both use 64/20,956 remembered cells and 1/64-update
+bursts. See [milestone 3 findings](milestone-3-closeout.md).
+
 ```sh
 cargo build --workspace --bins --locked
 python scripts/performance_driver.py --regions 256 --cycles 3 --pace-ms 250
@@ -156,7 +163,7 @@ Pacing, snapshot requests and progress annotations are outside these intervals.
 
 The three machine-local shortcuts are Text, ASCII, and Text + ASCII Spectator.
 The 256 Region Spectator shortcut has been removed; its command-line driver remains. Their scripts and icons use the explicitly rebuilt
-`target/debug` binaries. The paired game's text helper uses that same directory.
+`target/release` binaries. The paired game's text helper uses that same directory.
  Verify real connections and presented
 frames, helper paths, separate spectator credentials, fresh saves and owned
 cleanup whenever updating binaries; `cargo check` is insufficient.

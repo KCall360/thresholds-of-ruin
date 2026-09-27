@@ -361,6 +361,10 @@ impl Canvas {
                 );
             }
             let entries = state.history();
+            let prose = state.narration().join(" ");
+            for (i, line) in crate::wrap(&prose, 142).iter().take(2).enumerate() {
+                self.text(28, 696 + i * 12, line, TEXT, 1, 142);
+            }
             for (i, entry) in entries
                 .iter()
                 .rev()

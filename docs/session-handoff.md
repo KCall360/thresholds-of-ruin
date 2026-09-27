@@ -1,24 +1,30 @@
-# Session handoff — milestone 3 interactions and travel
+# Session handoff — milestone 4a scenario packages
 
 ## Current direction
 
-At the user's direction, milestone 3p is deferred, still open, and no longer
-blocks feature work. The initial shared action extension points now separate
-validation/timing, effect application and scheduling without changing gameplay,
-protocol, saves or rules. Concrete partial progress remains future work; see the
-[simulation guide](simulation-slice.md#shared-action-extension-points) and
-[architecture](architecture.md#time-and-actions). Durable place knowledge is implemented and verified locally;
-see [the feature guide](place-knowledge.md) and
-[verification findings](place-knowledge-findings.md). Continue milestone 3 with semantic
-narration/interruption and slow-client resynchronization acceptance. Extend wizard placement as needed to
-reproduce interactions and failures. Follow the [roadmap](milestones.md) and
-retain the ongoing feature performance checks in [development practices](../CONTRIBUTING.md).
+Milestone 3 is complete for the agreed slice, including narration and slow-client
+acceptance. See [the closeout and verification](milestone-3-closeout.md).
+The next session should start **milestone 4a: authored scenario packages and
+offline validation**, following the [roadmap](milestones.md) and accepted
+[game design](game-design-plan.md). Do not begin the first dungeon or generation
+before ordinary validated scenario packages exist.
+
+Milestone 3p remains deferred and open. The user explicitly assigned
+damage-triggered interruption to 4d with HP/damage mechanics. Offscreen named-place
+travel and concrete resumable timed actions also remain deferred. Existing action
+extension points and durable place knowledge are the foundation for later work.
+Keep the ongoing performance checks in [development practices](../CONTRIBUTING.md).
 The timing findings below remain unresolved evidence, not a completion claim.
+
+All three desktop shortcuts now use rebuilt `target/release` server/client
+binaries, including the shared text helper. Preserve their fresh-save behavior,
+prior saves, spectator credentials and owned-process cleanup when updating builds.
 
 ## Starting checkout and retained publication context
 
-The action extension-point refactor starts from local commit `ea80533`, the merge
-of PR #30. The publication details below describe the preceding 3p investigation.
+Milestone 3 closeout starts from `14daa91`, the merge of PR #31 (durable place
+knowledge and action extension points), on `codex/milestone-3-closeout`.
+The publication details below describe the preceding 3p investigation.
 
 PR #29 merged at `37a913dedc05b18b366c34e6ba6f728468381ec4` at
 2026-09-25 17:49:33 UTC. Windows/Linux CI passed on final head
@@ -76,8 +82,7 @@ kernel trace started. Obtain that profiling capability before assigning wall
 intervals to descheduling or pure I/O.
 Keep failed runs, nullable final diagnostic costs and historical measurements.
 
-The action refactor and durable-place feature form one publication checkpoint
-alongside the retained sequencing changes. Offscreen place travel and concrete resumable action
-progress remain deferred. Accumulate
+The action refactor and durable-place feature merged in PR #31. Offscreen place
+travel and concrete resumable action progress remain deferred. Accumulate
 planning edits locally; publish at a meaningful checkpoint through a PR and merge
 only after Windows/Linux CI pass on its final head.

@@ -27,6 +27,15 @@ class ClientPerformanceReport(unittest.TestCase):
         self.assertEqual(len(summary), 8)
         self.assertTrue(all(s["n"] == 20 for s in summary.values()))
 
+    def test_narration_workload_requires_explicit_version_and_semantic_coverage(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(version=2, narration_count=1 if row['burst'] == 1 and row['sample'] == 0 else 2)
+        self.assertEqual(len(validate(rows, version=2)), 8)
+        with self.assertRaises(ValueError): validate(rows)
+        rows[0]['narration_count'] = 0
+        with self.assertRaises(ValueError): validate(rows, version=2)
+
     def test_rejects_missing_reordered_invalid_or_unbounded_samples(self):
         rows = self.rows()
         for broken in (rows[:-1], rows[::-1], rows+rows[:1]):

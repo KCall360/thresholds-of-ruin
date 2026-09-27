@@ -21,7 +21,7 @@ rather than migrated or silently upgraded.
 | Server and persistence | Complete for the slice | Local authenticated WebSockets, action journal, save/replay, protocol validation, history and annotations |
 | Clients | Complete for the slice | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for the slice | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
-| Navigation and interaction | Partial | Known-cell travel, cancellation, prose/examination, clarification, approach-and-pickup, open/close doors |
+| Navigation and interaction | Complete for milestone 3 | Known-cell travel, hazard/cancellation boundaries, prose/examination, clarification, compound pickup/doors, durable places, semantic narration, slow-client recovery acceptance |
 | Dungeon gameplay | Not started | Equipment, combat, enemies, death, exit objective, authored/generated scenario inputs |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
@@ -75,7 +75,8 @@ The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
 work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks milestone 3 feature work. Its unresolved findings and acceptance criteria
+blocks feature work. Milestone 3 is complete; milestone 4a is next. The unresolved
+3p findings and acceptance criteria
 remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
 
@@ -154,7 +155,7 @@ importer.
 
 ### 3 — Complete interactions and travel
 
-Status: **active next work; remaining milestone 3p closure is deferred**.
+Status: **complete for the agreed slice. Milestone 3p remains deferred and open**.
 
 Already implemented: server-managed travel through known cells, interruption and
 cancellation at action boundaries, ASCII keyboard/mouse destinations, text
@@ -170,16 +171,17 @@ See the [simulation guide](simulation-slice.md#shared-action-extension-points).
 Persistent partial progress and concrete interruption policies remain deferred
 until the first timed action needs them.
 
-Next scope:
-
-- use the shared action extension points when later timed actions require progress;
-- extend wizard placement so each failure and interaction can be reproduced;
-- expand semantic event narration and threat/damage travel interruption; and
-- verify slow-client presentation and resynchronization independently of server
-  action timing.
+Closeout adds shared disclosed action/sight-change narration in text and ASCII,
+real-client delayed-delivery and broken-stream/relaunch acceptance, and a service
+test proving slow spectators cannot stop active travel. Existing wizard placement
+commands reproduce the two-actor narration fixture without new setup APIs.
+See [milestone 3 closeout](milestone-3-closeout.md) for behavior and verification.
+Potential-hazard interruption uses newly perceived actors; at the user's explicit
+direction, damage-triggered interruption is assigned to 4d with HP/damage mechanics.
+Use the shared action extension points when later timed actions need progress.
 
 Locks, keys, containers, equipment, and item use are deferred. New item foundations
-are milestone 4b. Interruption preserves still-valid progress; retry resumes,
+are milestone 4b. For future timed actions, interruption preserves still-valid progress; retry resumes,
 waiting preserves it, and other actions/movement generally discard it. Damage
 alone interrupts without erasing progress. Player and AI actors share the model;
 per-action policies and meaningful partial effects remain possible. Implement
@@ -192,6 +194,8 @@ planned route or future outcome, and ambiguity never consumes simulation time.
 ## Planned milestones
 
 ### 4a — Authored scenario packages and offline validation
+
+Next implementation milestone after milestone 3 closeout.
 
 Build the real scenario format before the first dungeon. Packages contain world
 and zones, region geometry/gravity/anchors, local outgoing portals and placements,
@@ -262,6 +266,10 @@ Victory requires one player character at a named anchor, optionally with a speci
 authored item; visibility and continued play are scenario-configured. Death is
 persistent, leaving a corpse item and inventory at the base cell. Equipment,
 containers, locks, keys, and usable-item effects are not prerequisites.
+
+Introduce damage-triggered travel and timed-action interruption here with the
+first real damage mechanics. Damage interrupts without erasing still-valid partial
+progress; implement concrete progress policies only for actions that need them.
 
 Acceptance: deterministic attack/AI outcomes, actor-independent targeting and
 interruption, drops/corpses, durable death/victory, hidden-information protection,
