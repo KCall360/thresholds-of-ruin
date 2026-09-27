@@ -5,7 +5,7 @@ use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
 
-pub const HELP: &str = "places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get/drop [quantity] <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
+pub const HELP: &str = "attack <actor>, places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get/drop [quantity] <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +67,31 @@ impl Dialogue {
         }
         let (verb, rest) = crate::word(&normalized);
         match (verb, rest) {
+            ("attack" | "hit" | "fight", noun) => {
+                let mut actors: Vec<_> = state
+                    .observation
+                    .visible_actors
+                    .iter()
+                    .filter(|a| {
+                        a.id != state.observation.actor
+                            && (noun_matches(noun, &a.name)
+                                || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok())
+                                    == Some(a.id.0))
+                    })
+                    .collect();
+                actors.sort_by_key(|a| a.id);
+                actors.dedup_by_key(|a| a.id);
+                let choices = actors
+                    .into_iter()
+                    .map(|a| Choice {
+                        label: format!("{} (#{})", a.name, a.id.0),
+                        intent: Intent::Action(Action::Attack { target: a.id }),
+                        item: None,
+                        door: None,
+                    })
+                    .collect();
+                self.choose(choices, state.revision, "No matching actor is visible.")
+            }
             ("look" | "l", "") => Intent::Look,
             ("inventory" | "i", "") => Intent::Say(inventory(state)),
             ("help", "session") => Intent::Say(SESSION_HELP.into()),
@@ -552,6 +577,10 @@ fn indefinite(name: &str) -> String {
 pub fn describe(state: &StateView) -> String {
     let o = &state.observation;
     let mut lines = Vec::new();
+    if let Some(c) = &o.combat {
+        lines.push(tor_client_common::narration::combat_status(c));
+        lines.extend(c.objective.clone());
+    }
     if state.wizard_game {
         lines.push("*** WIZARD GAME — permanently marked ***".into());
     }
@@ -632,6 +661,13 @@ pub fn describe(state: &StateView) -> String {
                 },
                 whereabouts(actor.position)
             ));
+            if let Some(injury) = o
+                .combat
+                .as_ref()
+                .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
+            {
+                lines.push(format!("{} looks {}.", safe(&actor.name), injury.injury));
+            }
         }
     }
     let ways: Vec<_> = [
@@ -653,7 +689,7 @@ pub fn describe(state: &StateView) -> String {
     if !ways.is_empty() {
         lines.push(format!("You can head {}.", ways.join(" or ")));
     }
-    if !o.ready {
+    if !o.ready && !o.combat.as_ref().is_some_and(|c| c.terminal) {
         lines.push("For now, you must wait.".into());
     }
     lines.join("\n")

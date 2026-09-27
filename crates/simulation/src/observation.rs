@@ -30,9 +30,9 @@ pub struct KnownPlace {
     pub name: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorView {
-    pub name: &'static str,
+    pub name: String,
     pub description: &'static str,
     pub id: ActorId,
     pub location: Location,
@@ -69,6 +69,7 @@ pub struct MotionView {
 /// Disclosed facts for one actor, separate from the authoritative game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
+    pub combat: Option<crate::combat::CombatView>,
     pub motion: Option<MotionView>,
     pub actor: ActorId,
     pub tick: u64,
@@ -172,6 +173,7 @@ impl Game {
             }
         }
         Ok(Observation {
+            combat: self.combat_view(id, &visible),
             motion: self.motion_view_active(id).then_some(MotionView {
                 velocity: actor.motion.velocity,
                 displaced: self.physics.displaced.contains(&id),
@@ -218,6 +220,7 @@ impl Game {
             visible_actors: self
                 .actors
                 .iter()
+                .filter(|(_, a)| a.alive())
                 .flat_map(|(&other_id, other)| {
                     self.body_cells(other.location, other.orientation, &other.body)
                         .unwrap_or_default()
@@ -226,7 +229,14 @@ impl Game {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })
                         .map(move |(location, _)| ActorView {
-                            name: if other_id == id { "yourself" } else { "figure" },
+                            name: if other_id == id {
+                                "yourself".into()
+                            } else {
+                                other
+                                    .combat
+                                    .as_ref()
+                                    .map_or_else(|| "figure".into(), |c| c.spec.name.clone())
+                            },
                             description: "An unremarkable figure is here.",
                             id: other_id,
                             location,
@@ -340,6 +350,9 @@ impl Game {
 
     /// Backend-resolved view occurrences. A location may be seen at several offsets.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
+        if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
+            return Ok(Vec::new());
+        }
         crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         Ok(if self.motion_view_active(id) || actor.orientation >= 4 {

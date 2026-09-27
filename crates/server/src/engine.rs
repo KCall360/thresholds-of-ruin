@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 10;
+const ARCHIVE_VERSION: u32 = 11;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -607,6 +607,58 @@ impl Engine {
     pub fn actors(&self) -> Vec<ActorId> {
         self.revisions.keys().copied().collect()
     }
+    pub fn is_ai(&self, actor: ActorId) -> bool {
+        self.game.is_ai(SimActor(actor.0))
+    }
+
+    pub fn pause_preparation(&mut self, actor: ActorId) -> Result<Option<CommandResult>, Failure> {
+        if self.game.is_ai(SimActor(actor.0))
+            || self
+                .game
+                .preparation(SimActor(actor.0))
+                .is_none_or(|p| !p.active)
+        {
+            return Ok(None);
+        }
+        self.command(
+            "scheduler",
+            "server",
+            actor,
+            &Uuid::new_v4().to_string(),
+            &self.branch().clone(),
+            Command::PausePreparation,
+        )
+        .map(Some)
+    }
+
+    pub fn next_ai_action(&self) -> Option<(ActorId, Action)> {
+        let (actor, action) = self.game.next_ai_action()?;
+        let action = match action {
+            tor_simulation::Action::Attack { target } => Action::Attack {
+                target: ActorId(target.0),
+            },
+            tor_simulation::Action::Wait => Action::Wait,
+            tor_simulation::Action::SetDoor { door, open } => Action::SetDoor { door, open },
+            tor_simulation::Action::Move(d) => {
+                let direction = match d {
+                    tor_world::Direction::North => Direction::North,
+                    tor_world::Direction::South => Direction::South,
+                    tor_world::Direction::East => Direction::East,
+                    tor_world::Direction::West => Direction::West,
+                    tor_world::Direction::NorthEast => Direction::NorthEast,
+                    tor_world::Direction::SouthEast => Direction::SouthEast,
+                    tor_world::Direction::SouthWest => Direction::SouthWest,
+                    tor_world::Direction::NorthWest => Direction::NorthWest,
+                    tor_world::Direction::Up => Direction::Up,
+                    tor_world::Direction::Down => Direction::Down,
+                    _ => return None,
+                };
+                Action::Move { direction }
+            }
+            _ => return None,
+        };
+        Some((ActorId(actor.0), action))
+    }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
             .get(&actor)
@@ -899,7 +951,9 @@ impl Engine {
             // retained boundary against ordinary commands. Never use this
             // shortcut for measured actions or an engine attached to a save.
             for (&id, revision) in &mut self.revisions {
-                if outcome.next_tick != tick || ((id == actor) != (id.0 == outcome.next_actor.0)) {
+                if outcome.next_tick != tick
+                    || ((id == actor) != (outcome.next_actor == Some(SimActor(id.0))))
+                {
                     *revision = revision.checked_add(1).ok_or_else(invalid_archive)?;
                 }
             }
@@ -1006,17 +1060,45 @@ impl Engine {
         let navigation_changed = match &receipt.command {
             Command::Act { action, .. } => match action {
                 Action::Move { .. } | Action::SetDoor { .. } => true,
+                Action::Attack { .. } => false,
                 Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
                 Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
             },
             Command::Wizard { .. } => true,
+            Command::PausePreparation => false,
             Command::RenamePlace { .. } | Command::Annotate { .. } | Command::Travel { .. } => {
                 false
             }
         };
+        let mut navigation_refreshed = false;
         let mut tick = candidate.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
+            Command::PausePreparation => {
+                let target = candidate
+                    .game
+                    .pause_preparation(SimActor(receipt.actor.0))
+                    .ok_or_else(|| {
+                        Failure::new(ErrorCode::InvalidAction, "No active preparation")
+                    })?;
+                for revision in candidate.revisions.values_mut() {
+                    *revision = revision.checked_add(1).ok_or_else(|| {
+                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
+                    })?;
+                }
+                (
+                    Author::Backend {
+                        component: "scheduler".into(),
+                    },
+                    Audience::Actor,
+                    HistoryContent::Action {
+                        action: Action::Attack {
+                            target: ActorId(target.0),
+                        },
+                        event: crate::journal::Event::PreparationPaused,
+                    },
+                )
+            }
             Command::RenamePlace {
                 expected_revision,
                 key,
@@ -1131,6 +1213,7 @@ impl Engine {
                 let perception_changed = match action {
                     Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
                     Action::Move { .. }
+                    | Action::Attack { .. }
                     | Action::SetDoor { .. }
                     | Action::Take { .. }
                     | Action::Drop { .. } => true,
@@ -1160,7 +1243,8 @@ impl Engine {
                     let started = Instant::now();
                     for (&actor, revision) in &mut candidate.revisions {
                         if outcome.next_tick != tick
-                            || ((actor == receipt.actor) != (actor.0 == outcome.next_actor.0))
+                            || ((actor == receipt.actor)
+                                != (outcome.next_actor == Some(SimActor(actor.0))))
                         {
                             *revision = revision.checked_add(1).ok_or_else(|| {
                                 Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
@@ -1181,7 +1265,8 @@ impl Engine {
                         profile.perception += perception_started.elapsed();
                         profile.actors_observed += 1;
                     }
-                    if navigation_changed || candidate.game.physics_enabled() {
+                    if navigation_changed || after.1 != old.1 {
+                        navigation_refreshed = true;
                         let started = Instant::now();
                         candidate
                             .game
@@ -1250,7 +1335,7 @@ impl Engine {
                 profile.navigation_refreshes += 1;
             }
         }
-        if navigation_changed && matches!(receipt.command, Command::Act { .. }) {
+        if navigation_refreshed && matches!(receipt.command, Command::Act { .. }) {
             if let Some(profile) = profile.as_deref_mut() {
                 profile.navigation_refreshes += 1;
             }

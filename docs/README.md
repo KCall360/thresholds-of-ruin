@@ -79,3 +79,5 @@ For every behavior change:
 
 - [Durable place knowledge](place-knowledge.md): character-owned names, discovery, persistence and client lists.
 - [Place knowledge findings](place-knowledge-findings.md): correctness and focused release measurements.
+
+- [Dungeon gameplay](dungeon.md): milestone 4d rules, controls, and verification status.

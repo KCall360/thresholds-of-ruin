@@ -8,6 +8,7 @@ use tor_world::{Shared, World};
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    combat: crate::combat::CombatWorld,
     physics: crate::physics::Physics,
     world: usize,
     material_surfaces: bool,
@@ -48,6 +49,7 @@ impl Game {
                 worlds.len() - 1
             });
         Snapshot {
+            combat: self.combat.clone(),
             physics: self.physics.clone(),
             world,
             material_surfaces: self.material_surfaces,
@@ -85,6 +87,7 @@ impl Game {
 
     pub fn restore_checkpoint(snapshot: Snapshot, shared: &SharedState) -> Option<Self> {
         let game = Self {
+            combat: snapshot.combat,
             physics: snapshot.physics,
             world: Shared::new(shared.worlds.get(snapshot.world)?.clone()),
             material_surfaces: snapshot.material_surfaces,
@@ -105,16 +108,23 @@ impl Game {
         };
         let mut occupied = BTreeSet::new();
         if !game.physics_valid()
+            || !game.combat_valid()
             || game.actors.is_empty()
             || game.next_actor_id == 0
             || game.next_item_id == 0
             || game.next_door_id == 0
-            || game.actors.values().map(|a| a.ready_at).min() != Some(game.tick)
+            || game
+                .next_actor()
+                .is_some_and(|id| game.actors[&id].ready_at != game.tick)
             || game.actors.iter().any(|(id, actor)| {
                 id.0 == 0
+                    || actor
+                        .combat
+                        .as_ref()
+                        .is_some_and(|c| !c.spec.valid() || c.hp > c.spec.max_hp)
                     || id.0 >= game.next_actor_id
                     || actor.orientation >= 24
-                    || actor.ready_at < game.tick
+                    || (actor.alive() && actor.ready_at < game.tick)
                     || !game.world.contains(actor.location)
                     || actor
                         .visited
@@ -127,13 +137,14 @@ impl Game {
                         .acceleration_remainder
                         .iter()
                         .any(|v| v.unsigned_abs() >= actor.body.cells.len() as u64)
-                    || game
-                        .body_cells(actor.location, actor.orientation, &actor.body)
-                        .is_none_or(|cells| {
-                            cells
-                                .iter()
-                                .any(|(at, _)| !game.world.walkable(*at) || !occupied.insert(*at))
-                        })
+                    || (actor.alive()
+                        && game
+                            .body_cells(actor.location, actor.orientation, &actor.body)
+                            .is_none_or(|cells| {
+                                cells.iter().any(|(at, _)| {
+                                    !game.world.walkable(*at) || !occupied.insert(*at)
+                                })
+                            }))
             })
             || game.items.iter().any(|(id, item)| {
                 id.0 == 0

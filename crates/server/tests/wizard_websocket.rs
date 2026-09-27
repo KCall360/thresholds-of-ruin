@@ -192,7 +192,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                     expected_revision: 0,
                     operation,
                 }
-                .into(),
+                .try_into()
+                .unwrap(),
             };
             for client in [&mut player, &mut spectator] {
                 request(client, &format!("denied-{index}"), command.clone()).await;
@@ -233,7 +234,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                         },
                     },
                 }
-                .into(),
+                .try_into()
+                .unwrap(),
             };
             request(&mut wizard, "accepted", teleport.clone()).await;
             for client in [&mut wizard, &mut player, &mut spectator] {
@@ -277,7 +279,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                         expected_revision: 1,
                         operation: WizardOperation::Rewind { target: None },
                     }
-                    .into(),
+                    .try_into()
+                    .unwrap(),
                 },
             )
             .await;
@@ -307,7 +310,8 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                         expected_revision: 0,
                         operation: WizardOperation::Rewind { target: None },
                     }
-                    .into(),
+                    .try_into()
+                    .unwrap(),
                 },
             )
             .await;

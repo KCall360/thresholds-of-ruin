@@ -16,6 +16,13 @@ the historical Phase A writer from the revised [background-save contract](backgr
 The user authorized Phase B with asynchronous acknowledgements and performance as a primary driver.
 The [Phase B findings](phase-b-findings.md) retain the focused comparison.
 
+Milestone 4d adds the [combat workload findings](dungeon.md). Eight-actor combat
+still exceeds the 8 ms p95 target after removing duplicate attack validation and
+unnecessary navigation refreshes. Phase timing identifies all-actor before/after
+observation construction as the largest remaining cost. This is tracked with the
+already-deferred 3p scaling work; the latency target is unchanged. The ordinary
+comparison cases and smaller combat cases remain within target.
+
 ## Recorded decisions and guiding criteria
 
 The milestone uses these product decisions:

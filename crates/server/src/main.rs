@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Scenario::two_room(seed)
     } else if regions.is_none() {
         let default_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/first-dungeon");
         tor_server::scenario_package::load(
             package_path.as_deref().unwrap_or(&default_path),
             seed,

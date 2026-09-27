@@ -134,6 +134,12 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     app.ready();
     app.input(Input::Key { key: Key::Note });
     assert!(app.note.is_some());
+    app.attack_targets.push(ActorView {
+        id: ActorId(2),
+        name: "guard".into(),
+        description: String::new(),
+        position: Position { x: 1, y: 0, z: 0 },
+    });
     let mut canvas = tor_client_ascii::render::Canvas::default();
     canvas.draw(&app);
     let normal = canvas.pixels.clone();
@@ -145,6 +151,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     snapshot["state"]["wizard_game"] = true.into();
     app.set_state(ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap());
     assert!(app.note.is_none());
+    assert!(app.attack_targets.is_empty());
     canvas.draw(&app);
     assert_ne!(normal, canvas.pixels);
 }
@@ -658,4 +665,80 @@ fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() 
         .unwrap()
         .memory()
         .any(|c| c.key.starts_with("intermediate-")));
+}
+
+#[test]
+fn configurable_bump_attacks_use_disclosed_hostility_only() {
+    use tor_client_ascii::BumpAttacks;
+    for (mode, hostile, attacks) in [
+        (BumpAttacks::Hostile, true, true),
+        (BumpAttacks::Hostile, false, false),
+        (BumpAttacks::Any, false, true),
+        (BumpAttacks::Off, true, false),
+    ] {
+        let mut view = state().state().clone();
+        view.observation.visible_actors.push(ActorView {
+            id: ActorId(2),
+            name: "guard".into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        view.observation.combat = Some(CombatView {
+            hp: 30,
+            max_hp: 30,
+            preparation_remaining: None,
+            preparation_active: false,
+            recovery_remaining: 0,
+            actors: vec![CombatActorView {
+                actor: ActorId(2),
+                hostile,
+                injury: "healthy".into(),
+            }],
+            messages: vec![],
+            objective: None,
+            victory: false,
+            dead: false,
+            terminal: false,
+        });
+        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,"history":{"entries":[],"older_before":null},"state":view})).unwrap();
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.bump_attacks = mode;
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        let Effect::Request(Request::Command {
+            command: Command::Act { action, .. },
+            ..
+        }) = app.input(Input::Key { key: Key::Right })
+        else {
+            panic!("action")
+        };
+        assert_eq!(
+            action,
+            if attacks {
+                Action::Attack { target: ActorId(2) }
+            } else {
+                Action::Move {
+                    direction: Direction::East,
+                }
+            }
+        );
+        app.ready();
+        app.input(Input::Key { key: Key::Attack });
+        assert!(!app.attack_targets.is_empty());
+        app.disconnect("lost connection".into());
+        assert!(app.attack_targets.is_empty());
+    }
+}
+
+#[test]
+fn prose_dashes_render_as_supported_bitmap_glyphs() {
+    let mut app = App::new();
+    let mut canvas = tor_client_ascii::render::Canvas::default();
+    app.status = "HP 20/20 — Victory!".into();
+    canvas.draw(&app);
+    let prose = canvas.pixels.clone();
+    app.status = "HP 20/20 - Victory!".into();
+    canvas.draw(&app);
+    assert_eq!(canvas.pixels, prose);
 }

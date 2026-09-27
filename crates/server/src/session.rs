@@ -44,6 +44,7 @@ fn potential_hazards(observation: &Observation) -> BTreeSet<ActorId> {
 }
 
 struct TravelJob {
+    hp: Option<u32>,
     owner: u64,
     steps: VecDeque<tor_simulation::TravelStep>,
     hazards: BTreeSet<ActorId>,
@@ -51,6 +52,8 @@ struct TravelJob {
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    pending_pauses: BTreeSet<ActorId>,
+    autonomous_enabled: bool,
     travels: BTreeMap<ActorId, TravelJob>,
     travel_status: BTreeMap<ActorId, TravelStatus>,
     resetting_streams: bool,
@@ -64,15 +67,23 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(engine: Engine) -> Self {
+    pub fn new(mut engine: Engine) -> Self {
+        let mut save_warning = None;
+        for actor in engine.actors() {
+            if let Err(error) = engine.pause_preparation(actor) {
+                save_warning = Some(error.to_string());
+            }
+        }
         Self {
+            pending_pauses: BTreeSet::new(),
+            autonomous_enabled: false,
             travels: BTreeMap::new(),
             travel_status: BTreeMap::new(),
             resetting_streams: false,
             broadcasting_travel: false,
             engine,
             pending_saves: Vec::new(),
-            save_warning: None,
+            save_warning,
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
@@ -213,6 +224,16 @@ impl Service {
         let user = client.user.clone();
         let frontend = client.frontend.clone();
         match request {
+            Request::Continue => {
+                if self.controllers.get(&actor) != Some(&id) {
+                    return Err(Failure::new(
+                        ErrorCode::NotController,
+                        "Acquire control before continuing",
+                    ));
+                }
+                self.autonomous_enabled = true;
+                self.ack(id, request_id, None);
+            }
             Request::Save => {
                 if self
                     .pending_saves
@@ -254,6 +275,12 @@ impl Service {
                 self.ack(id, request_id, None);
             }
             Request::AcquireControl => {
+                if self.engine.is_ai(actor) {
+                    return Err(Failure::new(
+                        ErrorCode::Unauthorized,
+                        "This actor is controlled by scenario AI",
+                    ));
+                }
                 match self.controllers.get(&actor) {
                     Some(owner) if *owner != id => {
                         return Err(Failure::new(
@@ -282,6 +309,8 @@ impl Service {
                 }
                 self.stop_travel(actor, TravelPhase::ControlLost);
                 if self.controllers.remove(&actor).is_some() {
+                    self.pending_pauses.insert(actor);
+                    self.autonomous_enabled = false;
                     self.control_update(actor);
                 }
                 self.ack(id, request_id, None);
@@ -350,6 +379,12 @@ impl Service {
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
                 let visible_entry = result.entry.disclosed();
+                if matches!(
+                    visible_entry.content,
+                    HistoryContent::Action { .. } | HistoryContent::Travel { .. }
+                ) {
+                    self.autonomous_enabled = true;
+                }
                 match visible_entry.content {
                     HistoryContent::Travel { ref destination } => {
                         self.stop_travel(actor, TravelPhase::Cancelled);
@@ -373,6 +408,7 @@ impl Service {
                             self.travels.insert(
                                 actor,
                                 TravelJob {
+                                    hp: observation.combat.as_ref().map(|c| c.hp),
                                     owner: id,
                                     steps: steps.into(),
                                     hazards: potential_hazards(&observation),
@@ -382,6 +418,13 @@ impl Service {
                         self.travel_update(actor, Some(visible_entry.clone()));
                     }
                     HistoryContent::Wizard { rewind, .. } => {
+                        self.autonomous_enabled = false;
+                        self.pending_pauses.clear();
+                        for actor in self.engine.actors() {
+                            if let Err(error) = self.engine.pause_preparation(actor) {
+                                self.save_warning = Some(error.to_string());
+                            }
+                        }
                         if rewind {
                             // The committed rewind already changed the branch. Publish
                             // only the explicit snapshot boundary into the old stream.
@@ -509,6 +552,24 @@ impl Service {
     /// At most one ordinary action per actor per pump; never hold the service lock
     /// for a whole route. Network delivery/cancellation runs between boundaries.
     pub(crate) fn advance_travel(&mut self) {
+        for actor in std::mem::take(&mut self.pending_pauses) {
+            let revisions = self
+                .engine
+                .actors()
+                .into_iter()
+                .map(|id| (id, self.engine.revision(id).unwrap()))
+                .collect();
+            match self.engine.pause_preparation(actor) {
+                Ok(Some(result)) => {
+                    let _ = self.action_update(&revisions, &result.entry.disclosed());
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.save_warning = Some(error.to_string());
+                }
+            }
+        }
+        self.advance_ai();
         for actor in self.travels.keys().copied().collect::<Vec<_>>() {
             let Some(mut job) = self.travels.remove(&actor) else {
                 continue;
@@ -521,6 +582,14 @@ impl Service {
                 self.stop_travel(actor, TravelPhase::Failed);
                 continue;
             };
+            if job
+                .hp
+                .zip(state.observation.combat.as_ref().map(|c| c.hp))
+                .is_some_and(|(before, after)| after < before)
+            {
+                self.stop_travel(actor, TravelPhase::Hazard);
+                continue;
+            }
             if !potential_hazards(&state.observation).is_subset(&job.hazards) {
                 self.stop_travel(actor, TravelPhase::Hazard);
                 continue;
@@ -592,7 +661,11 @@ impl Service {
                 continue;
             }
             let observation = self.engine.observation(actor).expect("surviving actor");
-            let hazard = !potential_hazards(&observation).is_subset(&job.hazards);
+            let hazard = !potential_hazards(&observation).is_subset(&job.hazards)
+                || job
+                    .hp
+                    .zip(observation.combat.as_ref().map(|c| c.hp))
+                    .is_some_and(|(before, after)| after < before);
             if observation
                 .motion
                 .as_ref()
@@ -608,6 +681,50 @@ impl Service {
             } else {
                 self.travels.insert(actor, job);
                 self.travel_update(actor, None);
+            }
+        }
+    }
+
+    fn advance_ai(&mut self) {
+        if !self.autonomous_enabled || self.controllers.is_empty() {
+            return;
+        }
+        let Some((actor, action)) = self.engine.next_ai_action() else {
+            return;
+        };
+        let revisions = self
+            .engine
+            .actors()
+            .into_iter()
+            .map(|id| (id, self.engine.revision(id).unwrap()))
+            .collect();
+        let command = crate::journal::Command::Act {
+            expected_revision: self.engine.revision(actor).unwrap(),
+            action,
+        };
+        match self.engine.command(
+            "scenario-ai",
+            "server-ai",
+            actor,
+            &uuid::Uuid::new_v4().to_string(),
+            &self.engine.branch().clone(),
+            command,
+        ) {
+            Ok(result) => {
+                let _ = self.action_update(&revisions, &result.entry.disclosed());
+            }
+            Err(error) => {
+                self.autonomous_enabled = false;
+                for client in self.controllers.values().copied().collect::<Vec<_>>() {
+                    self.send(
+                        client,
+                        ServerMessage::Error {
+                            request_id: None,
+                            code: error.code,
+                            message: "Autonomous action failed; simulation paused.".into(),
+                        },
+                    );
+                }
             }
         }
     }
@@ -763,6 +880,8 @@ impl Service {
             }
             if self.controllers.get(&actor) == Some(&id) {
                 self.controllers.remove(&actor);
+                self.pending_pauses.insert(actor);
+                self.autonomous_enabled = false;
                 if !self.resetting_streams {
                     self.control_update(actor);
                 }
@@ -860,6 +979,7 @@ mod tests {
         for i in 0..64 {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
+        service.autonomous_enabled = true;
         let branch = service.engine.branch().clone();
         service.handle(
             observer.id,
@@ -872,6 +992,7 @@ mod tests {
                 },
             },
         );
+        assert!(!service.autonomous_enabled);
         assert!(*controller.close.borrow());
         let ServerMessage::Snapshot { snapshot, .. } = observer.messages.try_recv().unwrap() else {
             panic!("snapshot must precede control transition")

@@ -40,6 +40,9 @@ pub fn direction(direction: p::Direction) -> w::Direction {
 
 pub fn action(action: &p::Action) -> s::Action {
     match action {
+        p::Action::Attack { target } => s::Action::Attack {
+            target: s::ActorId(target.0),
+        },
         p::Action::SetDoor { door, open } => s::Action::SetDoor {
             door: *door,
             open: *open,
@@ -59,6 +62,9 @@ pub fn action(action: &p::Action) -> s::Action {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
+        s::OutcomeKind::AttackStarted { target } => crate::journal::Event::AttackStarted {
+            target: p::ActorId(target.0),
+        },
         s::OutcomeKind::DoorChanged { door, open } => {
             crate::journal::Event::DoorChanged { door, open }
         }
@@ -169,7 +175,7 @@ pub fn observation(
             .filter(|actor| actor.location == cell.location)
         {
             visible_actors.push(p::ActorView {
-                name: actor.name.into(),
+                name: actor.name.clone(),
                 description: actor.description.into(),
                 id: p::ActorId(actor.id.0),
                 position: offset(cell.offset),
@@ -185,6 +191,27 @@ pub fn observation(
         }
     }
     p::Observation {
+        combat: view.combat.map(|c| p::CombatView {
+            hp: c.hp,
+            max_hp: c.max_hp,
+            preparation_remaining: c.preparation_remaining,
+            preparation_active: c.preparation_active,
+            recovery_remaining: c.recovery_remaining,
+            actors: c
+                .actors
+                .into_iter()
+                .map(|(id, hostile, injury)| p::CombatActorView {
+                    actor: p::ActorId(id.0),
+                    hostile,
+                    injury: injury.into(),
+                })
+                .collect(),
+            messages: c.messages,
+            objective: c.objective,
+            victory: c.victory,
+            dead: c.dead,
+            terminal: c.terminal,
+        }),
         motion: view.motion.map(|m| p::MotionView {
             velocity: m.velocity,
             units_per_cell: 65536,

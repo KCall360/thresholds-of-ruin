@@ -5,6 +5,7 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    Attack,
     MapHigher,
     MapLower,
     Places,
@@ -59,6 +60,8 @@ pub struct NoteDraft {
 }
 
 pub struct App {
+    pub bump_attacks: BumpAttacks,
+    pub attack_targets: Vec<ActorView>,
     pub map_level: i32,
     pub places_open: bool,
     pub place_selected: usize,
@@ -88,6 +91,8 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            bump_attacks: BumpAttacks::Hostile,
+            attack_targets: Vec::new(),
             map_level: 0,
             places_open: false,
             place_selected: 0,
@@ -156,6 +161,7 @@ impl App {
             self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
+            self.attack_targets.clear();
             self.door_direction = None;
             self.places_open = false;
             self.place_name = None;
@@ -170,10 +176,12 @@ impl App {
                 .place_selected
                 .min(state.state().observation.places.len().saturating_sub(1));
             self.pickup.clear();
+            self.attack_targets.clear();
             self.door_direction = None;
             self.travel_cursor = None;
         }
         if !state.has_control() {
+            self.attack_targets.clear();
             self.place_name = None;
             self.door_direction = None;
             self.travel_cursor = None;
@@ -193,11 +201,35 @@ impl App {
         self.busy = false;
         self.note = None;
         self.pickup.clear();
+        self.attack_targets.clear();
         self.door_direction = None;
         self.status = message;
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if !self.attack_targets.is_empty() {
+            match input {
+                Input::Key { key: Key::Escape } => {
+                    self.attack_targets.clear();
+                    return Effect::None;
+                }
+                Input::Key { key: Key::Up } => self.selected = self.selected.saturating_sub(1),
+                Input::Key { key: Key::Down } => {
+                    self.selected = (self.selected + 1).min(self.attack_targets.len() - 1)
+                }
+                Input::Key { key: Key::Enter } => {
+                    let target = self.attack_targets[self.selected].id;
+                    self.attack_targets.clear();
+                    return self.act(Action::Attack { target });
+                }
+                _ => {}
+            }
+            self.status = format!(
+                "Attack {}? Up/Down select, Enter confirms, Esc cancels.",
+                self.attack_targets[self.selected].name
+            );
+            return Effect::None;
+        }
         if !self.pickup.is_empty() {
             if let Input::Text { text } = &input {
                 for ch in text.chars().filter(char::is_ascii_digit) {
@@ -242,6 +274,7 @@ impl App {
                 || self.door_direction.is_some()
             {
                 self.pickup.clear();
+                self.attack_targets.clear();
                 self.door_direction = None;
                 self.status = "Cancelled.".into();
                 return Effect::None;
@@ -461,6 +494,7 @@ impl App {
                         }
                     };
                     self.pickup.clear();
+                    self.attack_targets.clear();
                     self.door_direction = None;
                     return self.act(if self.dropping {
                         Action::Drop { item, quantity }
@@ -559,6 +593,31 @@ impl App {
             Key::Up => self.act(Action::Move {
                 direction: Direction::North,
             }),
+            Key::Attack => {
+                if let Some(state) = &self.state {
+                    self.attack_targets = state
+                        .state()
+                        .observation
+                        .visible_actors
+                        .iter()
+                        .filter(|a| a.id != state.state().observation.actor)
+                        .cloned()
+                        .collect();
+                    self.attack_targets.sort_by_key(|a| a.id);
+                    self.attack_targets.dedup_by_key(|a| a.id);
+                    self.selected = 0;
+                    self.status = self.attack_targets.first().map_or_else(
+                        || "No target is visible.".into(),
+                        |a| {
+                            format!(
+                                "Attack {}? Up/Down select, Enter confirms, Esc cancels.",
+                                a.name
+                            )
+                        },
+                    );
+                }
+                Effect::None
+            }
             Key::Down => self.act(Action::Move {
                 direction: Direction::South,
             }),
@@ -594,6 +653,7 @@ impl App {
                     return Effect::None;
                 };
                 if !state.has_control() {
+                    self.attack_targets.clear();
                     self.place_name = None;
                     self.status = "You are observing. Press F3 to request control.".into();
                 } else if !state.state().observation.ready {
@@ -731,19 +791,60 @@ impl App {
         self.command(command)
     }
 
-    fn act(&mut self, action: Action) -> Effect {
+    fn act(&mut self, mut action: Action) -> Effect {
         let Some(state) = &self.state else {
             return Effect::None;
         };
         if !state.has_control() {
+            self.attack_targets.clear();
             self.place_name = None;
             self.door_direction = None;
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
         }
         if !state.state().observation.ready {
+            if matches!(action, Action::Wait)
+                && state
+                    .state()
+                    .observation
+                    .combat
+                    .as_ref()
+                    .is_some_and(|c| !c.terminal)
+            {
+                return self.request(Request::Continue);
+            }
             self.status = "Waiting for another actor to act.".into();
             return Effect::None;
+        }
+        if let Action::Move { direction } = action {
+            let (x, y, z) = match direction {
+                Direction::North => (0, -1, 0),
+                Direction::South => (0, 1, 0),
+                Direction::East => (1, 0, 0),
+                Direction::West => (-1, 0, 0),
+                Direction::NorthEast => (1, -1, 0),
+                Direction::SouthEast => (1, 1, 0),
+                Direction::SouthWest => (-1, 1, 0),
+                Direction::NorthWest => (-1, -1, 0),
+                Direction::Up => (0, 0, 1),
+                Direction::Down => (0, 0, -1),
+            };
+            let view = &state.state().observation;
+            if let Some(target) = view.visible_actors.iter().find(|a| {
+                a.id != view.actor
+                    && a.position == (Position { x, y, z })
+                    && match self.bump_attacks {
+                        BumpAttacks::Any => true,
+                        BumpAttacks::Off => false,
+                        BumpAttacks::Hostile => view.combat.as_ref().is_some_and(|c| {
+                            c.actors
+                                .iter()
+                                .any(|other| other.actor == a.id && other.hostile)
+                        }),
+                    }
+            }) {
+                action = Action::Attack { target: target.id };
+            }
         }
         self.command(Command::Act {
             expected_revision: state.state().revision,
@@ -766,6 +867,14 @@ impl App {
         self.status = "Waiting for server...".into();
         Effect::Request(request)
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BumpAttacks {
+    #[default]
+    Hostile,
+    Any,
+    Off,
 }
 
 /// Render only cells disclosed in the observer's scene.
@@ -823,6 +932,8 @@ pub fn history_text(entry: &HistoryEntry) -> String {
                 format!("{} door.", if *open { "Opened" } else { "Closed" })
             }
             Event::Waited => "Waited.".into(),
+            Event::PreparationPaused => "Preparation paused.".into(),
+            Event::AttackStarted { .. } => "Prepared an attack.".into(),
         },
         HistoryContent::Annotation { text, category, .. } => {
             format!("{:?} {:?}: {text}", entry.audience, category)

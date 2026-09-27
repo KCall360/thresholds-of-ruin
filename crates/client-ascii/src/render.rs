@@ -205,6 +205,7 @@ impl Canvas {
         let clipped = text.chars().count() > limit;
         for (i, ch) in text.chars().take(limit).enumerate() {
             let ch = if clipped && i + 1 == limit { '~' } else { ch };
+            let ch = if matches!(ch, '—' | '–') { '-' } else { ch };
             let glyph = BASIC_FONTS
                 .get(ch)
                 .or_else(|| BASIC_FONTS.get('?'))
@@ -258,8 +259,15 @@ impl Canvas {
         self.text(44, 532, "RECENT HISTORY", MUTED, 1, 70);
         if let Some(state) = &app.state {
             let o = &state.state().observation;
+            if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective.as_ref()) {
+                self.text(28, 72, objective, MUTED, 1, 120);
+            }
             self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
-            self.text(44, 140, &format!("TICK {}", o.tick), MUTED, 1, 84);
+            let status = o.combat.as_ref().map_or_else(
+                || format!("TICK {}", o.tick),
+                tor_client_common::narration::combat_status,
+            );
+            self.text(44, 140, &status, MUTED, 1, 110);
             for panel in map_panels(&display_observation(state), app.map_level) {
                 if panel.label {
                     self.text(
@@ -334,7 +342,12 @@ impl Canvas {
             if o.inventory.is_empty() {
                 self.text(804, 148, "Nothing carried yet.", MUTED, 2, 22);
             }
-            for (i, item) in o.inventory.iter().take(5).enumerate() {
+            for (i, item) in o
+                .inventory
+                .iter()
+                .take(if o.combat.is_some() { 3 } else { 5 })
+                .enumerate()
+            {
                 self.text(
                     804,
                     146 + i * 22,
@@ -344,17 +357,32 @@ impl Canvas {
                     22,
                 );
             }
-            if o.inventory.len() > 5 {
+            let inventory_limit = if o.combat.is_some() { 3 } else { 5 };
+            if o.inventory.len() > inventory_limit {
                 self.text(
                     804,
-                    257,
-                    &format!("... {} more", o.inventory.len() - 5),
+                    if o.combat.is_some() { 205 } else { 257 },
+                    &format!("... {} more", o.inventory.len() - inventory_limit),
                     MUTED,
                     1,
                     40,
                 );
             }
             self.text(804, 280, "IN SIGHT", ACCENT, 2, 22);
+            if let Some(combat) = &o.combat {
+                for (index, actor) in combat.actors.iter().take(3).enumerate() {
+                    if let Some(view) = o.visible_actors.iter().find(|a| a.id == actor.actor) {
+                        self.text(
+                            804,
+                            220 + index * 16,
+                            &format!("{}: {}", view.name, actor.injury),
+                            TEXT,
+                            1,
+                            44,
+                        );
+                    }
+                }
+            }
             if o.ground_items.is_empty() {
                 self.text(804, 316, "No items in sight.", MUTED, 2, 22);
             }
@@ -423,7 +451,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F6/F7 height   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "F6/F7 height HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors SPACE wait F3/R control F4 note F5 places F2 history ESC quit"
+            "F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {

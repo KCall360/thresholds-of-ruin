@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +56,7 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    Attack { target: ActorId },
     SetDoor { door: u64, open: bool },
     Move { direction: Direction },
     Take { item: u64, quantity: Option<u64> },
@@ -118,6 +119,8 @@ pub struct MotionView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combat: Option<CombatView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<MotionView>,
     pub places: Vec<PlaceView>,
@@ -129,6 +132,28 @@ pub struct Observation {
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
     pub ready: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CombatView {
+    pub hp: u32,
+    pub max_hp: u32,
+    pub preparation_remaining: Option<u64>,
+    pub preparation_active: bool,
+    pub recovery_remaining: u64,
+    pub actors: Vec<CombatActorView>,
+    pub messages: Vec<String>,
+    pub objective: Option<String>,
+    pub victory: bool,
+    pub dead: bool,
+    pub terminal: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CombatActorView {
+    pub actor: ActorId,
+    pub hostile: bool,
+    pub injury: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +279,10 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    PreparationPaused,
+    AttackStarted {
+        target: ActorId,
+    },
     DoorChanged {
         door: u64,
         open: bool,
@@ -349,6 +378,8 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    /// Resume autonomous recovery after fresh controller input; never starts a new action.
+    Continue,
     /// Acknowledged only after all earlier accepted records are durable.
     Save,
     CancelTravel {

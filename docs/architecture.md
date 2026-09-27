@@ -43,6 +43,22 @@ same boundary checks as every crate. Shared diagnostic traces belong in fixture
 data and test-support orchestration. Thread-local simulation call counters are
 outside persisted game state, read no clock, and never affect rule decisions.
 
+## Combat and autonomous actors
+
+Combat state belongs to each actor, while the simulation owns a seeded,
+checkpointed combat random stream, directed faction hostility, and run objectives.
+Hit checking and typed damage resolution are separate steps; future attack
+outcomes can extend them without changing the d20 rule implicitly. Wind-up is
+persisted progress; recovery remains scheduler time. Physics applies impact damage
+at contact, using the same death and interruption rules as attacks.
+
+AI consumes its actor's perception and expiring memory. Its deterministic choice
+is committed through ordinary journaled actions. The server bounds autonomous
+work between delivery/input opportunities and records human preparation suspension
+on control loss or recovery boundaries. Backend suspension commands have no wire
+representation. Clients receive only their own exact health/progress and visible
+qualitative enemy injuries. See [dungeon gameplay](dungeon.md) for the rule contract.
+
 ## Geometry and barriers
 
 Regions are bounded rectangular 3D volumes with integer local coordinates.
@@ -116,30 +132,21 @@ the relevant action rule. Multiplayer waiting and simultaneous input policies
 are deferred.
 
 The simulation's private action boundary separates read-only validation and timing,
-effect application, and scheduler advancement. `Game::act` completes all three
-without yielding; its prepared action cannot escape to a caller or be stored for
-later execution. Every fallible check, including recovery-time overflow, precedes
-mutation. Current actions still apply effects immediately and then incur recovery.
-Recovery time is not resumable work. The server's existing simulation profiling
-interval covers the entire boundary; the simulation introduces no wall clock.
+effect application, and scheduler advancement. `Game::act` completes the command
+boundary without yielding. Immediate actions apply effects and then incur recovery;
+attacks instead commit per-actor wind-up progress and resolve at a later simulation
+boundary. Fallible command validation, including timing overflow, precedes mutation.
+The server's simulation profiling interval covers the command boundary; simulation
+code introduces no wall clock.
 
-Future timed actions share progress and interruption semantics across all actors.
-Interruption need not erase progress: damage interrupts, waiting preserves valid
-progress, and retrying resumes. Other actions, movement, or relevant target changes
-generally invalidate it. Policies can vary by action; existing travel cancellation
-remains supported. Physics and long actions must fit deterministic event boundaries
-and recoverable state without tying simulation time to client presentation.
-
-When the first timed action is introduced, its identity, target, completed work
-and action-specific validity belong to authoritative per-actor simulation state,
-with checkpoint/replay/rewind coverage. Each scheduled work boundary must validate
-against the current world before applying a partial or final effect. Progress is
-distinct from both recovery time and session-local travel jobs: recovery preserves
-valid saved progress but requires fresh input, and travel retains its cancellation
-and no-auto-resume policy. No unused progress fields, generic interruption engine,
-new protocol messages or save-format changes are introduced by the extension-point
-refactor. Concrete work durations and partial-effect policies wait for an action
-that needs them.
+Attack identity, target, remaining work, and active/suspended state are authoritative
+and checkpointed. Resolution revalidates perception, reach, and displacement before
+applying damage. Positive HP loss interrupts, waiting preserves valid progress,
+and retrying the same attack resumes it. Movement, another action, or loss of target
+validity discards progress. Recovery time remains distinct from resumable work.
+Control-loss/restart boundaries preserve valid work but require fresh human input;
+travel keeps its cancellation and no-auto-resume policy. Future timed actions can
+reuse these boundaries with their own concrete partial-effect policies.
 
 ## Protocol and streaming
 
@@ -315,15 +322,14 @@ ordinary test scenarios use the same package format as normal games.
 
 ## Initial content and deferred decisions
 
-Use original code and content with NetHack as a gameplay reference. Planned
+Use original code and content with NetHack as a gameplay reference. Validated
 self-contained scenario packages describe worlds/zones, region-local portals,
 geometry, gravity, anchors, authored placements, themes, and objectives. An
 explicit offline validator binds content hashes and exact dependencies to
 author-controlled major.minor versions. Any authored change requires revalidation;
 startup performs lightweight checks and refuses unvalidated inputs by default.
 
-Start with authored scenarios and mobs. The first loop is explore, fight,
-retrieve, escape: a named exit cell optionally requires a specific authored item.
+Authored scenarios provide the first explore, fight, retrieve, escape loop: a named exit cell optionally requires a specific authored item.
 Scenarios configure objective disclosure and post-victory continuation. Actors
 differ by controller assignment, not separate player/mob types. Initial combat
 uses timed d20 attacks versus physical defense, typed HP damage, immunity/flat

@@ -1,0 +1,8 @@
+[[regions]]
+id = 1
+name = "Shared vault"
+size = [7,3,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { companion = [2,1,0], start = [4,1,0] }
+items = [{ id = 100, at = [2,1,0], carried_by = 1, name = "dawn seal" }]

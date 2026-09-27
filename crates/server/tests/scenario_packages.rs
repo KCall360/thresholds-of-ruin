@@ -94,7 +94,7 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
             "version = \"latest\"",
             "major.minor",
         ),
-        ("scenario.toml", "physics-v15", "missing-v1", "dependency"),
+        ("scenario.toml", "dungeon-v16", "missing-v1", "dependency"),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         (
             "regions.toml",
@@ -127,10 +127,25 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         data.push_str(text);
         std::fs::write(path, data).unwrap();
         scenario_package::validate(temp.path()).unwrap();
-        assert!(scenario_package::load(temp.path(), 42, None, false)
-            .unwrap_err()
-            .message
-            .contains(expected));
+        let scenario = scenario_package::load(temp.path(), 42, None, false).unwrap();
+        let engine = Engine::memory(scenario).unwrap();
+        assert!(
+            !engine
+                .state(tor_protocol::ActorId(1))
+                .unwrap()
+                .observation
+                .ready
+        );
+        assert!(
+            engine
+                .state(tor_protocol::ActorId(1))
+                .unwrap()
+                .observation
+                .combat
+                .unwrap()
+                .victory,
+            "{expected}"
+        );
     }
 }
 

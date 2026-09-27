@@ -7,9 +7,10 @@ a gameplay reference.
 
 ## Current state
 
-The repository contains a playable development slice rather than a complete
-dungeon game. It currently provides:
+The repository contains an authored dungeon with an explore, fight, retrieve,
+and escape loop. It currently provides:
 
+- timed melee, typed damage, enemy AI, persistent death, and a retrieval/escape objective;
 - a deterministic simulation with movement, waiting, quantity-aware pickup/drop,
   stacking, character-owned item knowledge, doors, inventory,
   finite material volumes, portal-connected geometry, stairs, visibility, and
@@ -24,10 +25,11 @@ dungeon game. It currently provides:
 - durable character-owned place names, learned on first sight, with renaming and
   remembered-place lists in text (`places`) and ASCII (F5).
 
-New games use protocol **15**, save format **10**, and ruleset
-**`physics-v15`**. The server rejects any other protocol, save format, or ruleset.
-The default authored package is deliberately small: two rooms and a connecting hall. It is
-a proving ground for architecture and interaction, not the planned dungeon.
+New games use protocol **16**, save format **11**, and ruleset
+**`dungeon-v16`**. The server rejects any other protocol, save format, or ruleset.
+The default authored package is a compact five-area dungeon: fight its inhabitants,
+retrieve the dawn seal, and return to the entrance. Use `--scenario scenarios/two-room`
+for the original development fixture. Milestone 4d is implemented; see [dungeon gameplay](docs/dungeon.md).
 
 For the exact implementation matrix and next work, see the
 [project status and roadmap](docs/milestones.md). The [documentation index](docs/README.md)
@@ -94,8 +96,8 @@ Read [the architecture](docs/architecture.md),
 ## Platform and scope
 
 Windows is the primary platform; Linux is tested continuously. Automatic server
-launch, packaged builds, remote networking, procedural dungeon generation,
-combat, death, and the exit objective remain roadmap work.
+launch, packaged builds, remote networking, and procedural dungeon generation remain roadmap work. Combat, death, and the retrieval/escape
+objective are implemented in milestone 4d.
 
 ## License
 

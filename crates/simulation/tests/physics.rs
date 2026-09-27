@@ -305,3 +305,32 @@ fn resting_waits_and_same_tick_handoffs_do_not_rebuild_physics_scenes() {
     }
     assert!(!game.wait_changes_perception(game.next_actor().unwrap()));
 }
+
+#[test]
+fn wall_impact_damages_only_the_moving_actor_and_can_end_the_run_at_contact() {
+    use std::collections::{BTreeMap, BTreeSet};
+    use tor_simulation::combat::CombatSpec;
+    let (mut game, id) = game();
+    game.teleport(id, at(6, 2)).unwrap();
+    game.set_gravity(RegionId(1), [0; 3]).unwrap();
+    game.configure_combat(
+        id,
+        CombatSpec {
+            max_hp: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    game.configure_run(id, BTreeSet::from([id]), None, BTreeMap::new())
+        .unwrap();
+    game.set_actor_velocity(id, [4096, 0, 0]).unwrap();
+    game.act(id, Action::Wait).unwrap();
+    assert_eq!(game.health(id), Some((0, 1)));
+    assert!(game.tick() < 100);
+    assert_eq!(game.next_actor(), None);
+    assert_eq!(game.observe(id).unwrap().location, at(7, 2));
+    assert!(game
+        .physics_impacts()
+        .iter()
+        .any(|impact| impact.at_tick == game.tick()));
+}

@@ -40,6 +40,7 @@ fn native_key_with_shift(key: NativeKey, shift: bool) -> Option<Key> {
 
 fn native_key(key: NativeKey) -> Option<Key> {
     Some(match key {
+        NativeKey::A => Key::Attack,
         NativeKey::Up | NativeKey::K => Key::Up,
         NativeKey::Down | NativeKey::J => Key::Down,
         NativeKey::Left | NativeKey::H => Key::Left,
@@ -88,6 +89,7 @@ fn run() -> Result<(), Error> {
     let mut address: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut actor = ActorId(1);
     let mut observe = false;
+    let mut bump_attacks = tor_client_ascii::BumpAttacks::Hostile;
     let mut automation = false;
     let mut report = false;
     let mut capture = None;
@@ -95,12 +97,20 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
             "--actor" => actor = ActorId(args.next().ok_or("Missing --actor ID")?.parse()?),
             "--observe" => observe = true,
+            "--bump-attacks" => {
+                bump_attacks = match args.next().as_deref() {
+                    Some("hostile") => tor_client_ascii::BumpAttacks::Hostile,
+                    Some("any") => tor_client_ascii::BumpAttacks::Any,
+                    Some("off") => tor_client_ascii::BumpAttacks::Off,
+                    _ => return Err("Use --bump-attacks hostile|any|off".into()),
+                }
+            }
             "--automation" => {
                 automation = true;
                 report = true;
@@ -135,7 +145,15 @@ fn run() -> Result<(), Error> {
     window.set_input_callback(Box::new(TextInput(text.clone())));
     let input = automation.then(automation_input);
     let network = Network::start(address, token, actor, observe);
-    let result = window_loop(&mut window, &network, &text, input, report, capture);
+    let result = window_loop(
+        &mut window,
+        &network,
+        &text,
+        input,
+        report,
+        capture,
+        bump_attacks,
+    );
     network.shutdown()?;
     result
 }
@@ -162,8 +180,10 @@ fn window_loop(
     input: Option<mpsc::Receiver<Result<Input, String>>>,
     report: bool,
     capture: Option<PathBuf>,
+    bump_attacks: tor_client_ascii::BumpAttacks,
 ) -> Result<(), Error> {
     let mut app = App::new();
+    app.bump_attacks = bump_attacks;
     let mut canvas = Canvas::default();
     let mut frame = 0u64;
     let mut pending_input = None;

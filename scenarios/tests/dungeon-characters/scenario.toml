@@ -1,0 +1,13 @@
+format = 1
+id = "dungeon-characters"
+version = "1.0"
+ruleset = "dungeon-v16"
+files = ["regions.toml"]
+default_character = 7
+factions = { delvers = [] }
+ai_profiles = { tactical = { memory_ticks = 1000, flee_percent = 25 } }
+objective = { anchor = "1/companion", item = 100, disclosed = false, continue_play = true }
+characters = [
+ { id = 1, anchor = "1/companion", unselected = "ai", ai = "tactical", combat = { name = "companion", faction = "delvers" } },
+ { id = 7, anchor = "1/start", combat = { name = "delver", faction = "delvers" } }
+]

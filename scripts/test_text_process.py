@@ -33,6 +33,8 @@ class Process:
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.executable = Path(executable)
+        if self.executable.stem == "tor-server" and "--scenario" not in args and "--regions" not in args:
+            args = [*args, "--scenario", ROOT / "scenarios/two-room"]
         self.token = token
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,

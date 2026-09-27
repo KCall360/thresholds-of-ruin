@@ -8,8 +8,8 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **15**, save format **10**, and ruleset
-**`physics-v15`**. Older protocols, save formats, and rulesets are rejected
+two-room fixture. New games use protocol **16**, save format **11**, and ruleset
+**`dungeon-v16`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
 | Area | Status | Implemented scope |
@@ -24,7 +24,7 @@ rather than migrated or silently upgraded.
 | Navigation and interaction | Complete for milestone 3 | Known-cell travel, hazard/cancellation boundaries, prose/examination, clarification, compound pickup/doors, durable places, semantic narration, slow-client recovery acceptance |
 | Authored scenarios | Complete for bounded authored worlds | TOML packages, offline validation, pinned inputs, and converted test setups |
 | Item knowledge | Complete for milestone 4b | Compatible stacks, seeded appearances, character-owned identities, disclosure and recovery |
-| Dungeon gameplay | Not started | Equipment, combat, enemies, death, exit objective, generated scenarios |
+| Dungeon gameplay | 4d complete locally; PR review/CI pending | Timed melee, typed damage, AI, death, retrieval/escape; equipment and generation remain deferred |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
 The current fixture, compatibility behavior, and checks are described in the
@@ -77,7 +77,7 @@ The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
 work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c is complete locally, pending review and Windows/Linux CI. The unresolved
+blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c merged in PR #34 at `c8efdd5`. Milestone 4d is implemented and verified locally; PR review and Windows/Linux CI are pending. Milestone 4e is next. The unresolved
 3p findings and acceptance criteria
 remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
@@ -179,7 +179,7 @@ test proving slow spectators cannot stop active travel. Existing wizard placemen
 commands reproduce the two-actor narration fixture without new setup APIs.
 See [milestone 3 closeout](milestone-3-closeout.md) for behavior and verification.
 Potential-hazard interruption uses newly perceived actors; at the user's explicit
-direction, damage-triggered interruption is assigned to 4d with HP/damage mechanics.
+direction, damage-triggered interruption is implemented in 4d with HP/damage mechanics.
 Use the shared action extension points when later timed actions need progress.
 
 Locks, keys, containers, equipment, and item use are deferred. New item foundations
@@ -207,7 +207,7 @@ objectives. World themes provide defaults; zones replace their pools. Player
 starts use anchors; mobs initially use authored placements instantiated at region
 activation. Starting characters are selected by server option; unselected
 characters can be omitted. Gravity is implemented in 4c. AI and victory declarations are validated
-and retained, but runtime refuses those mechanics until 4d. All authored regions are active in 4a; streaming follows in 4e.
+and retained; milestone 4d activates those mechanics. All authored regions are active in 4a; streaming follows in 4e.
 
 Packages use author-controlled major.minor versions and stable IDs, exact content hashes
 and dependency identities, and an explicit validation utility. Any authored edit
@@ -242,7 +242,7 @@ these rules. Full identification mechanics, equipment and item use come later.
 
 ### 4c — Multi-cell bodies, rotated portals, and gravity
 
-Status: complete locally; review and Windows/Linux CI pending. See [physics](physics.md) for implemented rules and verification/performance evidence.
+Status: merged in PR #34. See [physics](physics.md) for implemented rules and verification/performance evidence.
 
 Extend portal transforms including z-facing apertures independently of stairs.
 Add discrete occupied footprints/heights, region gravity and sparse cell overrides,
@@ -262,12 +262,16 @@ checks and reproducible scenario packages. Numerical tuning can follow mechanics
 
 ### 4d — First complete dungeon loop
 
-Deliver explore, fight, retrieve, escape through authored scenarios and both
+Status: complete locally, ready for PR review and Windows/Linux CI. See
+[dungeon gameplay](dungeon.md) for rules, acceptance evidence, and the eight-actor
+combat performance limitation tracked under deferred 3p.
+
+Implements explore, fight, retrieve, escape through authored scenarios and both
 playable clients. Shared actors support timed d20-plus-bonus attacks versus
 physical defense, LOS to any occupied target cell, differing speeds, HP, typed
 damage, immunity and flat reductions to zero. Initial damage types are energy,
-impact, keen, spirit, and vital; allow multiple components with resolution policies
-defined during implementation. Initial enemies use search/attack/flee, a transition
+impact, keen, spirit, and vital; each component independently applies immunity or
+flat reduction before the remaining damage is summed. Initial enemies use search/attack/flee, a transition
 lookup table, and perception-limited expiring target memory. Scenario-selected AI
 also controls optional starting characters.
 
@@ -276,9 +280,9 @@ authored item; visibility and continued play are scenario-configured. Death is
 persistent, leaving a corpse item and inventory at the base cell. Equipment,
 containers, locks, keys, and usable-item effects are not prerequisites.
 
-Introduce damage-triggered travel and timed-action interruption here with the
-first real damage mechanics. Damage interrupts without erasing still-valid partial
-progress; implement concrete progress policies only for actions that need them.
+Positive HP loss interrupts travel and attack preparation without erasing
+still-valid partial preparation. Zero damage does not interrupt. Waiting preserves
+preparation; movement or a different action discards it.
 
 Acceptance: deterministic attack/AI outcomes, actor-independent targeting and
 interruption, drops/corpses, durable death/victory, hidden-information protection,
@@ -286,6 +290,9 @@ and the complete loop using real text/ASCII clients. Tests use ordinary packages
 with wizard edits only where the test needs them.
 
 ### 4e — Region streaming, generation, and asset palettes
+
+Status: next milestone. See the [handoff](session-handoff.md) for the 4d state that
+streaming must preserve.
 
 Follow the authored loop with region/zone on-demand generation and large-world
 loading. Dependencies on neighbors use fixed structural metadata only. Preload

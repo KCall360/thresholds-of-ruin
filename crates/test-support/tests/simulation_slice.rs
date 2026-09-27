@@ -159,7 +159,7 @@ fn actors_have_independent_inventories_and_deterministic_variable_timing() {
             },
         )
         .unwrap();
-    assert_eq!((pickup.next_actor, pickup.next_tick), (second, 0));
+    assert_eq!((pickup.next_actor, pickup.next_tick), (Some(second), 0));
     assert!(game.observe(second).unwrap().inventory.is_empty());
     assert!(game
         .observe(second)
@@ -168,9 +168,9 @@ fn actors_have_independent_inventories_and_deterministic_variable_timing() {
         .iter()
         .all(|i| i.id != item));
     let wait = game.act(second, Action::Wait).unwrap();
-    assert_eq!((wait.next_actor, wait.next_tick), (second, 40));
+    assert_eq!((wait.next_actor, wait.next_tick), (Some(second), 40));
     let wait = game.act(second, Action::Wait).unwrap();
-    assert_eq!((wait.next_actor, wait.next_tick), (first, 50));
+    assert_eq!((wait.next_actor, wait.next_tick), (Some(first), 50));
 }
 
 #[test]
@@ -333,11 +333,14 @@ fn equal_time_ties_are_stable_and_new_actors_join_at_the_current_tick() {
         )
         .unwrap();
     assert_eq!(game.next_actor(), Some(first));
-    assert_eq!(game.act(first, Action::Wait).unwrap().next_actor, second);
+    assert_eq!(
+        game.act(first, Action::Wait).unwrap().next_actor,
+        Some(second)
+    );
     let outcome = game.act(second, Action::Wait).unwrap();
     assert_eq!(
         (outcome.at_tick, outcome.next_tick, outcome.next_actor),
-        (100, 200, first)
+        (100, 200, Some(first))
     );
 }
 
