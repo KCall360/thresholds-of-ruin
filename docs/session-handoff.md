@@ -1,49 +1,63 @@
-# Session handoff — milestone 3p explored checkpoint growth
+# Session handoff — milestone 3p client timing
 
 ## Verified starting publication
 
-PR #28 merged at `eff107ce95b7c0f6c8f813597d0fcb94f70fefa5` after Windows and Linux
-CI passed on final head `61372ee1958346a90fe423eb75b6e16f182951cc`. GitHub was
-queried directly. This follow-up uses branch `codex/explored-checkpoint-growth`;
-consult its live PR for final publication and CI state.
+PR #29 merged at `37a913dedc05b18b366c34e6ba6f728468381ec4` at
+2026-09-25 17:49:33 UTC. Windows/Linux CI passed on final head
+`a098f341553c256d7775f71754d470bece2765d6` at 17:48:33/17:49:00 UTC.
+GitHub was queried directly. This follow-up uses `codex/3p-client-timing`;
+consult its PR for final publication and CI state.
 
-Read [the original audit](3p-closeout.md), [this follow-up](3p-checkpoint-growth.md),
+Read [the client timing findings](3p-client-timing.md),
+[checkpoint reduction](3p-checkpoint-growth.md), [original audit](3p-closeout.md),
 [milestones](milestones.md), [checkpoints](checkpoints.md),
-[the harness](performance-harness.md), [the performance plan](performance-persistence.md),
+[harness](performance-harness.md), [performance plan](performance-persistence.md),
 [architecture](architecture.md) and [development practices](../CONTRIBUTING.md).
 
-## Implementation and compatibility
+## Preserved contracts
 
-The user explicitly approved advancing to save format **6** and rejecting format 5
-before implementation, following the pre-release policy. No migration/compatibility
-reader was added. Protocol 12 and `diagonal-v11` remain unchanged. Format 6 stores
-equal cell/edge knowledge by source region once across navigation/rewind instances.
-Decoding restores sharing and validates ordered references and table structure.
-Exact boundary/game comparison, malformed-reference tests and full eight/256-region
-saved-exploration regressions cover the changed representation.
+Format 6 intentionally rejects format 5 under the approved pre-release policy.
+Protocol 12 and `diagonal-v11` remain unchanged. The complete 256-region checkpoint
+remains 9.92 MB under the unchanged 64 MiB cap. Exact recovery, rewind, disclosure,
+bounded queues and resynchronization behavior are unchanged. Maintain the Text,
+ASCII and Text + ASCII Spectator desktop launchers; do not restore the removed
+256 Region Spectator launcher. Preserve the driver and existing saves.
 
-The complete 256-region checkpoint falls from 765,021,723 to 9,920,494 bytes.
-Both interval-64 and default-1024 traversal complete all 2,805 actions and 20,956
-cells with exact restart and tails of 53/757 records. The 64 MiB cap, bounded
-queues, resynchronization, disclosure, history and rewind contracts are unchanged.
-The 256 Region Spectator desktop shortcut was removed as requested. Maintain the
-remaining three launchers; preserve the reusable benchmark driver and prior saves.
+## Findings and closure
 
-## Closure and next step
+Milestone **3p remains open**. The historical 2,915 ms tail is retained, not declared
+fixed by non-reproduction. New timing fields locate a 632.82 ms request-start
+diagnostic call inside a 632.99 ms apparent send interval, and a 441.59 ms stdout
+write after native presentation already returned. Encoding is separately measured.
+Capped deferred logs remove reader disk writes during actions; they do not remove
+pipe backpressure, CPU work or scheduling. The original metric boundaries remain.
 
-The checkpoint-size blocker is addressed. Full native explored-save acceptance
-passes, including a 78 ms real-keyboard modal response on the retained 256-region
-save while persistence is blocked. Final acknowledgement maximum is 30.64 ms;
-full native traversal still has a 2,915 ms maximum. Correlation places the largest
-intervals in client request sending, acknowledgement delivery and frame-reader
-receipt; server handlers peak at 10.53 ms. Their root causes and latency disposition
-remain unresolved. Opt-in request/reader timing correlation is maintained with
-the workloads. Non-reproduction does not prove historical spikes fixed. See the
-follow-up for retained raw samples, timings, final verification and remaining
-limitations; keep 3p open while that evidence item remains unresolved.
+Both final 256-region traversals complete 2,805 actions and 20,956 cells with exact
+restart, checkpoint sequence 2,752, 9,806,500 bytes and 53 replay-tail records.
+Synchronous/deferred maxima are 683.50/87.76 ms. The small deferred run retains
+a 233.47 ms tail including 196.95 ms inside native presentation/pacing, before
+reporting. Real keyboard modal input on the fully explored save takes 47 ms
+while SQLite is blocked and the subsequent checkpoint commits.
 
-Next isolate those send/delivery/report-reader intervals with focused diagnostics.
-After 3p gates are satisfied, milestone 3 resumes with shared resumable actions,
-durable place knowledge, semantic narration/interruption, and slow-client
-resynchronization acceptance. No interaction or travel feature is added here.
-Publish through a PR and merge only after Windows/Linux CI pass on its final head.
+The longer deferred eight-client attempt fails at its diagnostic retention cap
+after 1,418 samples/two cycles. The synchronous attempt fails after 950 samples/
+one cycle at a snapshot readiness deadline; one headless ready report takes
+27,347 ms despite a 0.256 ms snapshot handler. Both failures are retained.
+Separate one-cycle comparisons complete 495 acknowledgements each; their success
+does not qualify the failed longer runs. See the findings for raw evidence,
+hashes, verification, measurement boundaries and limitations.
+
+## Next step
+
+Capture thread scheduling and blocked-write evidence around the remaining native
+and headless-report stalls, then fix or explicitly resolve those costs and qualify
+the longer client workload. WPR's CPU-trace probe failed to enable the local
+system performance profiling policy (`0xc5585011`); no policy was changed or
+kernel trace started. Obtain that profiling capability before assigning wall
+intervals to descheduling or pure I/O.
+Keep failed runs, nullable final diagnostic costs and historical measurements.
+
+After 3p gates pass, milestone 3 resumes with shared resumable actions, durable
+place knowledge, semantic narration/interruption and slow-client resynchronization
+acceptance. No interaction or travel feature is added here. Publish through a PR
+and merge only after Windows/Linux CI pass on its final head.

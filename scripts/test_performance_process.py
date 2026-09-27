@@ -18,7 +18,7 @@ class PerformanceProcesses(unittest.TestCase):
         output = Path(directory.name) / "demo"
         regions = int(os.environ.get("TOR_PERFORMANCE_REGIONS", "8"))
         cycles = int(os.environ.get("TOR_PERFORMANCE_CYCLES", "1"))
-        result = run_demo(self.bin, output, regions=regions, actors=1, cycles=cycles, pace=0, stay_open=False, correlate=True)
+        result = run_demo(self.bin, output, regions=regions, actors=1, cycles=cycles, pace=0, stay_open=False, correlate=True, defer_logs=True)
         from timing_correlation import correlate_ack
         correlated = correlate_ack(output, result)
         self.assertEqual(len(correlated), sum(s["expected"] != "blocked" for s in result["samples"]))

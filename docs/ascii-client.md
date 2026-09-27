@@ -190,6 +190,14 @@ reported frame. Diagnostic I/O is synchronous and can delay input; leave these
 options off for ordinary play. They do not measure physical keyboard-to-photon
 latency. See [Phase E findings](phase-e-findings.md) for measured limits.
 
+Additional diagnostic fields retain that boundary while separating report work:
+`presented_unix_ns` samples host time just after native presentation returns;
+`previous_report_encode_ms` and `previous_report_write_ms` describe construction/
+encoding and stdout writing/flushing for the preceding reported frame. All include
+scheduling within the measured interval. The harness can defer its disk logs for
+comparison; this does not disable the application's synchronous diagnostic output.
+See the [timing investigation](3p-client-timing.md) for attribution and limits.
+
 `test_client_responsiveness_process.py` verifies native Win32/X11 note input while
 SQLite saving is deliberately blocked, both with and without a pending checkpoint,
 and exercises native input during a 160-action burst, followed by exact final-state,

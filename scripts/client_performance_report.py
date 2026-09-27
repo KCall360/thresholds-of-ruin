@@ -18,6 +18,11 @@ def validate_presentation_profile(profile):
         value = profile[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError("Invalid native phase duration")
+    if "previous_report_encode_ms" in profile or "previous_report_write_ms" in profile:
+        for key in ("previous_report_encode_ms", "previous_report_write_ms"):
+            value = profile.get(key)
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError("Invalid diagnostic report phase duration")
 
 
 def validate(rows):

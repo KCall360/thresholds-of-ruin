@@ -167,6 +167,8 @@ fn window_loop(
     let mut failed = false;
     let mut mouse_down = false;
     let mut previous_report_ms = 0.;
+    let mut previous_report_encode_ms = 0.;
+    let mut previous_report_write_ms = 0.;
     let mut last_turn = Instant::now();
     while window.is_open() {
         let turn = Instant::now();
@@ -306,6 +308,10 @@ fn window_loop(
         // headless fallback; CI must supply a functioning display environment.
         if report && dirty {
             let report_started = Instant::now();
+            let presented_unix_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
             let done = if !app.busy {
                 pending_input.take()
             } else {
@@ -317,18 +323,22 @@ fn window_loop(
                 save_frame(path, &canvas)?;
             }
             let capture_ms = capture_started.elapsed().as_secs_f64() * 1000.;
-            println!(
-                "{}",
-                serde_json::json!({"type":"frame","frame":frame,
+            let encode_started = Instant::now();
+            let encoded = serde_json::json!({"type":"frame","frame":frame,
+                "presented_unix_ns":presented_unix_ns,
                 "profile":{"version":1,"network_events":network_events,"apply_ms":apply_ms,"draw_ms":draw_ms,
+                "previous_report_encode_ms":previous_report_encode_ms,"previous_report_write_ms":previous_report_write_ms,
                 "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
                 "map_tiles":state.map(tor_client_ascii::render::map_tiles),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
-                "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)})
-            );
+                "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
+            previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
+            let write_started = Instant::now();
+            println!("{encoded}");
             io::stdout().flush()?;
+            previous_report_write_ms = write_started.elapsed().as_secs_f64() * 1000.;
             previous_report_ms = report_started.elapsed().as_secs_f64() * 1000.;
         }
         if quit {
