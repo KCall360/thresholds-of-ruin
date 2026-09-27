@@ -1,0 +1,12 @@
+{
+  "validator": "tor-scenario-2",
+  "ruleset": "items-v14",
+  "content_hash": "643e89861dd3005e3423a8c96b5e89be3e70771c9ed57e918664f8572c30efaa",
+  "files": {
+    "regions.toml": "8552ef4d562c7cf7a9d8ffab66c5c5da65f0f3e93f449a27c81b268350176911",
+    "scenario.toml": "37885a236d74e5c44f09d4cd7b0846c1e2e5d718231adeb257bc2b30766c81b7"
+  },
+  "regions": 4,
+  "model_hash": "3d612482787f5cccd8cc6ccadb74df10dc412a90a531ef70d00966e48a4e5030",
+  "coverage": "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof"
+}

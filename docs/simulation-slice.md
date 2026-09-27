@@ -83,8 +83,8 @@ world changes. Effect application and scheduling have no fallible operations.
 These are extension points for future timed actions, not implemented partial
 progress or interruption behavior. Current effects still happen at the action's
 starting tick, and all actors use the same deterministic recovery scheduler.
-Travel remains a server-managed sequence of ordinary moves. The refactor changed no formats; current place knowledge uses protocol 13, save
-format 7 and `places-v12`. The [architecture](architecture.md#time-and-actions)
+Travel remains a server-managed sequence of ordinary moves. The refactor changed no formats; current place knowledge uses protocol 14, save
+format 7 and `items-v14`. The [architecture](architecture.md#time-and-actions)
 defines where future persistent progress and revalidation belong.
 
 The action-boundary behavior tests cover immediate effects and exact recovery for
@@ -135,7 +135,7 @@ unknown, already carried, and out-of-reach items produces the same unavailable
 error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
 Clients retain separate last-seen cell contents, which may be stale. Existing
-Saves use `places-v12`; older rulesets are rejected. Sound remains later work.
+Saves use `items-v14`; older rulesets are rejected. Sound remains later work.
 Server games add an initially open door.
 
 ## Validation and remaining work
@@ -157,7 +157,7 @@ process tests, including cross-frontend control transfer and save/resume.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `places-v12`.
+[the adventure slice](text-adventure.md). Saves use `items-v14`.
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

@@ -156,6 +156,13 @@ pub struct Door {
 }
 
 impl World {
+    /// Authored portal endpoints must remain clear of solid terrain. Closed
+    /// doors are ordinary gameplay state and do not invalidate a package.
+    pub fn authored_links_clear(&self) -> bool {
+        self.passages
+            .values()
+            .all(|p| !self.is_wall(p.from) && !self.is_wall(p.to))
+    }
     /// Structural validation for backend checkpoint restoration.
     pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
         let mut ids = BTreeSet::new();

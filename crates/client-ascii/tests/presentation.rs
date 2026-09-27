@@ -3,6 +3,40 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn quantity_picker_submits_partial_pickup_and_drop() {
+    let mut snapshot = state().snapshot();
+    snapshot.state.observation.ground_items[0].item.quantity = 10;
+    snapshot
+        .state
+        .observation
+        .inventory
+        .push(snapshot.state.observation.ground_items[0].item.clone());
+    for key in [Key::Pickup, Key::Drop] {
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+        app.ready();
+        assert_eq!(app.input(Input::Key { key }), Effect::None);
+        app.input(Input::Text { text: "3".into() });
+        let effect = app.input(Input::Key { key: Key::Enter });
+        let expected = if key == Key::Pickup {
+            Action::Take {
+                item: 3,
+                quantity: Some(3),
+            }
+        } else {
+            Action::Drop {
+                item: 3,
+                quantity: Some(3),
+            }
+        };
+        assert!(
+            matches!(effect, Effect::Request(Request::Command { command: Command::Act { action, .. }, .. }) if action == expected)
+        );
+    }
+}
+
+#[test]
 fn places_modal_displays_memory_and_renames_without_travel_or_time() {
     let mut snapshot = state().snapshot();
     snapshot.state.observation.places.push(PlaceView {
@@ -123,7 +157,7 @@ fn state() -> ClientState {
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"reachable":true,"item":{"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -154,7 +188,10 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
         app.input(Input::Key { key: Key::Pickup }),
         Effect::Request(Request::Command {
             command: Command::Act {
-                action: Action::Take { item: 3 },
+                action: Action::Take {
+                    item: 3,
+                    quantity: None
+                },
                 ..
             },
             ..
@@ -252,6 +289,9 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .push(GroundItemView {
             reachable: true,
             item: ItemView {
+                quantity: 1,
+                appearance: String::new(),
+                identified: true,
                 description: String::new(),
                 id: 4,
                 name: "another token".into(),
@@ -270,7 +310,10 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         app.input(Input::Key { key: Key::Enter }),
         Effect::Request(Request::Command {
             command: Command::Act {
-                action: Action::Take { item: 4 },
+                action: Action::Take {
+                    item: 4,
+                    quantity: None
+                },
                 ..
             },
             ..

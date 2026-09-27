@@ -10,7 +10,8 @@ a gameplay reference.
 The repository contains a playable development slice rather than a complete
 dungeon game. It currently provides:
 
-- a deterministic simulation with movement, waiting, pickup, doors, inventory,
+- a deterministic simulation with movement, waiting, quantity-aware pickup/drop,
+  stacking, character-owned item knowledge, doors, inventory,
   finite material volumes, portal-connected geometry, stairs, visibility, and
   actor-specific perception;
 - a local, authenticated WebSocket server with saved action history, annotations,
@@ -19,12 +20,13 @@ dungeon game. It currently provides:
 - playable text and native graphical ASCII clients, plus a JSON-lines headless
   client for scripted acceptance tests; and
 - client-held last-seen map memory that never exposes undisclosed world state; and
+- validated, self-contained TOML scenario packages with pinned save inputs; and
 - durable character-owned place names, learned on first sight, with renaming and
   remembered-place lists in text (`places`) and ASCII (F5).
 
-New games use protocol **13**, save format **7**, and ruleset
-**`places-v12`**. The server rejects any other protocol, save format, or ruleset.
-The current fixture is deliberately small: two rooms and a connecting hall. It is
+New games use protocol **14**, save format **9**, and ruleset
+**`items-v14`**. The server rejects any other protocol, save format, or ruleset.
+The default authored package is deliberately small: two rooms and a connecting hall. It is
 a proving ground for architecture and interaction, not the planned dungeon.
 
 For the exact implementation matrix and next work, see the

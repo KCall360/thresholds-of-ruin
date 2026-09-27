@@ -87,14 +87,10 @@ impl Game {
                     movement_cost(actor.turn_ticks.get(), direction)?,
                 )
             }
-            Action::Take(item) => {
-                if self.items.get(&item).map(|item| item.location)
-                    != Some(ItemLocation::Ground(actor.location))
-                {
-                    return Err(GameError::ItemUnavailable);
-                }
+            Action::Take { item, quantity } | Action::Drop { item, quantity } => {
+                let taking = matches!(action, Action::Take { .. });
                 (
-                    OutcomeKind::Taken { item },
+                    self.prepare_transfer(id, item, quantity, taking)?,
                     actor.turn_ticks.get().div_ceil(2),
                 )
             }
@@ -144,11 +140,20 @@ impl Game {
                 actor.location = to;
                 actor.visited.insert(to.region);
             }
-            OutcomeKind::Taken { item } => {
-                self.items
-                    .get_mut(&item)
-                    .expect("item validated above")
-                    .location = ItemLocation::Carried(id);
+            OutcomeKind::Taken {
+                item,
+                result,
+                quantity,
+            } => {
+                self.apply_transfer(item, result, quantity, ItemLocation::Carried(id));
+            }
+            OutcomeKind::Dropped {
+                item,
+                result,
+                quantity,
+            } => {
+                let location = self.actors[&id].location;
+                self.apply_transfer(item, result, quantity, ItemLocation::Ground(location));
             }
             OutcomeKind::Waited => {}
         }

@@ -49,7 +49,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 13, save format 7, and `places-v12` are currently in use. Multi-actor archives
+Protocol 14, save format 9, and `items-v14` are currently in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
@@ -404,3 +404,22 @@ diagnostic cell memory and history retention reset. The driver also records ack
 line arrival, ready reader/queue work, cell counts and the size of ready JSON
 re-encoded by Python (not network byte counts). Keep both cases; see the
 [place-knowledge findings](place-knowledge-findings.md).
+
+## Scenario package workload v1
+
+`cargo run --release -p tor-server --example scenario_bench --locked` reports
+20 samples each for 2 and 256 authored regions. It measures source integrity
+checks, initial game construction, one ordinary wait, durable creation, explicit
+saving, and checkpoint restart, plus one offline validation interval and source/save
+bytes. Every restart must match the saved actor state and validation status. The 2-region case also measures the
+original in-code fixture constructor on the same build. The 256-region fixture
+adds disconnected authored chambers to measure input scaling, not exploration.
+Timing ends before JSON reporting. Keep p50/p95/max and raw samples; these are
+diagnostics, not machine-independent test thresholds. Pair this feature workload
+with unchanged small/large `latency_bench --case` comparisons.
+
+## Item quantities and knowledge
+
+See [items and character knowledge](items.md) for quantity-aware pickup/drop,
+stack identity, randomized appearances, disclosed protocol fields, scenario
+authoring, compatibility, and the versioned item profiling workload.

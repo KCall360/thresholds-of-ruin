@@ -5,7 +5,7 @@ use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
 
-pub const HELP: &str = "places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
+pub const HELP: &str = "places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get/drop [quantity] <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,7 +15,7 @@ pub enum Intent {
     Action(Action),
     Travel {
         destination: String,
-        take: Option<u64>,
+        take: Option<(u64, Option<u64>)>,
         door: Option<(u64, bool)>,
         label: String,
         direction: Option<Direction>,
@@ -80,6 +80,7 @@ impl Dialogue {
             ("look", noun) if noun.starts_with("at ") => self.object(&noun[3..], state, "examine"),
             ("open" | "close", noun) => self.object(noun, state, verb),
             ("take" | "get", noun) => self.object(noun, state, "take"),
+            ("drop", noun) => self.object(noun, state, "drop"),
             ("go" | "approach", noun) if parse_direction(noun).is_err() => {
                 self.object(noun.strip_prefix("to ").unwrap_or(noun), state, "go")
             }
@@ -149,6 +150,14 @@ impl Dialogue {
     }
 
     fn object(&mut self, noun: &str, state: &StateView, verb: &str) -> Intent {
+        let (quantity, noun) = if matches!(verb, "take" | "drop") {
+            match crate::item_quantity(noun) {
+                Ok(value) => value,
+                Err(error) => return Intent::Say(error),
+            }
+        } else {
+            (None, noun)
+        };
         if verb == "examine"
             && matches!(
                 noun,
@@ -201,12 +210,19 @@ impl Dialogue {
                 continue;
             }
             if !(noun.is_empty()
+                || crate::item_matches(noun, item)
                 || noun_matches(noun, &item.name)
                 || noun == "it" && self.item == Some(id))
             {
                 continue;
             }
-            let intent = if verb == "examine" {
+            let carried = state.observation.inventory.iter().any(|i| i.id == id);
+            if verb == "drop" && !carried {
+                continue;
+            }
+            let intent = if verb == "drop" {
+                Intent::Action(Action::Drop { item: id, quantity })
+            } else if verb == "examine" {
                 Intent::Say(if item.description.is_empty() {
                     "You notice no further distinguishing details.".into()
                 } else {
@@ -226,7 +242,7 @@ impl Dialogue {
                 };
                 if ground.reachable {
                     if verb == "take" {
-                        Intent::Action(Action::Take { item: id })
+                        Intent::Action(Action::Take { item: id, quantity })
                     } else {
                         Intent::Say("You are already there.".into())
                     }
@@ -241,7 +257,7 @@ impl Dialogue {
                     };
                     Intent::Travel {
                         destination: cell.key.clone(),
-                        take: (verb == "take").then_some(id),
+                        take: (verb == "take").then_some((id, quantity)),
                         door: None,
                         label: format!("the {}", safe(&item.name)),
                         direction: None,
@@ -249,7 +265,7 @@ impl Dialogue {
                 }
             };
             choices.push(Choice {
-                label: item.name.clone(),
+                label: format!("{} (count {})", item.name, item.quantity),
                 intent,
                 item: Some(id),
                 door: None,
@@ -569,7 +585,11 @@ pub fn describe(state: &StateView) -> String {
         if seen.insert(item.item.id) {
             lines.push(format!(
                 "You see {} {}.",
-                indefinite(&item.item.name),
+                if item.item.quantity == 1 {
+                    indefinite(&item.item.name)
+                } else {
+                    format!("{} x {}", item.item.quantity, safe(&item.item.name))
+                },
                 if item.reachable {
                     "at your feet".into()
                 } else if in_current_place(state, item.position) {
@@ -649,7 +669,7 @@ pub fn inventory(state: &StateView) -> String {
                 .observation
                 .inventory
                 .iter()
-                .map(|i| safe(&i.name))
+                .map(|i| format!("{} x {}", i.quantity, safe(&i.name)))
                 .collect::<Vec<_>>()
                 .join(", ")
         )

@@ -27,12 +27,9 @@ class DiagonalProcesses(unittest.TestCase):
     native_keys = doors.DoorProcesses.native_keys
     key = ascii_support.AsciiProcesses.key
 
-    def setup_wizard(self, section):
+    def setup_wizard(self):
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/diagonal.json").read_text())
-        for command in fixture[section]:
-            self.assertNotIn("Server error", wizard.command(command))
         wizard.command("release")
         return wizard
 
@@ -69,11 +66,11 @@ class DiagonalProcesses(unittest.TestCase):
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],current["state"])
-        self.assertEqual(inspect_save(self.save)["ruleset"],"places-v12")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"items-v14")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
-        self.server(wizard=True)
-        wizard = self.setup_wizard("doors")
+        self.server(wizard=True, scenario="diagonal-doors")
+        wizard = self.setup_wizard()
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         player, _ = self.adventure()
         self.assertEqual(self.say(player,"open door"),"You open the wooden door.\n> ")
@@ -109,8 +106,7 @@ class DiagonalProcesses(unittest.TestCase):
         self.assertEqual(rewound["state"]["observation"]["tick"],0)
 
     def test_rotated_crossing_keeps_observer_axes(self):
-        self.server(wizard=True)
-        self.setup_wizard("rotated")
+        self.server(scenario="diagonal-rotated")
         player, _ = self.client()
         moved = self.act(player,{"type":"move","direction":"north_east"})
         self.assertIsNone(moved["error"])
@@ -123,8 +119,7 @@ class DiagonalProcesses(unittest.TestCase):
         self.assertEqual(moved["state"]["observation"]["tick"],242)
 
     def test_native_stair_bindings_do_not_also_wait(self):
-        self.server(wizard=True)
-        self.setup_wizard("stairs")
+        self.server(scenario="diagonal-stairs")
         window = self.launch("tor-client-ascii",["--connect",self.address,"--report-frames"])
         self.frame(window,lambda f:f.get("state") and not f["busy"])
         observer, _ = self.client(support.SPECTATOR_TOKEN)

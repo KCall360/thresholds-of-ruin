@@ -12,7 +12,7 @@ fn snapshot(hidden: bool) -> Snapshot {
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
                 "stairs_up":x==2,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"id":1,"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
+            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
             "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":2,"position":{"x":2,"y":0,"z":0}})]},
             "inventory":[],"ready":true
         }}

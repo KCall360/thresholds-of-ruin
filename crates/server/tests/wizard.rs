@@ -170,6 +170,7 @@ fn rewind_restores_inventory_knowledge_scheduler_and_identity_allocation() {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
                 action: Action::Take {
                     item: initial.observation.ground_items[0].item.id,
+                    quantity: None,
                 },
             },
         )

@@ -22,8 +22,23 @@ fn seeded_actor_can_observe_take_and_cross_between_rooms() {
     assert!(initial.inventory.is_empty());
     assert_eq!(initial.known_places.len(), 1);
     let item = initial.ground_items[0].id;
-    let taken = game.act(actor, Action::Take(item)).unwrap();
-    assert_eq!(taken.kind, OutcomeKind::Taken { item });
+    let taken = game
+        .act(
+            actor,
+            Action::Take {
+                item,
+                quantity: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        taken.kind,
+        OutcomeKind::Taken {
+            item,
+            result: item,
+            quantity: 1
+        }
+    );
     assert_eq!((taken.at_tick, taken.next_tick), (0, 50));
     assert_eq!(game.observe(actor).unwrap().inventory[0].id, item);
     assert!(game
@@ -64,12 +79,24 @@ fn queries_and_invalid_actions_leave_the_entire_simulation_unchanged() {
         Err(GameError::Blocked)
     );
     assert_eq!(
-        game.act(actor, Action::Take(ItemId(999))),
+        game.act(
+            actor,
+            Action::Take {
+                item: ItemId(999),
+                quantity: None
+            }
+        ),
         Err(GameError::ItemUnavailable)
     );
     // A real but undisclosed item must produce the same error as a guessed ID.
     assert_eq!(
-        game.act(actor, Action::Take(ItemId(2))),
+        game.act(
+            actor,
+            Action::Take {
+                item: ItemId(2),
+                quantity: None
+            }
+        ),
         Err(GameError::ItemUnavailable)
     );
     assert_eq!(game, original);
@@ -84,7 +111,10 @@ fn identical_seed_and_actions_reproduce_state_and_event_trace() {
             .unwrap();
         let item = game.observe(actor).unwrap().ground_items[0].id;
         let trace = [
-            Action::Take(item),
+            Action::Take {
+                item,
+                quantity: None,
+            },
             Action::Move(Direction::East),
             Action::Wait,
         ]
@@ -120,7 +150,15 @@ fn actors_have_independent_inventories_and_deterministic_variable_timing() {
     );
     assert_eq!(game, before);
     let item = game.observe(first).unwrap().ground_items[0].id;
-    let pickup = game.act(first, Action::Take(item)).unwrap();
+    let pickup = game
+        .act(
+            first,
+            Action::Take {
+                item,
+                quantity: None,
+            },
+        )
+        .unwrap();
     assert_eq!((pickup.next_actor, pickup.next_tick), (second, 0));
     assert!(game.observe(second).unwrap().inventory.is_empty());
     assert!(game
@@ -187,16 +225,36 @@ fn visible_items_still_require_reach_and_cannot_be_taken_twice() {
     let item = game.observe(actor).unwrap().ground_items[0].id;
     let before = game.clone();
     assert_eq!(
-        game.act(actor, Action::Take(item)),
+        game.act(
+            actor,
+            Action::Take {
+                item,
+                quantity: None
+            }
+        ),
         Err(GameError::ItemUnavailable)
     );
     assert_eq!(game, before);
     game.act(actor, Action::Move(Direction::East)).unwrap();
-    let taken = game.act(actor, Action::Take(item)).unwrap();
+    let taken = game
+        .act(
+            actor,
+            Action::Take {
+                item,
+                quantity: None,
+            },
+        )
+        .unwrap();
     assert_eq!((taken.at_tick, taken.next_tick), (1, 2));
     let before = game.clone();
     assert_eq!(
-        game.act(actor, Action::Take(item)),
+        game.act(
+            actor,
+            Action::Take {
+                item,
+                quantity: None
+            }
+        ),
         Err(GameError::ItemUnavailable)
     );
     assert_eq!(game, before);

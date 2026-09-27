@@ -97,15 +97,12 @@ class StreamRecoveryProcesses(unittest.TestCase):
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
         server = self.launch('tor-server', ['--listen', '127.0.0.1:0', '--save', self.save,
-            '--regions', '1', '--actors', '2', '--wizard'],
+            '--scenario', Path(__file__).resolve().parents[1] / 'scenarios/tests/semantic-narration-setup', '--wizard'],
             extra_env={'TOR_WIZARD_TOKEN': headless.WIZARD_TOKEN,
                        'TOR_SPECTATOR_TOKEN': support.SPECTATOR_TOKEN})
         self.address = json.loads(server.until(lambda line: line.startswith('{')))['address']
         wizard = self.launch('tor-client-text', ['--connect', self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == 'Ready.')
-        fixture = json.loads((Path(__file__).parent / 'scenarios/semantic-narration.json').read_text())
-        for operation in fixture['setup']:
-            self.assertNotIn('Server error', wizard.command(operation))
         wizard.command('release')
         player, _ = self.client()
         other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])

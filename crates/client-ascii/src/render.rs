@@ -323,7 +323,14 @@ impl Canvas {
                 self.text(804, 148, "Nothing carried yet.", MUTED, 2, 22);
             }
             for (i, item) in o.inventory.iter().take(5).enumerate() {
-                self.text(804, 146 + i * 22, &format!("! {}", item.name), TEXT, 2, 22);
+                self.text(
+                    804,
+                    146 + i * 22,
+                    &format!("{} x {}", item.quantity, item.name),
+                    TEXT,
+                    2,
+                    22,
+                );
             }
             if o.inventory.len() > 5 {
                 self.text(
@@ -340,7 +347,14 @@ impl Canvas {
                 self.text(804, 316, "No items in sight.", MUTED, 2, 22);
             }
             for (i, item) in o.ground_items.iter().take(4).enumerate() {
-                self.text(804, 316 + i * 36, &item.item.name, TEXT, 2, 22);
+                self.text(
+                    804,
+                    316 + i * 36,
+                    &format!("{} x {}", item.item.quantity, item.item.name),
+                    TEXT,
+                    2,
+                    22,
+                );
                 self.text(
                     804,
                     337 + i * 36,
@@ -397,7 +411,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "HJKL/YUBN move  </> level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  F4 note  F5 places  F2 history  ESC quit/cancel"
+            "HJKL/YUBN move  </> level  _/CLICK travel  G take  D drop  O/C doors  SPACE wait  F3/R control  F4 note  F5 places  F2 history  ESC quit/cancel"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -447,7 +461,15 @@ impl Canvas {
             self.text(
                 188,
                 239,
-                "UP/DOWN select   ENTER take   ESC cancel",
+                &format!(
+                    "UP/DOWN select  ENTER {}  Count: {}  ESC cancel",
+                    if app.dropping { "drop" } else { "take" },
+                    if app.quantity.is_empty() {
+                        "all"
+                    } else {
+                        &app.quantity
+                    }
+                ),
                 MUTED,
                 1,
                 80,
@@ -460,7 +482,7 @@ impl Canvas {
                     &format!(
                         "{} {}",
                         if i == app.selected { ">" } else { " " },
-                        item.name
+                        format_args!("{} x {}", item.quantity, item.name)
                     ),
                     if i == app.selected { GOLD } else { TEXT },
                     2,
@@ -721,7 +743,7 @@ mod index_tests {
                 "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
                 "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":[{"item":{"id":1,"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
+            "ground_items":[{"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
             "visible_actors":[{"id":2,"position":{"x":3,"y":0,"z":0}}],"inventory":[]
         })).unwrap();
         let index = super::indexed_glyphs(&view);

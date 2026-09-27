@@ -6,7 +6,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let position = |v: &[&str]| -> Result<Position, String> {
         Ok(Position {
             region: v[0].parse().map_err(|_| usage)?,
@@ -85,6 +85,10 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                 "open" => false,
                 _ => return Err(usage.into()),
             },
+        },
+        ["identify", actor, item] => WizardOperation::IdentifyItem {
+            actor: tor_protocol::ActorId(actor.parse().map_err(|_| usage)?),
+            item: item.parse().map_err(|_| usage)?,
         },
         ["item", kind, r, x, y, z] => WizardOperation::PlaceItem {
             kind: match *kind {

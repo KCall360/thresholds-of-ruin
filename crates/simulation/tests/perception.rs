@@ -28,7 +28,13 @@ fn portal_sight_discloses_only_visible_locations_and_does_not_grant_reach_or_vis
         .any(|place| place.id == RegionId(2)));
     let before = game.clone();
     assert_eq!(
-        game.act(actor, Action::Take(tablet.id)),
+        game.act(
+            actor,
+            Action::Take {
+                item: tablet.id,
+                quantity: None
+            }
+        ),
         Err(GameError::ItemUnavailable)
     );
     assert_eq!(game, before);

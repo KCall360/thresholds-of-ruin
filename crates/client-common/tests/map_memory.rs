@@ -75,6 +75,9 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
     let mut initial = snapshot(&[("a", 0, 0), ("b", 1, 0), ("item", 3, 0)], 0);
     initial.state.observation.ground_items.push(GroundItemView {
         item: ItemView {
+            quantity: 1,
+            appearance: String::new(),
+            identified: true,
             id: 7,
             name: "token".into(),
             description: String::new(),

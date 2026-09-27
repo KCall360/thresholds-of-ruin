@@ -52,8 +52,7 @@ claims to resolve the deferred 3p scheduling/presentation tails.
 
 `scripts/test_stream_recovery_process.py` covers delayed delivery, broken streams,
 fresh snapshots, and both playable clients' semantic narration. Its two-actor
-door fixture is `scripts/scenarios/semantic-narration.json`, reproduced with
-existing wizard room, door, and teleport commands. Shared-state tests cover
+door fixture is `scenarios/tests/semantic-narration-setup`, converted in milestone 4a to an ordinary validated package. Shared-state tests cover
 deduplication, disclosure limits, atomic rejection, snapshot resets, and names.
 Travel, adventure, doors, places, persistence, and native-input suites remain
 part of full verification.

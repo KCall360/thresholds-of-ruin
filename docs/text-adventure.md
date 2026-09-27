@@ -86,7 +86,10 @@ invent enclosed walls or use internal region names.
 - `look` / `l`: describe current sight and visible ways onward.
 - `examine <thing>` / `x <thing>` / `look at <thing>`: inspect disclosed appearance;
   `examine walls` and `examine floor` describe visible surface material.
-- `inventory` / `i`: list carried names.
+- `inventory` / `i`: list carried names and quantities.
+- `take 3 arrows` / `drop 2 arrows`: transfer a requested quantity from a selected
+  stack; omit the count to transfer the whole stack. Ambiguous names prompt for
+  clarification, preserving the count through selection and any approach.
 - Diagonal names and `ne`/`se`/`sw`/`nw` work with travel and `step`; descriptions
   use eight horizontal bearings (diagonal sectors cover ratios from 1:2 to 2:1).
 - Directions / `go east`: travel to a visible destination as described above.
@@ -151,7 +154,7 @@ disclosure, repeated views, and floor-versus-exit distinctions. The actual-proce
 suite `scripts/test_adventure_process.py` verifies normal play, travel then pickup,
 exact successful/interrupted transcripts, prompt boundaries, cancellation,
 spectators, persistence, and wizard-authored geometry/hazards using
-`scripts/scenarios/text-adventure.json`, `wide-join.json`, and `portal-geometry.json`.
+`scenarios/tests/text-adventure-*`, `wide-join-setup`, and `portal-geometry-setup`.
 The existing discovery runs these tests in debug and release on Windows and Linux.
 
 ## Door interactions
@@ -160,8 +163,14 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. Current games use `places-v12` and save format 7.
+automatically opens a door. Current games use `items-v14` and save format 9.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling
 facts; missing enclosure is not inferred from a storage boundary.
+
+## Item quantities and knowledge
+
+See [items and character knowledge](items.md) for quantity-aware pickup/drop,
+stack identity, randomized appearances, disclosed protocol fields, scenario
+authoring, compatibility, and the versioned item profiling workload.

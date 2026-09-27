@@ -11,8 +11,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"id":1,"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"id":2,"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":1,"appearance":"item","identified":true,"id":2,"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -151,18 +151,24 @@ fn directions_travel_to_another_anchor_and_take_approaches_an_item() {
         matches!(dialogue.interpret("east", &state()), Intent::Travel { destination, take: None, .. } if destination == "cell-6")
     );
     assert!(
-        matches!(dialogue.interpret("take tablet", &state()), Intent::Travel { destination, take: Some(2), .. } if destination == "cell-6")
+        matches!(dialogue.interpret("take tablet", &state()), Intent::Travel { destination, take: Some((2, None)), .. } if destination == "cell-6")
     );
     assert!(matches!(
         dialogue.interpret("take token", &state()),
-        Intent::Action(Action::Take { item: 1 })
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None
+        })
     ));
     assert!(
         matches!(dialogue.interpret("examine tablet", &state()), Intent::Say(text) if text == "A weathered slab of stone.")
     );
     assert!(matches!(
         dialogue.interpret("take it", &state()),
-        Intent::Travel { take: Some(2), .. }
+        Intent::Travel {
+            take: Some((2, None)),
+            ..
+        }
     ));
 }
 
@@ -179,7 +185,10 @@ fn noun_clarification_is_conversational_free_and_invalidated_by_changes() {
     );
     assert!(matches!(
         d.interpret("the copper one", &s),
-        Intent::Action(Action::Take { item: 1 })
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None
+        })
     ));
     d.interpret("take token", &s);
     s.revision += 1;
@@ -210,7 +219,10 @@ fn ordinary_floor_is_not_an_exit_and_the_current_anchor_is_not_a_destination() {
     ));
     assert!(matches!(
         Dialogue::default().interpret("get tablet", &s),
-        Intent::Travel { take: Some(2), .. }
+        Intent::Travel {
+            take: Some((2, None)),
+            ..
+        }
     ));
 }
 

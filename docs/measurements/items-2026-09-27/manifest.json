@@ -1,0 +1,24 @@
+{
+  "baseline_binary_sha256": "2e0d5c6e935911592d21a05507c2fb0486f1c9843257e8033ca3fe5f9370fd48",
+  "binaries": {
+    "target\\release\\examples\\item_bench.exe": "43716b75474215d51bebdd70713ee4d8f1725bae7deefd4722fc51d23b124e06",
+    "target\\release\\examples\\scenario_bench.exe": "089eae3b71ea0fb7940f0b025b56eb1444317ebf680fb28e86ed8ee7205389d6"
+  },
+  "sources_lf": {
+    "crates/server/examples/item_bench.rs": "4167a3461eeb0369008cf6561634ef15f27e40fbe0b522498f0621949f6194dd",
+    "crates/server/examples/scenario_bench.rs": "7574c8e65f1bf61a81e8a978a97b9aa7afc56c7c60f840d1a2575879a5222175",
+    "crates/simulation/src/items.rs": "bb11176ac5440f063aabbf23a2b30d1d320bc2db2023b1662ee96f0fba972cbe",
+    "crates/simulation/src/diagnostics.rs": "3a19b888d89286549f2d06c4c0f14b7c047fcd52ca4c9b728b949fc9e066f0ab",
+    "scripts/item_performance_report.py": "ef17dd022fef6d38189e2da1728e493e85efc60988b2b3c6decd6f2bc08f5c99"
+  },
+  "artifacts": {
+    "items-desktop-permissions.jsonl": "30f649f9334ef212727978f71b2948bfae8b5c6f409a82ea82a88c381597ae32",
+    "items.jsonl": "589bd412435dbc8274ea9e7dd7f768738dd3dbcdf32ec2254754b3cc446f537b",
+    "scenario-after-desktop-permissions.jsonl": "4f9ce12736ee08536a523a39eed9bbf811ed5341790fd15802f7b601ea36defe",
+    "scenario-after.jsonl": "ed0862c7677aa9c035cd87c1b446ddddc58e0b27d5202f717a06288b95281d0f",
+    "scenario-before.jsonl": "dcd1b18a3843c6369b3002b40c51f52d3ac5ae42bf4e39c4537529ebafaf1dc7",
+    "scenario-repeat1.jsonl": "4e569fd0d83da79e02c194c912d386aec3c96b4372e4a82b4bb01b5a548e0e83",
+    "scenario-repeat2.jsonl": "ae9ee49a244f291646359c611eb9b37caeec31409dfce2c40af6ff4a89e2542a",
+    "summary.json": "87640f55449359c8b0c13dbd961398cde14a1b3e29c3378828d4e63b8a67843e"
+  }
+}

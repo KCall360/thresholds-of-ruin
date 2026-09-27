@@ -33,12 +33,9 @@ class DoorProcesses(unittest.TestCase):
     def door(frame):
         return next(c["door"] for c in frame["state"]["observation"]["visible_cells"] if c.get("door"))
 
-    def setup_wizard(self, section="setup"):
+    def setup_wizard(self):
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/doors.json").read_text())
-        for command in fixture[section]:
-            self.assertNotIn("Server error", wizard.command(command))
         wizard.command("release")
         return wizard
 
@@ -101,7 +98,7 @@ class DoorProcesses(unittest.TestCase):
         self.assertFalse(resumed["state"]["wizard_game"])
 
     def test_wizard_occlusion_explicit_open_travel_memory_and_rewind(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="doors-setup")
         wizard = self.setup_wizard()
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         player, welcome = self.adventure()
@@ -134,11 +131,11 @@ class DoorProcesses(unittest.TestCase):
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type":"snapshot"})
         self.assertNotEqual(rewound["branch"], resumed["branch"])
-        self.assertTrue(self.door(rewound)["open"])
+        self.assertFalse(self.door(rewound)["open"])
         self.assertFalse(any(c["key"] == tablet_cell["key"] for c in rewound["memory"]))
 
     def test_cancel_and_rewind_discard_pending_door_action(self):
-        self.server(wizard=True)
+        self.server(wizard=True, scenario="doors-setup")
         wizard = self.setup_wizard()
         player, _ = self.adventure()
         observer, initial = self.client(support.SPECTATOR_TOKEN)
@@ -167,8 +164,7 @@ class DoorProcesses(unittest.TestCase):
 
 
     def test_rotated_aperture_door_remains_an_ordinary_visible_object(self):
-        self.server(wizard=True)
-        self.setup_wizard("rotated")
+        self.server(scenario="doors-rotated")
         player, welcome = self.adventure()
         self.assertIn("closed wooden door to the east", welcome)
         self.assertNotIn("stone tablet", welcome)
@@ -185,10 +181,9 @@ class DoorProcesses(unittest.TestCase):
             self.assertNotIn(forbidden, json.dumps(view))
 
     def test_arrival_revealing_an_actor_does_not_open_the_door(self):
-        self.server(wizard=True)
+        self.server(scenario="doors-arrival_hazard")
         # The door is beyond diagonal reach. The south approach is walled off;
         # the first eastward step reveals the actor before manipulation.
-        self.setup_wizard("arrival_hazard")
         player, _ = self.adventure()
         output = self.say(player, "open door")
         self.assertIn("figure comes into view", output)

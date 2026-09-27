@@ -62,7 +62,7 @@ hidden corner approach disclosure, stale navigation, and a route where seven ste
 Server tests cover durable retries, restart, and rejection of obsolete rulesets.
 Client tests cover parsing, bearings, key mappings and free cursor movement.
 
-`scripts/scenarios/diagonal.json` and `scripts/test_diagonal_process.py` exercise
+`scenarios/tests/diagonal-*` and `scripts/test_diagonal_process.py` exercise
 real server/text/headless/native ASCII processes, native Y/U/B/N, F4 and `<`/`>` input,
 diagonal door input, one-clear-side travel, spectator denial and agreement,
 rotated movement axes, save/resume and rewind. The existing Windows/Linux CI

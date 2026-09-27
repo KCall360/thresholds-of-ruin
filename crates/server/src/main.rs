@@ -14,6 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut wizard = false;
     let mut save = PathBuf::from("saves/game.db");
     let mut regions = None;
+    let mut package_path: Option<PathBuf> = None;
+    let mut character = None;
+    let mut allow_unvalidated = false;
     let mut actors = 1usize;
     let mut save_policy = SavePolicy::default();
     let mut args = std::env::args().skip(1);
@@ -22,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--help" | "-h" => {
                 println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
                 println!("Checkpoints: --checkpoint-interval 1024 journal entries (0 disables). Retains all history; bounds simulation replay after the latest committed checkpoint.");
+                println!("Authored packages: --scenario <directory> [--character <id>] [--allow-unvalidated]. Validate with tor-scenario validate <directory>. Saves pin their original package.");
                 println!("Diagnostic fixture: --regions 1..=256 [--actors 1..=8] selects performance trace version 1.");
                 println!("tor-server [--listen 127.0.0.1:4000] [--seed 0] [--save saves/game.db]\nSet TOR_SERVER_TOKEN to an authentication token of at least 16 characters.\nOptionally set a different TOR_SPECTATOR_TOKEN for read-only access.\n--wizard with distinct TOR_WIZARD_TOKEN permanently marks a new or existing game and enables development commands.\nOnly loopback connections are supported. Existing saves retain their original seed.");
                 return Ok(());
@@ -49,6 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 save_policy.max_pending_bytes =
                     args.next().ok_or("Missing save queue size")?.parse()?
             }
+            "--scenario" => {
+                package_path = Some(args.next().ok_or("Missing scenario directory")?.into())
+            }
+            "--character" => character = Some(args.next().ok_or("Missing character ID")?.parse()?),
+            "--allow-unvalidated" => allow_unvalidated = true,
             "--wizard" => wizard = true,
             "--listen" => listen = args.next().ok_or("Missing --listen value")?.parse()?,
             "--seed" => seed = args.next().ok_or("Missing --seed value")?.parse()?,
@@ -103,11 +112,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(std::env::VarError::NotPresent) if !wizard => None,
         Err(_) => return Err("--wizard requires TOR_WIZARD_TOKEN".into()),
     };
-    let scenario = match regions {
-        Some(regions) => Scenario::performance(seed, regions, actors)?,
-        None if actors == 1 => Scenario::two_room(seed),
-        None => return Err("--actors requires --regions".into()),
+    if regions.is_none() && actors != 1 {
+        return Err("--actors requires --regions".into());
+    }
+    if package_path.is_some() && regions.is_some() {
+        return Err("--scenario conflicts with --regions".into());
+    }
+    if regions.is_some() && character.is_some() {
+        return Err("--character requires an authored scenario".into());
+    }
+    let scenario = if save.exists() {
+        // Resume exclusively from immutable saved inputs, even if the source moved.
+        Scenario::two_room(seed)
+    } else if regions.is_none() {
+        let default_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        tor_server::scenario_package::load(
+            package_path.as_deref().unwrap_or(&default_path),
+            seed,
+            character,
+            allow_unvalidated,
+        )?
+    } else {
+        match regions {
+            Some(regions) => Scenario::performance(seed, regions, actors)?,
+            None if actors == 1 => Scenario::two_room(seed),
+            None => return Err("--actors requires --regions".into()),
+        }
     };
+    if scenario.package.as_ref().is_some_and(|p| !p.validated) {
+        eprintln!("Warning: running an unvalidated scenario under --allow-unvalidated");
+    }
     save_policy.validate()?;
     let mut engine = Engine::open_with_policy(save, scenario, save_policy)?;
     if wizard {

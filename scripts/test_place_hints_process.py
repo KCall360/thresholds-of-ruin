@@ -28,7 +28,7 @@ class PlaceHintProcesses(unittest.TestCase):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
 
     def test_durable_names_in_real_clients_save_reconnect_and_rewind(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="place-hints-setup")
         player, _ = self.adventure()
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         places = initial["state"]["observation"]["places"]
@@ -60,8 +60,6 @@ class PlaceHintProcesses(unittest.TestCase):
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
         fixture = json.loads((Path(__file__).parent / "scenarios/place-hints.json").read_text())
-        for operation in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(operation))
         wizard.command(fixture["visit"])
         discovered = self.request(observer, {"type": "snapshot"})
         self.assertEqual(len(discovered["state"]["observation"]["places"]), 3)
@@ -88,7 +86,7 @@ class PlaceHintProcesses(unittest.TestCase):
         self.assertEqual(rewound["state"]["observation"]["places"], places)
 
     def test_perception_stale_memory_dynamic_removal_restart_and_rewind(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="place-hints-setup")
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
         observer, initial = self.client(support.SPECTATOR_TOKEN)
@@ -96,8 +94,6 @@ class PlaceHintProcesses(unittest.TestCase):
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=support.SPECTATOR_TOKEN)
         self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         fixture = json.loads((Path(__file__).parent / "scenarios/place-hints.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(command))
         hidden = self.request(observer, {"type": "snapshot"})
         self.assertEqual(hidden["state"]["observation"], initial["state"]["observation"])
         self.assertEqual([(c["key"], c["place_hint"]) for c in hidden["memory"]],

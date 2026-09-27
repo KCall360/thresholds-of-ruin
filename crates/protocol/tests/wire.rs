@@ -1,6 +1,32 @@
 use tor_protocol::*;
 
 #[test]
+fn transfers_accept_optional_counts_but_reject_forged_identity_and_invalid_numbers() {
+    assert_eq!(
+        serde_json::from_str::<Action>(r#"{"type":"take","item":10}"#).unwrap(),
+        Action::Take {
+            item: 10,
+            quantity: None
+        }
+    );
+    assert_eq!(
+        serde_json::from_str::<Action>(r#"{"type":"drop","item":10,"quantity":3}"#).unwrap(),
+        Action::Drop {
+            item: 10,
+            quantity: Some(3)
+        }
+    );
+    for text in [
+        r#"{"type":"take","item":10,"quantity":-1}"#,
+        r#"{"type":"take","item":10,"quantity":1.5}"#,
+        r#"{"type":"take","item":10,"quantity":18446744073709551616}"#,
+        r#"{"type":"drop","item":10,"identity":"healing"}"#,
+    ] {
+        assert!(serde_json::from_str::<Action>(text).is_err());
+    }
+}
+
+#[test]
 fn place_names_use_opaque_keys_and_remain_read_only_for_spectators() {
     let command = Command::RenamePlace {
         expected_revision: 7,

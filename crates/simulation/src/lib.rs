@@ -4,6 +4,8 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 mod actions;
+mod items;
+pub use items::ItemSpec;
 pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;
@@ -36,7 +38,8 @@ pub struct ItemId(pub u64);
 pub enum Action {
     SetDoor { door: u64, open: bool },
     Move(Direction),
-    Take(ItemId),
+    Take { item: ItemId, quantity: Option<u64> },
+    Drop { item: ItemId, quantity: Option<u64> },
     Wait,
 }
 
@@ -49,6 +52,7 @@ pub enum GameError {
     Blocked,
     /// No distinction between unknown, hidden, carried, and out-of-reach items.
     ItemUnavailable,
+    InvalidQuantity,
     DoorUnavailable,
     TimeExhausted,
     IdentityExhausted,
@@ -56,9 +60,24 @@ pub enum GameError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
-    DoorChanged { door: u64, open: bool },
-    Moved { from: Location, to: Location },
-    Taken { item: ItemId },
+    DoorChanged {
+        door: u64,
+        open: bool,
+    },
+    Moved {
+        from: Location,
+        to: Location,
+    },
+    Taken {
+        item: ItemId,
+        result: ItemId,
+        quantity: u64,
+    },
+    Dropped {
+        item: ItemId,
+        result: ItemId,
+        quantity: u64,
+    },
     Waited,
 }
 
@@ -84,6 +103,7 @@ struct Actor {
     turn_ticks: NonZeroU64,
     ready_at: u64,
     visited: BTreeSet<RegionId>,
+    knowledge: Shared<BTreeSet<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,7 +115,8 @@ enum ItemLocation {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Item {
-    name: String,
+    spec: ItemSpec,
+    quantity: u64,
     location: ItemLocation,
 }
 
@@ -129,6 +150,80 @@ fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
 }
 
 impl Game {
+    /// Package construction helpers keep authored identities stable across edits.
+    pub fn set_material_surfaces(&mut self, enabled: bool) {
+        self.material_surfaces = enabled;
+    }
+    pub fn authored_cell_valid(&self, at: Location) -> bool {
+        self.world.contains(at) && !self.world.is_wall(at)
+    }
+    pub fn authored_links_clear(&self) -> bool {
+        self.world.authored_links_clear()
+    }
+    pub fn spawn_authored_actor(
+        &mut self,
+        id: u64,
+        at: Location,
+        ticks: NonZeroU64,
+    ) -> Result<ActorId, GameError> {
+        if id == 0 || id == u64::MAX || self.actors.contains_key(&ActorId(id)) {
+            return Err(GameError::IdentityExhausted);
+        }
+        let next = self.next_actor_id;
+        self.next_actor_id = id;
+        let result = self.spawn_actor(at, ticks);
+        self.next_actor_id = if result.is_ok() {
+            self.next_actor_id.max(next)
+        } else {
+            next
+        };
+        result
+    }
+    pub fn place_authored_item(
+        &mut self,
+        id: u64,
+        at: Location,
+        name: String,
+        owner: Option<ActorId>,
+    ) -> Result<ItemId, GameError> {
+        if id == 0 || id == u64::MAX || self.items.contains_key(&ItemId(id)) {
+            return Err(GameError::IdentityExhausted);
+        }
+        if owner.is_some_and(|a| !self.actors.contains_key(&a)) {
+            return Err(GameError::UnknownActor);
+        }
+        let next = self.next_item_id;
+        self.next_item_id = id;
+        let result = self.place_item(at, name);
+        self.next_item_id = if result.is_ok() {
+            self.next_item_id.max(next)
+        } else {
+            next
+        };
+        if let (Ok(item), Some(actor)) = (&result, owner) {
+            self.items.get_mut(item).expect("placed item").location = ItemLocation::Carried(actor);
+        }
+        result
+    }
+    pub fn place_authored_door(
+        &mut self,
+        id: u64,
+        at: Location,
+        open: bool,
+    ) -> Result<u64, GameError> {
+        if id == 0 || id == u64::MAX || self.world.door_location(id).is_some() {
+            return Err(GameError::IdentityExhausted);
+        }
+        let next = self.next_door_id;
+        self.next_door_id = id;
+        let result = self.place_door(at, open);
+        self.next_door_id = if result.is_ok() {
+            self.next_door_id.max(next)
+        } else {
+            next
+        };
+        result
+    }
     fn reach(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
         if direction.components().is_some() {
             self.world
@@ -181,6 +276,7 @@ impl Game {
                 turn_ticks,
                 ready_at: self.tick,
                 visited: BTreeSet::from([location.region]),
+                knowledge: Shared::default(),
             },
         );
         self.next_actor_id = next;
@@ -200,7 +296,8 @@ impl Game {
         self.items.insert(
             id,
             Item {
-                name,
+                spec: ItemSpec::ordinary(name),
+                quantity: 1,
                 location: ItemLocation::Ground(location),
             },
         );

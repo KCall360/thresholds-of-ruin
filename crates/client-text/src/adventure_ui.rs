@@ -16,7 +16,7 @@ use super::Error;
 struct Journey {
     branch: BranchId,
     receipt: Option<EntryId>,
-    item: Option<u64>,
+    item: Option<(u64, Option<u64>)>,
     door: Option<(u64, bool)>,
     label: String,
     direction: Option<Direction>,
@@ -332,7 +332,7 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
                 if open { "open" } else { "close" }
             );
         }
-    } else if let Some(item) = journey.item {
+    } else if let Some((item, quantity)) = journey.item {
         if journey.branch != *connection.state.branch() || !connection.state.has_control() {
             println!("You stop before picking anything up.");
         } else if !state.observation.ready {
@@ -347,7 +347,7 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
             .any(|i| i.item.id == item && i.reachable)
         {
             session.summarizing_pickup = true;
-            let accepted = act(connection, session, Action::Take { item }).await?;
+            let accepted = act(connection, session, Action::Take { item, quantity }).await?;
             session.summarizing_pickup = false;
             if accepted {
                 println!("You walk over to {} and pick it up.", journey.label);

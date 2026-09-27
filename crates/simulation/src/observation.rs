@@ -8,6 +8,9 @@ pub struct ItemView {
     pub description: String,
     pub id: ItemId,
     pub name: String,
+    pub quantity: u64,
+    pub appearance: String,
+    pub identified: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,6 +18,9 @@ pub struct GroundItemView {
     pub description: String,
     pub id: ItemId,
     pub name: String,
+    pub quantity: u64,
+    pub appearance: String,
+    pub identified: bool,
     pub location: Location,
 }
 
@@ -121,20 +127,34 @@ impl Game {
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         for (&item_id, item) in self.items.iter() {
+            crate::diagnostics::item_view(item.spec.concealed);
+            let identified = !item.spec.concealed || actor.knowledge.contains(&item.spec.identity);
+            let name = if identified {
+                &item.spec.name
+            } else {
+                &item.spec.appearance
+            };
+
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
-                        description: item_description(&item.name),
+                        description: item_description(name),
                         id: item_id,
-                        name: item.name.clone(),
+                        name: name.clone(),
+                        quantity: item.quantity,
+                        appearance: item.spec.appearance.clone(),
+                        identified,
                         location,
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
                     inventory.push(ItemView {
-                        description: item_description(&item.name),
+                        description: item_description(name),
                         id: item_id,
-                        name: item.name.clone(),
+                        name: name.clone(),
+                        quantity: item.quantity,
+                        appearance: item.spec.appearance.clone(),
+                        identified,
                     });
                 }
                 _ => {}

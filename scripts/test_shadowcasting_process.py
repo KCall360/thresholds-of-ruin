@@ -24,12 +24,9 @@ class ShadowcastingProcesses(unittest.TestCase):
     say = adventure_support.AdventureProcesses.say
 
     def test_door_corner_disclosure_agrees_across_clients_and_resume(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="shadowcasting-setup")
         wizard = self.launch("tor-client-text", ["--connect",self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/shadowcasting.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error",wizard.command(command))
         wizard.command("release")
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         view = initial["state"]["observation"]
@@ -59,7 +56,7 @@ class ShadowcastingProcesses(unittest.TestCase):
         self.assertEqual(window.child.wait(timeout=10),0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         text.stop(); observer.stop(); wizard.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"],"places-v12")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"items-v14")
         self.server(wizard=True)
         _, resumed=self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],closed["state"])

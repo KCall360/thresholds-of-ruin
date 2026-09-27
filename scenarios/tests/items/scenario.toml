@@ -1,0 +1,30 @@
+format = 1
+id = "items"
+version = "1.0"
+ruleset = "items-v14"
+files = ["regions.toml"]
+default_character = 1
+characters = [
+  { id = 1, anchor = "1/start" },
+  { id = 2, anchor = "1/start", known_identities = ["healing"] }
+]
+
+[archetypes.arrow]
+name = "arrow"
+stackable = true
+
+[archetypes.healing]
+name = "potion of healing"
+identity = "healing"
+appearance_pool = "potions"
+stackable = true
+
+[archetypes.poison]
+name = "potion of poison"
+identity = "poison"
+appearance_pool = "potions"
+stackable = true
+
+[appearance_pools.potions]
+appearances = ["red potion"]
+confounding = true

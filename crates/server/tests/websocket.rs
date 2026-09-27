@@ -133,6 +133,7 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
                 expected_revision: 0,
                 action: Action::Take {
                     item: initial.state.observation.ground_items[0].item.id,
+                    quantity: None,
                 },
             },
         },
@@ -483,6 +484,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let actions = [
         Action::Take {
             item: initial.state.observation.ground_items[0].item.id,
+            quantity: None,
         },
         Action::Wait,
         Action::Move {

@@ -50,8 +50,8 @@ Public wizard history retains sanitized summaries, not hidden marker locations.
 
 ## Compatibility and verification
 
-Only the current `places-v12` ruleset and save format 7 are supported.
-All connected binaries must use protocol 13. Normal games are never implicitly
+Only the current `items-v14` ruleset and save format 9 are supported.
+All connected binaries must use protocol 14. Normal games are never implicitly
 promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale

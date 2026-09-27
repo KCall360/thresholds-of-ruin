@@ -19,6 +19,7 @@ pub enum Key {
     Descend,
     Wait,
     Pickup,
+    Drop,
     OpenDoor,
     CloseDoor,
     Control,
@@ -67,6 +68,8 @@ pub struct App {
     pub status: String,
     pub note: Option<NoteDraft>,
     pub pickup: Vec<ItemView>,
+    pub dropping: bool,
+    pub quantity: String,
     pub door_direction: Option<bool>,
     pub selected: usize,
     pub history_page: Option<HistoryPage>,
@@ -93,6 +96,8 @@ impl App {
             status: "Connecting to the local server...".into(),
             note: None,
             pickup: vec![],
+            dropping: false,
+            quantity: String::new(),
             door_direction: None,
             selected: 0,
             history_page: None,
@@ -188,6 +193,18 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if !self.pickup.is_empty() {
+            if let Input::Text { text } = &input {
+                for ch in text.chars().filter(char::is_ascii_digit) {
+                    // Keep one overflow digit so an oversized request cannot
+                    // silently become a smaller valid quantity.
+                    if self.quantity.len() < 21 {
+                        self.quantity.push(ch);
+                    }
+                }
+                return Effect::None;
+            }
+        }
         if let Input::Key { key: Key::Escape } = input {
             if self.place_name.take().is_some() {
                 return Effect::None;
@@ -415,13 +432,31 @@ impl App {
         }
         if !self.pickup.is_empty() {
             match key {
+                Key::Backspace => {
+                    self.quantity.pop();
+                }
                 Key::Up => self.selected = self.selected.saturating_sub(1),
                 Key::Down => self.selected = (self.selected + 1).min(self.pickup.len() - 1),
                 Key::Enter => {
                     let item = self.pickup[self.selected].id;
+                    let quantity = if self.quantity.is_empty() {
+                        None
+                    } else {
+                        match self.quantity.parse::<u64>() {
+                            Ok(q) if q > 0 => Some(q),
+                            _ => {
+                                self.status = "Quantity must be a positive integer.".into();
+                                return Effect::None;
+                            }
+                        }
+                    };
                     self.pickup.clear();
                     self.door_direction = None;
-                    return self.act(Action::Take { item });
+                    return self.act(if self.dropping {
+                        Action::Drop { item, quantity }
+                    } else {
+                        Action::Take { item, quantity }
+                    });
                 }
                 _ => {}
             }
@@ -538,7 +573,9 @@ impl App {
                 }
                 Effect::None
             }
-            Key::Pickup => {
+            Key::Pickup | Key::Drop => {
+                self.dropping = key == Key::Drop;
+                self.quantity.clear();
                 let Some(state) = &self.state else {
                     return Effect::None;
                 };
@@ -549,18 +586,37 @@ impl App {
                     .filter(|i| i.reachable)
                     .map(|i| i.item.clone())
                     .collect();
+                if self.dropping {
+                    items = o.inventory.clone();
+                }
                 items.sort_by_key(|item| item.id);
                 items.dedup_by_key(|item| item.id);
                 match items.as_slice() {
                     [] => {
-                        self.status = "There is nothing at your feet to pick up.".into();
+                        self.status = if self.dropping {
+                            "Your inventory is empty."
+                        } else {
+                            "There is nothing at your feet to pick up."
+                        }
+                        .into();
                         Effect::None
                     }
-                    [item] => self.act(Action::Take { item: item.id }),
+                    [item] if item.quantity == 1 => self.act(if self.dropping {
+                        Action::Drop {
+                            item: item.id,
+                            quantity: None,
+                        }
+                    } else {
+                        Action::Take {
+                            item: item.id,
+                            quantity: None,
+                        }
+                    }),
                     _ => {
                         self.pickup = items;
                         self.selected = 0;
-                        self.status = "Choose an item with Up/Down, then Enter.".into();
+                        self.status =
+                            "Up/Down select; type quantity (blank = all); Enter confirms.".into();
                         Effect::None
                     }
                 }
@@ -717,7 +773,12 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {
             Event::Moved { direction } => format!("Moved {direction:?}."),
-            Event::Taken { item } => format!("Picked up item #{item}."),
+            Event::Taken { item, quantity, .. } => {
+                format!("Picked up {quantity} from item #{item}.")
+            }
+            Event::Dropped { item, quantity, .. } => {
+                format!("Dropped {quantity} from item #{item}.")
+            }
             Event::DoorChanged { open, .. } => {
                 format!("{} door.", if *open { "Opened" } else { "Closed" })
             }

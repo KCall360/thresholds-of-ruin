@@ -45,7 +45,14 @@ pub fn action(action: &p::Action) -> s::Action {
             open: *open,
         },
         p::Action::Move { direction: value } => s::Action::Move(direction(*value)),
-        p::Action::Take { item } => s::Action::Take(s::ItemId(*item)),
+        p::Action::Take { item, quantity } => s::Action::Take {
+            item: s::ItemId(*item),
+            quantity: *quantity,
+        },
+        p::Action::Drop { item, quantity } => s::Action::Drop {
+            item: s::ItemId(*item),
+            quantity: *quantity,
+        },
         p::Action::Wait => s::Action::Wait,
     }
 }
@@ -59,7 +66,24 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
             from: position(from),
             to: position(to),
         },
-        s::OutcomeKind::Taken { item } => crate::journal::Event::Taken { item: item.0 },
+        s::OutcomeKind::Taken {
+            item,
+            result,
+            quantity,
+        } => crate::journal::Event::Taken {
+            item: item.0,
+            result: result.0,
+            quantity,
+        },
+        s::OutcomeKind::Dropped {
+            item,
+            result,
+            quantity,
+        } => crate::journal::Event::Dropped {
+            item: item.0,
+            result: result.0,
+            quantity,
+        },
         s::OutcomeKind::Waited => crate::journal::Event::Waited,
     }
 }
@@ -128,6 +152,9 @@ pub fn observation(
         {
             ground_items.push(p::GroundItemView {
                 item: p::ItemView {
+                    quantity: item.quantity,
+                    appearance: item.appearance.clone(),
+                    identified: item.identified,
                     description: item.description.clone(),
                     id: item.id.0,
                     name: item.name.clone(),
@@ -170,6 +197,9 @@ pub fn observation(
             .inventory
             .into_iter()
             .map(|item| p::ItemView {
+                quantity: item.quantity,
+                appearance: item.appearance.clone(),
+                identified: item.identified,
                 description: item.description,
                 id: item.id.0,
                 name: item.name,
