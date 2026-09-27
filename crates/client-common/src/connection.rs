@@ -16,6 +16,7 @@ pub struct Connection {
     pub state: ClientState,
     role: AccessRole,
     timing: bool,
+    previous_timing_write_ms: f64,
 }
 
 impl Connection {
@@ -72,6 +73,7 @@ impl Connection {
             state,
             role,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
+            previous_timing_write_ms: 0.,
         })
     }
 
@@ -131,14 +133,17 @@ impl Connection {
     }
 
     // Explicitly opt-in host diagnostics; no protocol or simulation-state fields.
-    fn timing_event(&self, event: &str, request_id: &str, duration_ms: Option<f64>) {
+    fn timing_event(&mut self, event: &str, request_id: &str, duration_ms: Option<f64>) {
+        let started = std::time::Instant::now();
         eprintln!(
             "{}",
             serde_json::json!({"timing_version":1,"event":event,
             "request_id":request_id,"actor":self.state.state().observation.actor,
             "revision":self.state.state().revision,"duration_ms":duration_ms,
+            "previous_timing_write_ms":self.previous_timing_write_ms,
             "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
         );
+        self.previous_timing_write_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 
     /// Save-and-quit is a durable barrier; abrupt disconnect is not.

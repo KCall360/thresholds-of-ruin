@@ -327,3 +327,31 @@ durations use monotonic clocks. Clock adjustments can limit cross-process attrib
 observe bytes just before the sender returns from sending, so tiny negative deltas
 are retained rather than clamped. These are diagnostic boundaries, not wire-only
 or physical keyboard-to-photon measurements. Ordinary play leaves this option off.
+
+The client timing records additionally carry `previous_timing_write_ms`: the
+complete preceding client diagnostic call, including construction, synchronous
+stderr writing and any scheduling within that call. Join it to the preceding
+client event, not the current event. In particular, `client_send_ms` still includes
+the request-start diagnostic; a following sent-record write can delay reading an
+acknowledgement already available from the server. Missing final write costs stay
+unknown. Historical files without the field remain valid.
+
+Native frames additionally include `presented_unix_ns`, sampled after the native
+presentation call returns and before capture/report construction. The following
+frame's `previous_report_encode_ms` and `previous_report_write_ms` separate JSON
+construction/encoding from stdout writing/flushing. The original total report,
+turn, reader and driver boundaries remain unchanged. These are wall durations:
+a long write can contain pipe backpressure or descheduling, and a short native
+call does not establish photon delivery. Cross-process clock caveats still apply.
+
+Both drivers accept `--defer-logs` for a targeted diagnostic-I/O comparison.
+Decoded stdout/stderr lines are retained until each child stops, then written to
+their usual files. UTF-8 content is capped at 512 MiB stdout and 16 MiB stderr per
+child; Python string/container overhead is additional. Overflow fails the run,
+preserves the retained prefix and partial samples, and attempts cleanup of every
+owned child. This opt-in experiment does not change runtime transport/event queues
+or suppress frame reporting. It moves diagnostic disk writes outside measured
+actions; JSON work, pipe I/O, Python parsing/retention and scheduling remain inside.
+The default synchronous stdout logging and historical workload meanings remain.
+Use fresh directories and retain failed runs; never interpret a rejected prefix
+as full traversal. See [the client timing investigation](3p-client-timing.md).

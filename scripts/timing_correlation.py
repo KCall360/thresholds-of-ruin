@@ -14,12 +14,24 @@ def events(path):
     return [r for r in rows if r.get('timing_version') == 1]
 
 
+def diagnostic_write_costs(rows):
+    client = [r for r in rows if r['event'] in ('client_request','client_request_sent','client_ack')]
+    costs = {}
+    for previous, following in zip(client, client[1:]):
+        if 'previous_timing_write_ms' in following:
+            value = following['previous_timing_write_ms']
+            assert type(value) in (int,float) and math.isfinite(value) and value >= 0
+            costs[(previous['request_id'], previous['event'])] = value
+    return costs
+
+
 def correlate_ack(directory, result):
     directory = Path(directory)
     server = {(r['request_id'],r['event']):r for r in events(directory/'server.stderr.log')}
     clients = {actor: events(directory/f'actor-{actor}.stderr.log') for actor in range(1,result['actors']+1)}
     indexed = {actor:{(r['request_id'],r['event']):r for r in rows if r.get('request_id')}
                for actor,rows in clients.items()}
+    writes = {actor:diagnostic_write_costs(rows) for actor,rows in clients.items()}
     output = []
     for sample in result['samples']:
         if sample['expected'] == 'blocked':
@@ -29,6 +41,9 @@ def correlate_ack(directory, result):
         start, sent, ack, report = [client[(request,k)] for k in ('client_request','client_request_sent','client_ack','headless_report')]
         handled, sent_ack = [server[(request,k)] for k in ('server_handled','server_ack_sent')]
         row = dict(request_id=request, actor=sample['actor'], label=sample['label'],
+                   request_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request')),
+                   sent_diagnostic_write_ms=writes[sample['actor']].get((request,'client_request_sent')),
+                   ack_diagnostic_write_ms=writes[sample['actor']].get((request,'client_ack')),
                    driver_ack_ms=sample['request_to_ack_ms'], reader_ack_ms=sample['request_to_ack_line_ms'],
                    driver_before_client_ms=(start['unix_ns']-sample['input_unix_ns'])/1e6,
                    client_request_to_ack_ms=(ack['unix_ns']-start['unix_ns'])/1e6,
@@ -43,7 +58,9 @@ def correlate_ack(directory, result):
                    driver_queue_ms=sample['request_to_ack_ms']-sample['request_to_ack_line_ms'])
         # Tiny negative send/receive deltas can occur because the receiver runs
         # before the sender returns from send. Keep them instead of clamping.
-        assert all(type(v) in (int,float) and math.isfinite(v) for k,v in row.items() if k.endswith('_ms'))
+        assert all((v is None and k.endswith('_diagnostic_write_ms')) or
+                   (type(v) in (int,float) and math.isfinite(v))
+                   for k,v in row.items() if k.endswith('_ms'))
         output.append(row)
     return output
 
@@ -55,10 +72,11 @@ def correlate_native(directory, result):
     requests = {r['revision']:r for r in client if r['event']=='client_request'}
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
     sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
+    write_cost = diagnostic_write_costs(client)
     # A frame reports the duration of the preceding diagnostic output call.
     # Recover that later sample rather than assigning the previous call to the
     # frame being measured. This read happens offline, after the workload.
-    action_frames, report_cost = {}, {}
+    action_frames, report_cost, frame_times, report_parts = {}, {}, {}, {}
     previous_frame = None
     with (directory/'ascii.stdout.jsonl').open() as stream:
         for line in stream:
@@ -72,7 +90,9 @@ def correlate_native(directory, result):
                 raise
             if previous_frame is not None:
                 report_cost[previous_frame] = frame['profile']['previous_report_ms']
+                report_parts[previous_frame] = {k:frame['profile'].get('previous_report_'+k+'_ms') for k in ('encode','write')}
             previous_frame = frame['frame']
+            frame_times[frame['frame']] = frame.get('presented_unix_ns')
             if frame.get('input_done') in ('up','down','left','right','ascend','descend') and not frame['busy']:
                 action_frames[frame['state']['revision']-1] = frame['frame']
     output = []
@@ -84,17 +104,31 @@ def correlate_native(directory, result):
         handled = server[(request_id,'server_handled')]
         sent = server[(request_id,'server_ack_sent')]
         ack = acknowledgements[request_id]
+        frame_id = sample.get('presented_frame',action_frames[sample['index']])
+        presented = frame_times.get(frame_id)
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],
             input_to_client_request_ms=(request['unix_ns']-sample['input_unix_ns'])/1e6,
             client_send_ms=sends[request_id]['duration_ms'],
+            request_diagnostic_write_ms=write_cost.get((request_id,'client_request')),
+            sent_diagnostic_write_ms=write_cost.get((request_id,'client_request_sent')),
+            ack_diagnostic_write_ms=write_cost.get((request_id,'client_ack')),
             server_handle_ms=handled['duration_ms'], server_lock_ms=handled['lock_ms'],
             server_handle_to_ack_sent_ms=(sent['unix_ns']-handled['unix_ns'])/1e6,
             server_ack_to_client_ack_ms=(ack['unix_ns']-sent['unix_ns'])/1e6,
             client_ack_to_frame_reader_ms=(sample['line_unix_ns']-ack['unix_ns'])/1e6,
+            client_ack_to_presented_ms=None if presented is None else (presented-ack['unix_ns'])/1e6,
+            presented_to_reader_ms=None if presented is None else (sample['line_unix_ns']-presented)/1e6,
+            measured_frame_encode_ms=report_parts.get(frame_id,{}).get('encode'),
+            measured_frame_write_ms=report_parts.get(frame_id,{}).get('write'),
             reader_work_ms=sample['reader_work_ms'], queue_delay_ms=sample['queue_delay_ms'],
             max_previous_report_ms=max(p['previous_report_ms'] for p in sample['intermediate_profiles']),
-            measured_frame_report_ms=report_cost.get(sample.get('presented_frame',action_frames[sample['index']]))))
+            measured_frame_report_ms=report_cost.get(frame_id)))
+    optional = {'request_diagnostic_write_ms','sent_diagnostic_write_ms','ack_diagnostic_write_ms',
+                'client_ack_to_presented_ms','presented_to_reader_ms','measured_frame_encode_ms',
+                'measured_frame_write_ms','measured_frame_report_ms'}
+    assert all((v is None and k in optional) or (type(v) in (int,float) and math.isfinite(v))
+               for row in output for k,v in row.items() if k.endswith('_ms'))
     return output
 
 

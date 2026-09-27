@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import time
 import uuid
-from performance_driver import JsonProcess, SPEC, ROOT, resolve, verify, wall_time_ns
+from performance_driver import JsonProcess, SPEC, ROOT, resolve, verify, wall_time_ns, stop_all
 from client_performance_report import validate_presentation_profile
 
 KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
@@ -18,6 +18,7 @@ KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
 
 
 def validate(result):
+    assert not result.get("diagnostics_error")
     spec = json.loads(SPEC.read_text())
     expected = spec["traversal"] * (result["regions"] - 1)
     assert result["trace_version"] == spec["version"] and result["seed"] == spec["seed"]
@@ -37,13 +38,16 @@ def validate(result):
     assert result["restart_equal"] and result["continued_after_restart"]
 
 
-def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=False):
+def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=False, defer_logs=False):
     assert regions in (8, 256) and interval > 0
     bin_dir, output = Path(bin_dir).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     spec = json.loads(SPEC.read_text())
     env = {k:v for k,v in os.environ.items() if k not in ("TOR_SERVER_TOKEN", "TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
     env["TOR_SERVER_TOKEN"] = uuid.uuid4().hex
+    env.pop("TOR_DRIVER_DEFER_LOGS", None)
+    if defer_logs:
+        env["TOR_DRIVER_DEFER_LOGS"] = "1"
     if correlate:
         env["TOR_TIMING_DIAGNOSTICS"] = "1"
     suffix = ".exe" if os.name == "nt" else ""
@@ -68,7 +72,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         assert frame["connected"] and frame["window_open"]
         return frame, (received-started)*1000
     result = {"trace_version":spec["version"], "seed":spec["seed"], "regions":regions,
-              "checkpoint_interval":interval, "correlate":correlate, "samples":[]}
+              "checkpoint_interval":interval, "correlate":correlate, "defer_logs":defer_logs, "samples":[]}
     try:
         host, address = server("server")
         window = launch("tor-client-ascii", ["--connect", address, "--automation"], "ascii", True)
@@ -132,11 +136,10 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         (output/"result.json").write_text(json.dumps(result, indent=2))
         return result
     except BaseException as error:
-        (output/"failure.json").write_text(json.dumps({"error":str(error), "samples":len(result["samples"])}))
+        (output/"failure.json").write_text(json.dumps({"error":str(error), "partial_result":result}))
         raise
     finally:
-        for process in reversed(owned):
-            process.stop()
+        stop_all(owned, output, result)
 
 
 if __name__ == "__main__":
@@ -146,6 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--regions", type=int, choices=(8,256), default=256)
     parser.add_argument("--checkpoint-interval", type=int, default=64)
     parser.add_argument("--correlate", action="store_true")
+    parser.add_argument("--defer-logs", action="store_true", help="Retain capped diagnostic logs until each child stops")
     args = parser.parse_args()
-    result = run_saved_exploration(args.bin_dir,args.output,args.regions,args.checkpoint_interval,args.correlate)
+    result = run_saved_exploration(args.bin_dir,args.output,args.regions,args.checkpoint_interval,args.correlate,args.defer_logs)
     print(f"Verified {result['actions']} actions, {result['disclosed_cells']} disclosed cells, restart and continued input.")

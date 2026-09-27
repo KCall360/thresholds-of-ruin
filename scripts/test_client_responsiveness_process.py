@@ -75,9 +75,12 @@ class ClientResponsivenessProcesses(unittest.TestCase):
         from saved_exploration_driver import run_saved_exploration
         output = self.save.parent / "explored"
         regions = int(os.environ.get("TOR_SAVED_EXPLORATION_REGIONS", "8"))
-        result = run_saved_exploration(self.bin, output, regions=regions, correlate=True)
+        result = run_saved_exploration(self.bin, output, regions=regions, correlate=True, defer_logs=True)
         from timing_correlation import correlate_native
-        self.assertEqual(len(correlate_native(output, result)), result["actions"])
+        correlated = correlate_native(output, result)
+        self.assertEqual(len(correlated), result["actions"])
+        self.assertTrue(all(row['ack_diagnostic_write_ms'] is not None for row in correlated[:-1]))
+        self.assertTrue(all(row['presented_to_reader_ms'] is not None for row in correlated))
         self.assertTrue(result["restart_equal"])
         self.save = Path(output) / "game.db"
         self.native_during_save(1)

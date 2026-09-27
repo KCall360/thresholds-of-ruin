@@ -253,6 +253,14 @@ Milestone 3p remains open for recurrent acknowledgement/presentation-tail eviden
 opt-in server/client/reader correlation records the relevant boundaries. No later
 interaction or travel feature is introduced, and no latency target is relaxed.
 
+The [client timing investigation](3p-client-timing.md) now separates request
+diagnostic writing, native presentation return, report encoding/output and reader
+receipt. It identifies recurrent diagnostic-call stalls but also retains a native
+presentation/pacing-call tail and two failed longer client attempts. Capped deferred
+logging is a diagnostic experiment, not a runtime queue change or a closure waiver.
+Thread scheduling/blocked-write attribution and long-run client qualification remain
+the next 3p step; checkpoint recovery and the approved format-6 policy are unchanged.
+
 ## Verification and completion
 
 The milestone is complete when:

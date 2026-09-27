@@ -8,6 +8,11 @@ class ClientPerformanceReport(unittest.TestCase):
         profile = dict(version=1, network_events=16, apply_ms=2, draw_ms=1,
                        native_ms=16, capture_ms=0, previous_report_ms=1, turn_interval_ms=17)
         validate_presentation_profile(profile)
+        validate_presentation_profile({**profile, "previous_report_encode_ms":.2, "previous_report_write_ms":.8})
+        for extra in ({"previous_report_encode_ms":.2},
+                      {"previous_report_encode_ms":.2, "previous_report_write_ms":float("nan")}):
+            with self.assertRaises(ValueError):
+                validate_presentation_profile({**profile, **extra})
         for key, value in (("network_events",17),("network_events",True),("version",2),
                            ("native_ms",float("inf")),("capture_ms",-1)):
             with self.assertRaises(ValueError):

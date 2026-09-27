@@ -5,6 +5,7 @@ All child processes and fresh saves belong to this invocation.
 """
 import argparse
 import functools
+import io
 import json
 import os
 from pathlib import Path
@@ -47,9 +48,41 @@ class WindowClosed(RuntimeError):
     pass
 
 
+class DiagnosticLog:
+    """Opt-in capped retention: no disk writes until close; overflow fails the run."""
+    def __init__(self, path, deferred=False, limit=512 * 1024 * 1024):
+        self.file = path.open("w", encoding="utf-8")
+        self.buffer = io.StringIO() if deferred else None
+        self.limit = limit
+        self.size = 0
+
+    def write(self, text):
+        if self.buffer is None:
+            self.file.write(text)
+        else:
+            size = len(text.encode("utf-8"))
+            if self.size + size > self.limit:
+                raise RuntimeError("Deferred diagnostic log cap exceeded; retained prefix is incomplete")
+            self.buffer.write(text)
+            self.size += size
+
+    def flush(self):
+        if self.buffer is None:
+            self.file.flush()
+
+    def close(self):
+        if self.buffer is not None:
+            self.buffer.seek(0)
+            while chunk := self.buffer.read(1024 * 1024):
+                self.file.write(chunk)
+            self.buffer.close()
+        self.file.close()
+
+
 class JsonProcess:
     def __init__(self, binary, args, env, directory, name, visible=False):
         self.name = name
+        self.stopped = False
         self.ack_line_received = None
         self.last_line_received = None
         self.ack_request_id = None
@@ -57,11 +90,13 @@ class JsonProcess:
         self.last_queue_delay_ms = 0
         self.last_frame_profiles = []
         self.lines = queue.Queue()
-        self.stderr = (directory / (name + ".stderr.log")).open("w", encoding="utf-8")
-        self.log = (directory / (name + ".stdout.jsonl")).open("w", encoding="utf-8")
+        deferred = env.get("TOR_DRIVER_DEFER_LOGS") == "1"
+        self.reader_error = None
+        self.stderr = DiagnosticLog(directory / (name + ".stderr.log"), deferred, 16 * 1024 * 1024)
+        self.log = DiagnosticLog(directory / (name + ".stdout.jsonl"), deferred)
         self.child = subprocess.Popen([str(binary), *map(str, args)], cwd=ROOT, env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if env.get("TOR_TIMING_DIAGNOSTICS") else self.stderr,
+            stderr=subprocess.PIPE if deferred or env.get("TOR_TIMING_DIAGNOSTICS") else self.stderr.file,
             text=True, encoding="utf-8", bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" and not visible else 0)
         self.stderr_reader = None
@@ -72,10 +107,12 @@ class JsonProcess:
         self.reader.start()
 
     def _read_stderr(self):
-        for line in self.child.stderr:
-            # A bounded file buffer drains small timing records without one
-            # disk write per record; stop() joins the reader and closes it.
-            self.stderr.write(line)
+        try:
+            for line in self.child.stderr:
+                self.stderr.write(line)
+        except Exception as error:
+            self.reader_error = error
+            self.lines.put(({"type": "fatal", "error": str(error)}, time.perf_counter()))
 
     def _read(self):
         try:
@@ -87,6 +124,7 @@ class JsonProcess:
                 value = json.loads(line)
                 self.lines.put((value, received, (time.perf_counter()-received)*1000, wall_received))
         except Exception as error:
+            self.reader_error = error
             self.lines.put(({"type": "fatal", "error": str(error)}, time.perf_counter()))
         finally:
             self.lines.put((None, time.perf_counter()))
@@ -142,6 +180,9 @@ class JsonProcess:
         return frame
 
     def stop(self):
+        if self.stopped:
+            return
+        self.stopped = True
         if self.child.poll() is None:
             self.child.kill()
         self.child.wait(timeout=10)
@@ -153,6 +194,26 @@ class JsonProcess:
         self.child.stdout.close()
         self.stderr.close()
         self.log.close()
+        if self.reader_error is not None:
+            raise RuntimeError(str(self.reader_error))
+
+
+def stop_all(processes, output, result):
+    """Attempt every owned cleanup even if one diagnostic reader failed."""
+    errors = []
+    for process in reversed(processes):
+        try:
+            process.stop()
+        except Exception as error:
+            errors.append(f"{process.name}: {error}")
+    if errors:
+        result["diagnostics_error"] = errors
+        # A result written before cleanup must not look like complete evidence.
+        result_path = output / "result.json"
+        if result_path.exists():
+            result_path.replace(output / "rejected-result.json")
+        (output / "failure.json").write_text(json.dumps({"error":errors,"partial_result":result}))
+        raise RuntimeError("Owned process cleanup/diagnostics failed: " + "; ".join(errors))
 
 
 def resolve(step, frame):
@@ -191,13 +252,16 @@ def verify(step, action, before, after):
     assert after["history"][-1]["content"]["event"]["type"] == step["expected"]
 
 
-def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False, capture=True, correlate=False):
+def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, stay_open=False, capture=True, correlate=False, defer_logs=False):
     bin_dir, output = Path(bin_dir).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     spec = json.loads(SPEC.read_text(encoding="utf-8"))
     assert 1 <= regions <= 256 and 1 <= actors <= 8 and cycles > 0 and pace >= 0
     suffix = ".exe" if os.name == "nt" else ""
     env = {k:v for k,v in os.environ.items() if k not in ("TOR_SERVER_TOKEN","TOR_SPECTATOR_TOKEN","TOR_WIZARD_TOKEN")}
+    env.pop("TOR_DRIVER_DEFER_LOGS", None)
+    if defer_logs:
+        env["TOR_DRIVER_DEFER_LOGS"] = "1"
     if correlate:
         env["TOR_TIMING_DIAGNOSTICS"] = "1"
     player, spectator_token = uuid.uuid4().hex, uuid.uuid4().hex
@@ -207,7 +271,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         processes.append(process)
         return process
     result = {"trace_version":spec["version"],"seed":spec["seed"],"regions":regions,"actors":actors,
-        "cycles":0,"pace_seconds":pace,"capture":capture,"diagnostics_version":1,"correlate":correlate,"samples":[]}
+        "cycles":0,"pace_seconds":pace,"capture":capture,"diagnostics_version":1,"correlate":correlate,"defer_logs":defer_logs,"samples":[]}
     clients = {}
     try:
         server = launch("tor-server", ["--listen","127.0.0.1:0","--seed",spec["seed"],"--regions",regions,
@@ -316,11 +380,10 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
         (output/"result.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return result
     except BaseException as error:
-        (output/"failure.json").write_text(json.dumps({"error":str(error),"completed_cycles":result["cycles"]}),encoding="utf-8")
+        (output/"failure.json").write_text(json.dumps({"error":str(error),"partial_result":result}),encoding="utf-8")
         raise
     finally:
-        for process in reversed(processes):
-            process.stop()
+        stop_all(processes, output, result)
 
 
 def main():
@@ -334,11 +397,12 @@ def main():
     parser.add_argument("--stay-open",action="store_true")
     parser.add_argument("--no-capture",action="store_true")
     parser.add_argument("--correlate",action="store_true")
+    parser.add_argument("--defer-logs",action="store_true")
     args = parser.parse_args()
     output = args.output or ROOT/"saves/playtests"/("regions-256-"+uuid.uuid4().hex)
     print(f"Performance demo logs and fresh save: {output}",flush=True)
     result = run_demo(args.bin_dir,output,regions=args.regions,actors=args.actors,cycles=args.cycles,
-        pace=args.pace_ms/1000,stay_open=args.stay_open,capture=not args.no_capture,correlate=args.correlate)
+        pace=args.pace_ms/1000,stay_open=args.stay_open,capture=not args.no_capture,correlate=args.correlate,defer_logs=args.defer_logs)
     print(f"Verified {result['cycles']} complete cycles.")
 
 

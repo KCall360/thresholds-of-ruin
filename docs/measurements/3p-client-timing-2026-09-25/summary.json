@@ -1,0 +1,1120 @@
+{
+  "sync-small": {
+    "presentation_ms": {
+      "n": 77,
+      "p50_ms": 49.86749999807216,
+      "p95_ms": 52.45779998949729,
+      "max_ms": 112.09619999863207
+    },
+    "input_to_client_request_ms": {
+      "n": 77,
+      "p50_ms": 13.51055,
+      "p95_ms": 16.01945,
+      "max_ms": 16.84215
+    },
+    "client_send_ms": {
+      "n": 77,
+      "p50_ms": 0.4106,
+      "p95_ms": 0.9034,
+      "max_ms": 1.1647999999999998
+    },
+    "request_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.304,
+      "p95_ms": 0.6939,
+      "max_ms": 0.9562
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.3207,
+      "p95_ms": 0.628,
+      "max_ms": 1.1474
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 76,
+      "p50_ms": 0.2195,
+      "p95_ms": 0.5687,
+      "max_ms": 0.615
+    },
+    "server_handle_ms": {
+      "n": 77,
+      "p50_ms": 2.0162999999999998,
+      "p95_ms": 4.3924,
+      "max_ms": 5.3835999999999995
+    },
+    "server_lock_ms": {
+      "n": 77,
+      "p50_ms": 0.001,
+      "p95_ms": 0.0018,
+      "max_ms": 0.0024
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 77,
+      "p50_ms": 0.4738,
+      "p95_ms": 0.9058,
+      "max_ms": 1.1002
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 77,
+      "p50_ms": 0.4802,
+      "p95_ms": 0.8799,
+      "max_ms": 1.0067
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 77,
+      "p50_ms": 32.98415,
+      "p95_ms": 34.32765,
+      "max_ms": 93.66035
+    },
+    "reader_work_ms": {
+      "n": 77,
+      "p50_ms": 1.2817999959224835,
+      "p95_ms": 2.2327000042423606,
+      "max_ms": 12.286900004255585
+    },
+    "queue_delay_ms": {
+      "n": 77,
+      "p50_ms": 0.17559999832883477,
+      "p95_ms": 0.30980000155977905,
+      "max_ms": 0.34189999860245734
+    },
+    "max_previous_report_ms": {
+      "n": 77,
+      "p50_ms": 3.1111,
+      "p95_ms": 5.593,
+      "max_ms": 65.1339
+    },
+    "measured_frame_report_ms": {
+      "n": 76,
+      "p50_ms": 2.4569,
+      "p95_ms": 4.1728,
+      "max_ms": 65.1339
+    },
+    "recovery": {
+      "actions": 77,
+      "disclosed_cells": 620,
+      "checkpoint_sequence": 64,
+      "checkpoint_bytes": 890141,
+      "tail_records": 13,
+      "restart_to_frame_ms": 192.6406999991741,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "sync-large": {
+    "presentation_ms": {
+      "n": 2805,
+      "p50_ms": 49.440600007073954,
+      "p95_ms": 50.96849999972619,
+      "max_ms": 502.52379999437835
+    },
+    "input_to_client_request_ms": {
+      "n": 2805,
+      "p50_ms": 12.9623,
+      "p95_ms": 14.1342,
+      "max_ms": 16.505
+    },
+    "client_send_ms": {
+      "n": 2805,
+      "p50_ms": 0.36069999999999997,
+      "p95_ms": 0.6601,
+      "max_ms": 1.7539
+    },
+    "request_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.2606,
+      "p95_ms": 0.5086999999999999,
+      "max_ms": 1.6632
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.244,
+      "p95_ms": 0.4415,
+      "max_ms": 97.3276
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.1899,
+      "p95_ms": 0.3112,
+      "max_ms": 0.9396
+    },
+    "server_handle_ms": {
+      "n": 2805,
+      "p50_ms": 2.513,
+      "p95_ms": 4.595,
+      "max_ms": 12.3839
+    },
+    "server_lock_ms": {
+      "n": 2805,
+      "p50_ms": 0.001,
+      "p95_ms": 0.002,
+      "max_ms": 0.0448
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 2805,
+      "p50_ms": 0.3559,
+      "p95_ms": 0.5666,
+      "max_ms": 1.5092
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 2805,
+      "p50_ms": 1.7838,
+      "p95_ms": 2.8764,
+      "max_ms": 97.6549
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 2805,
+      "p50_ms": 31.2879,
+      "p95_ms": 33.223,
+      "max_ms": 483.8643
+    },
+    "reader_work_ms": {
+      "n": 2805,
+      "p50_ms": 1.4100999978836626,
+      "p95_ms": 2.2877000010339543,
+      "max_ms": 181.61899999540765
+    },
+    "queue_delay_ms": {
+      "n": 2805,
+      "p50_ms": 0.22739999985788018,
+      "p95_ms": 0.3623000084189698,
+      "max_ms": 4.059899991261773
+    },
+    "max_previous_report_ms": {
+      "n": 2805,
+      "p50_ms": 2.6995,
+      "p95_ms": 4.336600000000001,
+      "max_ms": 454.8347
+    },
+    "measured_frame_report_ms": {
+      "n": 2804,
+      "p50_ms": 2.5161,
+      "p95_ms": 3.9579000000000004,
+      "max_ms": 454.8347
+    },
+    "recovery": {
+      "actions": 2805,
+      "disclosed_cells": 20956,
+      "checkpoint_sequence": 2752,
+      "checkpoint_bytes": 9806500,
+      "tail_records": 53,
+      "restart_to_frame_ms": 1958.6315999913495,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "deferred-small": {
+    "presentation_ms": {
+      "n": 77,
+      "p50_ms": 50.04919999919366,
+      "p95_ms": 51.31759999494534,
+      "max_ms": 52.21870000241324
+    },
+    "input_to_client_request_ms": {
+      "n": 77,
+      "p50_ms": 13.7292,
+      "p95_ms": 15.8206,
+      "max_ms": 16.29
+    },
+    "client_send_ms": {
+      "n": 77,
+      "p50_ms": 0.4087,
+      "p95_ms": 0.7069,
+      "max_ms": 0.9734999999999999
+    },
+    "request_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.3076,
+      "p95_ms": 0.5433,
+      "max_ms": 0.8097
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.28650000000000003,
+      "p95_ms": 0.5392,
+      "max_ms": 0.7266
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 76,
+      "p50_ms": 0.2517,
+      "p95_ms": 0.43110000000000004,
+      "max_ms": 0.4682
+    },
+    "server_handle_ms": {
+      "n": 77,
+      "p50_ms": 2.1601,
+      "p95_ms": 4.2623,
+      "max_ms": 5.3496999999999995
+    },
+    "server_lock_ms": {
+      "n": 77,
+      "p50_ms": 0.001,
+      "p95_ms": 0.0022,
+      "max_ms": 0.0423
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 77,
+      "p50_ms": 0.4765,
+      "p95_ms": 0.8275,
+      "max_ms": 0.9431
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 77,
+      "p50_ms": 0.4898,
+      "p95_ms": 0.8569,
+      "max_ms": 1.1264
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 77,
+      "p50_ms": 32.6564,
+      "p95_ms": 34.2638,
+      "max_ms": 34.6596
+    },
+    "reader_work_ms": {
+      "n": 77,
+      "p50_ms": 1.0536000045249239,
+      "p95_ms": 2.2791000083088875,
+      "max_ms": 4.32260001252871
+    },
+    "queue_delay_ms": {
+      "n": 77,
+      "p50_ms": 0.1703000016277656,
+      "p95_ms": 0.28279999969527125,
+      "max_ms": 0.3378999972483143
+    },
+    "max_previous_report_ms": {
+      "n": 77,
+      "p50_ms": 2.7761,
+      "p95_ms": 4.4081,
+      "max_ms": 5.0699
+    },
+    "measured_frame_report_ms": {
+      "n": 76,
+      "p50_ms": 2.4227,
+      "p95_ms": 4.254499999999999,
+      "max_ms": 5.0699
+    },
+    "recovery": {
+      "actions": 77,
+      "disclosed_cells": 620,
+      "checkpoint_sequence": 64,
+      "checkpoint_bytes": 890141,
+      "tail_records": 13,
+      "restart_to_frame_ms": 213.51709999726154,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "deferred-large": {
+    "presentation_ms": {
+      "n": 2805,
+      "p50_ms": 49.547200003871694,
+      "p95_ms": 50.929199991514906,
+      "max_ms": 160.02080000180285
+    },
+    "input_to_client_request_ms": {
+      "n": 2805,
+      "p50_ms": 13.19995,
+      "p95_ms": 14.27865,
+      "max_ms": 16.63085
+    },
+    "client_send_ms": {
+      "n": 2805,
+      "p50_ms": 0.34469999999999995,
+      "p95_ms": 0.5561999999999999,
+      "max_ms": 1.0682999999999998
+    },
+    "request_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.2504,
+      "p95_ms": 0.4312,
+      "max_ms": 0.9559
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.24230000000000002,
+      "p95_ms": 0.4009,
+      "max_ms": 1.0607
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.19110000000000002,
+      "p95_ms": 0.3194,
+      "max_ms": 0.9024
+    },
+    "server_handle_ms": {
+      "n": 2805,
+      "p50_ms": 2.625,
+      "p95_ms": 4.7221,
+      "max_ms": 16.0198
+    },
+    "server_lock_ms": {
+      "n": 2805,
+      "p50_ms": 0.0011,
+      "p95_ms": 0.0018,
+      "max_ms": 0.0455
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 2805,
+      "p50_ms": 0.355,
+      "p95_ms": 0.569,
+      "max_ms": 1.4454
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 2805,
+      "p50_ms": 1.7582,
+      "p95_ms": 2.8131,
+      "max_ms": 5.407
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 2805,
+      "p50_ms": 31.19945,
+      "p95_ms": 32.93825,
+      "max_ms": 141.36505
+    },
+    "reader_work_ms": {
+      "n": 2805,
+      "p50_ms": 1.2780999968526885,
+      "p95_ms": 2.176499998313375,
+      "max_ms": 22.677100001601502
+    },
+    "queue_delay_ms": {
+      "n": 2805,
+      "p50_ms": 0.23520000104326755,
+      "p95_ms": 0.35790000401902944,
+      "max_ms": 1.094899998861365
+    },
+    "max_previous_report_ms": {
+      "n": 2805,
+      "p50_ms": 2.6728,
+      "p95_ms": 4.434699999999999,
+      "max_ms": 114.3971
+    },
+    "measured_frame_report_ms": {
+      "n": 2804,
+      "p50_ms": 2.4171,
+      "p95_ms": 3.9119999999999995,
+      "max_ms": 114.3971
+    },
+    "recovery": {
+      "actions": 2805,
+      "disclosed_cells": 20956,
+      "checkpoint_sequence": 2752,
+      "checkpoint_bytes": 9806500,
+      "tail_records": 53,
+      "restart_to_frame_ms": 2273.6565000086557,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "final-sync-small": {
+    "presentation_ms": {
+      "n": 77,
+      "p50_ms": 50.10219999530818,
+      "p95_ms": 51.87570000998676,
+      "max_ms": 62.9482999938773
+    },
+    "input_to_client_request_ms": {
+      "n": 77,
+      "p50_ms": 14.0405,
+      "p95_ms": 15.7492,
+      "max_ms": 16.3022
+    },
+    "client_send_ms": {
+      "n": 77,
+      "p50_ms": 0.4283,
+      "p95_ms": 0.8260000000000001,
+      "max_ms": 1.1218000000000001
+    },
+    "request_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.32430000000000003,
+      "p95_ms": 0.6589999999999999,
+      "max_ms": 0.9508
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.3105,
+      "p95_ms": 0.5925,
+      "max_ms": 0.6772
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 76,
+      "p50_ms": 0.2129,
+      "p95_ms": 0.4862,
+      "max_ms": 0.5199999999999999
+    },
+    "server_handle_ms": {
+      "n": 77,
+      "p50_ms": 1.9457,
+      "p95_ms": 4.0498,
+      "max_ms": 4.4566
+    },
+    "server_lock_ms": {
+      "n": 77,
+      "p50_ms": 0.0009,
+      "p95_ms": 0.0015,
+      "max_ms": 0.0025
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 77,
+      "p50_ms": 0.4074,
+      "p95_ms": 0.7807,
+      "max_ms": 0.9988
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 77,
+      "p50_ms": 0.4678,
+      "p95_ms": 1.0079,
+      "max_ms": 1.0773
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 77,
+      "p50_ms": 32.8278,
+      "p95_ms": 34.4092,
+      "max_ms": 46.9947
+    },
+    "client_ack_to_presented_ms": {
+      "n": 77,
+      "p50_ms": 30.6071,
+      "p95_ms": 32.3403,
+      "max_ms": 32.5918
+    },
+    "presented_to_reader_ms": {
+      "n": 77,
+      "p50_ms": 2.0034,
+      "p95_ms": 4.1727,
+      "max_ms": 17.3917
+    },
+    "measured_frame_encode_ms": {
+      "n": 76,
+      "p50_ms": 1.7138,
+      "p95_ms": 3.7697999999999996,
+      "max_ms": 4.4190000000000005
+    },
+    "measured_frame_write_ms": {
+      "n": 76,
+      "p50_ms": 0.1436,
+      "p95_ms": 0.3046,
+      "max_ms": 14.7052
+    },
+    "reader_work_ms": {
+      "n": 77,
+      "p50_ms": 1.0272999934386462,
+      "p95_ms": 2.2030999971320853,
+      "max_ms": 25.390700000571087
+    },
+    "queue_delay_ms": {
+      "n": 77,
+      "p50_ms": 0.16179999511223286,
+      "p95_ms": 0.28649999876506627,
+      "max_ms": 0.2986999897984788
+    },
+    "max_previous_report_ms": {
+      "n": 77,
+      "p50_ms": 2.2336,
+      "p95_ms": 4.5829,
+      "max_ms": 17.3083
+    },
+    "measured_frame_report_ms": {
+      "n": 76,
+      "p50_ms": 1.8747,
+      "p95_ms": 4.1293,
+      "max_ms": 17.3083
+    },
+    "recovery": {
+      "actions": 77,
+      "disclosed_cells": 620,
+      "checkpoint_sequence": 64,
+      "checkpoint_bytes": 890141,
+      "tail_records": 13,
+      "restart_to_frame_ms": 206.5157999895746,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "final-deferred-small": {
+    "presentation_ms": {
+      "n": 77,
+      "p50_ms": 50.18019999261014,
+      "p95_ms": 52.23929999920074,
+      "max_ms": 233.46819999278523
+    },
+    "input_to_client_request_ms": {
+      "n": 77,
+      "p50_ms": 14.3208,
+      "p95_ms": 16.0321,
+      "max_ms": 16.4403
+    },
+    "client_send_ms": {
+      "n": 77,
+      "p50_ms": 0.4231,
+      "p95_ms": 0.8053,
+      "max_ms": 1.2202
+    },
+    "request_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.3162,
+      "p95_ms": 0.6717,
+      "max_ms": 0.9940000000000001
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 77,
+      "p50_ms": 0.277,
+      "p95_ms": 0.518,
+      "max_ms": 1.0148
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 76,
+      "p50_ms": 0.19890000000000002,
+      "p95_ms": 0.3909,
+      "max_ms": 0.5438
+    },
+    "server_handle_ms": {
+      "n": 77,
+      "p50_ms": 1.5782,
+      "p95_ms": 4.4475,
+      "max_ms": 7.4722
+    },
+    "server_lock_ms": {
+      "n": 77,
+      "p50_ms": 0.001,
+      "p95_ms": 0.002,
+      "max_ms": 0.0396
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 77,
+      "p50_ms": 0.3659,
+      "p95_ms": 0.6716,
+      "max_ms": 1.0069
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 77,
+      "p50_ms": 0.4371,
+      "p95_ms": 0.9012,
+      "max_ms": 1.0215
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 77,
+      "p50_ms": 32.6137,
+      "p95_ms": 34.2523,
+      "max_ms": 215.3661
+    },
+    "client_ack_to_presented_ms": {
+      "n": 77,
+      "p50_ms": 31.1762,
+      "p95_ms": 32.0954,
+      "max_ms": 213.3773
+    },
+    "presented_to_reader_ms": {
+      "n": 77,
+      "p50_ms": 1.7775,
+      "p95_ms": 3.9958,
+      "max_ms": 7.0799
+    },
+    "measured_frame_encode_ms": {
+      "n": 76,
+      "p50_ms": 1.5299999999999998,
+      "p95_ms": 3.7104999999999997,
+      "max_ms": 6.657
+    },
+    "measured_frame_write_ms": {
+      "n": 76,
+      "p50_ms": 0.1293,
+      "p95_ms": 0.244,
+      "max_ms": 0.3989
+    },
+    "reader_work_ms": {
+      "n": 77,
+      "p50_ms": 0.8448000007774681,
+      "p95_ms": 2.162000004318543,
+      "max_ms": 4.959499987307936
+    },
+    "queue_delay_ms": {
+      "n": 77,
+      "p50_ms": 0.1252000074600801,
+      "p95_ms": 0.30250000418163836,
+      "max_ms": 0.4991999885533005
+    },
+    "max_previous_report_ms": {
+      "n": 77,
+      "p50_ms": 1.7995,
+      "p95_ms": 5.1934,
+      "max_ms": 9.8329
+    },
+    "measured_frame_report_ms": {
+      "n": 76,
+      "p50_ms": 1.7086,
+      "p95_ms": 3.9359,
+      "max_ms": 6.9879
+    },
+    "recovery": {
+      "actions": 77,
+      "disclosed_cells": 620,
+      "checkpoint_sequence": 64,
+      "checkpoint_bytes": 890141,
+      "tail_records": 13,
+      "restart_to_frame_ms": 206.57290000235662,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "final-sync-large": {
+    "presentation_ms": {
+      "n": 2805,
+      "p50_ms": 49.366299994289875,
+      "p95_ms": 50.94000000099186,
+      "max_ms": 683.5011999937706
+    },
+    "input_to_client_request_ms": {
+      "n": 2805,
+      "p50_ms": 13.07675,
+      "p95_ms": 14.42725,
+      "max_ms": 16.38655
+    },
+    "client_send_ms": {
+      "n": 2805,
+      "p50_ms": 0.3651,
+      "p95_ms": 0.6687000000000001,
+      "max_ms": 632.9924
+    },
+    "request_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.2605,
+      "p95_ms": 0.5144000000000001,
+      "max_ms": 632.8224
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.24620000000000003,
+      "p95_ms": 0.44710000000000005,
+      "max_ms": 44.4483
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.19190000000000002,
+      "p95_ms": 0.3325,
+      "max_ms": 1.7413999999999998
+    },
+    "server_handle_ms": {
+      "n": 2805,
+      "p50_ms": 2.6814,
+      "p95_ms": 4.9651,
+      "max_ms": 12.7559
+    },
+    "server_lock_ms": {
+      "n": 2805,
+      "p50_ms": 0.0011,
+      "p95_ms": 0.0023,
+      "max_ms": 0.051
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 2805,
+      "p50_ms": 0.3726,
+      "p95_ms": 0.6087,
+      "max_ms": 1.2043
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 2805,
+      "p50_ms": 1.7969,
+      "p95_ms": 3.057,
+      "max_ms": 43.4171
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 2805,
+      "p50_ms": 30.88885,
+      "p95_ms": 32.72565,
+      "max_ms": 472.84535
+    },
+    "client_ack_to_presented_ms": {
+      "n": 2805,
+      "p50_ms": 28.7271,
+      "p95_ms": 30.589,
+      "max_ms": 46.9153
+    },
+    "presented_to_reader_ms": {
+      "n": 2805,
+      "p50_ms": 2.02745,
+      "p95_ms": 3.46915,
+      "max_ms": 443.10365
+    },
+    "measured_frame_encode_ms": {
+      "n": 2804,
+      "p50_ms": 1.8357,
+      "p95_ms": 3.1817,
+      "max_ms": 5.6314
+    },
+    "measured_frame_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.14459999999999998,
+      "p95_ms": 0.2321,
+      "max_ms": 441.59159999999997
+    },
+    "reader_work_ms": {
+      "n": 2805,
+      "p50_ms": 1.4536999951815233,
+      "p95_ms": 2.443000004859641,
+      "max_ms": 133.96930000453722
+    },
+    "queue_delay_ms": {
+      "n": 2805,
+      "p50_ms": 0.24310000299010426,
+      "p95_ms": 0.3934999986086041,
+      "max_ms": 1.026300000376068
+    },
+    "max_previous_report_ms": {
+      "n": 2805,
+      "p50_ms": 2.1941,
+      "p95_ms": 3.7025,
+      "max_ms": 443.0773
+    },
+    "measured_frame_report_ms": {
+      "n": 2804,
+      "p50_ms": 1.9849999999999999,
+      "p95_ms": 3.4302,
+      "max_ms": 443.0773
+    },
+    "recovery": {
+      "actions": 2805,
+      "disclosed_cells": 20956,
+      "checkpoint_sequence": 2752,
+      "checkpoint_bytes": 9806500,
+      "tail_records": 53,
+      "restart_to_frame_ms": 1777.6146000105655,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "final-deferred-large": {
+    "presentation_ms": {
+      "n": 2805,
+      "p50_ms": 49.6176999877207,
+      "p95_ms": 51.055499992799014,
+      "max_ms": 87.7597000071546
+    },
+    "input_to_client_request_ms": {
+      "n": 2805,
+      "p50_ms": 13.32415,
+      "p95_ms": 14.55365,
+      "max_ms": 17.24525
+    },
+    "client_send_ms": {
+      "n": 2805,
+      "p50_ms": 0.37070000000000003,
+      "p95_ms": 0.6605,
+      "max_ms": 1.3119
+    },
+    "request_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.2701,
+      "p95_ms": 0.5168,
+      "max_ms": 1.2432999999999998
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 2805,
+      "p50_ms": 0.2548,
+      "p95_ms": 0.4657,
+      "max_ms": 0.8651000000000001
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.19560000000000002,
+      "p95_ms": 0.34469999999999995,
+      "max_ms": 0.6273
+    },
+    "server_handle_ms": {
+      "n": 2805,
+      "p50_ms": 2.6671,
+      "p95_ms": 4.9448,
+      "max_ms": 11.5633
+    },
+    "server_lock_ms": {
+      "n": 2805,
+      "p50_ms": 0.0011,
+      "p95_ms": 0.0022,
+      "max_ms": 0.0388
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 2805,
+      "p50_ms": 0.3815,
+      "p95_ms": 0.625,
+      "max_ms": 1.2148
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 2805,
+      "p50_ms": 1.8186,
+      "p95_ms": 3.0345,
+      "max_ms": 6.2937
+    },
+    "client_ack_to_frame_reader_ms": {
+      "n": 2805,
+      "p50_ms": 30.94015,
+      "p95_ms": 32.56005,
+      "max_ms": 69.05225
+    },
+    "client_ack_to_presented_ms": {
+      "n": 2805,
+      "p50_ms": 28.7733,
+      "p95_ms": 30.5345,
+      "max_ms": 44.7504
+    },
+    "presented_to_reader_ms": {
+      "n": 2805,
+      "p50_ms": 2.04705,
+      "p95_ms": 3.26095,
+      "max_ms": 41.12995
+    },
+    "measured_frame_encode_ms": {
+      "n": 2804,
+      "p50_ms": 1.8542999999999998,
+      "p95_ms": 2.9854,
+      "max_ms": 7.8575
+    },
+    "measured_frame_write_ms": {
+      "n": 2804,
+      "p50_ms": 0.1459,
+      "p95_ms": 0.2331,
+      "max_ms": 37.1286
+    },
+    "reader_work_ms": {
+      "n": 2805,
+      "p50_ms": 1.2681000080192462,
+      "p95_ms": 2.2044000070309266,
+      "max_ms": 66.603600003873
+    },
+    "queue_delay_ms": {
+      "n": 2805,
+      "p50_ms": 0.24049999774433672,
+      "p95_ms": 0.37799999699927866,
+      "max_ms": 0.7254000083776191
+    },
+    "max_previous_report_ms": {
+      "n": 2805,
+      "p50_ms": 2.2073,
+      "p95_ms": 3.5300000000000002,
+      "max_ms": 41.0824
+    },
+    "measured_frame_report_ms": {
+      "n": 2804,
+      "p50_ms": 2.0008999999999997,
+      "p95_ms": 3.2083,
+      "max_ms": 41.0824
+    },
+    "recovery": {
+      "actions": 2805,
+      "disclosed_cells": 20956,
+      "checkpoint_sequence": 2752,
+      "checkpoint_bytes": 9806500,
+      "tail_records": 53,
+      "restart_to_frame_ms": 2214.109599997755,
+      "restart_equal": true,
+      "continued_after_restart": true
+    }
+  },
+  "final-ack": {
+    "failed": true,
+    "samples": 1418,
+    "cycles": 2
+  },
+  "final-ack-sync": {
+    "failed": true,
+    "samples": 950,
+    "cycles": 1
+  },
+  "ack-short-sync": {
+    "request_diagnostic_write_ms": {
+      "n": 495,
+      "p50_ms": 0.18359999999999999,
+      "p95_ms": 0.22699999999999998,
+      "max_ms": 0.3142
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 495,
+      "p50_ms": 0.1825,
+      "p95_ms": 0.216,
+      "max_ms": 0.4788
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 494,
+      "p50_ms": 0.1585,
+      "p95_ms": 0.21139999999999998,
+      "max_ms": 0.655
+    },
+    "driver_ack_ms": {
+      "n": 495,
+      "p50_ms": 6.712299989885651,
+      "p95_ms": 19.192799998563714,
+      "max_ms": 26.16880000277888
+    },
+    "reader_ack_ms": {
+      "n": 495,
+      "p50_ms": 6.040100008249283,
+      "p95_ms": 17.374600007315166,
+      "max_ms": 24.106700002448633
+    },
+    "driver_before_client_ms": {
+      "n": 495,
+      "p50_ms": 0.0519,
+      "p95_ms": 0.0789,
+      "max_ms": 0.1709
+    },
+    "client_request_to_ack_ms": {
+      "n": 495,
+      "p50_ms": 4.4101,
+      "p95_ms": 14.1664,
+      "max_ms": 20.7403
+    },
+    "client_send_ms": {
+      "n": 495,
+      "p50_ms": 0.2206,
+      "p95_ms": 0.2698,
+      "max_ms": 0.36719999999999997
+    },
+    "server_lock_ms": {
+      "n": 495,
+      "p50_ms": 0.0003,
+      "p95_ms": 0.0007,
+      "max_ms": 0.013699999999999999
+    },
+    "server_handle_ms": {
+      "n": 495,
+      "p50_ms": 2.3074,
+      "p95_ms": 5.8850999999999996,
+      "max_ms": 11.169500000000001
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 495,
+      "p50_ms": 0.2605,
+      "p95_ms": 0.4634,
+      "max_ms": 0.8652
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 495,
+      "p50_ms": 1.7385,
+      "p95_ms": 7.6579,
+      "max_ms": 10.7778
+    },
+    "headless_ack_report_ms": {
+      "n": 495,
+      "p50_ms": 1.2549,
+      "p95_ms": 3.143,
+      "max_ms": 5.2376000000000005
+    },
+    "headless_report_max_ms": {
+      "n": 495,
+      "p50_ms": 1.489,
+      "p95_ms": 6.4818999999999996,
+      "max_ms": 9.2216
+    },
+    "client_ack_to_reader_ms": {
+      "n": 495,
+      "p50_ms": 1.4675,
+      "p95_ms": 3.4161,
+      "max_ms": 5.4338
+    },
+    "driver_queue_ms": {
+      "n": 495,
+      "p50_ms": 0.6569999968633056,
+      "p95_ms": 1.6066000098362565,
+      "max_ms": 3.093899998930283
+    }
+  },
+  "ack-short-deferred": {
+    "request_diagnostic_write_ms": {
+      "n": 495,
+      "p50_ms": 0.1797,
+      "p95_ms": 0.2327,
+      "max_ms": 0.3792
+    },
+    "sent_diagnostic_write_ms": {
+      "n": 495,
+      "p50_ms": 0.18230000000000002,
+      "p95_ms": 0.24000000000000002,
+      "max_ms": 0.3706
+    },
+    "ack_diagnostic_write_ms": {
+      "n": 494,
+      "p50_ms": 0.1529,
+      "p95_ms": 0.2186,
+      "max_ms": 0.3766
+    },
+    "driver_ack_ms": {
+      "n": 495,
+      "p50_ms": 6.620000000111759,
+      "p95_ms": 18.557299990789033,
+      "max_ms": 30.656799994176254
+    },
+    "reader_ack_ms": {
+      "n": 495,
+      "p50_ms": 6.0400000074878335,
+      "p95_ms": 17.073299997719005,
+      "max_ms": 27.937499995459802
+    },
+    "driver_before_client_ms": {
+      "n": 495,
+      "p50_ms": 0.0518,
+      "p95_ms": 0.0976,
+      "max_ms": 0.1617
+    },
+    "client_request_to_ack_ms": {
+      "n": 495,
+      "p50_ms": 4.4791,
+      "p95_ms": 13.7634,
+      "max_ms": 23.1839
+    },
+    "client_send_ms": {
+      "n": 495,
+      "p50_ms": 0.2148,
+      "p95_ms": 0.2842,
+      "max_ms": 0.8661
+    },
+    "server_lock_ms": {
+      "n": 495,
+      "p50_ms": 0.0003,
+      "p95_ms": 0.0007999999999999999,
+      "max_ms": 0.0015
+    },
+    "server_handle_ms": {
+      "n": 495,
+      "p50_ms": 2.3616,
+      "p95_ms": 5.9982999999999995,
+      "max_ms": 10.0996
+    },
+    "server_handle_to_ack_sent_ms": {
+      "n": 495,
+      "p50_ms": 0.259,
+      "p95_ms": 0.4368,
+      "max_ms": 0.7538
+    },
+    "server_ack_to_client_ack_ms": {
+      "n": 495,
+      "p50_ms": 1.6158,
+      "p95_ms": 7.3663,
+      "max_ms": 17.1718
+    },
+    "headless_ack_report_ms": {
+      "n": 495,
+      "p50_ms": 1.2691,
+      "p95_ms": 3.0115,
+      "max_ms": 12.4299
+    },
+    "headless_report_max_ms": {
+      "n": 495,
+      "p50_ms": 1.4836,
+      "p95_ms": 6.3419,
+      "max_ms": 16.6081
+    },
+    "client_ack_to_reader_ms": {
+      "n": 495,
+      "p50_ms": 1.4718,
+      "p95_ms": 3.465,
+      "max_ms": 12.5868
+    },
+    "driver_queue_ms": {
+      "n": 495,
+      "p50_ms": 0.5641000025207177,
+      "p95_ms": 1.4940000110073015,
+      "max_ms": 3.790999995544553
+    }
+  }
+}

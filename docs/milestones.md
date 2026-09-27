@@ -78,7 +78,7 @@ must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phases A–E merged; format-6 checkpoint reduction implemented; latency-tail closure evidence remains open**.
+Status: **Phases A–E and format-6 checkpoint reduction merged; diagnostic/native timing closure remains open**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -114,11 +114,17 @@ navigation sharing. The user approved rejecting format-5 saves before this chang
 Enabled traversal now completes with exact durable restart and bounded tail replay;
 native full exploration, ASCII/text continuation and native input during a blocked
 checkpoint also pass. The cap, rewind window and runtime queue limits are unchanged.
-The broader milestone remains **not ready to close** while recurrent diagnostic
-acknowledgement/presentation tails are resolved. The final correlated full native
-traversal still peaks at 2,915 ms, with large intervals in client sending, delivery
-and frame-reader receipt; its server handlers peak at 10.53 ms. Isolate those
-intervals next, then establish the latency disposition before feature expansion.
+PR #29 merged at `37a913d` after Windows/Linux CI passed on final head `a098f34`.
+The broader milestone remains **not ready to close**. The
+[client timing investigation](3p-client-timing.md) preserves the historical
+2,915 ms tail and separates new 633 ms request-diagnostic and 442 ms post-native
+stdout-write stalls from short server handlers. Deferred diagnostic disk logging
+does not eliminate a 197 ms native presentation/pacing-call stall in the small
+saved traversal. Two longer eight-client attempts fail (diagnostic retention cap
+and readiness timeout); shorter successes do not replace them. Full native
+exploration/recovery and real keyboard input during blocked saving still pass.
+Next obtain thread scheduling/blocked-write evidence for those native/report
+intervals and qualify the longer client workload before feature expansion.
 This is distinct from deferred streaming, history loading and query scaling.
 Process recovery tests do not establish hardware power-loss behavior.
 

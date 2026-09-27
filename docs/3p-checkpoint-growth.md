@@ -4,6 +4,12 @@ This focused change removes the explored-world checkpoint-size blocker without
 raising the 64 MiB cap or disabling checkpoints. It adds no interactions or travel
 features. The remaining closure disposition is recorded below.
 
+This change merged in PR #29 at `37a913dedc05b18b366c34e6ba6f728468381ec4`
+after Windows/Linux CI passed on final head
+`a098f341553c256d7775f71754d470bece2765d6`. The subsequent
+[client timing investigation](3p-client-timing.md) preserves these measurements
+and updates the remaining diagnostic/native delivery evidence; 3p remains open.
+
 ## Publication and compatibility
 
 PR #28 merged at `eff107ce95b7c0f6c8f813597d0fcb94f70fefa5` after Windows and Linux
