@@ -4,7 +4,16 @@
 It renders only the server's disclosed observations and shares the same
 connection/state validation as the text client. Windows and Linux/X11 are tested.
 
+The latest disclosed action and sight-change prose appears above the status bar,
+up to two lines. It shares perceived names and conservative sight-change wording
+with adventure text. This transient narration resets on a fresh snapshot; F2
+still opens durable history. See [milestone 3 acceptance](milestone-3-closeout.md).
+
 ## Run and play
+
+Automation frames include `narration`, the current observation's disclosed prose
+as an array (empty immediately after a snapshot). It is presentation data, not
+another history stream.
 
 Start the server as described in [the protocol guide](protocol.md), then set
 `TOR_SERVER_TOKEN` to the same token in the client terminal:

@@ -34,7 +34,7 @@ name comes from disclosed appearance; the client does not invent monsters.
 
 ## Descriptive facts
 
-Protocol **8** adds an item `description`, actor `name` and `description`, and cell
+The current protocol supplies an item `description`, actor `name` and `description`, and cell
 `material`. The backend supplies only appearances belonging to disclosed objects
 and cells, including carried items. Shared cell memory retains these appearances
 as potentially stale sightings. No world-wide appearance catalog is sent.
@@ -120,6 +120,12 @@ not printed as separate responses. Nearby pickup does not claim the actor walked
 Normal startup omits control-acquisition chatter, and basic help contains gameplay
 commands only. `help session` exposes connection/history tools and fine movement.
 
+Outside compound journeys, shared narration reports newly perceived figures,
+loss of sight, and changes to continuously visible doors. It never names an
+undisclosed cause or claims a disappearing actor died. Unchanged observations
+from another actor no longer repeat the entire room description. Explicit `look`
+and snapshots still describe the scene. See [milestone 3 acceptance](milestone-3-closeout.md).
+
 A pending pickup is connection-local and tied to the exact travel receipt and
 branch. It is discarded on cancellation, any non-arrival termination, snapshot,
 rewind, control loss, replacement intent, or disconnect. Arrival rechecks control,
@@ -154,7 +160,7 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. Saves use `diagonal-v11`.
+automatically opens a door. Current games use `places-v12` and save format 7.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling

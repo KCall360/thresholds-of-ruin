@@ -35,6 +35,42 @@ fn advance(client: &mut ClientState, next: Snapshot) {
 }
 
 #[test]
+fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
+    let mut client = ClientState::from_snapshot(snapshot(&[("a", 0, 0)], 0)).unwrap();
+    let mut seen = snapshot(&[("a", 0, 0)], 1);
+    seen.state.observation.visible_actors.push(ActorView {
+        id: ActorId(2),
+        name: "figure".into(),
+        description: String::new(),
+        position: Position { x: 1, y: 0, z: 0 },
+    });
+    advance(&mut client, seen);
+    assert_eq!(client.narration(), ["You notice a figure."]);
+    let unchanged = client.clone();
+    let mut next = snapshot(&[("a", 0, 0)], 2);
+    assert!(client
+        .apply(StreamUpdate {
+            actor: next.actor,
+            branch: next.branch.clone(),
+            cursor: StreamCursor {
+                sequence: 3,
+                tick: 2
+            },
+            body: UpdateBody::Observation {
+                state: Box::new(next.state.clone()),
+                event: None
+            },
+        })
+        .is_err());
+    assert_eq!(client, unchanged);
+    client.replace_snapshot(next.clone()).unwrap();
+    assert!(client.narration().is_empty());
+    next.branch = BranchId("rewound".into());
+    client.replace_snapshot(next).unwrap();
+    assert!(client.narration().is_empty());
+}
+
+#[test]
 fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
     let mut initial = snapshot(&[("a", 0, 0), ("b", 1, 0), ("item", 3, 0)], 0);
     initial.state.observation.ground_items.push(GroundItemView {

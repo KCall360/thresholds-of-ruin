@@ -19,12 +19,24 @@ fn snapshot(count: usize) -> Snapshot {
 }
 
 fn main() {
+    // Keep the original workload unchanged; opt into disclosed actor/door churn.
+    let narration = std::env::args().any(|arg| arg == "--narration");
     for cells in [64, 20_956] {
         for burst in [1, 64] {
             let mut app = App::new();
             app.set_state(ClientState::from_snapshot(snapshot(cells)).unwrap());
             let mut view = app.state.as_ref().unwrap().state().clone();
             view.observation.visible_cells.truncate(64);
+            if narration {
+                view.observation.visible_cells[0].door = Some(DoorView {
+                    id: 1,
+                    name: "wooden door".into(),
+                    description: String::new(),
+                    open: false,
+                    reachable: true,
+                    approaches: Vec::new(),
+                });
+            }
             let mut canvas = Canvas::default();
             for sample in 0..20 {
                 let started = Instant::now();
@@ -32,6 +44,24 @@ fn main() {
                     let client = app.state.as_mut().unwrap();
                     view.revision += 1;
                     view.observation.tick += 1;
+                    if narration {
+                        let open = view.revision % 2 == 1;
+                        view.observation.visible_cells[0]
+                            .door
+                            .as_mut()
+                            .unwrap()
+                            .open = open;
+                        view.observation.visible_actors = if open {
+                            vec![ActorView {
+                                id: ActorId(2),
+                                name: "figure".into(),
+                                description: String::new(),
+                                position: Position { x: 1, y: 0, z: 0 },
+                            }]
+                        } else {
+                            Vec::new()
+                        };
+                    }
                     client
                         .apply(StreamUpdate {
                             actor: ActorId(1),
@@ -52,12 +82,15 @@ fn main() {
                 canvas.draw(black_box(&app));
                 black_box(&canvas.pixels);
                 let render_ms = started.elapsed().as_secs_f64() * 1000.;
-                println!(
-                    "{}",
-                    serde_json::json!({"version":1,"cells":cells,"burst":burst,"sample":sample,
+                let mut result = serde_json::json!({"version":if narration {2} else {1},"cells":cells,"burst":burst,"sample":sample,
                     "memory":app.state.as_ref().unwrap().memory().count(),
-                    "chart":app.state.as_ref().unwrap().map_memory().count(),"apply_ms":apply_ms,"render_ms":render_ms})
-                );
+                    "chart":app.state.as_ref().unwrap().map_memory().count(),"apply_ms":apply_ms,"render_ms":render_ms});
+                if narration {
+                    let count = app.state.as_ref().unwrap().narration().len();
+                    assert!(count > 0);
+                    result["narration_count"] = count.into();
+                }
+                println!("{result}");
             }
         }
     }

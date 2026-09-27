@@ -389,3 +389,40 @@ fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
     assert!(statuses.iter().all(|s| s.phase == TravelPhase::ControlLost));
     assert!(service.travels.is_empty());
 }
+
+#[test]
+fn slow_spectator_reconnects_at_committed_travel_state_without_stopping_controller() {
+    let (mut service, mut controller) = fixture();
+    let mut slow = connect(&mut service, AccessRole::Spectator);
+    start(&mut service, &mut controller, 7);
+    drain(&mut slow);
+    for i in 0..64 {
+        service.handle(slow.id, format!("fill-{i}"), Request::Snapshot);
+    }
+    service.advance_travel();
+    drain(&mut controller);
+    assert!(*slow.close.borrow());
+    assert_eq!(
+        service.travel_status[&ActorId(1)].phase,
+        TravelPhase::Active
+    );
+    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 1);
+    let mut replacement = connect(&mut service, AccessRole::Spectator);
+    service.handle(replacement.id, "resync".into(), Request::Snapshot);
+    let ServerMessage::Snapshot { snapshot, .. } = drain(&mut replacement).pop().unwrap() else {
+        panic!("replacement snapshot");
+    };
+    assert_eq!(snapshot.state, service.engine.state(ActorId(1)).unwrap());
+    assert_eq!(snapshot.travel.unwrap().completed_steps, 1);
+    assert!(!snapshot.has_control);
+    for _ in 0..6 {
+        service.advance_travel();
+        drain(&mut controller);
+        drain(&mut replacement);
+    }
+    assert_eq!(
+        service.travel_status[&ActorId(1)].phase,
+        TravelPhase::Arrived
+    );
+    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 7);
+}

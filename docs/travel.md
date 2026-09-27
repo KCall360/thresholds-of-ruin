@@ -2,7 +2,7 @@
 
 The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 13 is required. Save format remains 3.
+region names, and frontend language. Protocol 13 and save format 7 are current.
 
 ## ASCII controls
 
@@ -36,7 +36,7 @@ private. Navigation memory is reconstructed by deterministic journal replay and
 restored by rewind. It is distinct from connection-local frontend display memory.
 
 Deterministic minimum-tick search uses only the remembered graph and terrain.
-In diagonal-v11 games, diagonals are composed from disclosed cardinal connections
+Diagonals are composed from disclosed cardinal connections
 through at least one remembered clear side. Their cost is `ceil(base × √2)`.
 Ties use stable discovery order: north/east/south/west/up/down, then
 northeast/southeast/southwest/northwest in the actor's frame.
@@ -73,6 +73,10 @@ There is no combat, hostility, trap, or dangerous-terrain system yet. The backen
 hazard classification can grow with those mechanics without treating all new
 information as dangerous. Actors already visible when a trip starts do not count
 as new hazards, but still block movement normally. Wizard changes stop active jobs even when their changes are elsewhere.
+
+Damage-triggered interruption is explicitly assigned to milestone 4d alongside
+HP/damage mechanics. [Milestone 3 acceptance](milestone-3-closeout.md) documents
+current narration and slow-client recovery separately from deferred 3p timing.
 
 A cancel request applies at an action boundary and cannot undo committed steps.
 Travel status and active jobs are session-local. Restart restores completed moves,
