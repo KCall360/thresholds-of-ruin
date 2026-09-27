@@ -86,7 +86,7 @@ fn cycles_are_bounded_and_invalid_setup_is_atomic() {
                 direction: Direction::West,
                 to: cell(1, 4, 2, 0)
             },
-            4
+            24
         )
         .is_err());
     assert!(world.add_region(room(1)).is_err());

@@ -101,6 +101,10 @@ fn indexed_glyphs(
 }
 
 pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
+    map_tiles_at_level(state, 0)
+}
+
+pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) -> Vec<MapTile> {
     let display = display_observation(state);
     let current: std::collections::BTreeSet<_> = state
         .state()
@@ -111,7 +115,7 @@ pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
         .collect();
     let glyphs = indexed_glyphs(&display);
     let mut tiles = Vec::new();
-    for panel in map_panels(&display) {
+    for panel in map_panels(&display, level) {
         for row in 0..panel.rows {
             for col in 0..panel.cols {
                 let position = tor_protocol::Position {
@@ -160,7 +164,15 @@ pub fn visible_cell_at(
     x: usize,
     y: usize,
 ) -> Option<tor_protocol::Position> {
-    let position = cell_at(&display_observation(state), x, y)?;
+    visible_cell_at_level(state, x, y, 0)
+}
+pub fn visible_cell_at_level(
+    state: &tor_client_common::ClientState,
+    x: usize,
+    y: usize,
+    level: i32,
+) -> Option<tor_protocol::Position> {
+    let position = cell_at_level(&display_observation(state), x, y, level)?;
     state
         .state()
         .observation
@@ -248,7 +260,7 @@ impl Canvas {
             let o = &state.state().observation;
             self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
             self.text(44, 140, &format!("TICK {}", o.tick), MUTED, 1, 84);
-            for panel in map_panels(&display_observation(state)) {
+            for panel in map_panels(&display_observation(state), app.map_level) {
                 if panel.label {
                     self.text(
                         panel.left,
@@ -260,7 +272,7 @@ impl Canvas {
                     );
                 }
             }
-            for tile in map_tiles(state) {
+            for tile in map_tiles_at_level(state, app.map_level) {
                 let selected = app.travel_cursor == Some(tile.position);
                 let x = tile.center.0 - tile.step / 2;
                 let y = tile.center.1 - tile.step / 2;
@@ -409,9 +421,9 @@ impl Canvas {
             142,
         );
         let help = if app.role == tor_protocol::AccessRole::Spectator {
-            "READ-ONLY   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
+            "READ-ONLY   F6/F7 height   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "HJKL/YUBN move  </> level  _/CLICK travel  G take  D drop  O/C doors  SPACE wait  F3/R control  F4 note  F5 places  F2 history  ESC quit/cancel"
+            "F6/F7 height HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors SPACE wait F3/R control F4 note F5 places F2 history ESC quit"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -605,11 +617,11 @@ struct MapPanel {
     top: usize,
     label: bool,
 }
-fn map_panels(o: &tor_protocol::Observation) -> Vec<MapPanel> {
+fn map_panels(o: &tor_protocol::Observation, focus: i32) -> Vec<MapPanel> {
     let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
     levels.sort_unstable();
     levels.dedup();
-    levels.sort_by_key(|z| (i64::from(*z).abs(), *z));
+    levels.sort_by_key(|z| ((i64::from(*z) - i64::from(focus)).abs(), *z));
     levels.truncate(5);
     let panels = levels.len().max(1);
     levels
@@ -661,7 +673,15 @@ pub fn cell_at(
     x: usize,
     y: usize,
 ) -> Option<tor_protocol::Position> {
-    for panel in map_panels(o) {
+    cell_at_level(o, x, y, 0)
+}
+fn cell_at_level(
+    o: &tor_protocol::Observation,
+    x: usize,
+    y: usize,
+    level: i32,
+) -> Option<tor_protocol::Position> {
+    for panel in map_panels(o, level) {
         if x >= panel.left
             && y >= panel.top
             && x < panel.left + panel.cols * panel.step
@@ -689,7 +709,7 @@ pub fn cell_center(
     if !o.visible_cells.iter().any(|c| c.position == position) {
         return None;
     }
-    map_panels(o)
+    map_panels(o, 0)
         .into_iter()
         .find(|p| {
             p.z == position.z

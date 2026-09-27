@@ -8,6 +8,7 @@ use tor_world::{Shared, World};
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    physics: crate::physics::Physics,
     world: usize,
     material_surfaces: bool,
     navigation: BTreeMap<ActorId, usize>,
@@ -47,6 +48,7 @@ impl Game {
                 worlds.len() - 1
             });
         Snapshot {
+            physics: self.physics.clone(),
             world,
             material_surfaces: self.material_surfaces,
             navigation: self
@@ -83,6 +85,7 @@ impl Game {
 
     pub fn restore_checkpoint(snapshot: Snapshot, shared: &SharedState) -> Option<Self> {
         let game = Self {
+            physics: snapshot.physics,
             world: Shared::new(shared.worlds.get(snapshot.world)?.clone()),
             material_surfaces: snapshot.material_surfaces,
             navigation: snapshot
@@ -101,7 +104,8 @@ impl Game {
             next_door_id: snapshot.next_door_id,
         };
         let mut occupied = BTreeSet::new();
-        if game.actors.is_empty()
+        if !game.physics_valid()
+            || game.actors.is_empty()
             || game.next_actor_id == 0
             || game.next_item_id == 0
             || game.next_door_id == 0
@@ -109,14 +113,27 @@ impl Game {
             || game.actors.iter().any(|(id, actor)| {
                 id.0 == 0
                     || id.0 >= game.next_actor_id
-                    || actor.orientation >= 4
+                    || actor.orientation >= 24
                     || actor.ready_at < game.tick
                     || !game.world.contains(actor.location)
                     || actor
                         .visited
                         .iter()
                         .any(|id| game.world.region(*id).is_none())
-                    || !occupied.insert(actor.location)
+                    || !actor.body.valid()
+                    || !actor.motion.valid()
+                    || actor
+                        .motion
+                        .acceleration_remainder
+                        .iter()
+                        .any(|v| v.unsigned_abs() >= actor.body.cells.len() as u64)
+                    || game
+                        .body_cells(actor.location, actor.orientation, &actor.body)
+                        .is_none_or(|cells| {
+                            cells
+                                .iter()
+                                .any(|(at, _)| !game.world.walkable(*at) || !occupied.insert(*at))
+                        })
             })
             || game.items.iter().any(|(id, item)| {
                 id.0 == 0
@@ -124,6 +141,9 @@ impl Game {
                     || item.quantity == 0
                     || (!item.spec.stackable && item.quantity != 1)
                     || !item.spec.valid()
+                    || !item.motion.valid()
+                    || item.motion.acceleration_remainder != [0; 3]
+                    || item.orientation >= 24
                     || match item.location {
                         ItemLocation::Ground(location) => !game.world.contains(location),
                         ItemLocation::Carried(actor) => !game.actors.contains_key(&actor),

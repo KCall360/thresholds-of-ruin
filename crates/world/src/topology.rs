@@ -34,6 +34,14 @@ pub enum Direction {
     NorthWest,
     Up,
     Down,
+    EastUp,
+    WestUp,
+    NorthUp,
+    SouthUp,
+    EastDown,
+    WestDown,
+    NorthDown,
+    SouthDown,
 }
 
 impl Direction {
@@ -48,16 +56,26 @@ impl Direction {
         Self::NorthWest,
     ];
 
+    #[inline]
     pub fn components(self) -> Option<(Self, Self)> {
         match self {
             Self::NorthEast => Some((Self::North, Self::East)),
             Self::SouthEast => Some((Self::South, Self::East)),
             Self::SouthWest => Some((Self::South, Self::West)),
             Self::NorthWest => Some((Self::North, Self::West)),
+            Self::EastUp => Some((Self::East, Self::Up)),
+            Self::WestUp => Some((Self::West, Self::Up)),
+            Self::NorthUp => Some((Self::North, Self::Up)),
+            Self::SouthUp => Some((Self::South, Self::Up)),
+            Self::EastDown => Some((Self::East, Self::Down)),
+            Self::WestDown => Some((Self::West, Self::Down)),
+            Self::NorthDown => Some((Self::North, Self::Down)),
+            Self::SouthDown => Some((Self::South, Self::Down)),
             _ => None,
         }
     }
 
+    #[inline]
     pub fn delta(self) -> (i32, i32, i32) {
         match self {
             Self::NorthEast => (1, -1, 0),
@@ -70,6 +88,14 @@ impl Direction {
             Self::West => (-1, 0, 0),
             Self::Up => (0, 0, 1),
             Self::Down => (0, 0, -1),
+            Self::EastUp => (1, 0, 1),
+            Self::WestUp => (-1, 0, 1),
+            Self::NorthUp => (0, -1, 1),
+            Self::SouthUp => (0, 1, 1),
+            Self::EastDown => (1, 0, -1),
+            Self::WestDown => (-1, 0, -1),
+            Self::NorthDown => (0, -1, -1),
+            Self::SouthDown => (0, 1, -1),
         }
     }
 
@@ -82,21 +108,41 @@ impl Direction {
         })
     }
 
+    #[inline]
+    pub fn from_delta(v: [i64; 3]) -> Option<Self> {
+        Some(match v {
+            [0, -1, 0] => Self::North,
+            [1, 0, 0] => Self::East,
+            [0, 1, 0] => Self::South,
+            [-1, 0, 0] => Self::West,
+            [0, 0, 1] => Self::Up,
+            [0, 0, -1] => Self::Down,
+            [1, -1, 0] => Self::NorthEast,
+            [1, 1, 0] => Self::SouthEast,
+            [-1, 1, 0] => Self::SouthWest,
+            [-1, -1, 0] => Self::NorthWest,
+            [1, 0, 1] => Self::EastUp,
+            [-1, 0, 1] => Self::WestUp,
+            [0, -1, 1] => Self::NorthUp,
+            [0, 1, 1] => Self::SouthUp,
+            [1, 0, -1] => Self::EastDown,
+            [-1, 0, -1] => Self::WestDown,
+            [0, -1, -1] => Self::NorthDown,
+            [0, 1, -1] => Self::SouthDown,
+            _ => return None,
+        })
+    }
+    #[inline]
     pub fn rotated(self, turns: u8) -> Self {
-        let directions = if self.components().is_some() {
-            [
-                Self::NorthEast,
-                Self::SouthEast,
-                Self::SouthWest,
-                Self::NorthWest,
-            ]
-        } else {
-            [Self::North, Self::East, Self::South, Self::West]
-        };
-        match directions.iter().position(|d| *d == self) {
-            Some(index) => directions[(index + usize::from(turns)) % 4],
-            None => self,
+        if turns == 0 {
+            return self;
         }
+        let (x, y, z) = self.delta();
+        Self::from_delta(crate::rotate_vector(
+            turns,
+            [i64::from(x), i64::from(y), i64::from(z)],
+        ))
+        .expect("cube direction")
     }
 }
 
@@ -140,6 +186,10 @@ pub struct World {
     passages: Shared<BTreeMap<(Location, Direction), Passage>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     rotations: Shared<BTreeMap<(Location, Direction), u8>>,
+    physical_vertical: Shared<BTreeSet<(Location, Direction)>>,
+    region_gravity: Shared<BTreeMap<RegionId, [i32; 3]>>,
+    #[serde(with = "crate::checkpoint_map::shared")]
+    cell_gravity: Shared<BTreeMap<Location, [i32; 3]>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     terrain: Shared<BTreeMap<Location, Terrain>>,
     /// Carved interior extents also locate join apertures; storage includes a shell.
@@ -166,6 +216,22 @@ impl World {
     /// Structural validation for backend checkpoint restoration.
     pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
         let mut ids = BTreeSet::new();
+        if !self
+            .region_gravity
+            .iter()
+            .all(|(r, g)| self.region(*r).is_some() && valid_gravity(*g))
+            || !self
+                .cell_gravity
+                .iter()
+                .all(|(at, g)| self.contains(*at) && valid_gravity(*g))
+        {
+            return false;
+        }
+        if self.physical_vertical.iter().any(|(at, d)| {
+            !matches!(d, Direction::Up | Direction::Down) || self.passage(*at, *d).is_none()
+        }) {
+            return false;
+        }
         self.regions.iter().all(|(id, region)| {
             *id == region.id && {
                 let (x, y, z) = region.bounds.dimensions();
@@ -188,7 +254,7 @@ impl World {
             && self
                 .rotations
                 .iter()
-                .all(|(key, rotation)| *rotation < 4 && self.passages.contains_key(key))
+                .all(|(key, rotation)| *rotation < 24 && self.passages.contains_key(key))
     }
 
     pub fn door(&self, location: Location) -> Option<Door> {
@@ -236,6 +302,9 @@ impl World {
             regions: Shared::new(BTreeMap::new()),
             passages: Shared::new(BTreeMap::new()),
             rotations: Shared::new(BTreeMap::new()),
+            physical_vertical: Shared::default(),
+            region_gravity: Shared::default(),
+            cell_gravity: Shared::default(),
             terrain: Shared::new(BTreeMap::new()),
             chambers: Shared::new(BTreeMap::new()),
             place_hints: Shared::new(BTreeSet::new()),
@@ -299,12 +368,27 @@ impl World {
         direction: Direction,
         range: u32,
     ) -> Option<(Material, u32)> {
-        if !matches!(direction, Direction::Up | Direction::Down) || !self.walkable(from) {
+        if !matches!(direction, Direction::Up | Direction::Down) {
+            return None;
+        }
+        self.axis_surface(from, direction, range)
+    }
+    /// A finite material probe along an observer axis, without stair traversal.
+    pub fn axis_surface(
+        &self,
+        from: Location,
+        direction: Direction,
+        range: u32,
+    ) -> Option<(Material, u32)> {
+        if direction.components().is_some() || !self.walkable(from) {
             return None;
         }
         let mut location = from;
+        let mut direction = direction;
         for distance in 1..=range.min(16) {
-            location.position = direction.offset(location.position)?;
+            let (next, rotation) = self.physics_neighbor(location, direction)?;
+            location = next;
+            direction = direction.rotated(rotation);
             match self.terrain(location)? {
                 Terrain::Solid(material) => return Some((material, distance)),
                 Terrain::Empty if self.opaque(location) => return None,
@@ -327,9 +411,7 @@ impl World {
         if passage.direction.components().is_some() {
             return Err(WorldError::InvalidEndpoint);
         }
-        if quarter_turns > 3
-            || (matches!(passage.direction, Direction::Up | Direction::Down) && quarter_turns != 0)
-        {
+        if quarter_turns >= 24 {
             return Err(WorldError::InvalidRotation);
         }
         if !self.walkable(passage.from) || !self.walkable(passage.to) {
@@ -380,13 +462,12 @@ impl World {
                     Direction::Up | Direction::Down => (u, v, 0),
                     _ => return Err(WorldError::InvalidEndpoint),
                 };
-                let (rx, ry) = match turns {
-                    0 => (x, y),
-                    1 => (-y, x),
-                    2 => (-x, -y),
-                    3 => (y, -x),
-                    _ => return Err(WorldError::InvalidRotation),
-                };
+                if turns >= 24 {
+                    return Err(WorldError::InvalidRotation);
+                }
+                let [rx, ry, rz] =
+                    crate::rotate_vector(turns, [i64::from(x), i64::from(y), i64::from(z)])
+                        .map(|v| v as i32);
                 let offset =
                     |location: Location, x: i32, y: i32, z: i32| -> Result<Location, WorldError> {
                         Ok(Location {
@@ -414,7 +495,7 @@ impl World {
                     Passage {
                         from: offset(anchor.from, x, y, z)?,
                         direction: anchor.direction,
-                        to: offset(anchor.to, rx, ry, z)?,
+                        to: offset(anchor.to, rx, ry, rz)?,
                     },
                     turns,
                 )?;
@@ -422,6 +503,59 @@ impl World {
         }
         *self = candidate;
         Ok(())
+    }
+
+    /// Physical apertures are distinct from explicit stair traversal links.
+    pub fn connect_portal_area(
+        &mut self,
+        anchor: Passage,
+        turns: u8,
+        width: u16,
+        height: u16,
+    ) -> Result<(), WorldError> {
+        if anchor
+            .direction
+            .offset(anchor.from.position)
+            .is_some_and(|position| {
+                self.within_aperture_bounds(Location {
+                    position,
+                    ..anchor.from
+                })
+            })
+        {
+            return Err(WorldError::NotBoundaryExit);
+        }
+        let mut candidate = self.clone();
+        candidate.connect_area(anchor, turns, width, height)?;
+        if matches!(anchor.direction, Direction::Up | Direction::Down) {
+            for u in 0..i32::from(width) {
+                for v in 0..i32::from(height) {
+                    let mut at = anchor.from;
+                    at.position.x += u;
+                    at.position.y += v;
+                    candidate.physical_vertical.insert((at, anchor.direction));
+                }
+            }
+        }
+        *self = candidate;
+        Ok(())
+    }
+    pub fn physics_neighbor(&self, from: Location, direction: Direction) -> Option<(Location, u8)> {
+        if !matches!(direction, Direction::Up | Direction::Down)
+            || self.physical_vertical.contains(&(from, direction))
+        {
+            return self.movement_neighbor(from, direction);
+        }
+        let to = Location {
+            position: direction.offset(from.position)?,
+            ..from
+        };
+        self.contains(to).then_some((to, 0))
+    }
+    pub fn is_stair(&self, from: Location, direction: Direction) -> bool {
+        matches!(direction, Direction::Up | Direction::Down)
+            && self.passage(from, direction).is_some()
+            && !self.physical_vertical.contains(&(from, direction))
     }
 
     pub fn crossing_rotation(&self, from: Location, direction: Direction) -> u8 {
@@ -530,12 +664,7 @@ impl World {
             let dy = i64::from(b.y) - i64::from(a.y);
             let dz = i64::from(b.z) - i64::from(a.z);
             let turns = self.crossing_rotation(passage.from, direction);
-            let (dx, dy) = match turns {
-                0 => (dx, dy),
-                1 => (-dy, dx),
-                2 => (-dx, -dy),
-                _ => (dy, -dx),
-            };
+            let [dx, dy, dz] = crate::rotate_vector(turns, [dx, dy, dz]);
             let to = Location {
                 region: passage.to.region,
                 position: Position {
@@ -562,6 +691,29 @@ impl World {
         self.contains(to).then_some((to, 0))
     }
 
+    pub fn gravity(&self, at: Location) -> Option<[i32; 3]> {
+        self.cell_gravity
+            .get(&at)
+            .or_else(|| self.region_gravity.get(&at.region))
+            .copied()
+    }
+    pub fn has_gravity(&self) -> bool {
+        !self.region_gravity.is_empty() || !self.cell_gravity.is_empty()
+    }
+    pub fn set_gravity(&mut self, region: RegionId, vector: [i32; 3]) -> Result<(), WorldError> {
+        if self.region(region).is_none() || !valid_gravity(vector) {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.region_gravity.insert(region, vector);
+        Ok(())
+    }
+    pub fn set_cell_gravity(&mut self, at: Location, vector: [i32; 3]) -> Result<(), WorldError> {
+        if !self.walkable(at) || !valid_gravity(vector) {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.cell_gravity.insert(at, vector);
+        Ok(())
+    }
     pub fn region(&self, id: RegionId) -> Option<&Region> {
         self.regions.get(&id)
     }
@@ -630,7 +782,7 @@ impl World {
             if self.is_wall(to) {
                 return None;
             }
-            Some((to, (r1 + r2) % 4))
+            Some((to, crate::compose_rotation(r1, r2)))
         };
         match (route(a, b), route(b, a)) {
             (Some(a), Some(b)) if a == b => Some(a),
@@ -673,5 +825,44 @@ mod sharing_tests {
         assert!(world.passages.shares_storage(&original.passages));
         assert!(world.terrain.shares_storage(&original.terrain));
         assert!(world.rotations.shares_storage(&original.rotations));
+    }
+}
+
+fn valid_gravity(g: [i32; 3]) -> bool {
+    g.iter().filter(|v| **v != 0).count() <= 1 && g.iter().all(|v| (-1024..=1024).contains(v))
+}
+
+#[cfg(test)]
+mod gravity_sharing_tests {
+    use super::*;
+    #[test]
+    fn gravity_tables_share_geometry_and_detach_only_on_edit() {
+        let region = RegionId(1);
+        let mut original = World::new(
+            vec![Region {
+                id: region,
+                name: "field".into(),
+                bounds: Extent::new(2, 2, 2).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap();
+        let at = Location {
+            region,
+            position: Position { x: 0, y: 0, z: 0 },
+        };
+        original.set_gravity(region, [0, 0, -1]).unwrap();
+        original.set_cell_gravity(at, [0; 3]).unwrap();
+        let mut edited = original.clone();
+        assert!(edited
+            .region_gravity
+            .shares_storage(&original.region_gravity));
+        assert!(edited.cell_gravity.shares_storage(&original.cell_gravity));
+        edited.set_cell_gravity(at, [0, 0, 1]).unwrap();
+        assert_eq!(original.gravity(at), Some([0; 3]));
+        assert_eq!(edited.gravity(at), Some([0, 0, 1]));
+        assert!(edited
+            .region_gravity
+            .shares_storage(&original.region_gravity));
     }
 }

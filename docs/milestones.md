@@ -8,8 +8,8 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **14**, save format **9**, and ruleset
-**`items-v14`**. Older protocols, save formats, and rulesets are rejected
+two-room fixture. New games use protocol **15**, save format **10**, and ruleset
+**`physics-v15`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
 | Area | Status | Implemented scope |
@@ -77,7 +77,7 @@ The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
 work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks feature work. Milestones 3, 4a and 4b are complete; milestone 4c is next. The unresolved
+blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c is complete locally, pending review and Windows/Linux CI. The unresolved
 3p findings and acceptance criteria
 remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
@@ -206,9 +206,8 @@ archetypes with instance overrides, theme pools, controller assignments, and
 objectives. World themes provide defaults; zones replace their pools. Player
 starts use anchors; mobs initially use authored placements instantiated at region
 activation. Starting characters are selected by server option; unselected
-characters can be omitted. Gravity, AI, and victory declarations are validated
-and retained, but configurations requiring those mechanics are refused until
-4c/4d. All authored regions are active in 4a; streaming follows in 4e.
+characters can be omitted. Gravity is implemented in 4c. AI and victory declarations are validated
+and retained, but runtime refuses those mechanics until 4d. All authored regions are active in 4a; streaming follows in 4e.
 
 Packages use author-controlled major.minor versions and stable IDs, exact content hashes
 and dependency identities, and an explicit validation utility. Any authored edit
@@ -227,7 +226,7 @@ authorship must not rely on a script of wizard setup commands.
 ### 4b — Items and character knowledge foundations
 
 Status: complete, with Windows verification and recorded performance limitations. See [items](items.md).
-4a and 4b will be published together in one feature PR, at the user's direction.
+4a and 4b were published together and merged after Windows and Linux CI passed.
 
 Add pickup/drop/inventory with quantities, multiple items per cell, explicitly
 stackable archetypes and matching-property merge rules. Keep ownership/identity
@@ -243,6 +242,8 @@ these rules. Full identification mechanics, equipment and item use come later.
 
 ### 4c — Multi-cell bodies, rotated portals, and gravity
 
+Status: complete locally; review and Windows/Linux CI pending. See [physics](physics.md) for implemented rules and verification/performance evidence.
+
 Extend portal transforms including z-facing apertures independently of stairs.
 Add discrete occupied footprints/heights, region gravity and sparse cell overrides,
 aggregate diagonal acceleration, persistent velocity, terminal speed, scheduled
@@ -250,10 +251,9 @@ one-cell translations, drift, and blocked-component collision response. Other
 actors continue on the scheduler. Provide impact-damage hooks and room for
 momentum transfer without requiring a complete physics damage model first.
 
-Before implementation settle deterministic integration, aggregate mass/normalization,
-transformed occupancy/velocity, support, and collision ordering. No entity facing
-system is required. Clarify impact versus general acceleration damage using the
-[open physics considerations](game-design-plan.md#portal-geometry-bodies-and-gravity).
+Approved decisions use averaged acceleration, fixed-point simulation ticks,
+persistent body frames through all 24 rotations, rigid support and sliding,
+and impact-only hooks. Crouching/ducking is deferred; whole bodies must fit.
 
 Acceptance: multi-cell gravity aggregation, rotated crossings, discontinuous and
 zero-gravity fields, diagonal sliding, collision hooks, concurrent scheduled actors,

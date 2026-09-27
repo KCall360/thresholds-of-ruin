@@ -69,8 +69,8 @@ item-use or identification action is introduced.
 Clients receive only disclosed `name`, `description`, `appearance`, `identified`,
 quantity and instance ID. Hidden archetype/identity keys and properties are never
 wire fields. History and wizard summaries do not serialize authoritative specs.
-Protocol 14, save format/SQLite version 9, ruleset `items-v14`, and validator
-`tor-scenario-2` replace the previous versions without migration readers.
+Protocol 15, save format/SQLite version 10, ruleset `physics-v15`, and validator
+`tor-scenario-3` replace the previous versions without migration readers.
 
 ## Verification and profiling
 

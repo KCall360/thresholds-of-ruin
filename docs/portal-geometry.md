@@ -9,21 +9,22 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `diagonal-v11`, with [symmetric shadowcasting](shadowcasting.md)
-within eight Manhattan steps. Topology is resolved separately from opacity;
-clockwise quarter turns around z and translation map observer offsets across
+New games use `physics-v15`. Body/gravity scenes preserve [symmetric shadowcasting](shadowcasting.md) on the
+main plane and use conservative 3D voxel rays for height slices. Static diagnostic
+scenes retain their established sight.
+See [physics](physics.md). Both use eight Manhattan steps. Topology is resolved separately from opacity;
+all 24 proper cube rotations and translation map observer offsets across
 joins. Crossing consumes distance, including self-links and cycles. A physical
 cell may have multiple visible occurrences in non-Euclidean geometry. The scene
 preserves those occurrences at distinct offsets. The world API caps sight radius
-at 16; the current game fixes it at eight. Only current shadowcasting rules are
-supported.
+at 16; the current game fixes it at eight. Older rulesets are rejected.
 
 A rectangular join glues an entire aperture with one affine transform. Every
 constituent crossing is validated before any mutation commits. Horizontal joins
 can cover both width and height. Several adjacent joins can cover irregular
 areas. Reverse connections are explicit and separately validated.
 
-Walls and closed doors block movement and cast sight shadows. Shadowcasting uses
+Walls and closed doors block movement and cast sight shadows. Diagnostic shadowcasting uses
 point floor centers and beveled (diamond) occluders; diagonal corner contact does
 not seal sight. Both topology routes at an exact corner must still agree on the
 destination and orientation, independently of opacity. Missing or ambiguous
@@ -33,11 +34,10 @@ Movement retains the observer's axes across rotated joins: repeated north input
 continues toward what appeared north in the view, even if backend axes rotate.
 
 Actors and items do not block sight in this slice. There is no lighting or sound
-propagation. Visibility uses the shadowcasting model described above; it is not continuous
-surface rendering. Up/down sight follows explicit
+propagation. Visibility uses discrete cells rather than continuous surface rendering. Up/down sight follows explicit
 stair links and reveals their landings, not an entire destination floor. Separate
-visible heights are displayed in adjacent ASCII panels. Arbitrary gravity,
-falling/support physics, and continuous stair meshes remain future work.
+visible heights are displayed in adjacent ASCII panels. Gravity and falling/support physics are implemented in [4c](physics.md); continuous
+stair meshes remain future work.
 
 ## Authorized developer setup
 
@@ -60,7 +60,9 @@ in x/y. Destination offsets rotate with the join. Extents must be positive,
 contain at most 1024 cells, and fit clear source/destination cells. Horizontal
 sources must exit a region boundary. Duplicate exits are rejected atomically.
 `connect` takes the same first arguments without width/height for a one-cell link.
-Vertical links currently require zero rotation and may begin inside a region.
+Abstract vertical stair links may begin inside a region. Physical z-facing portals
+use structured `connect_portal` and must exit a boundary. Scenario authoring also
+supports the full cube transform table; see [physics](physics.md).
 
 `room` takes ID, width, depth, height, and a developer name. IDs must be nonzero
 and unique; width/depth are 1–32, height 1–8. Names are 1–80 UTF-8 bytes without

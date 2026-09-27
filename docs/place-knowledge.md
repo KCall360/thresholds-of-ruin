@@ -42,9 +42,9 @@ disclosure.
 The simulation stores remembered names alongside actor navigation, in shared
 source-region maps. Refresh inspects only the perceived scene; unchanged
 knowledge does not detach storage. Checkpoints deduplicate place maps across
-rewind boundaries. Protocol 14 sends only opaque actor-specific cell keys and
+rewind boundaries. Protocol 15 sends only opaque actor-specific cell keys and
 names in `observation.places`; it sends no region coordinates or authored labels.
-Current save format 9 and `items-v14` reject prior versions under the pre-release policy. Durable places were introduced in format 7.
+Current save format 10 and `physics-v15` reject prior versions under the pre-release policy. Durable places were introduced in format 7.
 
 ## Verification
 

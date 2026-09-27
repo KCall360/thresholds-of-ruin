@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 9;
+const ARCHIVE_VERSION: u32 = 10;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -1006,7 +1006,8 @@ impl Engine {
         let navigation_changed = match &receipt.command {
             Command::Act { action, .. } => match action {
                 Action::Move { .. } | Action::SetDoor { .. } => true,
-                Action::Wait | Action::Take { .. } | Action::Drop { .. } => false,
+                Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
+                Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
             },
             Command::Wizard { .. } => true,
             Command::RenamePlace { .. } | Command::Annotate { .. } | Command::Travel { .. } => {
@@ -1128,7 +1129,7 @@ impl Engine {
                 }
                 let started = Instant::now();
                 let perception_changed = match action {
-                    Action::Wait => false,
+                    Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
                     Action::Move { .. }
                     | Action::SetDoor { .. }
                     | Action::Take { .. }
@@ -1155,7 +1156,7 @@ impl Engine {
                 }
                 // Wait changes only tick/readiness. Other outcomes retain full
                 // comparison; new action kinds must make their impact explicit.
-                if matches!(outcome.kind, tor_simulation::OutcomeKind::Waited) {
+                if !perception_changed {
                     let started = Instant::now();
                     for (&actor, revision) in &mut candidate.revisions {
                         if outcome.next_tick != tick
@@ -1180,7 +1181,7 @@ impl Engine {
                         profile.perception += perception_started.elapsed();
                         profile.actors_observed += 1;
                     }
-                    if navigation_changed {
+                    if navigation_changed || candidate.game.physics_enabled() {
                         let started = Instant::now();
                         candidate
                             .game
@@ -1518,6 +1519,59 @@ impl Candidate {
             .map(|actor| Ok((actor, self.revision_view(actor)?)))
             .collect::<Result<_, Failure>>()?;
         let result = match operation {
+            WizardOperation::SetGravity { region, vector } => {
+                self.game
+                    .set_gravity(tor_world::RegionId(*region), *vector)
+                    .map_err(|_| invalid())?;
+                WizardResult::PhysicsSet
+            }
+            WizardOperation::SetCellGravity { position, vector } => {
+                self.game
+                    .set_cell_gravity(adapt::location(*position), *vector)
+                    .map_err(|_| invalid())?;
+                WizardResult::PhysicsSet
+            }
+            WizardOperation::SetBody { actor, cells, mass } => {
+                self.game
+                    .set_body(
+                        SimActor(actor.0),
+                        tor_simulation::BodySpec {
+                            cells: cells.clone(),
+                            mass: *mass,
+                        },
+                    )
+                    .map_err(|_| invalid())?;
+                WizardResult::PhysicsSet
+            }
+            WizardOperation::SetVelocity { actor, velocity } => {
+                self.game
+                    .set_actor_velocity(SimActor(actor.0), *velocity)
+                    .map_err(|_| invalid())?;
+                WizardResult::PhysicsSet
+            }
+            WizardOperation::ConnectPortal {
+                from,
+                direction,
+                to,
+                rotation,
+                width,
+                height,
+            } => {
+                self.game
+                    .connect_portal_area(
+                        tor_world::Passage {
+                            from: adapt::location(*from),
+                            direction: adapt::direction(*direction),
+                            to: adapt::location(*to),
+                        },
+                        *rotation,
+                        *width,
+                        *height,
+                    )
+                    .map_err(|_| invalid())?;
+                WizardResult::Connected
+            }
+
             WizardOperation::PlaceDoor { position, open } => {
                 let door = self
                     .game

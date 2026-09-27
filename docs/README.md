@@ -17,6 +17,8 @@ When implementation and documentation disagree, the code and automated tests are
 authoritative until the documentation is corrected. A feature is not complete
 until its guide and the roadmap are updated together.
 
+- [Bodies, portals, and gravity](physics.md) describes milestone 4c mechanics and verification.
+
 ## Start here
 
 | Need | Document |

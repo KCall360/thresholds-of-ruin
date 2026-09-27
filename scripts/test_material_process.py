@@ -42,7 +42,7 @@ class MaterialProcesses(unittest.TestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "items-v14")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "physics-v15")
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)
@@ -57,7 +57,8 @@ class MaterialProcesses(unittest.TestCase):
             native = self.key(window, "right")
         for name, floor_x, wall_x in [("west", 2, 1), ("on-door", 1, 0), ("east", 0, -1)]:
             cells = {(c["position"]["x"], c["position"]["y"]): c
-                     for c in native["state"]["observation"]["visible_cells"]}
+                     for c in native["state"]["observation"]["visible_cells"]
+                     if c["position"]["z"] == 0}
             for y in (-1, 1):
                 self.assertIn((floor_x, y), cells, name)
                 self.assertFalse(cells[(floor_x, y)]["wall"], name)

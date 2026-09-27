@@ -4,6 +4,8 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 mod actions;
+mod physics;
+pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod items;
 pub use items::ItemSpec;
 pub mod checkpoint;
@@ -98,6 +100,8 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Actor {
+    body: BodySpec,
+    motion: MotionState,
     location: Location,
     orientation: u8,
     turn_ticks: NonZeroU64,
@@ -115,6 +119,8 @@ enum ItemLocation {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Item {
+    motion: MotionState,
+    orientation: u8,
     spec: ItemSpec,
     quantity: u64,
     location: ItemLocation,
@@ -124,6 +130,7 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    physics: physics::Physics,
     material_surfaces: bool,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     world: Shared<World>,
@@ -237,6 +244,7 @@ impl Game {
 
     pub fn new(world: World, seed: u64) -> Self {
         Self {
+            physics: physics::Physics::default(),
             material_surfaces: false,
             navigation: BTreeMap::new(),
             world: Shared::new(world),
@@ -271,6 +279,8 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                body: BodySpec::default(),
+                motion: MotionState::default(),
                 location,
                 orientation: 0,
                 turn_ticks,
@@ -296,6 +306,8 @@ impl Game {
         self.items.insert(
             id,
             Item {
+                motion: MotionState::default(),
+                orientation: 0,
                 spec: ItemSpec::ordinary(name),
                 quantity: 1,
                 location: ItemLocation::Ground(location),
@@ -347,16 +359,13 @@ impl Game {
         if !self.world.walkable(location) {
             return Err(GameError::InvalidLocation);
         }
-        if self
-            .actors
-            .iter()
-            .any(|(&other, actor)| other != id && actor.location == location)
-        {
+        if !self.body_fits(id, location, 0, &self.actors[&id].body) {
             return Err(GameError::Occupied);
         }
         let actor = self.actors.get_mut(&id).expect("validated actor");
         actor.location = location;
         actor.orientation = 0;
+        actor.motion = MotionState::default();
         actor.visited.insert(location.region);
         Ok(())
     }
@@ -426,7 +435,10 @@ impl Game {
     }
 
     fn occupied(&self, location: Location) -> bool {
-        self.actors.values().any(|actor| actor.location == location)
+        self.actors.values().any(|actor| {
+            self.body_cells(actor.location, actor.orientation, &actor.body)
+                .is_some_and(|cells| cells.iter().any(|(at, _)| *at == location))
+        })
     }
 }
 

@@ -8,7 +8,6 @@
 use crate::{
     movement_cost, Action, ActionOutcome, ActorId, Game, GameError, ItemLocation, OutcomeKind,
 };
-use tor_world::Direction;
 
 /// Valid only inside the uninterrupted `Game::act` call that prepared it.
 /// Kept private so callers cannot retain an action across world changes.
@@ -26,6 +25,8 @@ impl Game {
     /// recovery is not partially completed work and cannot be resumed.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
         let prepared = self.prepare_action(id, action)?;
+        self.physics.impacts.clear();
+        self.physics.displaced.clear();
         self.apply_action_effect(&prepared);
         Ok(self.finish_action(prepared))
     }
@@ -60,25 +61,23 @@ impl Game {
                 )
             }
             Action::Move(direction) => {
-                let direction = direction.rotated(actor.orientation);
-                if matches!(direction, Direction::Up | Direction::Down)
-                    && self.world.passage(actor.location, direction).is_none()
-                {
-                    return Err(GameError::Blocked);
-                }
-                let (to, _) = self
-                    .reach(actor.location, direction)
-                    .ok_or(GameError::Blocked)?;
-                if !self.world.walkable(to) {
-                    return Err(GameError::Blocked);
-                }
-                if self
-                    .actors
-                    .iter()
-                    .any(|(&other_id, other)| other_id != id && other.location == to)
-                {
-                    return Err(GameError::Occupied);
-                }
+                let (to, _) = self.actor_translation(id, direction).ok_or_else(|| {
+                    if self
+                        .reach(actor.location, direction.rotated(actor.orientation))
+                        .is_some_and(|(at, _)| {
+                            self.actors.iter().any(|(other, a)| {
+                                *other != id
+                                    && self
+                                        .body_cells(a.location, a.orientation, &a.body)
+                                        .is_some_and(|cells| cells.iter().any(|(p, _)| *p == at))
+                            })
+                        })
+                    {
+                        GameError::Occupied
+                    } else {
+                        GameError::Blocked
+                    }
+                })?;
                 (
                     OutcomeKind::Moved {
                         from: actor.location,
@@ -99,12 +98,9 @@ impl Game {
         let at_tick = self.tick;
         let new_orientation = match action {
             Action::Move(direction) => {
-                (actor.orientation
-                    + self
-                        .reach(actor.location, direction.rotated(actor.orientation))
-                        .expect("validated move")
-                        .1)
-                    % 4
+                self.actor_translation(id, direction)
+                    .expect("validated move")
+                    .1
             }
             _ => actor.orientation,
         };
@@ -170,7 +166,9 @@ impl Game {
         } = prepared;
         self.actors.get_mut(&id).expect("validated actor").ready_at = ready_at;
         let next_actor = self.next_actor().expect("acting actor is still present");
-        self.tick = self.actors[&next_actor].ready_at;
+        let next_tick = self.actors[&next_actor].ready_at;
+        self.advance_physics(next_tick);
+        self.tick = next_tick;
         ActionOutcome {
             actor: id,
             at_tick,

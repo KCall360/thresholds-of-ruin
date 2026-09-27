@@ -24,8 +24,8 @@ dungeon game. It currently provides:
 - durable character-owned place names, learned on first sight, with renaming and
   remembered-place lists in text (`places`) and ASCII (F5).
 
-New games use protocol **14**, save format **9**, and ruleset
-**`items-v14`**. The server rejects any other protocol, save format, or ruleset.
+New games use protocol **15**, save format **10**, and ruleset
+**`physics-v15`**. The server rejects any other protocol, save format, or ruleset.
 The default authored package is deliberately small: two rooms and a connecting hall. It is
 a proving ground for architecture and interaction, not the planned dungeon.
 

@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 14)
+# Server protocol and annotations (version 15)
 
 The `tor-server` executable serves the two-room simulation over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -67,7 +67,7 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 14 requires a backend-resolved observer-relative scene. Positions
+Protocol version 15 requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
 Cells also carry terrain `material` (empty for carved voids) and nullable
@@ -76,7 +76,7 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Saves must use format 9 and ruleset `items-v14`; older formats
+must upgrade. Saves must use format 10 and ruleset `physics-v15`; older formats
 and rulesets are rejected. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
@@ -86,7 +86,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":14,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":15,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -249,7 +249,7 @@ A background worker saves atomic batches. Acknowledged unsaved play can be lost
 on a crash. Explicit save, normal player-client exit, and graceful server shutdown
 wait for persistence; enabling wizard authority also waits for its permanent
 marker. A sidecar `.lock` file prevents concurrent server writers. See
-[background saving](background-saving.md) for policy, failure handling, format 9,
+[background saving](background-saving.md) for policy, failure handling, format 10,
 and the tested durability boundaries.
 
 ```json
@@ -325,11 +325,11 @@ See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
 surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
-Only protocol 14, save format 9, and `items-v14` are supported; there are no
+Only protocol 15, save format 10, and `physics-v15` are supported; there are no
 historical rules implementations or save importers.
 
 
-## Durable places (protocol 14)
+## Durable places (protocol 15)
 
 `observation.places` is the complete authoritative list of learned anchor keys
 and character-owned mnemonic names. It includes offscreen knowledge, without
@@ -346,3 +346,13 @@ boundaries. See [place knowledge](place-knowledge.md).
 See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+## Physics disclosure
+
+Protocol 15 adds optional own-body `motion`: velocity, fixed-point units per cell,
+and displacement/impact sensations from the latest action boundary. Static
+single-cell diagnostic views may omit it. Gravity fields, hidden collision targets,
+and backend frames are never serialized. Visible actor cells can repeat an actor
+ID at different observer-relative positions; undisclosed body cells remain hidden.
+Both clients narrate involuntary motion and impact, and ASCII F6/F7 browse disclosed
+height slices. See [physics](physics.md) for numerical and persistence rules.

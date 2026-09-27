@@ -5,6 +5,8 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    MapHigher,
+    MapLower,
     Places,
     Travel,
     Up,
@@ -57,6 +59,7 @@ pub struct NoteDraft {
 }
 
 pub struct App {
+    pub map_level: i32,
     pub places_open: bool,
     pub place_selected: usize,
     pub place_name: Option<String>,
@@ -85,6 +88,7 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            map_level: 0,
             places_open: false,
             place_selected: 0,
             place_name: None,
@@ -157,6 +161,7 @@ impl App {
             self.place_name = None;
             self.history_page = None;
             self.history_scroll = 0;
+            self.map_level = 0;
             self.status = "Timeline changed; pending selections cleared.".into();
         }
         if old.is_some_and(|(_, revision)| revision != state.state().revision) {
@@ -351,7 +356,7 @@ impl App {
             if let Some(position) = self
                 .state
                 .as_ref()
-                .and_then(|s| crate::render::visible_cell_at(s, x, y))
+                .and_then(|s| crate::render::visible_cell_at_level(s, x, y, self.map_level))
             {
                 return self.travel_to(position);
             }
@@ -378,7 +383,12 @@ impl App {
         if self.role == AccessRole::Spectator
             && !matches!(
                 key,
-                Key::Places | Key::History | Key::OlderHistory | Key::RecentHistory
+                Key::Places
+                    | Key::History
+                    | Key::OlderHistory
+                    | Key::RecentHistory
+                    | Key::MapHigher
+                    | Key::MapLower
             )
         {
             self.status = "Spectator access is read-only.".into();
@@ -497,6 +507,36 @@ impl App {
             return Effect::None;
         }
         match key {
+            Key::MapHigher | Key::MapLower => {
+                if let Some(state) = &self.state {
+                    let levels: std::collections::BTreeSet<_> = state
+                        .state()
+                        .observation
+                        .visible_cells
+                        .iter()
+                        .map(|c| c.position.z)
+                        .collect();
+                    let next = if matches!(key, Key::MapHigher) {
+                        levels
+                            .range((
+                                std::ops::Bound::Excluded(self.map_level),
+                                std::ops::Bound::Unbounded,
+                            ))
+                            .next()
+                            .copied()
+                    } else {
+                        levels.range(..self.map_level).next_back().copied()
+                    };
+                    if let Some(level) = next {
+                        self.map_level = level;
+                    }
+                    self.status = format!(
+                        "Viewing height {:+}. F6/F7 browse disclosed heights.",
+                        self.map_level
+                    );
+                }
+                Effect::None
+            }
             Key::Travel => {
                 if self
                     .state

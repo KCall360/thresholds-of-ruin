@@ -22,7 +22,7 @@ fn world() -> World {
 #[test]
 fn diagonal_rotation_and_all_corner_masks() {
     for d in [D::NorthEast, D::SouthEast, D::SouthWest, D::NorthWest] {
-        assert_eq!(d.rotated(4), d);
+        assert_eq!(d.rotated(1).rotated(1).rotated(1).rotated(1), d);
         for mask in 0..8 {
             let mut w = world();
             let (a, b) = d.components().unwrap();

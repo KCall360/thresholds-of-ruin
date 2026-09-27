@@ -1,12 +1,12 @@
 {
-  "validator": "tor-scenario-2",
-  "ruleset": "items-v14",
-  "content_hash": "ae8c23d3d92feacdad60374819517eb1df9392183990e1e8f0d27c87ae6eee05",
+  "validator": "tor-scenario-3",
+  "ruleset": "physics-v15",
+  "content_hash": "c24e81125a20d65ec384249895d5e3afbe69ea1dd12d666b25bd629843fe5b22",
   "files": {
     "regions.toml": "bd20ca541f17e93e6e11893256c77fd586cfe5d2e42fdbf96e305b14185e19c6",
-    "scenario.toml": "0093c224b18276af994ac43301fe4075069074505b165ae360e242fcd129e8d9"
+    "scenario.toml": "766477c38ce0fe1bed265fdd6fe50c4daf347cc771e811ac87590e8872c3b7a6"
   },
   "regions": 3,
-  "model_hash": "5358f3ab8511def0b574f5855fad6db5980dd612be3b50cf3ec048984c59fa95",
+  "model_hash": "7f8f5fabb99c432177adf2d7f7cde77c0306208ebd86d3917939047ae13a926c",
   "coverage": "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof"
 }

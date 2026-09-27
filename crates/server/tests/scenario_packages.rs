@@ -90,11 +90,11 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
     for (file, from, to, expected) in [
         (
             "scenario.toml",
-            "version = \"1.0\"",
+            "version = \"1.1\"",
             "version = \"latest\"",
             "major.minor",
         ),
-        ("scenario.toml", "items-v14", "missing-v1", "dependency"),
+        ("scenario.toml", "physics-v15", "missing-v1", "dependency"),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         (
             "regions.toml",
@@ -115,14 +115,12 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         let error = scenario_package::validate(temp.path()).unwrap_err();
         assert!(error.message.contains(expected), "{error}");
     }
-    for (file, text, expected) in [
-        (
+    {
+        let (file, text, expected) = (
             "scenario.toml",
             "\nobjective = { anchor = \"1/start\", disclosed = true, continue_play = false }\n",
             "victory",
-        ),
-        ("regions.toml", "\ngravity = [0, 0, -1]\n", "gravity"),
-    ] {
+        );
         let temp = copied_package();
         let path = temp.path().join(file);
         let mut data = std::fs::read_to_string(&path).unwrap();

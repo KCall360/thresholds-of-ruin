@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "items-v14";
-const VALIDATOR: &str = "tor-scenario-2";
+pub const RULESET: &str = "physics-v15";
+const VALIDATOR: &str = "tor-scenario-3";
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 fn fail(message: impl AsRef<str>) -> Failure {
@@ -64,6 +64,7 @@ pub struct AppearancePool {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    pub body: Option<tor_simulation::BodySpec>,
     pub identity: Option<String>,
     pub appearance_pool: Option<String>,
     #[serde(default)]
@@ -76,6 +77,8 @@ pub struct Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    pub body: Option<tor_simulation::BodySpec>,
+    pub velocity: Option<[i64; 3]>,
     #[serde(default)]
     pub known_identities: Vec<String>,
     pub id: u64,
@@ -143,6 +146,8 @@ pub struct Gravity {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Portal {
+    pub rotation: Option<u8>,
+    pub kind: Option<String>,
     pub at: [i32; 3],
     pub direction: String,
     pub to: String,
@@ -185,6 +190,8 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
+    pub body: Option<tor_simulation::BodySpec>,
+    pub velocity: Option<[i64; 3]>,
     pub id: u64,
     pub at: [i32; 3],
     pub archetype: Option<String>,
@@ -393,13 +400,6 @@ impl Package {
         require(
             self.manifest.objective.is_none(),
             "Scenario requires victory mechanics (milestone 4d)",
-        )?;
-        require(
-            !self
-                .regions
-                .iter()
-                .any(|r| r.gravity.is_some() || !r.gravity_overrides.is_empty()),
-            "Scenario requires gravity mechanics (milestone 4c)",
         )?;
         require(
             !self
@@ -661,6 +661,10 @@ impl Package {
             }
         }
         for r in &self.regions {
+            if let Some(gravity) = r.gravity {
+                game.set_gravity(RegionId(r.id), gravity)
+                    .map_err(|_| fail("Invalid region gravity"))?;
+            }
             for p in &r.portals {
                 let direction = match p.direction.as_str() {
                     "north" => Direction::North,
@@ -674,13 +678,29 @@ impl Package {
                 let to = *anchors
                     .get(&p.to)
                     .ok_or_else(|| fail(format!("Missing portal anchor {}", p.to)))?;
-                game.connect_area(
+                require(
+                    p.turns < 4 && !(p.rotation.is_some() && p.turns != 0),
+                    "Use rotation for a cube transform, or turns for planar rotation",
+                )?;
+                let rotation = p.rotation.unwrap_or(p.turns);
+                require(
+                    p.kind.as_deref() != Some("stairs")
+                        || matches!(direction, Direction::Up | Direction::Down),
+                    "Stairs require an up/down direction",
+                )?;
+                let connect = match p.kind.as_deref() {
+                    Some("portal") => Game::connect_portal_area,
+                    None | Some("stairs") => Game::connect_area,
+                    _ => return Err(fail("Invalid connection kind")),
+                };
+                connect(
+                    &mut game,
                     Passage {
                         from: loc(r.id, p.at),
                         direction,
                         to,
                     },
-                    p.turns,
+                    rotation,
                     p.width,
                     p.height,
                 )
@@ -690,7 +710,14 @@ impl Package {
                 game.set_place_hint(loc(r.id, *p), true)
                     .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
             }
+            let mut gravity_cells = BTreeSet::new();
             for g in &r.gravity_overrides {
+                require(
+                    gravity_cells.insert(g.at),
+                    "Duplicate gravity override cell",
+                )?;
+                game.set_cell_gravity(loc(r.id, g.at), g.vector)
+                    .map_err(|_| fail("Invalid gravity override"))?;
                 require(
                     game.authored_cell_valid(loc(r.id, g.at)),
                     "Gravity override outside traversable geometry",
@@ -736,6 +763,34 @@ impl Package {
                 NonZeroU64::new(ticks).ok_or_else(|| fail("Zero actor duration"))?,
             )
             .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
+        }
+        for c in &self.manifest.characters {
+            if c.id == self.selected || (!runtime && c.unselected == "ai") {
+                if let Some(body) = &c.body {
+                    game.set_body(tor_simulation::ActorId(c.id), body.clone())
+                        .map_err(|_| fail("Character body does not fit"))?;
+                }
+                if let Some(v) = c.velocity {
+                    game.set_actor_velocity(tor_simulation::ActorId(c.id), v)
+                        .map_err(|_| fail("Invalid character velocity"))?;
+                }
+            }
+        }
+        for r in &self.regions {
+            for a in &r.actors {
+                if let Some(body) = a
+                    .body
+                    .as_ref()
+                    .or(self.archetype(&a.archetype)?.body.as_ref())
+                {
+                    game.set_body(tor_simulation::ActorId(a.id), body.clone())
+                        .map_err(|_| fail("Actor body does not fit"))?;
+                }
+                if let Some(v) = a.velocity {
+                    game.set_actor_velocity(tor_simulation::ActorId(a.id), v)
+                        .map_err(|_| fail("Invalid actor velocity"))?;
+                }
+            }
         }
         let appearances = self.appearance_mapping(seed)?;
         let mut items: Vec<_> = self
@@ -869,6 +924,17 @@ mod tests {
             // fixture has only ordinary names. Verify the complete disclosed
             // state and deterministic play rather than erasing that identity.
             let actor = tor_simulation::ActorId(1);
+            expected
+                .set_body(
+                    actor,
+                    tor_simulation::BodySpec {
+                        cells: vec![[0, 0, 0], [0, 0, 1]],
+                        mass: 80,
+                    },
+                )
+                .unwrap();
+            expected.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+            expected.set_gravity(RegionId(2), [0, 0, -1]).unwrap();
             assert_eq!(
                 actual.observe(actor).unwrap(),
                 expected.observe(actor).unwrap()

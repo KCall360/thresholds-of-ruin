@@ -207,6 +207,31 @@ pub enum WizardItem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardOperation {
+    SetGravity {
+        region: u64,
+        vector: [i32; 3],
+    },
+    SetCellGravity {
+        position: Position,
+        vector: [i32; 3],
+    },
+    SetBody {
+        actor: ActorId,
+        cells: Vec<[i32; 3]>,
+        mass: u32,
+    },
+    SetVelocity {
+        actor: ActorId,
+        velocity: [i64; 3],
+    },
+    ConnectPortal {
+        from: Position,
+        direction: Direction,
+        to: Position,
+        rotation: u8,
+        width: u16,
+        height: u16,
+    },
     IdentifyItem {
         actor: ActorId,
         item: u64,
@@ -264,6 +289,7 @@ pub enum WizardOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardResult {
+    PhysicsSet,
     ItemIdentified,
     DoorPlaced {
         door: u64,

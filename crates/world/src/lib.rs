@@ -92,3 +92,8 @@ mod tests {
 
 mod shared;
 pub use shared::Shared;
+
+mod rotation;
+pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};
+
+mod volume_scene;

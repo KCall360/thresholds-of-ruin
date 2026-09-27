@@ -542,6 +542,7 @@ impl Service {
 
                 tor_world::Direction::Up => Direction::Up,
                 tor_world::Direction::Down => Direction::Down,
+                _ => unreachable!("travel directions are observer-relative"),
             };
             let revisions = self
                 .engine
@@ -592,7 +593,13 @@ impl Service {
             }
             let observation = self.engine.observation(actor).expect("surviving actor");
             let hazard = !potential_hazards(&observation).is_subset(&job.hazards);
-            if job.steps.is_empty() {
+            if observation
+                .motion
+                .as_ref()
+                .is_some_and(|m| m.displaced || m.impacted)
+            {
+                self.stop_travel(actor, TravelPhase::DecisionRequired);
+            } else if job.steps.is_empty() {
                 self.stop_travel(actor, TravelPhase::Arrived);
             } else if hazard {
                 self.stop_travel(actor, TravelPhase::Hazard);

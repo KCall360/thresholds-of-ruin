@@ -47,6 +47,7 @@ pub struct ExitView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
+    pub frame: u8,
     pub floor: Option<(&'static str, u32)>,
     pub ceiling: Option<(&'static str, u32)>,
     pub door: Option<tor_world::Door>,
@@ -58,9 +59,17 @@ pub struct CellView {
     pub place_hint: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MotionView {
+    pub velocity: [i64; 3],
+    pub displaced: bool,
+    pub impacted: bool,
+}
+
 /// Disclosed facts for one actor, separate from the authoritative game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
+    pub motion: Option<MotionView>,
     pub actor: ActorId,
     pub tick: u64,
     pub location: Location,
@@ -103,25 +112,27 @@ impl Game {
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
-        let surface_scene = scene;
-        let surface = |location, direction| {
+        // A location can occur in several frames and at several distances.
+        // Index its best disclosed range once instead of rescanning the scene
+        // for every floor and ceiling probe.
+        let mut ranges = std::collections::BTreeMap::new();
+        for cell in scene {
+            let range = 8u32.saturating_sub(
+                cell.offset.x.unsigned_abs()
+                    + cell.offset.y.unsigned_abs()
+                    + cell.offset.z.unsigned_abs(),
+            );
+            ranges
+                .entry((cell.location, cell.rotation))
+                .and_modify(|old: &mut u32| *old = (*old).max(range))
+                .or_insert(range);
+        }
+        let surface = |location, direction: Direction, frame, range| {
             if !self.material_surfaces {
                 return None;
             }
-            let range = surface_scene
-                .iter()
-                .filter(|c| c.location == location)
-                .map(|c| {
-                    8u32.saturating_sub(
-                        c.offset.x.unsigned_abs()
-                            + c.offset.y.unsigned_abs()
-                            + c.offset.z.unsigned_abs(),
-                    )
-                })
-                .max()
-                .unwrap_or(0);
             self.world
-                .vertical_surface(location, direction, range)
+                .axis_surface(location, direction.rotated(frame), range)
                 .map(|(m, d)| (m.name(), d))
         };
         let mut ground_items = Vec::new();
@@ -161,6 +172,15 @@ impl Game {
             }
         }
         Ok(Observation {
+            motion: self.motion_view_active(id).then_some(MotionView {
+                velocity: actor.motion.velocity,
+                displaced: self.physics.displaced.contains(&id),
+                impacted: self
+                    .physics
+                    .impacts
+                    .iter()
+                    .any(|e| e.entity == crate::PhysicsEntity::Actor(id)),
+            }),
             actor: id,
             tick: self.tick,
             location: actor.location,
@@ -170,11 +190,12 @@ impl Game {
                 .expect("validated actor location")
                 .clone(),
             ground_items,
-            visible_cells: cells
+            visible_cells: ranges
                 .iter()
-                .map(|&location| CellView {
-                    floor: surface(location, Direction::Down),
-                    ceiling: surface(location, Direction::Up),
+                .map(|(&(location, frame), &range)| CellView {
+                    frame,
+                    floor: surface(location, Direction::Down, frame, range),
+                    ceiling: surface(location, Direction::Up, frame, range),
                     door: self.world.door(location),
                     door_reachable: self.world.door(location).is_some()
                         && self.door_reachable_from(actor.location, location),
@@ -197,12 +218,19 @@ impl Game {
             visible_actors: self
                 .actors
                 .iter()
-                .filter(|(other_id, other)| **other_id != id && visible(other.location))
-                .map(|(&id, other)| ActorView {
-                    name: "figure",
-                    description: "An unremarkable figure stands here.",
-                    id,
-                    location: other.location,
+                .flat_map(|(&other_id, other)| {
+                    self.body_cells(other.location, other.orientation, &other.body)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(move |(at, _)| {
+                            visible(*at) && (other_id != id || *at != actor.location)
+                        })
+                        .map(move |(location, _)| ActorView {
+                            name: if other_id == id { "yourself" } else { "figure" },
+                            description: "An unremarkable figure is here.",
+                            id: other_id,
+                            location,
+                        })
                 })
                 .collect(),
             exits: cells
@@ -219,7 +247,11 @@ impl Game {
                     .into_iter()
                     .filter_map(move |direction| self.world.passage(location, direction))
                 })
-                .filter(|exit| !self.world.is_wall(exit.from))
+                .filter(|exit| {
+                    !self.world.is_wall(exit.from)
+                        && (!matches!(exit.direction, Direction::Up | Direction::Down)
+                            || self.world.is_stair(exit.from, exit.direction))
+                })
                 .map(|exit| ExitView {
                     location: exit.from,
                     direction: exit.direction,
@@ -268,7 +300,8 @@ impl Game {
                                 next == side
                                     && scene.iter().any(|seen| {
                                         seen.location == side
-                                            && seen.rotation == (from.rotation + turns) % 4
+                                            && seen.rotation
+                                                == tor_world::compose_rotation(from.rotation, turns)
                                             && seen.offset
                                                 == Position {
                                                     x: from.offset.x + sx,
@@ -287,7 +320,7 @@ impl Game {
                 if to != door {
                     continue;
                 }
-                let rotation = (from.rotation + turns) % 4;
+                let rotation = tor_world::compose_rotation(from.rotation, turns);
                 if scene.iter().any(|target| {
                     target.location == door
                         && target.rotation == rotation
@@ -309,9 +342,13 @@ impl Game {
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        Ok(self
-            .world
-            .shadow_scene(actor.location, actor.orientation, 8))
+        Ok(if self.motion_view_active(id) || actor.orientation >= 4 {
+            self.world
+                .volume_scene(actor.location, actor.orientation, 8)
+        } else {
+            self.world
+                .shadow_scene(actor.location, actor.orientation, 8)
+        })
     }
 }
 

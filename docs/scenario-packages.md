@@ -2,7 +2,7 @@
 
 Milestone 4a adds ordinary TOML input packages and an explicit offline validator.
 Packages work in normal games and with `--wizard`; authoring does not execute
-wizard commands. Items extend this foundation with protocol 14. Save format 9 and `items-v14`
+wizard commands. Items extend this foundation with protocol 15. Save format 10 and `physics-v15`
 reject earlier pre-release saves; there is no migration.
 
 ## Author and run
@@ -67,10 +67,11 @@ actors specify `id`, `at`, optional archetype/duration, and `controller`.
 AI assignments use `controller = "ai"`, or character `unselected = "ai"`, plus
 an `ai` identifier. Active AI configurations are refused until milestone 4d.
 
-The validator also accepts objective declarations (`anchor`, optional authored
-item ID, `disclosed`, `continue_play`) and region gravity vectors/sparse overrides.
-Their references and shapes are validated and preserved, but runtime refuses
-these capabilities until their mechanics milestones. Generation, dependency
+Region gravity vectors/sparse overrides, body declarations, initial velocity,
+and full portal rotations are implemented; see [physics](physics.md).
+Objective declarations (`anchor`, optional authored item ID, `disclosed`,
+`continue_play`) remain validated and preserved but runtime refuses victory
+mechanics until 4d. Generation, dependency
 registries, streaming, equipment and the dungeon loop are outside 4a. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.

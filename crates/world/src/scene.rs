@@ -17,22 +17,18 @@ impl World {
         dx: i32,
         dy: i32,
     ) -> Option<(Location, u8)> {
-        let (x, y) = match orientation % 4 {
-            0 => (dx, dy),
-            1 => (-dy, dx),
-            2 => (-dx, -dy),
-            _ => (dy, -dx),
-        };
+        let [x, y, z] =
+            crate::rotate_vector(orientation, [i64::from(dx), i64::from(dy), 0]).map(|v| v as i32);
         let direct = Location {
             position: Position {
                 x: origin.position.x.checked_add(x)?,
                 y: origin.position.y.checked_add(y)?,
-                z: origin.position.z,
+                z: origin.position.z.checked_add(z)?,
             },
             ..origin
         };
         if self.within_aperture_bounds(origin) && self.within_aperture_bounds(direct) {
-            return Some((direct, orientation % 4));
+            return Some((direct, orientation));
         }
         let (nx, ny) = (dx.abs(), dy.abs());
         let horizontal = if dx >= 0 {
@@ -46,7 +42,7 @@ impl World {
             Direction::North
         };
         let (mut ix, mut iy) = (0, 0);
-        let (mut current, mut rotation) = (origin, orientation % 4);
+        let (mut current, mut rotation) = (origin, orientation);
         while ix < nx || iy < ny {
             let tx = (1 + 2 * ix) * ny;
             let ty = (1 + 2 * iy) * nx;
@@ -59,12 +55,12 @@ impl World {
                 let (sy, ry) = self.geometry_step(current, y)?;
                 let (a, ra) = self.geometry_step(sx, y.rotated(rx))?;
                 let (b, rb) = self.geometry_step(sy, x.rotated(ry))?;
-                if a != b || (rx + ra) % 4 != (ry + rb) % 4 {
+                if a != b || crate::compose_rotation(rx, ra) != crate::compose_rotation(ry, rb) {
                     return None;
                 }
                 ix += 1;
                 iy += 1;
-                (a, (rx + ra) % 4)
+                (a, crate::compose_rotation(rx, ra))
             } else if tx < ty {
                 ix += 1;
                 self.geometry_step(current, x)?
@@ -73,7 +69,7 @@ impl World {
                 self.geometry_step(current, y)?
             };
             current = next;
-            rotation = (rotation + turns) % 4;
+            rotation = crate::compose_rotation(rotation, turns);
         }
         Some((current, rotation))
     }

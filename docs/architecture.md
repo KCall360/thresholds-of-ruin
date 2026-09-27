@@ -58,22 +58,18 @@ projects all visible occurrences into one actor-relative scene, including when
 they span several regions. Opaque cell keys support memory without exposing
 geometry identity. Movement uses the same observer axes across rotated joins.
 
-Portals connect apertures and transform coordinates and orientation. Initial
-transforms allow translation and quarter-turn rotations around the vertical
-axis. The world needs no consistent global embedding: overlapping regions and
-rooms larger inside than outside are supported conceptually. Multiple elevations,
-stairs, and vertical movement are supported by the slice. Planned geometry extends
-aperture rotations beyond the current restrictions and separates stairs from
-portal topology. Reflections remain deferred.
+Portals connect apertures using translation and any of the 24 proper cube
+rotations, including z-facing apertures. Stairs are explicit traversal links,
+separate from physical apertures. The world needs no consistent global embedding;
+reflections remain deferred.
 
-Planned bodies occupy discrete multi-cell footprints/heights. Gravity is a
-region-local six-axis field with strength and absolute sparse cell overrides.
-Aggregate occupied-cell contributions can yield diagonal acceleration; persistent
-velocity drives scheduled cell crossings, with terminal speed, drift, and
-component-wise collision response. Region gravity may change discontinuously.
-Entity orientation is not a gameplay requirement, but transformed footprints,
-velocity, and support across portals need explicit handling. See the
-[gravity requirements](game-design-plan.md#portal-geometry-bodies-and-gravity).
+Rigid bodies occupy discrete cells in a persistent body frame. Region-local
+gravity and sparse cell overrides are averaged over occupied cells. Fixed-point
+velocity drives scheduled cell crossings with a magnitude cap, drift, support,
+and component-wise collision response. Body frames preserve observer axes across
+portals without introducing gameplay facing. Static gravity tables share world
+geometry storage; dynamic motion and impact hooks belong to simulation snapshots.
+See [physics](physics.md) for rules, limits, and deterministic ordering.
 
 [Doors](doors.md) are implemented interactive world entities, independent of
 portals. A door may occupy an interior opening or obstruct a portal aperture.

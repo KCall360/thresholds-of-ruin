@@ -49,7 +49,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 14, save format 9, and `items-v14` are currently in use. Multi-actor archives
+Protocol 15, save format 10, and `physics-v15` are currently in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
