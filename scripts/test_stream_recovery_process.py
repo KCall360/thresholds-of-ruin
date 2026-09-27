@@ -114,7 +114,11 @@ class StreamRecoveryProcesses(unittest.TestCase):
         window, _ = self.playable('ascii', self.address)
         door = next(c['door']['id'] for c in other_state['state']['observation']['visible_cells'] if c['door'])
         for opened in (True, False):
+            # Explicit barriers make turn handoff independent of which client's
+            # socket/input task the OS schedules first.
+            self.assertIsNone(self.request(player, {'type':'snapshot'})['error'])
             self.assertIsNone(self.command(player, {'type':'act','action':{'type':'wait'}})['error'])
+            self.assertIsNone(self.request(other, {'type':'snapshot'})['error'])
             changed = self.command(other, {'type':'act','action':{'type':'set_door','door':door,'open':opened}})
             self.assertIsNone(changed['error'])
             sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
