@@ -2,10 +2,9 @@
 
 Updated 2026-09-27. The user authorized implementing 4d to completion.
 Branch: `codex/milestone-4d-dungeon`, based on merged 4c PR #34 (`c8efdd5`).
-Implementation is complete and committed locally. Publishing the branch and draft
-PR is awaiting explicit user approval after automatic approval review rejected the
-push as external source/history publication. No 4d PR exists yet. Windows/Linux CI
-and review must pass before merge; neither is claimed by local verification.
+Implementation is complete and published in [draft PR #35](https://github.com/KCall360/thresholds-of-ruin/pull/35).
+The user explicitly authorized publication. Windows/Linux CI and review must pass
+before merge; neither is claimed by local verification.
 
 The implementation and rule contract are in [dungeon gameplay](dungeon.md).
 The ordinary launch default is `scenarios/first-dungeon`. Protocol 16, save 11,
