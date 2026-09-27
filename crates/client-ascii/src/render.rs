@@ -391,9 +391,9 @@ impl Canvas {
             142,
         );
         let help = if app.role == tor_protocol::AccessRole::Spectator {
-            "READ-ONLY   F2 history   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
+            "READ-ONLY   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "HJKL/YUBN move  </> level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  F4 note  F2 history  ESC quit/cancel"
+            "HJKL/YUBN move  </> level  _/CLICK travel  G take  O/C + direction: doors  SPACE wait  F3/R control  F4 note  F5 places  F2 history  ESC quit/cancel"
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -462,6 +462,57 @@ impl Canvas {
                     2,
                     50,
                 );
+            }
+        }
+        if app.places_open {
+            self.panel(48, 88, 1104, 632);
+            self.text(72, 112, "REMEMBERED PLACES", ACCENT, 2, 65);
+            self.text(
+                72,
+                144,
+                "UP/DOWN select   ENTER rename   ESC close. Names are personal mnemonics.",
+                MUTED,
+                1,
+                120,
+            );
+            if let Some(state) = &app.state {
+                let observation = &state.state().observation;
+                let start = app.place_selected.saturating_sub(12);
+                for (i, place) in observation.places.iter().enumerate().skip(start).take(15) {
+                    let visible = observation
+                        .visible_cells
+                        .iter()
+                        .any(|c| c.key == place.key && !c.wall);
+                    self.text(
+                        72,
+                        178 + (i - start) * 26,
+                        &format!(
+                            "{} {} ({})",
+                            if i == app.place_selected { ">" } else { " " },
+                            place.name,
+                            if visible { "in sight" } else { "remembered" }
+                        ),
+                        if i == app.place_selected { GOLD } else { TEXT },
+                        2,
+                        66,
+                    );
+                }
+                if observation.places.is_empty() {
+                    self.text(72, 178, "No places discovered yet.", TEXT, 2, 66);
+                }
+            }
+            if let Some(name) = &app.place_name {
+                self.text(
+                    72,
+                    625,
+                    "New name (ENTER saves, ESC cancels):",
+                    ACCENT,
+                    2,
+                    66,
+                );
+                for (i, line) in crate::wrap(name, 66).iter().take(2).enumerate() {
+                    self.text(72, 655 + i * 26, line, TEXT, 2, 66);
+                }
             }
         }
         if let Some(page) = &app.history_page {
@@ -662,7 +713,7 @@ mod index_tests {
     fn index_matches_vector_oracle_including_overlaps_and_precedence() {
         let view: tor_protocol::Observation = serde_json::from_value(serde_json::json!({
             "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
-            "visible_cells":(0..128).map(|i|serde_json::json!({
+            "places":[],"visible_cells":(0..128).map(|i|serde_json::json!({
                 "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
                 "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
             })).collect::<Vec<_>>(),

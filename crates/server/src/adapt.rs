@@ -158,6 +158,7 @@ pub fn observation(
         }
     }
     p::Observation {
+        places: vec![],
         actor: p::ActorId(view.actor.0),
         tick: view.tick,
         position: p::Position { x: 0, y: 0, z: 0 },

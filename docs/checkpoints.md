@@ -1,7 +1,8 @@
 # Checkpoints and retained history
 
-Phase C adds periodic snapshots to background saving. Protocol 12 and ruleset
-`diagonal-v11` are unchanged; save format **6** rejects every older format.
+Phase C adds periodic snapshots to background saving. Current games use protocol 13, ruleset
+`places-v12` and save format **7**, rejecting every older format. Format 7 adds
+shared character-owned place names to the format-6 navigation checkpoint tables.
 Checkpoints preserve the asynchronous acknowledgement and explicit-save contracts
 in [background saving](background-saving.md).
 

@@ -8,8 +8,8 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **12**, save format **6**, and ruleset
-**`diagonal-v11`**. Older protocols, save formats, and rulesets are rejected
+two-room fixture. New games use protocol **13**, save format **7**, and ruleset
+**`places-v12`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
 | Area | Status | Implemented scope |
@@ -65,20 +65,23 @@ Complete for the present gameplay needs. Implemented slices include
 [diagonal movement](diagonal-movement.md).
 
 Remaining perception work is driven by gameplay rather than more geometry in
-isolation: richer semantic events, sound propagation, and durable player-facing
-place knowledge will be added when interactions require them.
+isolation: richer semantic events and sound propagation will be added when interactions
+require them. [Durable place knowledge](place-knowledge.md) now retains learned
+anchor names independently of connection-local map memory.
 
 ## Active direction
 
 The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
-work. New feature work begins after the applicable 3p gates; later scale work
+work. At the user's direction, remaining 3p closure work is deferred and no longer
+blocks milestone 3 feature work. Its unresolved findings and acceptance criteria
+remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
 
 ### 3p — Performance and scalable persistence
 
-Status: **Phases A–E and format-6 checkpoint reduction merged; diagnostic/native timing closure remains open**.
+Status: **deferred, still open; Phases A–E and format-6 checkpoint reduction merged**.
 
 The shared versioned fixture drives focused and mixed movement, normal/rotated
 crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
@@ -123,8 +126,9 @@ does not eliminate a 197 ms native presentation/pacing-call stall in the small
 saved traversal. Two longer eight-client attempts fail (diagnostic retention cap
 and readiness timeout); shorter successes do not replace them. Full native
 exploration/recovery and real keyboard input during blocked saving still pass.
-Next obtain thread scheduling/blocked-write evidence for those native/report
-intervals and qualify the longer client workload before feature expansion.
+When 3p resumes, obtain thread scheduling/blocked-write evidence for those
+native/report intervals and qualify the longer client workload. This follow-up
+no longer blocks milestone 3 feature expansion.
 This is distinct from deferred streaming, history loading and query scaling.
 Process recovery tests do not establish hardware power-loss behavior.
 
@@ -150,18 +154,26 @@ importer.
 
 ### 3 — Complete interactions and travel
 
-Status: **in progress; feature expansion paused behind milestone 3p**.
+Status: **active next work; remaining milestone 3p closure is deferred**.
 
 Already implemented: server-managed travel through known cells, interruption and
 cancellation at action boundaries, ASCII keyboard/mouse destinations, text
 direction intentions, prose and examination, noun clarification, compound
-approach-and-pickup, and open/close doors.
+approach-and-pickup, and open/close doors. Durable place knowledge is implemented and locally verified: first-sight
+anchor discovery, automatic mnemonic names, player renaming and persistent lists.
+Offscreen destination selection remains deferred. See the
+[verification findings](place-knowledge-findings.md).
+
+The initial action extension points separate validation/timing, effect application
+and scheduling inside the simulation, with unchanged immediate-action semantics.
+See the [simulation guide](simulation-slice.md#shared-action-extension-points).
+Persistent partial progress and concrete interruption policies remain deferred
+until the first timed action needs them.
 
 Next scope:
 
-- establish the resumable-action extension points needed by later timed actions;
+- use the shared action extension points when later timed actions require progress;
 - extend wizard placement so each failure and interaction can be reproduced;
-- add named or durable place knowledge without revealing unseen topology;
 - expand semantic event narration and threat/damage travel interruption; and
 - verify slow-client presentation and resynchronization independently of server
   action timing.

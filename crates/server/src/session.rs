@@ -330,7 +330,9 @@ impl Service {
                 }
                 if matches!(
                     command,
-                    crate::journal::Command::Act { .. } | crate::journal::Command::Travel { .. }
+                    crate::journal::Command::RenamePlace { .. }
+                        | crate::journal::Command::Act { .. }
+                        | crate::journal::Command::Travel { .. }
                 ) && self.controllers.get(&actor) != Some(&id)
                 {
                     return Err(Failure::new(
@@ -426,7 +428,7 @@ impl Service {
                         }
                     }
                     HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
-                    HistoryContent::Action { .. } => {
+                    HistoryContent::PlaceRenamed { .. } | HistoryContent::Action { .. } => {
                         self.stop_travel(actor, TravelPhase::Cancelled);
                         self.action_update(&revisions, &visible_entry)?;
                     }

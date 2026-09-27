@@ -49,7 +49,7 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 12, save format 6, and `diagonal-v11` are currently in use. Multi-actor archives
+Protocol 13, save format 7, and `places-v12` are currently in use. Multi-actor archives
 whose receipts were produced before this readiness correction may fail strict
 replay because their expected revisions differ. Failed replay preserves the
 original file; no migration or relaxed replay validation is provided.
@@ -355,3 +355,45 @@ actions; JSON work, pipe I/O, Python parsing/retention and scheduling remain ins
 The default synchronous stdout logging and historical workload meanings remain.
 Use fresh directories and retain failed runs; never interpret a rejected prefix
 as full traversal. See [the client timing investigation](3p-client-timing.md).
+
+
+## Durable place workload v1
+
+The independent [place-knowledge-v1 specification](../crates/server/fixtures/place-knowledge-v1.json)
+adds 0/64 isolated rooms with four perceived anchors per added room, producing
+2/258 learned places. It leaves `performance-v1` unchanged. Setup uses authorized
+wizard edits; later scenario packages will replace authored setup. Samples alternate
+50 free renames and 50 ordinary waits per case, with periodic durable checkpoints.
+
+```sh
+cargo run --release -p tor-server --example place_bench --locked > places.jsonl
+python scripts/place_performance_report.py places.jsonl > places-summary.jsonl
+python scripts/place_performance_driver.py --bin-dir target/release --output .local/places-native-run
+```
+
+The engine harness times discovery/navigation, command processing, observation
+construction, wire encoding, shared client application, and ASCII place-list
+rendering separately. Update construction is outside client application; rendering
+does not include native presentation. Raw records include sample/operation counts,
+wire bytes, checkpoint/save bytes and exact durable restart validation. The validator
+rejects missing/duplicate samples, incorrect scale, nonfinite timing, extra navigation
+refreshes on free renames/waits, and missing recovery. Timing is diagnostic.
+
+The real-client driver uses the same specification, actual headless and native ASCII
+processes, and an open spectator place list. Request-to-ack/ready/presentation include
+transport, scheduling and stdout diagnostics; native draw/apply timings stay separate.
+It uses capped deferred diagnostics, preserves failures and fresh saves, and cleans
+up only owned processes. Diagnostic output remains outside timed samples where
+possible; native/headless stdout costs and the outstanding 3p timing limitations
+still apply. Do not compare these end-to-end intervals directly to engine phases.
+
+Run matching ordinary `latency_bench --case` cases before and after feature edits,
+and these small/large feature cases on the same release build and machine. No
+latency target or historical 3p finding is relaxed by this workload.
+
+Use `place_performance_driver.py --fresh-player` with a different output directory
+for a distinct attachment case: durable names remain, while connection-local
+diagnostic cell memory and history retention reset. The driver also records ack
+line arrival, ready reader/queue work, cell counts and the size of ready JSON
+re-encoded by Python (not network byte counts). Keep both cases; see the
+[place-knowledge findings](place-knowledge-findings.md).

@@ -5,7 +5,7 @@ fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":0,"observation":{
         "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
-        "visible_cells":(0..7).map(|x| serde_json::json!({
+        "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
@@ -14,6 +14,37 @@ fn state() -> StateView {
             {"reachable":true,"item":{"id":1,"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
             {"reachable":false,"item":{"id":2,"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
+}
+
+#[test]
+fn remembered_places_list_and_name_without_becoming_travel_destinations() {
+    let mut state = state();
+    state.observation.places.push(PlaceView {
+        key: "offscreen".into(),
+        name: "Quiet Reverie".into(),
+    });
+    assert_eq!(
+        tor_client_text::places(&state),
+        "1. Quiet Reverie (remembered)"
+    );
+    let mut dialogue = Dialogue::default();
+    assert_eq!(
+        dialogue.interpret("places", &state),
+        Intent::Tools(tor_client_text::Input::Places)
+    );
+    assert_eq!(
+        dialogue.interpret("name 1 Hearth of Echoes", &state),
+        Intent::Tools(tor_client_text::Input::Command(Command::RenamePlace {
+            expected_revision: state.revision,
+            key: "offscreen".into(),
+            name: "Hearth of Echoes".into()
+        }))
+    );
+    assert!(!matches!(
+        dialogue.interpret("go to Quiet Reverie", &state),
+        Intent::Travel { .. }
+    ));
+    assert!(tor_client_text::parse("name 9 Missing", &state).is_err());
 }
 
 #[test]

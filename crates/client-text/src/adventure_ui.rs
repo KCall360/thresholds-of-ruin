@@ -215,6 +215,10 @@ async fn dispatch(
                     println!("{}", adventure::describe(connection.state.state()));
                     return Ok(());
                 }
+                Input::Places => {
+                    println!("{}", tor_client_text::places(connection.state.state()));
+                    return Ok(());
+                }
                 Input::Inventory => {
                     println!("{}", adventure::inventory(connection.state.state()));
                     return Ok(());

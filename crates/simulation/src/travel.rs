@@ -18,12 +18,15 @@ const DIRECTIONS: [Direction; 6] = [
 #[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
     pub(super) cells: RegionMap<Location, bool>,
+    pub(super) places: RegionMap<Location, String>,
     pub(super) edges: RegionMap<(Location, Direction), (Location, u8)>,
 }
 
 impl Navigation {
     pub(crate) fn checkpoint_valid(&self, world: &tor_world::World) -> bool {
-        self.cells.keys().all(|location| world.contains(*location))
+        self.places.iter().all(|(location, name)| {
+            self.cells.contains_key(location) && crate::places::valid_name(name)
+        }) && self.cells.keys().all(|location| world.contains(*location))
             && self.edges.iter().all(|((from, _), (to, turns))| {
                 *turns < 4 && self.cells.contains_key(from) && self.cells.contains_key(to)
             })
@@ -49,6 +52,7 @@ impl Game {
     /// Reuse a scene produced by this game at the current decision boundary.
     /// This is backend-only; caller-supplied protocol data must never enter here.
     pub fn refresh_navigation_scene(&mut self, id: ActorId, scene: &[tor_world::SightCell]) {
+        self.refresh_places(id, scene);
         let knowledge = self.navigation.entry(id).or_default();
         let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
         let projected: BTreeSet<_> = scene
@@ -208,6 +212,7 @@ impl Game {
     fn reference_refresh_navigation(&mut self) {
         for id in self.actors.keys().copied().collect::<Vec<_>>() {
             let scene = self.scene(id).expect("existing actor");
+            self.refresh_places(id, &scene);
             let knowledge = self.navigation.entry(id).or_default();
             let mut cells: BTreeMap<_, _> = knowledge.cells.iter().map(|(k, v)| (*k, *v)).collect();
             let mut edges: BTreeMap<_, _> = knowledge.edges.iter().map(|(k, v)| (*k, *v)).collect();

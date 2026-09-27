@@ -16,12 +16,12 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 6;
+const ARCHIVE_VERSION: u32 = 7;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "diagonal-v11";
+const RULESET: &str = "places-v12";
 
 #[cfg(test)]
 mod seed_equivalence_tests {
@@ -590,12 +590,16 @@ impl Engine {
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
         self.revision(actor)?;
         let (view, scene, ready) = self.revision_view(actor)?;
-        Ok(adapt::observation(
-            view,
-            scene,
-            &self.archive.view_salt,
-            ready,
-        ))
+        let mut observation = adapt::observation(view, scene, &self.archive.view_salt, ready);
+        observation.places = self
+            .game
+            .remembered_places(SimActor(actor.0))
+            .map(|(location, name)| PlaceView {
+                key: adapt::cell_key(&self.archive.view_salt, actor.0, location),
+                name: name.into(),
+            })
+            .collect();
+        Ok(observation)
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
@@ -979,11 +983,58 @@ impl Engine {
                 Action::Wait | Action::Take { .. } => false,
             },
             Command::Wizard { .. } => true,
-            Command::Annotate { .. } | Command::Travel { .. } => false,
+            Command::RenamePlace { .. } | Command::Annotate { .. } | Command::Travel { .. } => {
+                false
+            }
         };
         let mut tick = candidate.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
+            Command::RenamePlace {
+                expected_revision,
+                key,
+                name,
+            } => {
+                if *expected_revision != revision {
+                    return Err(Failure::new(
+                        ErrorCode::StaleRevision,
+                        "Refresh before naming a place",
+                    ));
+                }
+                let location = self
+                    .game
+                    .remembered_places(SimActor(receipt.actor.0))
+                    .find(|(location, _)| {
+                        adapt::cell_key(&self.archive.view_salt, receipt.actor.0, *location) == *key
+                    })
+                    .map(|(location, _)| location)
+                    .ok_or_else(|| {
+                        Failure::new(ErrorCode::InvalidRequest, "Place or name is unavailable")
+                    })?;
+                candidate
+                    .game
+                    .rename_place(SimActor(receipt.actor.0), location, name)
+                    .map_err(|_| {
+                        Failure::new(ErrorCode::InvalidRequest, "Place or name is unavailable")
+                    })?;
+                *candidate
+                    .revisions
+                    .get_mut(&receipt.actor)
+                    .expect("known actor") = revision
+                    .checked_add(1)
+                    .ok_or_else(|| Failure::new(ErrorCode::InvalidRequest, "Revision exhausted"))?;
+                (
+                    Author::User {
+                        user: receipt.user.clone(),
+                    },
+                    Audience::Actor,
+                    HistoryContent::PlaceRenamed {
+                        key: key.clone(),
+                        name: name.clone(),
+                    },
+                )
+            }
+
             Command::Travel {
                 expected_revision,
                 destination,

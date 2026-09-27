@@ -87,7 +87,7 @@ restored snapshot. Memory is local to a connection and is not saved or recovered
 from history: restarting a client starts with its attachment snapshot only.
 
 The [portal-geometry slice](portal-geometry.md) introduces explicit visible cells,
-bounded portal sight, rotations, walls and stairs. Protocol version 12 requires
+bounded portal sight, rotations, walls and stairs. Protocol version 13 requires
 observer-relative disclosure. Memory output now describes individual cells rather
 than room elevations.
 Wizard operations still advance their author's actor revision even
@@ -106,7 +106,12 @@ text/ASCII process coverage remains required alongside this headless frontend.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
+[the adventure slice](text-adventure.md). Saves use `places-v12`.
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.
+
+`state.observation.places` contains authoritative durable names and opaque anchor
+keys, including offscreen entries. This survives restart independently of the
+connection-local `memory` list. A controller can send `rename_place` through the
+ordinary `request` command. See [place knowledge](place-knowledge.md).

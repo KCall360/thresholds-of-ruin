@@ -147,11 +147,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 12.
+and selections from an abandoned branch. Server and clients must use protocol 13.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
+[the adventure slice](text-adventure.md). Saves use `places-v12`.
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.
@@ -203,3 +203,9 @@ SQLite saving is deliberately blocked, both with and without a pending checkpoin
 and exercises native input during a 160-action burst, followed by exact final-state,
 history and durable-checkpoint checks.
 These run alongside the existing disclosure, mouse, rewind and restart tests.
+
+## Remembered places
+
+F5 opens the [durable place list](place-knowledge.md). Up/Down selects an entry;
+Enter opens the name editor, Enter saves, and Escape cancels or closes. Spectators
+can read the list. Names persist independently of connection-local map memory.

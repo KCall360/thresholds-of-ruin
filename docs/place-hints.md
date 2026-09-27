@@ -13,7 +13,7 @@ hint at each space's center. There is no procedural generator yet.
 
 ## Disclosure and memory
 
-Protocol **11** requires `place_hint` on each disclosed `visible_cells` entry.
+Protocol **13** requires `place_hint` on each disclosed `visible_cells` entry.
 Only perceived cells carry hints; there is no dungeon-wide marker list. The
 existing opaque cell key identifies the location, and the existing relative
 position locates each visible occurrence. Repeated views of the same cell through
@@ -25,7 +25,7 @@ stale until that cell is perceived again. A fresh observation replaces the value
 including `false`; rewind clears abandoned-future memory. Headless JSON exposes
 current hints and remembered hints. ASCII retains them without rendering markers.
 The [text adventure interface](text-adventure.md) uses visible hints for a
-conservative destination heuristic; persistent named places remain future work.
+conservative destination heuristic; [durable place knowledge](place-knowledge.md) retains character-owned names.
 
 ## Dynamic authoring
 
@@ -50,8 +50,8 @@ Public wizard history retains sanitized summaries, not hidden marker locations.
 
 ## Compatibility and verification
 
-Only the current `diagonal-v11` ruleset and save format 4 are supported.
-All connected binaries must use protocol 12. Normal games are never implicitly
+Only the current `places-v12` ruleset and save format 7 are supported.
+All connected binaries must use protocol 13. Normal games are never implicitly
 promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale

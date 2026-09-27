@@ -189,6 +189,7 @@ mod navigation_regions {
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Instance {
+        places: Vec<usize>,
         cells: Vec<usize>,
         edges: Vec<usize>,
     }
@@ -196,6 +197,7 @@ mod navigation_regions {
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Regions {
+        places: Vec<RegionMap<Location, String>>,
         cells: Vec<RegionMap<Location, bool>>,
         edges: Vec<RegionMap<(Location, Direction), (Location, u8)>>,
         instances: Vec<Instance>,
@@ -206,14 +208,19 @@ mod navigation_regions {
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         let mut saved = Regions {
+            places: Vec::new(),
             cells: Vec::new(),
             edges: Vec::new(),
             instances: Vec::new(),
         };
+        let mut places = BTreeMap::new();
         let mut cells = BTreeMap::new();
         let mut edges = BTreeMap::new();
         for map in navigation {
             saved.instances.push(Instance {
+                places: map
+                    .places
+                    .checkpoint_regions(&mut saved.places, &mut places),
                 cells: map.cells.checkpoint_regions(&mut saved.cells, &mut cells),
                 edges: map.edges.checkpoint_regions(&mut saved.edges, &mut edges),
             });
@@ -225,7 +232,8 @@ mod navigation_regions {
         deserializer: D,
     ) -> Result<Vec<Navigation>, D::Error> {
         let saved = Regions::deserialize(deserializer)?;
-        if saved.cells.iter().any(|map| !map.is_checkpoint_region())
+        if saved.places.iter().any(|map| !map.is_checkpoint_region())
+            || saved.cells.iter().any(|map| !map.is_checkpoint_region())
             || saved.edges.iter().any(|map| !map.is_checkpoint_region())
         {
             return Err(serde::de::Error::custom(
@@ -236,10 +244,15 @@ mod navigation_regions {
             .instances
             .into_iter()
             .map(|instance| {
+                let places = RegionMap::restore_regions(&instance.places, &saved.places);
                 let cells = RegionMap::restore_regions(&instance.cells, &saved.cells);
                 let edges = RegionMap::restore_regions(&instance.edges, &saved.edges);
-                match (cells, edges) {
-                    (Some(cells), Some(edges)) => Ok(Navigation { cells, edges }),
+                match (cells, edges, places) {
+                    (Some(cells), Some(edges), Some(places)) => Ok(Navigation {
+                        cells,
+                        edges,
+                        places,
+                    }),
                     _ => Err(serde::de::Error::custom(
                         "invalid checkpoint navigation reference",
                     )),

@@ -197,7 +197,10 @@ impl ClientState {
                     return Err(StreamError::InconsistentState);
                 }
                 if let Some(entry) = event {
-                    if !matches!(entry.content, HistoryContent::Action { .. }) {
+                    if !matches!(
+                        entry.content,
+                        HistoryContent::Action { .. } | HistoryContent::PlaceRenamed { .. }
+                    ) {
                         return Err(StreamError::InconsistentState);
                     }
                     self.remember(*entry, update.cursor.tick)?;

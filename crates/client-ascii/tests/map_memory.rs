@@ -8,7 +8,7 @@ fn snapshot(hidden: bool) -> Snapshot {
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":if hidden {1} else {0},"observation":{
             "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},
-            "visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
+            "places":[],"visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
                 "stairs_up":x==2,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),

@@ -119,12 +119,31 @@ unresolved noun ambiguities do not consume time; in-world failed attempts follow
 the relevant action rule. Multiplayer waiting and simultaneous input policies
 are deferred.
 
+The simulation's private action boundary separates read-only validation and timing,
+effect application, and scheduler advancement. `Game::act` completes all three
+without yielding; its prepared action cannot escape to a caller or be stored for
+later execution. Every fallible check, including recovery-time overflow, precedes
+mutation. Current actions still apply effects immediately and then incur recovery.
+Recovery time is not resumable work. The server's existing simulation profiling
+interval covers the entire boundary; the simulation introduces no wall clock.
+
 Future timed actions share progress and interruption semantics across all actors.
 Interruption need not erase progress: damage interrupts, waiting preserves valid
 progress, and retrying resumes. Other actions, movement, or relevant target changes
 generally invalidate it. Policies can vary by action; existing travel cancellation
 remains supported. Physics and long actions must fit deterministic event boundaries
 and recoverable state without tying simulation time to client presentation.
+
+When the first timed action is introduced, its identity, target, completed work
+and action-specific validity belong to authoritative per-actor simulation state,
+with checkpoint/replay/rewind coverage. Each scheduled work boundary must validate
+against the current world before applying a partial or final effect. Progress is
+distinct from both recovery time and session-local travel jobs: recovery preserves
+valid saved progress but requires fresh input, and travel retains its cancellation
+and no-auto-resume policy. No unused progress fields, generic interruption engine,
+new protocol messages or save-format changes are introduced by the extension-point
+refactor. Concrete work durations and partial-effect policies wait for an action
+that needs them.
 
 ## Protocol and streaming
 
@@ -331,3 +350,17 @@ ClientState and never exposes world/simulation internals. Window size and redraw
 rate do not affect game time. See the ASCII guide for display/test requirements.
 Choose a 3D renderer after ASCII and text validate the protocol. Avoid speculative
 rendering dependencies in the simulation or wire format.
+
+
+## Durable place knowledge
+
+Perceived anchors become character-owned remembered points, independent of region
+membership. The simulation stores names beside navigation in shared source-region
+maps, and learns only from authoritative perception boundaries. Deterministic
+mnemonics use seed/discovery order, never authored labels or hidden contents.
+Protocol observations carry opaque cell keys and names, without reconstructing
+unseen geometry. Rename is a controller-only, revision-checked, free journal
+command and rewind boundary. Checkpoints share remembered name maps across
+boundaries. Client lists derive visibility only from the current disclosed scene;
+full map persistence and offscreen destination selection remain deferred. See
+[durable place knowledge](place-knowledge.md).

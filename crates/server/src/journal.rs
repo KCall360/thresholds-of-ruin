@@ -53,6 +53,10 @@ impl HistoryEntry {
     pub fn disclosed(&self) -> tor_protocol::HistoryEntry {
         use tor_protocol::{Event as VisibleEvent, HistoryContent as Content};
         let content = match &self.content {
+            HistoryContent::PlaceRenamed { key, name } => Content::PlaceRenamed {
+                key: key.clone(),
+                name: name.clone(),
+            },
             HistoryContent::Travel { destination } => Content::Travel {
                 destination: destination.clone(),
             },
@@ -123,6 +127,11 @@ pub struct RegionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    RenamePlace {
+        expected_revision: u64,
+        key: String,
+        name: String,
+    },
     Travel {
         expected_revision: u64,
         destination: String,
@@ -248,6 +257,10 @@ pub enum WizardResult {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    PlaceRenamed {
+        key: String,
+        name: String,
+    },
     Travel {
         destination: String,
     },

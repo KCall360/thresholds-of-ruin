@@ -5,7 +5,7 @@ use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
 
-pub const HELP: &str = "look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
+pub const HELP: &str = "places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -687,6 +687,7 @@ pub fn event(entry: &HistoryEntry, state: &StateView) -> String {
         } => "Time passes.".into(),
         HistoryContent::Annotation { text, .. } => format!("Note: {}", safe(text)),
         HistoryContent::Wizard { summary, .. } => safe(summary),
+        HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", safe(name)),
         HistoryContent::Travel { .. } => "You set off.".into(),
     }
 }

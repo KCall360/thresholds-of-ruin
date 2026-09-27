@@ -1,6 +1,24 @@
 use tor_protocol::*;
 
 #[test]
+fn place_names_use_opaque_keys_and_remain_read_only_for_spectators() {
+    let command = Command::RenamePlace {
+        expected_revision: 7,
+        key: "opaque-cell".into(),
+        name: "Quiet Reverie".into(),
+    };
+    assert_eq!(
+        serde_json::from_str::<Command>(&serde_json::to_string(&command).unwrap()).unwrap(),
+        command
+    );
+    assert!(!AccessRole::Spectator.permits(&Request::Command {
+        branch: BranchId("branch".into()),
+        command
+    }));
+    assert!(serde_json::from_str::<Command>(r#"{"type":"rename_place","expected_revision":7,"key":"opaque-cell","name":"Quiet Reverie","region":3}"#).is_err());
+}
+
+#[test]
 fn wizard_wire_rejects_arbitrary_archetypes_and_forged_properties() {
     assert!(!AccessRole::Spectator.permits(&Request::Command {
         branch: BranchId("branch".into()),

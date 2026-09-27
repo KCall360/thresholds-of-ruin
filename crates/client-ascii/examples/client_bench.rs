@@ -10,7 +10,7 @@ fn snapshot(count: usize) -> Snapshot {
         "has_control":true,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":0,"observation":{
             "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},
-            "visible_cells":(0..count).map(|i| serde_json::json!({
+            "places":[],"visible_cells":(0..count).map(|i| serde_json::json!({
                 "key":i.to_string(),"position":{"x":(i%49) as i32-24,"y":((i/49)%25) as i32-12,"z":(i/1225) as i32},
                 "wall":i%7==0,"stairs_up":false,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),"ground_items":[],"inventory":[],"visible_actors":[],"ready":true

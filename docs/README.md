@@ -71,3 +71,6 @@ For every behavior change:
    changed.
 5. Link every new document from this index. Remove superseded prose instead of
    leaving an unlabelled historical plan beside current guidance.
+
+- [Durable place knowledge](place-knowledge.md): character-owned names, discovery, persistence and client lists.
+- [Place knowledge findings](place-knowledge-findings.md): correctness and focused release measurements.

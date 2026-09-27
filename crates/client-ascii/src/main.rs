@@ -56,6 +56,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::F3 => Key::Control,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
+        NativeKey::F5 => Key::Places,
         NativeKey::Enter => Key::Enter,
         NativeKey::Escape => Key::Escape,
         NativeKey::Backspace => Key::Backspace,
@@ -92,7 +93,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -220,13 +221,13 @@ fn window_loop(
         let mut inputs = Vec::new();
         let typed = std::mem::take(&mut *text.borrow_mut());
         if input.is_none() {
-            // Send typed text only to an already-open note editor.
-            if app.note.is_some() && !typed.is_empty() {
+            // Send text only to an already-open editor.
+            if (app.note.is_some() || app.place_name.is_some()) && !typed.is_empty() {
                 inputs.push(Input::Text {
                     text: typed.clone(),
                 });
             }
-            if app.note.is_none() && typed.contains('_') {
+            if app.note.is_none() && !app.places_open && typed.contains('_') {
                 inputs.push(Input::Key { key: Key::Travel });
             }
             let pressed = window.get_mouse_down(minifb::MouseButton::Left);
@@ -333,6 +334,7 @@ fn window_loop(
                 "map_tiles":state.map(tor_client_ascii::render::map_tiles),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
+                "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
@@ -378,6 +380,7 @@ mod tests {
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
+        assert_eq!(native_key(NativeKey::F5), Some(Key::Places));
         assert_eq!(native_key(NativeKey::Escape), Some(Key::Escape));
         assert_eq!(native_key(NativeKey::F2), Some(Key::History));
         assert_eq!(native_key(NativeKey::LeftShift), None);

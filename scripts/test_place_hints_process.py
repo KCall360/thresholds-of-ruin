@@ -7,6 +7,7 @@ import unittest
 import test_ascii_process as ascii_support
 import test_headless_process as headless_support
 import test_text_process as support
+import test_adventure_process as adventure_support
 
 
 class PlaceHintProcesses(unittest.TestCase):
@@ -18,10 +19,73 @@ class PlaceHintProcesses(unittest.TestCase):
     command = headless_support.HeadlessProcesses.command
     request = headless_support.HeadlessProcesses.request
     ascii_frame = ascii_support.AsciiProcesses.frame
+    key = ascii_support.AsciiProcesses.key
+    adventure = adventure_support.AdventureProcesses.adventure
+    say = adventure_support.AdventureProcesses.say
 
     @classmethod
     def setUpClass(cls):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
+
+    def test_durable_names_in_real_clients_save_reconnect_and_rewind(self):
+        server = self.server(wizard=True)
+        player, _ = self.adventure()
+        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        places = initial["state"]["observation"]["places"]
+        self.assertEqual(len(places), 2)
+        self.assertTrue(all(not p["name"].startswith("Place ") for p in places))
+        self.assertIn(places[0]["name"], self.say(player, "places"))
+        self.assertIn("Hearth of Echoes", self.say(player, "name 1 Hearth of Echoes"))
+        renamed = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(renamed["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
+        self.assertEqual(renamed["state"]["observation"]["places"][0]["name"], "Hearth of Echoes")
+        denied = self.request(observer, {"type": "command", "branch": renamed["branch"], "command": {
+            "type": "rename_place", "expected_revision": renamed["state"]["revision"], "key": places[0]["key"], "name": "Forbidden"}})
+        self.assertIsNotNone(denied["error"])
+        self.say(player, "release")
+        player.stop()
+        native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
+        self.ascii_frame(native, lambda f: f["state"] is not None and not f["busy"])
+        self.key(native, "control")
+        shown = self.key(native, "places")
+        self.assertTrue(shown["places_open"])
+        self.assertEqual(shown["state"]["observation"]["places"][0]["name"], "Hearth of Echoes")
+        self.key(native, "enter")
+        native.child.stdin.write(json.dumps({"type": "text", "text": "Lantern Dream"}) + "\n")
+        native.child.stdin.flush()
+        changed = self.key(native, "enter")
+        self.assertEqual(changed["state"]["observation"]["places"][0]["name"], "Lantern Dream")
+        self.key(native, "escape")
+        self.key(native, "release")
+        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
+        wizard.until(lambda line: line == "Ready.")
+        fixture = json.loads((Path(__file__).parent / "scenarios/place-hints.json").read_text())
+        for operation in fixture["setup"]:
+            self.assertNotIn("Server error", wizard.command(operation))
+        wizard.command(fixture["visit"])
+        discovered = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(len(discovered["state"]["observation"]["places"]), 3)
+        wizard.command(fixture["leave"])
+        wizard.command(fixture["remove"])
+        away = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(away["state"]["observation"]["places"], discovered["state"]["observation"]["places"])
+        player, _ = self.adventure()
+        self.assertIn("remembered", self.say(player, "places"))
+        self.assertNotIn("Hidden authoring name", self.say(player, "places"))
+        self.assertNotIn("Server error", wizard.command("save"))
+        for process in [native, wizard, player, observer]:
+            process.stop()
+        server.stop()
+        server = self.server(wizard=True)
+        observer, resumed = self.client(support.SPECTATOR_TOKEN)
+        self.assertEqual(resumed["state"]["observation"]["places"], away["state"]["observation"]["places"])
+        player, _ = self.adventure()
+        self.assertIn("Lantern Dream", self.say(player, "places"))
+        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
+        wizard.until(lambda line: line == "Ready.")
+        wizard.command("wizard rewind initial")
+        rewound = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(rewound["state"]["observation"]["places"], places)
 
     def test_perception_stale_memory_dynamic_removal_restart_and_rewind(self):
         server = self.server(wizard=True)

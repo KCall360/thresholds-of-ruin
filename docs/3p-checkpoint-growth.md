@@ -147,8 +147,8 @@ workload: complete checkpoint-enabled exploration, exact durable recovery, bound
 tail replay and explored-save native responsiveness pass without changing the cap.
 Milestone **3p remains open** for the recurrent client/diagnostic timing tails
 above. Historical spikes are not proved fixed by a size reduction. The next
-focused step is to isolate those measured send/delivery/report-reader intervals
-and establish their latency disposition before expanding milestone 3 features.
-Then resume the documented shared resumable-action
+focused 3p step is to isolate those measured send/delivery/report-reader intervals
+and establish their latency disposition. At the user's direction, this remaining
+work is deferred and no longer blocks milestone 3 features. Resume the documented shared resumable-action
 extension points, durable place knowledge, semantic narration/interruption and
 slow-client resynchronization acceptance for interactions and travel.

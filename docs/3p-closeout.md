@@ -179,7 +179,12 @@ save retention and owned-process cleanup, including three complete 256-region
 demo cycles. Their existing helpers target the rebuilt debug executables. Final
 publication still requires Windows/Linux CI.
 
-## Next step toward milestone 3
+## Historical next step toward milestone 3
+
+The recommendation below records this audit's original disposition. Checkpoint
+growth was subsequently addressed by [format 6](3p-checkpoint-growth.md). At the
+user's direction, remaining 3p timing closure is now deferred and no longer blocks
+milestone 3; see the [current roadmap](milestones.md).
 
 Keep milestone 3 feature expansion paused. The next focused 3p change should
 address repeated navigation/rewind checkpoint data while preserving exact recovery,

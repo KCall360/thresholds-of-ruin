@@ -1,6 +1,7 @@
 # Milestone 3p client timing investigation
 
-Milestone 3p remains open pending the latency disposition below. This follow-up
+Milestone 3p is deferred, still open, at the user's direction; it no longer blocks
+milestone 3 feature work. The latency disposition below remains unresolved. This follow-up
 keeps format 6, protocol 12, `diagonal-v11`, the 64 MiB checkpoint cap, exact
 recovery/rewind, disclosure and bounded runtime queues unchanged. It adds no
 interactions or travel features. The complete checkpoint remains 9.92 MB; format-5
@@ -143,13 +144,13 @@ writes, not pipe waits, JSON work, parsing, retention or OS scheduling. No resid
 interval is silently attributed to scheduling, subtracted from the original
 metric, or used to relax the latency targets.
 
-The checkpoint-growth gate remains addressed. Keep milestone 3 feature expansion
-paused. The next focused investigation should capture thread scheduling and
+The checkpoint-growth gate remains addressed. When deferred 3p work resumes,
+the next focused investigation should capture thread scheduling and
 blocked-write evidence around the native-call and headless-report stalls, with
 the new post-presentation boundary and capped log mode retained. Fix or explicitly
 resolve those costs, then qualify the longer client workload without replacing
 failed prefixes or treating quiet repeats as proof. Broader simulation/persistence
 matrix expansion is not warranted by these isolated diagnostic/native-call changes.
-The next feature work after that gate remains shared resumable actions, durable
+The next active feature work is shared resumable actions, durable
 place knowledge, semantic narration/interruption and slow-client resynchronization
 acceptance for milestone 3 interactions and travel.

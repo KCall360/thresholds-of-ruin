@@ -18,10 +18,12 @@ dungeon game. It currently provides:
   rewind;
 - playable text and native graphical ASCII clients, plus a JSON-lines headless
   client for scripted acceptance tests; and
-- client-held last-seen map memory that never exposes undisclosed world state.
+- client-held last-seen map memory that never exposes undisclosed world state; and
+- durable character-owned place names, learned on first sight, with renaming and
+  remembered-place lists in text (`places`) and ASCII (F5).
 
-New games use protocol **12**, save format **6**, and ruleset
-**`diagonal-v11`**. The server rejects any other protocol, save format, or ruleset.
+New games use protocol **13**, save format **7**, and ruleset
+**`places-v12`**. The server rejects any other protocol, save format, or ruleset.
 The current fixture is deliberately small: two rooms and a connecting hall. It is
 a proving ground for architecture and interaction, not the planned dungeon.
 
