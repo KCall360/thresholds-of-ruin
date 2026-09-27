@@ -28,7 +28,7 @@ impl Navigation {
             self.cells.contains_key(location) && crate::places::valid_name(name)
         }) && self.cells.keys().all(|location| world.contains(*location))
             && self.edges.iter().all(|((from, _), (to, turns))| {
-                *turns < 4 && self.cells.contains_key(from) && self.cells.contains_key(to)
+                *turns < 24 && self.cells.contains_key(from) && self.cells.contains_key(to)
             })
     }
 }
@@ -100,7 +100,11 @@ impl Game {
                     y: cell.offset.y + dy,
                     z: cell.offset.z + dz,
                 };
-                if projected.contains(&(to, offset, (cell.rotation + turns) % 4)) {
+                if projected.contains(&(
+                    to,
+                    offset,
+                    tor_world::compose_rotation(cell.rotation, turns),
+                )) {
                     edges.insert((cell.location, local), Some((to, turns)));
                 }
             }
@@ -174,7 +178,7 @@ impl Game {
                             return None;
                         }
                         let &(to, r2) = knowledge.edges.get(&(side, second.rotated(r1)))?;
-                        Some((to, (r1 + r2) % 4))
+                        Some((to, tor_world::compose_rotation(r1, r2)))
                     };
                     match (path(a, b), path(b, a)) {
                         (Some(a), Some(b)) if a == b => Some(a),
@@ -188,7 +192,7 @@ impl Game {
                     if knowledge.cells.get(&to) != Some(&false) {
                         continue;
                     }
-                    let next = (to, (node.1 + rotation) % 4);
+                    let next = (to, tor_world::compose_rotation(node.1, rotation));
                     let Ok(duration) = movement_cost(actor_state.turn_ticks.get(), direction)
                     else {
                         continue;
@@ -244,7 +248,7 @@ impl Game {
                         other.location == to
                             && !other.wall
                             && other.offset == offset
-                            && other.rotation == (cell.rotation + turns) % 4
+                            && other.rotation == tor_world::compose_rotation(cell.rotation, turns)
                     }) {
                         edges.insert((cell.location, local), (to, turns));
                     }

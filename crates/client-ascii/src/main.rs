@@ -62,6 +62,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::Backspace => Key::Backspace,
         NativeKey::Tab => Key::Tab,
         NativeKey::F2 => Key::History,
+        NativeKey::F6 => Key::MapLower,
+        NativeKey::F7 => Key::MapHigher,
         NativeKey::PageUp => Key::OlderHistory,
         NativeKey::PageDown => Key::RecentHistory,
         _ => return None,
@@ -93,7 +95,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -333,7 +335,7 @@ fn window_loop(
                 "previous_report_encode_ms":previous_report_encode_ms,"previous_report_write_ms":previous_report_write_ms,
                 "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
-                "map_tiles":state.map(tor_client_ascii::render::map_tiles),
+                "map_tiles":state.map(|s| tor_client_ascii::render::map_tiles_at_level(s,app.map_level)),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,

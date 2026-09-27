@@ -163,7 +163,7 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. Current games use `items-v14` and save format 9.
+automatically opens a door. Current games use `physics-v15` and save format 10.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling

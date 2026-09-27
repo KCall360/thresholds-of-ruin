@@ -25,6 +25,9 @@ fn same_geometry(a: &World, b: &World) -> bool {
         regions,
         passages,
         rotations,
+        physical_vertical,
+        region_gravity,
+        cell_gravity,
         terrain,
         chambers,
         place_hints,
@@ -32,6 +35,9 @@ fn same_geometry(a: &World, b: &World) -> bool {
     regions == &b.regions
         && passages == &b.passages
         && rotations == &b.rotations
+        && physical_vertical == &b.physical_vertical
+        && region_gravity == &b.region_gravity
+        && cell_gravity == &b.cell_gravity
         && terrain == &b.terrain
         && chambers == &b.chambers
         && place_hints == &b.place_hints

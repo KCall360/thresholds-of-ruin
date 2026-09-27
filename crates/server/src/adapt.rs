@@ -106,7 +106,7 @@ pub fn observation(
         let Some(visible) = view
             .visible_cells
             .iter()
-            .find(|visible| visible.location == cell.location)
+            .find(|visible| visible.location == cell.location && visible.frame == cell.rotation)
         else {
             continue;
         };
@@ -185,6 +185,12 @@ pub fn observation(
         }
     }
     p::Observation {
+        motion: view.motion.map(|m| p::MotionView {
+            velocity: m.velocity,
+            units_per_cell: 65536,
+            displaced: m.displaced,
+            impacted: m.impacted,
+        }),
         places: vec![],
         actor: p::ActorId(view.actor.0),
         tick: view.tick,

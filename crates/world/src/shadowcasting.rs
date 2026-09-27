@@ -122,10 +122,15 @@ impl World {
         // Vertical perception intentionally retains the established shaft rules.
         for (direction, sign) in [(Direction::Up, 1), (Direction::Down, -1)] {
             let mut current = origin;
+            let mut frame = orientation;
             for distance in 1..=radius {
-                let Some(passage) = self.passage(current, direction) else {
+                let Some(passage) = self.passage(current, direction.rotated(frame)) else {
                     break;
                 };
+                frame = crate::compose_rotation(
+                    frame,
+                    self.crossing_rotation(current, direction.rotated(frame)),
+                );
                 current = passage.to;
                 cells.push(SightCell {
                     location: current,
@@ -134,7 +139,7 @@ impl World {
                         y: 0,
                         z: sign * distance,
                     },
-                    rotation: orientation % 4,
+                    rotation: frame,
                     wall: self.is_wall(current),
                 });
                 if self.opaque(current) {

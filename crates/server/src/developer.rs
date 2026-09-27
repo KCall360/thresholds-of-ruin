@@ -16,6 +16,30 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         })
     };
     let operation = match words.as_slice() {
+        ["gravity", region, x, y, z] => WizardOperation::SetGravity {
+            region: region.parse().map_err(|_| usage)?,
+            vector: [
+                x.parse().map_err(|_| usage)?,
+                y.parse().map_err(|_| usage)?,
+                z.parse().map_err(|_| usage)?,
+            ],
+        },
+        ["cell-gravity", r, x, y, z, gx, gy, gz] => WizardOperation::SetCellGravity {
+            position: position(&[r, x, y, z])?,
+            vector: [
+                gx.parse().map_err(|_| usage)?,
+                gy.parse().map_err(|_| usage)?,
+                gz.parse().map_err(|_| usage)?,
+            ],
+        },
+        ["velocity", actor, x, y, z] => WizardOperation::SetVelocity {
+            actor: ActorId(actor.parse().map_err(|_| usage)?),
+            velocity: [
+                x.parse().map_err(|_| usage)?,
+                y.parse().map_err(|_| usage)?,
+                z.parse().map_err(|_| usage)?,
+            ],
+        },
         ["door", r, x, y, z, state] => WizardOperation::PlaceDoor {
             position: position(&[r, x, y, z])?,
             open: match *state {

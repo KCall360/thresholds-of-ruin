@@ -115,7 +115,13 @@ impl Game {
         let destination = if source.spec.stackable {
             self.items.iter().find(|(_, i)| {
                 crate::diagnostics::stack_candidate();
-                i.location == to && i.spec == source.spec
+                i.location == to
+                    && i.spec == source.spec
+                    && (taking
+                        || (i.motion == self.actors[&actor].motion
+                            && i.orientation == self.actors[&actor].orientation)
+                        || (i.motion == crate::MotionState::default()
+                            && self.actors[&actor].motion == crate::MotionState::default()))
             })
         } else {
             None
@@ -156,7 +162,17 @@ impl Game {
         quantity: u64,
         location: ItemLocation,
     ) {
+        let (motion, orientation) = match (self.items[&source].location, location) {
+            (ItemLocation::Carried(owner), ItemLocation::Ground(_)) => (
+                self.actors[&owner].motion.clone(),
+                self.actors[&owner].orientation,
+            ),
+            _ => (crate::MotionState::default(), 0),
+        };
         if source == result {
+            let item = self.items.get_mut(&source).expect("validated item");
+            item.motion = motion;
+            item.orientation = orientation;
             self.items
                 .get_mut(&source)
                 .expect("validated source")
@@ -179,6 +195,8 @@ impl Game {
             self.items.insert(
                 result,
                 Item {
+                    motion,
+                    orientation,
                     spec,
                     quantity,
                     location,

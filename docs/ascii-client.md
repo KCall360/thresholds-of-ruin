@@ -156,11 +156,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 14.
+and selections from an abandoned branch. Server and clients must use protocol 15.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `items-v14`.
+[the adventure slice](text-adventure.md). Saves use `physics-v15`.
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.
@@ -224,3 +224,5 @@ can read the list. Names persist independently of connection-local map memory.
 See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+ASCII F6/F7 browse disclosed height slices without advancing time; spectators can use them too. Mouse selection follows the displayed slice.

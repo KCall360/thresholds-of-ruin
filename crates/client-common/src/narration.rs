@@ -49,6 +49,16 @@ fn describe_changes(
     let old = actors(before);
     let new = actors(after);
     let mut lines = Vec::new();
+    if after.tick != before.tick {
+        if let Some(motion) = &after.motion {
+            if motion.displaced {
+                lines.push("You move involuntarily.".into());
+            }
+            if motion.impacted {
+                lines.push("You collide with an obstruction.".into());
+            }
+        }
+    }
     for (id, name) in &new {
         if !old.contains_key(id) {
             let article = if name.to_lowercase().starts_with(['a', 'e', 'i', 'o', 'u']) {

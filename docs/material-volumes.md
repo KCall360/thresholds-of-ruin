@@ -96,9 +96,9 @@ interactions remain deferred. Actor position is the cell containing their feet;
 ordinary vertical movement still requires an explicit stair/link. Empty headroom
 does not grant upward movement, and removing support does not cause a fall.
 
-Current saves use format **9** and ruleset `items-v14`.
+Current saves use format **10** and ruleset `physics-v15`.
 Start a new game after a format or rules update. All connected
-clients must use protocol 14. Existing launchers use `target/doors/debug` and
+clients must use protocol 15. Existing launchers use `target/doors/debug` and
 continue creating fresh normal saves.
 
 World tests cover finite shells, unallocated space, vertical probe limits and
@@ -127,7 +127,7 @@ all four rotations.
 
 The actual ASCII regression steps to the west of the door, onto it, and to its
 east, asserts both floor corners and wall cells, compares headless observations,
-and verifies closing/opening and save/resume. Protocol 14 and save format 9 stay
+and verifies closing/opening and save/resume. Protocol 15 and save format 10 stay
 unchanged; material-rims-v10 distinguishes corrected replay from the initial
 material-volumes-v9 rules.
 

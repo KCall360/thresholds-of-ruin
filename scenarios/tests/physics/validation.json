@@ -1,0 +1,12 @@
+{
+  "validator": "tor-scenario-3",
+  "ruleset": "physics-v15",
+  "content_hash": "621a9d9669202adbaa587c3cbf16a219b0fe16f1a2baebc3f874f599ec82ce99",
+  "files": {
+    "regions.toml": "8313bbcbbd7760644da38f9a6030fa0119f7ccd0cb7d6dcdfe54e74675206acf",
+    "scenario.toml": "2bac6b2ba96f8924f040e601ba63d6cb5166e6d2cbcb7ca48cb82891b147c555"
+  },
+  "regions": 1,
+  "model_hash": "e32577d89e10cd1ba36417b023e515a3067cc344aa22d37c5a46c535580854fe",
+  "coverage": "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof"
+}

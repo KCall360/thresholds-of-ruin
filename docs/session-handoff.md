@@ -1,58 +1,80 @@
-# Session handoff — scenario packages and item knowledge
+# Session handoff — milestone 4c complete locally
 
-Updated 2026-09-27. Milestones 4a and 4b are complete locally and are being
-published together from `codex/scenarios-items-knowledge`, as requested. The
-[roadmap](milestones.md) is the status source of truth. Do not merge until both
-Windows and Linux CI pass; publication does not authorize merging.
+Updated 2026-09-27. The user approved the physics proposals and requested all of
+4c before 4d. The implementation is on `codex/milestone-4c-physics`, ready for
+review and Windows/Linux CI. No merge is authorized yet. The [roadmap](milestones.md)
+remains the status source of truth.
 
-## Implemented decisions
+## Delivered
 
-See [scenario packages](scenario-packages.md) for authored TOML setup, certificates,
-stable IDs and pinned saves, and [items](items.md) for quantity-aware transfers,
-stack identity, appearance assignment, character knowledge and disclosure.
-NetHack informed defaults; implementation and content remain original.
-Protocol 14, save/SQLite version 9, ruleset `items-v14`, validator `tor-scenario-2`
-replace older prerelease formats without migration readers. There are 22 ordinary
-validated packages, including the item acceptance fixture. Equipment, item use,
-capacity and physics remain future work.
+See [physics](physics.md): rigid cell bodies, 24 cube rotations, portal straddling,
+averaged local gravity, fixed-point drift and terminal speed, support/sliding,
+actor/item integration, inherited dropped-item motion, impact hooks, authoring and
+wizard inputs, own-body disclosure, height browsing (ASCII F6/F7), and exact
+checkpoint/replay/retry/rewind state. The main plane retains beveled doorway sight;
+height slices use conservative voxel rays. Frame-aware surfaces and stair landings
+remain correctly oriented. Resting waits and same-tick handoffs avoid scene work.
 
-Context-preserving practices are in [CONTRIBUTING](../CONTRIBUTING.md): retain full
-logs locally, inspect relevant failures, report compact summaries and use targeted
-reads. Profiling maintenance remains mandatory as features change, despite 3p
-being deferred.
+The default playable character is two cells tall. Crouching/ducking and posture
+changes remain deferred. No HP damage, combat, AI, death, or victory is added; 4d
+owns the first complete dungeon loop. Protocol 15, save/SQLite format 10, ruleset
+`physics-v15`, and validator `tor-scenario-3` intentionally reject older prerelease
+formats. All 24 authored packages validate, including physics and sideways-portal
+acceptance packages. Gravity tables share world geometry across action/rewind state.
 
-## Verification and evidence
+## Verified locally
 
-Windows local verification passed: 257 Rust tests in each of debug/release,
-108 debug Python checks, 73 release process checks, all-target Clippy, formatting,
-architecture and documentation checks, rustdoc with warnings denied, and all 22
-package validations. Release binaries were rebuilt. Text, ASCII, and Text + ASCII
-Spectator desktop launchers connected, retained fresh saves and cleaned up owned
-processes. The removed 256-region desktop shortcut remains removed.
+- Rust: 276 tests each in debug and release, no failures.
+- Python: 114 tests in the full debug suite; 76 release process tests, all passed.
+- Formatting, all-target Clippy, private rustdoc with warnings denied, architecture
+  boundaries, documentation links, and all authored-package validation passed.
+- Real text/ASCII clients cover falling, landing, rotated crossings, body cells,
+  height browsing, blocked movement, saved continuation, and existing interactions.
+- All three desktop launchers connected with fresh saves and cleaned up only owned
+  processes. Final native captures were visually inspected.
 
-Local logs under `.local/`: `4b-rust-debug-final2.log`, `4b-rust-release.log`,
-`4b-python-debug.log`, `4b-python-release.log`, `4b-clippy-final.log`,
-`4b-rustdoc.log`, `4b-validation-lf.log`, and `4b-launchers.log`.
-The debug Python run preceded the final non-stackable merge-scan optimization;
-full Rust checks and release process checks passed afterward. All development
-failure logs are retained locally, outside Git.
+Final debug tests used `CARGO_BUILD_JOBS=2` and `CARGO_PROFILE_DEV_DEBUG=0` to avoid
+Windows linker/paging pressure; debug assertions remained enabled. Release used
+the ordinary optimized profile. Earlier failed logs retain build contention,
+native access/startup failures, and the fixed doorway and benchmark regressions;
+final application suites ran sequentially after builds completed.
 
-[Item profiling results](items.md#recorded-results-2026-09-27-windows) link the
-raw measurements, summary and source/binary hashes. Scenario workload v1 remains
-unchanged; new items workload v1 measures transfers, knowledge, client application
-and canvas drawing, persistence, and operation/byte counts. Matching permissions
-and two repeats were used to investigate persistence variation. Large-scenario
-restart median is about 1.1 ms higher than the local 4a baseline; its cause is not
-isolated. Persistence tails vary. These are recorded limitations, not claims of
-3p closure or durable-action latency acceptance. Original 4a evidence remains
-available through the scenario guide, clearly labelled historical.
+Local evidence is retained under `.local/`: `4c-rust-{debug,release}-publish.log`,
+`4c-python-{debug,release}-publish.log`, `4c-clippy-publish.log`,
+`4c-rustdoc-publish.log`, `4c-fmt-publish.log`, `4c-architecture-publish.log`,
+`4c-docs-publish.log`, `4c-desktop-publish.log`, and `4c-visual-qa/`.
+Normalized implementation hashes are in `4c-source-hashes.json` and are verified
+before publication. Machine-local saves, tokens, logs, and captures stay out of Git.
 
-## Next work
+## Performance and next steps
 
-Milestone 4c is next: multi-cell bodies, rotated portals and gravity. Before
-implementation settle deterministic integration, mass/normalization, transformed
-occupancy/velocity, support and collision ordering, and impact versus acceleration
-damage. Refer to the roadmap and [design plan](game-design-plan.md), rather than
-assuming NetHack specifies this project's physics. Keep scenario fixtures,
-profiling, recovery, disclosure and real-client tests current as those mechanics
-are added. Deferred 3p findings and targets remain open.
+The [physics guide](physics.md#local-performance-evidence--2026-09-27) records
+reproduction commands, sample counts, p50/p95/max, work/byte counts, and save/resume
+measurements. Matched existing command p95 is 0.968/3.450 ms (small/large), versus
+0.831/2.175 ms baseline. Body/frame-aware perception accounts for the remaining
+increase; scene counts are unchanged. Both existing cases remain below the 8 ms
+p95 target. Dense eight-actor falling still exceeds it and remains a documented
+3p stress-case gap; no target was relaxed and full 3p closure is not claimed.
+
+Raw final measurements are `.local/4c-final-*`; failed and earlier optimization
+runs are retained separately. The preserved 4b binary hash and measurement
+boundaries are recorded in the guide. Timing excludes transport/native presentation
+and does not establish long-history scaling.
+
+The merged 4a/4b main commit `17bab2f` has the same source tree as `818f2f4`;
+implementation commit `d8515fb` was rebased onto that merged main baseline, and
+the normalized source hashes still match the verified code. Review
+the feature PR, require Windows and Linux CI before merging, and obtain user merge
+authorization. Then proceed to 4d. Deferred 3p work remains open.
+
+## Publication blocked pending explicit user approval
+
+Automatic approval review rejected `git push -u origin codex/milestone-4c-physics`
+and PR creation. Its stated reason was that implementation approval did not
+explicitly authorize external disclosure/publication of the private source tree.
+No push or PR creation occurred. Do not retry publication through another tool or
+workaround without user approval. The implementation is complete locally; the
+reviewable PR description is prepared in `.local/4c-pr-body.md`. Ask whether the
+user authorizes pushing this branch to the configured GitHub remote and opening
+its PR. Once authorized, publish, attach the PR to the task, and require Windows
+and Linux CI plus separate merge authorization before merging.

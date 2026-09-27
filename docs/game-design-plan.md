@@ -114,15 +114,10 @@ deliberately retained as considerations, not silently selected defaults.
   components. Leave room for momentum transfer. Provide a damage hook for
   momentum changes; collision/fall damage normally uses impact, while hazards
   such as spikes may use keen. Damage quantities are not yet specified.
-- Before implementation, resolve aggregate normalization/mass, deterministic
-  integration and diagonal collision ordering, transformed velocity and occupied
-  footprints across portals, support, and the interaction of multi-cell bodies
-  with activation boundaries. The lack of entity orientation does not remove the
-  need to map occupied geometry consistently through a rotated connection.
-- Clarify whether the proposed momentum-damage hook applies only to impacts or
-  also ordinary acceleration: applying damage to every change of momentum would
-  also damage freely falling bodies. This remains open, as do terminal-speed
-  values and detailed physical balance.
+- The 4c implementation decisions are in [bodies and gravity](physics.md):
+  average acceleration, fixed-point tick integration, persistent body frames,
+  deterministic collisions, rigid support, and impact-only hooks. Crouching and
+  ducking remain future posture changes. Numerical balance can evolve later.
 
 ## Asset palettes
 

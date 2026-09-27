@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,8 +107,19 @@ pub struct PlaceView {
     pub name: String,
 }
 
+/// Own-body sensations only; never includes hidden field geometry or other bodies.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MotionView {
+    pub velocity: [i64; 3],
+    pub units_per_cell: u32,
+    pub displaced: bool,
+    pub impacted: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionView>,
     pub places: Vec<PlaceView>,
     pub actor: ActorId,
     pub tick: u64,

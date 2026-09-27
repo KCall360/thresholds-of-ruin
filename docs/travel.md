@@ -2,7 +2,7 @@
 
 The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 14 and save format 9 are current.
+region names, and frontend language. Protocol 15 and save format 10 are current.
 
 ## ASCII controls
 
@@ -116,7 +116,7 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-Only the current `items-v14` ruleset is supported. Start a fresh game after
+Only the current `physics-v15` ruleset is supported. Start a fresh game after
 an incompatible revision; saves are not migrated.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,
