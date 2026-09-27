@@ -225,7 +225,9 @@ deliberately retained as considerations, not silently selected defaults.
 
 ## Deferred details
 
-Exact file syntax, package layout, wire fields, validation heuristics, physics
+The authored TOML syntax and package layout are now defined in
+[scenario packages](scenario-packages.md). Future wire fields, generation
+validation heuristics, physics
 constants, damage formulas, animation, advanced AI, region-boundary effects,
 equipment slots, identification actions, sound, hunger, ranged combat, multiplayer,
 3D renderer selection, and historical-save migration await their milestones.

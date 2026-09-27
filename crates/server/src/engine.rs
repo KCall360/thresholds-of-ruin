@@ -16,12 +16,12 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 7;
+const ARCHIVE_VERSION: u32 = 9;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
-const RULESET: &str = "places-v12";
+const RULESET: &str = crate::scenario_package::RULESET;
 
 #[cfg(test)]
 mod seed_equivalence_tests {
@@ -100,6 +100,7 @@ pub struct Scenario {
     pub actors: Vec<ActorSetup>,
     pub regions: u64,
     pub workload_version: Option<u32>,
+    pub package: Option<Arc<crate::scenario_package::Package>>,
 }
 
 impl Scenario {
@@ -117,6 +118,7 @@ impl Scenario {
             }],
             regions: 2,
             workload_version: None,
+            package: None,
         }
     }
 
@@ -129,6 +131,7 @@ impl Scenario {
             seed,
             regions,
             workload_version: Some(fixture.version),
+            package: None,
             actors: fixture
                 .geometry
                 .actors
@@ -379,17 +382,37 @@ pub struct Engine {
 }
 
 impl Engine {
+    pub fn scenario_validation(&self) -> Option<bool> {
+        self.archive
+            .scenario
+            .package
+            .as_ref()
+            .map(|p| p.validated && p.state_valid(&self.game))
+    }
+    pub fn selected_character(&self) -> Option<ActorId> {
+        self.archive
+            .scenario
+            .package
+            .as_ref()
+            .map(|p| ActorId(p.selected))
+    }
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
         if !(1..=256).contains(&scenario.regions) {
             return Err(invalid_archive());
         }
         let mut game = match scenario.workload_version {
-            None => scenario_game(&scenario),
+            None => match &scenario.package {
+                Some(package) => package.build(scenario.seed, true)?,
+                None => scenario_game(&scenario),
+            },
             Some(1) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
             Some(_) => return Err(invalid_archive()),
         };
-        let mut revisions = BTreeMap::new();
-        if scenario.actors.is_empty() {
+        let mut revisions: BTreeMap<_, _> = game
+            .checkpoint_actor_ids()
+            .map(|id| (ActorId(id), 0))
+            .collect();
+        if scenario.actors.is_empty() && scenario.package.is_none() {
             return Err(invalid_archive());
         }
         for actor in &scenario.actors {
@@ -495,6 +518,9 @@ impl Engine {
     }
 
     fn replay(mut archive: Archive, checkpoint: Option<DiskCheckpoint>) -> Result<Self, Failure> {
+        if let Some(package) = &archive.scenario.package {
+            package.check_identity()?;
+        }
         if archive.version != ARCHIVE_VERSION
             || Uuid::parse_str(&archive.view_salt).is_err()
             || archive.ruleset != RULESET
@@ -980,7 +1006,7 @@ impl Engine {
         let navigation_changed = match &receipt.command {
             Command::Act { action, .. } => match action {
                 Action::Move { .. } | Action::SetDoor { .. } => true,
-                Action::Wait | Action::Take { .. } => false,
+                Action::Wait | Action::Take { .. } | Action::Drop { .. } => false,
             },
             Command::Wizard { .. } => true,
             Command::RenamePlace { .. } | Command::Annotate { .. } | Command::Travel { .. } => {
@@ -1080,6 +1106,12 @@ impl Engine {
                     Audience::Private,
                     HistoryContent::Wizard {
                         operation: operation.clone(),
+                        validation: self
+                            .archive
+                            .scenario
+                            .package
+                            .as_ref()
+                            .map(|p| p.validated && p.state_valid(&candidate.game)),
                         result,
                     },
                 )
@@ -1097,7 +1129,10 @@ impl Engine {
                 let started = Instant::now();
                 let perception_changed = match action {
                     Action::Wait => false,
-                    Action::Move { .. } | Action::SetDoor { .. } | Action::Take { .. } => true,
+                    Action::Move { .. }
+                    | Action::SetDoor { .. }
+                    | Action::Take { .. }
+                    | Action::Drop { .. } => true,
                 };
                 let before: BTreeMap<_, _> = self
                     .actors()
@@ -1570,6 +1605,12 @@ impl Candidate {
                     .set_wall(adapt::location(*position), *wall)
                     .map_err(|_| invalid())?;
                 WizardResult::WallSet
+            }
+            WizardOperation::IdentifyItem { actor, item } => {
+                self.game
+                    .identify_item(SimActor(actor.0), tor_simulation::ItemId(*item))
+                    .map_err(|_| invalid())?;
+                WizardResult::ItemIdentified
             }
             WizardOperation::PlaceItem { kind, position } => {
                 let name = match kind {

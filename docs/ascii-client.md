@@ -41,10 +41,10 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | --- | --- |
 | Arrow keys, H/J/K/L | Move west/south/north/east by one cell |
 | Y/U/B/N | Move northwest/northeast/southwest/southeast by one cell |
-| `<` / `>` (D also descends) | Request movement up/down; the current fixture has no vertical route |
+| `<` / `>` | Request movement up/down; the current fixture has no vertical route |
 | Space or period | Wait one action |
 | O / C, then a direction | Open / close the adjacent door using arrows or HJKL/YUBN; no door means a local message and no ticks |
-| G | Pick up an item at your feet; choose with Up/Down and Enter if several match |
+| G / D | Pick up at your feet / drop from inventory; Up/Down selects, digits set a count, Enter confirms (blank = whole stack) |
 | `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
 | Escape during travel | Cancel at the next action boundary |
 | F3 / R | Acquire / release actor control |
@@ -156,11 +156,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 13.
+and selections from an abandoned branch. Server and clients must use protocol 14.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `places-v12`.
+[the adventure slice](text-adventure.md). Saves use `items-v14`.
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.
@@ -218,3 +218,9 @@ These run alongside the existing disclosure, mouse, rewind and restart tests.
 F5 opens the [durable place list](place-knowledge.md). Up/Down selects an entry;
 Enter opens the name editor, Enter saves, and Escape cancels or closes. Spectators
 can read the list. Names persist independently of connection-local map memory.
+
+## Item quantities and knowledge
+
+See [items and character knowledge](items.md) for quantity-aware pickup/drop,
+stack identity, randomized appearances, disclosed protocol fields, scenario
+authoring, compatibility, and the versioned item profiling workload.

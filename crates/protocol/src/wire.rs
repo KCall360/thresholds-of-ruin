@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,7 +58,8 @@ pub enum Direction {
 pub enum Action {
     SetDoor { door: u64, open: bool },
     Move { direction: Direction },
-    Take { item: u64 },
+    Take { item: u64, quantity: Option<u64> },
+    Drop { item: u64, quantity: Option<u64> },
     Wait,
 }
 
@@ -72,6 +73,9 @@ pub struct Position {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemView {
+    pub quantity: u64,
+    pub appearance: String,
+    pub identified: bool,
     /// Perceived appearance only; never hidden properties.
     #[serde(default)]
     pub description: String,
@@ -239,9 +243,23 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    DoorChanged { door: u64, open: bool },
-    Moved { direction: Direction },
-    Taken { item: u64 },
+    DoorChanged {
+        door: u64,
+        open: bool,
+    },
+    Moved {
+        direction: Direction,
+    },
+    Taken {
+        item: u64,
+        result: u64,
+        quantity: u64,
+    },
+    Dropped {
+        item: u64,
+        result: u64,
+        quantity: u64,
+    },
     Waited,
 }
 

@@ -111,10 +111,28 @@ pub fn action(event: &Event, view: &Observation) -> String {
                 Direction::Down => "down",
             }
         ),
-        Event::Taken { item } => view.inventory.iter().find(|i| i.id == *item).map_or_else(
+        Event::Taken {
+            result, quantity, ..
+        } => view.inventory.iter().find(|i| i.id == *result).map_or_else(
             || "You pick up the item.".into(),
-            |i| format!("You pick up the {}.", label(&i.name, "item")),
+            |i| {
+                if *quantity == 1 {
+                    format!("You pick up the {}.", label(&i.name, "item"))
+                } else {
+                    format!("You pick up {} x {}.", quantity, label(&i.name, "item"))
+                }
+            },
         ),
+        Event::Dropped {
+            result, quantity, ..
+        } => view
+            .ground_items
+            .iter()
+            .find(|i| i.item.id == *result)
+            .map_or_else(
+                || "You drop the item.".into(),
+                |i| format!("You drop {} x {}.", quantity, label(&i.item.name, "item")),
+            ),
         Event::DoorChanged { door, open } => {
             let name = view
                 .visible_cells
@@ -198,16 +216,33 @@ mod tests {
     fn action_names_are_disclosed_and_control_characters_are_removed() {
         let mut view = observation();
         assert_eq!(
-            action(&Event::Taken { item: 9 }, &view),
+            action(
+                &Event::Taken {
+                    item: 9,
+                    result: 9,
+                    quantity: 1
+                },
+                &view
+            ),
             "You pick up the item."
         );
         view.inventory.push(ItemView {
+            quantity: 1,
+            appearance: String::new(),
+            identified: true,
             id: 9,
             name: "copper\ntoken".into(),
             description: String::new(),
         });
         assert_eq!(
-            action(&Event::Taken { item: 9 }, &view),
+            action(
+                &Event::Taken {
+                    item: 9,
+                    result: 9,
+                    quantity: 1
+                },
+                &view
+            ),
             "You pick up the coppertoken."
         );
         assert_eq!(

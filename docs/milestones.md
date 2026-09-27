@@ -8,21 +8,23 @@ appropriate unit, integration, protocol, and actual-client process tests.
 ## Current implementation
 
 The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **13**, save format **7**, and ruleset
-**`places-v12`**. Older protocols, save formats, and rulesets are rejected
+two-room fixture. New games use protocol **14**, save format **9**, and ruleset
+**`items-v14`**. Older protocols, save formats, and rulesets are rejected
 rather than migrated or silently upgraded.
 
 | Area | Status | Implemented scope |
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
-| Simulation | Complete for the slice | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, pickup, inventory, doors, stairs |
+| Simulation | Complete for the slice | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Geometry | Complete for the slice | Bounded 3D regions, rotated and elevated joins, finite stone volumes, actor-relative scenes |
 | Perception | Complete for the slice | Symmetric shadowcasting, disclosed surfaces/entities, opaque cell keys, stale client memory |
 | Server and persistence | Complete for the slice | Local authenticated WebSockets, action journal, save/replay, protocol validation, history and annotations |
 | Clients | Complete for the slice | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for the slice | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
 | Navigation and interaction | Complete for milestone 3 | Known-cell travel, hazard/cancellation boundaries, prose/examination, clarification, compound pickup/doors, durable places, semantic narration, slow-client recovery acceptance |
-| Dungeon gameplay | Not started | Equipment, combat, enemies, death, exit objective, authored/generated scenario inputs |
+| Authored scenarios | Complete for bounded authored worlds | TOML packages, offline validation, pinned inputs, and converted test setups |
+| Item knowledge | Complete for milestone 4b | Compatible stacks, seeded appearances, character-owned identities, disclosure and recovery |
+| Dungeon gameplay | Not started | Equipment, combat, enemies, death, exit objective, generated scenarios |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
 The current fixture, compatibility behavior, and checks are described in the
@@ -75,7 +77,7 @@ The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
 work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks feature work. Milestone 3 is complete; milestone 4a is next. The unresolved
+blocks feature work. Milestones 3, 4a and 4b are complete; milestone 4c is next. The unresolved
 3p findings and acceptance criteria
 remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
@@ -195,23 +197,27 @@ planned route or future outcome, and ambiguity never consumes simulation time.
 
 ### 4a — Authored scenario packages and offline validation
 
-Next implementation milestone after milestone 3 closeout.
+Complete for bounded authored worlds. See [scenario packages](scenario-packages.md)
+for the format, limits, compatibility, and local verification.
 
-Build the real scenario format before the first dungeon. Packages contain world
+Ordinary TOML packages precede the first dungeon. Packages contain world
 and zones, region geometry/gravity/anchors, local outgoing portals and placements,
 archetypes with instance overrides, theme pools, controller assignments, and
 objectives. World themes provide defaults; zones replace their pools. Player
 starts use anchors; mobs initially use authored placements instantiated at region
-activation. Support optional starting characters omitted or controlled by AI.
+activation. Starting characters are selected by server option; unselected
+characters can be omitted. Gravity, AI, and victory declarations are validated
+and retained, but configurations requiring those mechanics are refused until
+4c/4d. All authored regions are active in 4a; streaming follows in 4e.
 
-Use author-controlled major.minor versions and stable IDs, exact content hashes
+Packages use author-controlled major.minor versions and stable IDs, exact content hashes
 and dependency identities, and an explicit validation utility. Any authored edit
 requires revalidation. Startup uses inexpensive integrity checks and refuses
 unvalidated/stale scenarios by default; runtime development options can permit
 them. Structural and deterministic validation are required, with explicit limits
 on large-world sampling rather than an exhaustive gameplay proof.
 
-Acceptance: ordinary packages load in normal and wizard games and real client
+Verified: ordinary packages load in normal and wizard games and real client
 process tests; invalid references, anchors, geometry, and stale validation fail
 with useful diagnostics. Assertions remain in tests. Wizard can mutate loaded
 structure and existing saves; journal edits, mark validation broken only when
@@ -219,6 +225,9 @@ appropriate, and preserve the separate permanent wizard-lineage flag. Package
 authorship must not rely on a script of wizard setup commands.
 
 ### 4b — Items and character knowledge foundations
+
+Status: complete, with Windows verification and recorded performance limitations. See [items](items.md).
+4a and 4b will be published together in one feature PR, at the user's direction.
 
 Add pickup/drop/inventory with quantities, multiple items per cell, explicitly
 stackable archetypes and matching-property merge rules. Keep ownership/identity

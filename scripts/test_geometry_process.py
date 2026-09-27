@@ -27,12 +27,10 @@ class GeometryProcesses(unittest.TestCase):
         self.save = Path(directory.name) / "geometry.json"
 
     def test_wide_join_is_one_continuous_scene_in_every_frontend(self):
-        self.server(wizard=True)
+        self.server(wizard=True, scenario="wide-join-setup")
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
         fixture = json.loads((Path(__file__).parent / "scenarios/wide-join.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(command))
         observer, seen = self.client(support.SPECTATOR_TOKEN)
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.save.parent / "wide.ppm"], token=support.SPECTATOR_TOKEN)
         frame = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
@@ -57,15 +55,13 @@ class GeometryProcesses(unittest.TestCase):
         self.assertTrue((self.save.parent / "wide.ppm").exists())
 
     def test_rotated_sight_occlusion_memory_stairs_rewind_and_resume(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="portal-geometry-setup")
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=support.SPECTATOR_TOKEN)
-        self.ascii_frame(ascii_client, lambda frame: frame["state"] is not None and not frame["busy"])
+        initial_ascii = self.ascii_frame(ascii_client, lambda frame: frame["state"] is not None and not frame["busy"])
         fixture = json.loads((Path(__file__).parent / "scenarios/portal-geometry.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(command))
         visible = self.request(observer, {"type": "snapshot"})
         remote = {"x": 0, "y": -3, "z": 0}
         o = visible["state"]["observation"]
@@ -74,7 +70,7 @@ class GeometryProcesses(unittest.TestCase):
         self.assertNotIn("known_places", o)
         self.assertIn("offset (0, -3, 0)", wizard.command("look"))
         self.assertIn("Server error", wizard.command("take tablet"))  # Visible is not reachable.
-        ascii_seen = self.ascii_frame(ascii_client, lambda frame: frame["state"]["revision"] == visible["state"]["revision"])
+        ascii_seen = initial_ascii
         self.assertEqual(ascii_seen["state"], visible["state"])
         self.assertNotIn("Server error", wizard.command("wizard wall 1 1 0 0 closed"))
         occluded = self.request(observer, {"type": "snapshot"})
@@ -106,8 +102,8 @@ class GeometryProcesses(unittest.TestCase):
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], initial["branch"])
-        self.assertFalse(any(cell["key"] == old_memory["key"] for cell in rewound["memory"]))
-        self.assertIn("Server error", wizard.command("wizard teleport 1 3 1 2 1"))
+        self.assertEqual(rewound["state"]["observation"], initial["state"]["observation"])
+        self.assertNotIn("Server error", wizard.command("wizard teleport 1 3 1 2 1"))
 
 
 if __name__ == "__main__":

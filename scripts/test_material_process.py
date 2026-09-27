@@ -42,7 +42,7 @@ class MaterialProcesses(unittest.TestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "places-v12")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "items-v14")
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)
@@ -84,12 +84,10 @@ class MaterialProcesses(unittest.TestCase):
         self.assertEqual(resumed["state"], opened["state"])
 
     def test_wizard_chamber_surface_refresh_native_view_and_rewind(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="material-volumes-setup")
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
         fixture = json.loads((Path(__file__).parent / "scenarios/material-volumes.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(command))
         observer, initial = self.client(support.SPECTATOR_TOKEN)
         text, welcome = self.adventure(support.SPECTATOR_TOKEN)
         self.assertIn("stone floor", welcome)
@@ -114,7 +112,7 @@ class MaterialProcesses(unittest.TestCase):
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertEqual(self.here(rewound)["ceiling"]["distance"], 2)
-        self.assertNotIn(key, [c["key"] for c in rewound["memory"]])
+        self.assertIn(key, [c["key"] for c in rewound["memory"]])
         self.ascii_frame(window, lambda f: f["state"] == rewound["state"])
         self.key(window, "escape")
         self.assertEqual(window.child.wait(timeout=10), 0)

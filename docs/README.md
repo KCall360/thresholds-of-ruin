@@ -37,6 +37,8 @@ until its guide and the roadmap are updated together.
 | Configure saves and understand crash recovery | [Background saving](background-saving.md) |
 | Understand bounded replay and retained history | [Checkpoints](checkpoints.md) |
 | Run the server or integrate a client | [Protocol and persistence](protocol.md) |
+| Author and validate a scenario | [Scenario packages](scenario-packages.md) |
+| Transfer item quantities and understand identification | [Items and character knowledge](items.md) |
 | Play in a terminal | [Text client](text-client.md) |
 | Play in a native window | [Graphical ASCII client](ascii-client.md) |
 | Drive scripted acceptance scenarios | [Headless client](headless-client.md) |

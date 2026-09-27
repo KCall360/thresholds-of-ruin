@@ -46,7 +46,10 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
             let door = game.place_door(door_cell, false).unwrap();
             let action = [
                 Action::Wait,
-                Action::Take(item),
+                Action::Take {
+                    item,
+                    quantity: None,
+                },
                 Action::SetDoor { door, open: true },
                 Action::Move(Direction::North),
                 Action::Move(Direction::NorthEast),
@@ -58,9 +61,17 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
             assert_eq!(outcome.next_tick, if acting_second { 100 } else { 0 });
             let observed = game.observe(actor).unwrap();
             match action {
+                Action::Drop { .. } => unreachable!("tested separately"),
                 Action::Wait => assert_eq!(outcome.kind, OutcomeKind::Waited),
-                Action::Take(_) => {
-                    assert_eq!(outcome.kind, OutcomeKind::Taken { item });
+                Action::Take { .. } => {
+                    assert_eq!(
+                        outcome.kind,
+                        OutcomeKind::Taken {
+                            item,
+                            result: item,
+                            quantity: 1
+                        }
+                    );
                     assert!(observed.inventory.iter().any(|entry| entry.id == item));
                     assert!(observed.ground_items.iter().all(|entry| entry.id != item));
                 }
@@ -80,7 +91,7 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
                 }
             }
             let expected_recovery = match action {
-                Action::Take(_) => cost / 2,
+                Action::Take { .. } => cost / 2,
                 Action::Move(Direction::NorthEast) => {
                     if acting_second {
                         425
@@ -111,7 +122,10 @@ fn recovery_overflow_rejects_each_action_before_applying_its_effect() {
         let door = game.place_door(cell(2, 1), false).unwrap();
         let action = [
             Action::Wait,
-            Action::Take(item),
+            Action::Take {
+                item,
+                quantity: None,
+            },
             Action::SetDoor { door, open: true },
             Action::Move(Direction::North),
             Action::Move(Direction::NorthEast),

@@ -1,0 +1,11 @@
+# Ordinary authored scenario; validate after every edit.
+format = 1
+id = "place-hints-setup"
+version = "1.0"
+ruleset = "items-v14"
+files = ["regions.toml"]
+default_character = 1
+themes = ["stone"]
+zones = { "entry" = {  } }
+archetypes = { "token" = { "name" = "copper token" }, "tablet" = { "name" = "stone tablet" } }
+characters = [{ "id" = 1, "anchor" = "1/start", "turn_ticks" = 100 }]

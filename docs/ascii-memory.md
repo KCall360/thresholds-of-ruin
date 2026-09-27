@@ -46,7 +46,7 @@ actor exclusion, elevation, snapshots, rewind, ambiguous views, overflow, bounde
 storage, and atomic rejection of invalid updates. ASCII tests check glyphs, grey
 pixels, remembered elevation panels, clipping, and mouse targets.
 
-`scripts/scenarios/ascii-memory.json` and `scripts/test_ascii_memory_process.py`
+`scenarios/tests/ascii-memory-*` and `scripts/test_ascii_memory_process.py`
 exercise real server/headless/text/native ASCII processes: normal door occlusion,
 movement, pickup and revisiting, a rotated crossing, hidden actors and item changes,
 spectators, rewind, and save/resume with fresh client memory. They assert both

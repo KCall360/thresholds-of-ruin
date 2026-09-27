@@ -54,7 +54,7 @@ successful retry. Rewind cannot clear the marker.
 ## Format 6
 
 The format-6 compatibility decision rejects format 5, as explicitly authorized
-for this pre-release checkpoint change. Protocol 13 and `places-v12` are unchanged.
+for this pre-release checkpoint change. Current games use protocol 14 and `items-v14`; format 8 adds pinned scenario inputs.
 Only the current format is supported; old JSON and format-4/5 SQLite saves are rejected without an
 importer. The filename extension is immaterial. The database uses bundled SQLite
 through `rusqlite`, confined to the server crate. The `journal` table holds the

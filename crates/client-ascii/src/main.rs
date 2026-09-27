@@ -48,9 +48,9 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::U => Key::NorthEast,
         NativeKey::B => Key::SouthWest,
         NativeKey::N => Key::SouthEast,
-        NativeKey::D => Key::Descend,
         NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
+        NativeKey::D => Key::Drop,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -93,7 +93,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -222,7 +222,9 @@ fn window_loop(
         let typed = std::mem::take(&mut *text.borrow_mut());
         if input.is_none() {
             // Send text only to an already-open editor.
-            if (app.note.is_some() || app.place_name.is_some()) && !typed.is_empty() {
+            if (app.note.is_some() || app.place_name.is_some() || !app.pickup.is_empty())
+                && !typed.is_empty()
+            {
                 inputs.push(Input::Text {
                     text: typed.clone(),
                 });

@@ -81,7 +81,24 @@ impl HistoryEntry {
                             _ => unreachable!("movement has a move action"),
                         },
                     },
-                    Event::Taken { item } => VisibleEvent::Taken { item: *item },
+                    Event::Taken {
+                        item,
+                        result,
+                        quantity,
+                    } => VisibleEvent::Taken {
+                        item: *item,
+                        result: *result,
+                        quantity: *quantity,
+                    },
+                    Event::Dropped {
+                        item,
+                        result,
+                        quantity,
+                    } => VisibleEvent::Dropped {
+                        item: *item,
+                        result: *result,
+                        quantity: *quantity,
+                    },
                     Event::Waited => VisibleEvent::Waited,
                 },
             },
@@ -159,9 +176,24 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    DoorChanged { door: u64, open: bool },
-    Moved { from: Position, to: Position },
-    Taken { item: u64 },
+    DoorChanged {
+        door: u64,
+        open: bool,
+    },
+    Moved {
+        from: Position,
+        to: Position,
+    },
+    Taken {
+        item: u64,
+        result: u64,
+        quantity: u64,
+    },
+    Dropped {
+        item: u64,
+        result: u64,
+        quantity: u64,
+    },
     Waited,
 }
 
@@ -175,6 +207,10 @@ pub enum WizardItem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardOperation {
+    IdentifyItem {
+        actor: ActorId,
+        item: u64,
+    },
     PlaceChamber {
         region: RegionView,
     },
@@ -228,6 +264,7 @@ pub enum WizardOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WizardResult {
+    ItemIdentified,
     DoorPlaced {
         door: u64,
     },
@@ -266,6 +303,7 @@ pub enum HistoryContent {
     },
     Wizard {
         operation: WizardOperation,
+        validation: Option<bool>,
         result: WizardResult,
     },
     Action {

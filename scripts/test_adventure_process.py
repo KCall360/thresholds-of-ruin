@@ -50,12 +50,9 @@ class AdventureProcesses(unittest.TestCase):
         process.child.stdin.write(text + "\n")
         process.child.stdin.flush()
 
-    def wizard(self, fixture, section="setup"):
+    def wizard(self):
         wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
-        scenario = json.loads((Path(__file__).parent / "scenarios" / fixture).read_text())
-        for operation in scenario[section]:
-            self.assertNotIn("Server error", wizard.command(operation))
         wizard.command("release")
         return wizard
 
@@ -131,14 +128,12 @@ class AdventureProcesses(unittest.TestCase):
         self.assertIn("empty-handed", self.say(player, "inventory"))
 
     def test_directional_interruption_is_one_narrative_response(self):
-        self.server(wizard=True)
-        self.wizard("text-adventure.json", "hazard")
+        self.server(scenario="text-adventure-hazard")
         player, _ = self.adventure()
         self.assertEqual("You start walking east, but stop when a figure comes into view.\n> ", self.say(player, "go east"))
 
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
-        self.server(wizard=True)
-        self.wizard("portal-geometry.json")
+        self.server(scenario="portal-geometry-setup")
         player, welcome = self.adventure()
         self.assertIn("walls of stone", welcome)
         self.assertIn("made of stone", self.say(player, "examine walls"))
@@ -152,8 +147,7 @@ class AdventureProcesses(unittest.TestCase):
             self.assertNotIn(hidden, "\n".join(player.transcript))
 
     def test_wide_join_direction_then_approach_works_without_region_names(self):
-        self.server(wizard=True)
-        self.wizard("wide-join.json")
+        self.server(scenario="wide-join-setup")
         player, _ = self.adventure()
         self.assertIn("You walk east.", self.say(player, "east"))
         self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
@@ -166,8 +160,7 @@ class AdventureProcesses(unittest.TestCase):
         for section, expected_phase in (("hazard", "hazard"), ("arrival_hazard", "arrived")):
             with self.subTest(section=section):
                 self.setUp()
-                server = self.server(wizard=True)
-                wizard = self.wizard("text-adventure.json", section)
+                server = self.server(scenario="text-adventure-" + section)
                 player, welcome = self.adventure()
                 self.assertNotIn("figure", welcome)
                 interrupted = self.say(player, "take tablet")
@@ -179,11 +172,11 @@ class AdventureProcesses(unittest.TestCase):
                 self.assertEqual(state["travel"]["completed_steps"], 1)
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
                 self.assertIn("unremarkable figure", self.say(player, "examine figure"))
-                for process in (player, wizard, observer, server): process.stop()
+                for process in (player, observer, server): process.stop()
 
     def test_clarification_is_free_and_wizard_rewind_clears_pending_pickup(self):
-        self.server(wizard=True)
-        wizard = self.wizard("text-adventure.json", "clarification")
+        self.server(wizard=True, scenario="text-adventure-clarification")
+        wizard = self.wizard()
         player, _ = self.adventure()
         flush_save(self)
         before = self.save.read_bytes()

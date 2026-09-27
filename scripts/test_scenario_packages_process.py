@@ -1,0 +1,56 @@
+"""Offline validation and ordinary package startup through actual executables."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+import test_text_process as support
+
+
+class ScenarioPackageProcesses(unittest.TestCase):
+    setUpClass = classmethod(support.TextProcesses.setUpClass.__func__)
+
+    def test_validator_stale_rejection_and_ordinary_startup(self):
+        directory = support.ProcessTestDirectory()
+        self.addCleanup(directory.cleanup)
+        package = Path(directory.name) / 'package'
+        shutil.copytree(support.ROOT / 'scenarios/two-room', package)
+        path = package / 'regions.toml'
+        path.write_text(path.read_text() + '\n# author revision\n')
+        env = {k:v for k,v in os.environ.items() if k not in ('TOR_WIZARD_TOKEN','TOR_SPECTATOR_TOKEN')}
+        env['TOR_SERVER_TOKEN'] = support.TOKEN
+        result = subprocess.run([self.bin / ('tor-server' + self.suffix), '--scenario', package,
+                                 '--save', Path(directory.name) / 'game.db'], env=env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unvalidated or stale', result.stderr)
+        self.assertFalse((Path(directory.name) / 'game.db').exists())
+        result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        certificate = json.loads(result.stdout)
+        self.assertEqual(certificate['regions'], 2)
+        self.assertIn('all authored regions', certificate['coverage'])
+        server = support.Process(self.bin / ('tor-server' + self.suffix),
+                                 ['--listen','127.0.0.1:0','--scenario',package,'--save',Path(directory.name)/'game.db'])
+        self.addCleanup(server.stop)
+        address = json.loads(server.until(lambda line:line.startswith('{')))['address']
+        client = support.Process(self.bin / ('tor-client-text' + self.suffix),['--connect',address,'--script'])
+        self.addCleanup(client.stop)
+        client.until(lambda line:line=='Ready.')
+        self.assertIn('Waited',client.command('wait'))
+        client.stop(); server.stop()
+        manifest = package / 'scenario.toml'
+        manifest.write_text(manifest.read_text().replace('1/start', '1/missing'))
+        invalid = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                 capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(invalid.returncode, 0)
+        error = json.loads(invalid.stderr)['error']
+        self.assertEqual(error['code'], 'scenario_invalid')
+        self.assertIn('anchor', error['message'])
+
+
+if __name__ == '__main__':
+    unittest.main()

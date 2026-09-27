@@ -3,7 +3,7 @@ use tor_protocol::*;
 
 pub mod adventure;
 
-pub const HELP: &str = "Commands: places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -79,31 +79,45 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 limit: 50,
             }))
         }
-        ("take" | "get", noun) if !noun.is_empty() => {
+        ("take" | "get" | "drop", noun) if !noun.is_empty() => {
+            let (quantity, noun) = item_quantity(noun)?;
             let noun = noun.to_lowercase();
             let noun = noun.strip_prefix("the ").unwrap_or(&noun);
-            let mut matches: Vec<_> = state
-                .observation
-                .ground_items
-                .iter()
-                .filter(|item| {
-                    if let Some(id) = noun.strip_prefix('#') {
-                        return id.parse::<u64>() == Ok(item.item.id);
-                    }
-                    let name = item.item.name.to_lowercase();
-                    !noun.is_empty() && (name == noun || name.ends_with(&format!(" {noun}")))
-                })
+            let items: Vec<_> = if verb == "drop" {
+                state.observation.inventory.iter().collect()
+            } else {
+                state
+                    .observation
+                    .ground_items
+                    .iter()
+                    .map(|i| &i.item)
+                    .collect()
+            };
+            let mut matches: Vec<_> = items
+                .into_iter()
+                .filter(|item| item_matches(noun, item))
                 .collect();
-            matches.sort_by_key(|item| item.item.id);
-            matches.dedup_by_key(|item| item.item.id);
+            matches.sort_by_key(|item| item.id);
+            matches.dedup_by_key(|item| item.id);
             match matches.as_slice() {
-                [item] => action(Action::Take { item: item.item.id }),
-                [] => Err("No disclosed ground item matches that name.".into()),
+                [item] => action(if verb == "drop" {
+                    Action::Drop {
+                        item: item.id,
+                        quantity,
+                    }
+                } else {
+                    Action::Take {
+                        item: item.id,
+                        quantity,
+                    }
+                }),
+                [] => Err("No disclosed item matches that name.".into()),
                 _ => Err(format!(
-                    "Which item? Use take #id: {}",
+                    "Which item? Use {} [quantity] #id: {}",
+                    verb,
                     matches
                         .iter()
-                        .map(|i| format!("{} (#{})", safe(&i.item.name), i.item.id))
+                        .map(|i| format!("{} x {} (#{})", i.quantity, safe(&i.name), i.id))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),
@@ -231,7 +245,8 @@ pub fn describe(state: &StateView) -> String {
     )];
     for item in &o.ground_items {
         lines.push(format!(
-            "You see {} (#{}), at offset ({}, {}, {}).{}",
+            "You see {} x {} (#{}), at offset ({}, {}, {}).{}",
+            item.item.quantity,
             safe(&item.item.name),
             item.item.id,
             item.position.x,
@@ -281,6 +296,40 @@ pub fn describe(state: &StateView) -> String {
     lines.join("\n")
 }
 
+/// An omitted quantity means the whole selected stack.
+pub fn item_quantity(noun: &str) -> Result<(Option<u64>, &str), String> {
+    let (first, rest) = word(noun);
+    if first == "all" && !rest.is_empty() {
+        return Ok((None, rest));
+    }
+    if first.chars().all(|c| c.is_ascii_digit()) && !first.is_empty() {
+        let quantity = first
+            .parse::<u64>()
+            .ok()
+            .filter(|q| *q > 0)
+            .ok_or("Quantity must be a positive integer.")?;
+        if rest.is_empty() {
+            return Err("Which item?".into());
+        }
+        Ok((Some(quantity), rest))
+    } else {
+        Ok((None, noun))
+    }
+}
+
+pub fn item_matches(noun: &str, item: &tor_protocol::ItemView) -> bool {
+    if let Some(id) = noun.strip_prefix('#') {
+        return id.parse::<u64>() == Ok(item.id);
+    }
+    let name = item.name.to_lowercase();
+    let noun = noun.strip_prefix("the ").unwrap_or(noun);
+    !noun.is_empty()
+        && (name == noun
+            || name.ends_with(&format!(" {noun}"))
+            || format!("{name}s") == noun
+            || format!("{name}s").ends_with(&format!(" {noun}")))
+}
+
 pub fn inventory(state: &StateView) -> String {
     if state.observation.inventory.is_empty() {
         return "Inventory: empty.".into();
@@ -291,7 +340,7 @@ pub fn inventory(state: &StateView) -> String {
             .observation
             .inventory
             .iter()
-            .map(|i| format!("{} (#{})", safe(&i.name), i.id))
+            .map(|i| format!("{} x {} (#{})", i.quantity, safe(&i.name), i.id))
             .collect::<Vec<_>>()
             .join(", ")
     )

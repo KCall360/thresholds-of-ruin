@@ -1,0 +1,430 @@
+{
+  "items_v1": [
+    {
+      "items": 16,
+      "identities": 8,
+      "samples": 20,
+      "construction_ms": {
+        "n": 20,
+        "p50": 0.1471,
+        "p95": 0.3441,
+        "maximum": 0.46509999999999996
+      },
+      "knowledge_ms": {
+        "n": 20,
+        "p50": 0.1044,
+        "p95": 0.2392,
+        "maximum": 0.3812
+      },
+      "transfer_ms": {
+        "n": 400,
+        "p50": 0.0629,
+        "p95": 0.1439,
+        "maximum": 0.2251
+      },
+      "client_apply_ms": {
+        "n": 400,
+        "p50": 0.0605,
+        "p95": 0.1618,
+        "maximum": 0.21910000000000002
+      },
+      "client_render_ms": {
+        "n": 400,
+        "p50": 0.5377,
+        "p95": 1.1114,
+        "maximum": 1.9127
+      },
+      "save_ms": {
+        "n": 20,
+        "p50": 12.729600000000001,
+        "p95": 46.971199999999996,
+        "maximum": 110.42250000000001
+      },
+      "resume_ms": {
+        "n": 20,
+        "p50": 3.1064,
+        "p95": 9.7618,
+        "maximum": 13.5821
+      },
+      "disclosed_bytes": {
+        "min": 12883,
+        "max": 12883
+      },
+      "saved_bytes": {
+        "min": 36864,
+        "max": 36864
+      },
+      "observations": {
+        "min": 70,
+        "max": 70
+      },
+      "scenes": {
+        "min": 70,
+        "max": 70
+      },
+      "item_candidates": {
+        "min": 1160,
+        "max": 1160
+      },
+      "stack_candidates": {
+        "min": 170,
+        "max": 170
+      },
+      "knowledge_checks": {
+        "min": 1160,
+        "max": 1160
+      }
+    },
+    {
+      "items": 1000,
+      "identities": 256,
+      "samples": 20,
+      "construction_ms": {
+        "n": 20,
+        "p50": 2.4893,
+        "p95": 3.0745,
+        "maximum": 3.8415
+      },
+      "knowledge_ms": {
+        "n": 20,
+        "p50": 0.49450000000000005,
+        "p95": 0.9600000000000001,
+        "maximum": 0.9601
+      },
+      "transfer_ms": {
+        "n": 400,
+        "p50": 0.8961,
+        "p95": 1.2651,
+        "maximum": 1.8054
+      },
+      "client_apply_ms": {
+        "n": 400,
+        "p50": 0.6181,
+        "p95": 0.8938,
+        "maximum": 2.0694
+      },
+      "client_render_ms": {
+        "n": 400,
+        "p50": 0.896,
+        "p95": 1.3677,
+        "maximum": 1.827
+      },
+      "save_ms": {
+        "n": 20,
+        "p50": 47.6272,
+        "p95": 89.39020000000001,
+        "maximum": 118.7361
+      },
+      "resume_ms": {
+        "n": 20,
+        "p50": 35.2491,
+        "p95": 47.4455,
+        "maximum": 50.435599999999994
+      },
+      "disclosed_bytes": {
+        "min": 218051,
+        "max": 218051
+      },
+      "saved_bytes": {
+        "min": 712704,
+        "max": 712704
+      },
+      "observations": {
+        "min": 70,
+        "max": 70
+      },
+      "scenes": {
+        "min": 70,
+        "max": 70
+      },
+      "item_candidates": {
+        "min": 70040,
+        "max": 70040
+      },
+      "stack_candidates": {
+        "min": 10010,
+        "max": 10010
+      },
+      "knowledge_checks": {
+        "min": 70040,
+        "max": 70040
+      }
+    }
+  ],
+  "scenario_v1": {
+    "before": {
+      "2": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 1.1352,
+          "p95": 3.6243,
+          "maximum": 3.8699
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.13119999999999998,
+          "p95": 0.3268,
+          "maximum": 0.3357
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.0106,
+          "p95": 0.0258,
+          "maximum": 0.045000000000000005
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 37.4013,
+          "p95": 78.3742,
+          "maximum": 80.0205
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 3.6874,
+          "p95": 11.3863,
+          "maximum": 12.801
+        }
+      },
+      "256": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 4.9606,
+          "p95": 5.8407,
+          "maximum": 6.0637
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.7793,
+          "p95": 0.9303,
+          "maximum": 1.1605
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.009300000000000001,
+          "p95": 0.0103,
+          "maximum": 0.0112
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 14.2439,
+          "p95": 38.7462,
+          "maximum": 39.5724
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 10.610100000000001,
+          "p95": 15.4556,
+          "maximum": 16.6719
+        }
+      }
+    },
+    "after": {
+      "2": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 1.0483,
+          "p95": 1.6267,
+          "maximum": 1.7051
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.11900000000000001,
+          "p95": 0.2236,
+          "maximum": 0.2285
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.0095,
+          "p95": 0.0299,
+          "maximum": 0.0451
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 22.4753,
+          "p95": 36.004599999999996,
+          "maximum": 60.888999999999996
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 2.8773,
+          "p95": 4.5115,
+          "maximum": 4.6773
+        }
+      },
+      "256": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 5.2494000000000005,
+          "p95": 7.5338,
+          "maximum": 7.7043
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.8114,
+          "p95": 1.1559000000000001,
+          "maximum": 1.3533
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.0095,
+          "p95": 0.0121,
+          "maximum": 0.0135
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 25.2467,
+          "p95": 36.8009,
+          "maximum": 70.6663
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 11.7136,
+          "p95": 19.4469,
+          "maximum": 30.4047
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Windows local measurements; timings are diagnostic, not cross-machine guarantees.",
+    "The pre-change binary was rebuilt/checked against the uncommitted 4a checkout before item implementation. Its hash is retained; the baseline is not a clean historical Git revision.",
+    "Scenario workload v1 and its timing boundaries are unchanged; new item workload v1 has no pre-4b mechanics baseline.",
+    "Client application and drawing use real client code in process, excluding native-window presentation and network transport. Actual-client behavior is covered separately by process tests.",
+    "Scenario scaling uses disconnected extra regions, not growing exploration; milestone 3p remains open.",
+    "Matched baseline and post-change runs use the same sandbox execution profile. Initial post-change runs with desktop-test permissions are retained separately and are not used as the matched comparison."
+  ],
+  "scenario_repeat_runs": {
+    "1": {
+      "2": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 1.0681,
+          "p95": 3.5672,
+          "maximum": 3.6238
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.133,
+          "p95": 0.4414,
+          "maximum": 0.4986
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.0108,
+          "p95": 0.0409,
+          "maximum": 0.044700000000000004
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 42.666500000000006,
+          "p95": 57.859500000000004,
+          "maximum": 72.59500000000001
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 3.3348,
+          "p95": 12.1754,
+          "maximum": 13.6607
+        }
+      },
+      "256": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 5.2303999999999995,
+          "p95": 6.8004,
+          "maximum": 6.9719
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.8008,
+          "p95": 1.118,
+          "maximum": 1.6793
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.009300000000000001,
+          "p95": 0.0122,
+          "maximum": 0.0133
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 36.3262,
+          "p95": 67.2715,
+          "maximum": 94.03699999999999
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 11.687,
+          "p95": 26.1246,
+          "maximum": 27.2437
+        }
+      }
+    },
+    "2": {
+      "2": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 0.9401999999999999,
+          "p95": 1.8671,
+          "maximum": 3.0814000000000004
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.12010000000000001,
+          "p95": 0.2353,
+          "maximum": 0.6177999999999999
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.0085,
+          "p95": 0.0248,
+          "maximum": 0.0445
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 53.9159,
+          "p95": 63.9635,
+          "maximum": 66.1134
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 3.5477999999999996,
+          "p95": 6.2185,
+          "maximum": 12.4259
+        }
+      },
+      "256": {
+        "integrity_ms": {
+          "n": 20,
+          "p50": 4.9932,
+          "p95": 7.099,
+          "maximum": 7.4559999999999995
+        },
+        "construction_ms": {
+          "n": 20,
+          "p50": 0.8089,
+          "p95": 1.0271,
+          "maximum": 1.0611
+        },
+        "action_ms": {
+          "n": 20,
+          "p50": 0.009300000000000001,
+          "p95": 0.011600000000000001,
+          "maximum": 0.0143
+        },
+        "save_barrier_ms": {
+          "n": 20,
+          "p50": 28.302500000000002,
+          "p95": 42.756299999999996,
+          "maximum": 48.1789
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 11.6986,
+          "p95": 23.8392,
+          "maximum": 26.4437
+        }
+      }
+    }
+  }
+}

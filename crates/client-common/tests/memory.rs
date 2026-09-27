@@ -151,6 +151,9 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            quantity: 1,
+            appearance: String::new(),
+            identified: true,
             description: String::new(),
             id: 7,
             name: "token".into(),
@@ -237,6 +240,9 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            quantity: 1,
+            appearance: String::new(),
+            identified: true,
             description: String::new(),
             id: 8,
             name: "distant token".into(),

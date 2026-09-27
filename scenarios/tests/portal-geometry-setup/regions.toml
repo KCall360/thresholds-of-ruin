@@ -1,0 +1,31 @@
+[[regions]]
+id = 1
+name = "Entry chamber"
+size = [6, 3, 2]
+chamber = true
+zone = "entry"
+walls = [[5, 0, 0], [5, 0, 1], [5, 2, 0], [5, 2, 1], [4, 1, 0]]
+anchors = { "start" = [1, 1, 0], "hall" = [5, 1, 0], "portal-2" = [1, 0, 0] }
+places = [[2, 1, 0]]
+portals = [{ "at" = [5, 1, 0], "direction" = "east", "to" = "2/landing", "height" = 2 }, { "at" = [1, 0, 0], "direction" = "north", "to" = "3/portal-0", "turns" = 1 }]
+doors = [{ "id" = 1, "at" = [5, 1, 0], "open" = true }]
+items = [{ "id" = 1, "at" = [1, 1, 0], "seed_names" = ["copper token", "silver token", "iron token"] }]
+
+[[regions]]
+id = 2
+name = "Gallery"
+size = [5, 3, 2]
+chamber = true
+anchors = { "landing" = [0, 1, 0] }
+places = [[2, 1, 0]]
+portals = [{ "at" = [0, 1, 0], "direction" = "west", "to" = "1/hall", "height" = 2 }]
+items = [{ "id" = 2, "at" = [2, 1, 0], "archetype" = "tablet" }]
+
+[[regions]]
+id = 3
+size = [5, 5, 2]
+name = "Upper gallery"
+chamber = false
+anchors = { "portal-0" = [0, 2, 1], "portal-1" = [1, 2, 0], "portal-2" = [1, 2, 1] }
+portals = [{ "at" = [0, 2, 1], "direction" = "west", "to" = "1/portal-2", "turns" = 3 }, { "at" = [1, 2, 1], "direction" = "down", "to" = "3/portal-1", "turns" = 0 }, { "at" = [1, 2, 0], "direction" = "up", "to" = "3/portal-2", "turns" = 0 }]
+items = [{ "id" = 3, "at" = [1, 2, 1], "archetype" = "tablet" }, { "id" = 4, "at" = [4, 4, 1], "archetype" = "token" }]

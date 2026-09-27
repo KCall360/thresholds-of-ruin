@@ -21,6 +21,20 @@ and an integration acceptance scenario for its complete user-visible behavior.
 Add regression tests for bug fixes. Update the project documentation and milestone
 status with the behavior, limitations, and how the feature is verified.
 
+Preserve agent/conversation context by searching for relevant symbols and sections
+before reading whole files. Start with change summaries, then inspect targeted
+diffs; bound command output and expand only when needed. Reuse established facts
+and decisions, revisiting their sources when they change or uncertainty requires
+it. Summarize investigations with conclusions, evidence paths, and unresolved
+questions rather than full intermediate transcripts. Keep progress updates focused
+on new findings, meaningful changes, and blockers.
+
+At meaningful checkpoints, maintain `docs/session-handoff.md` with current scope,
+decisions, verification summaries and evidence paths, blockers, and next steps.
+Link to authoritative guides instead of duplicating them. Keep bulky reproducible
+details in local logs; context preservation must not skip required work or conceal
+failures, limitations, or evidence needed to assess a conclusion.
+
 Keep successful test output out of agent/conversation context. Run the required
 unit and integration tests, redirecting stdout and stderr to local log files,
 and check their exit codes. Return only a compact pass/fail summary on success;

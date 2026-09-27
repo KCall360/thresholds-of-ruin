@@ -40,11 +40,8 @@ class TravelProcesses(unittest.TestCase):
         return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
 
     def test_ascii_selection_click_cancellation_and_resume(self):
-        server = self.server(wizard=True)
+        server = self.server(wizard=True, scenario="travel-setup")
         wizard = self.wizard()
-        fixture = json.loads((Path(__file__).parent / "scenarios/travel.json").read_text())
-        for command in fixture["setup"]:
-            self.assertNotIn("Server error", wizard.command(command))
         wizard.command("release")
         spectator, _ = self.client(support.SPECTATOR_TOKEN)
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
@@ -108,10 +105,8 @@ class TravelProcesses(unittest.TestCase):
         self.assertFalse(arrived["state"]["wizard_game"])
 
     def test_native_underscore_and_mouse_click(self):
-        self.server(wizard=True)
+        self.server(wizard=True, scenario="travel-setup")
         wizard = self.wizard()
-        fixture = json.loads((Path(__file__).parent / "scenarios/travel.json").read_text())
-        for command in fixture["setup"]: wizard.command(command)
         wizard.command("release")
         capture = Path(os.environ.get("TOR_TRAVEL_CAPTURE", str(self.save.parent / "travel.ppm")))
         client = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
@@ -196,11 +191,8 @@ class TravelProcesses(unittest.TestCase):
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
 
     def travel_scenario(self, setup_name):
-        self.server(wizard=True)
+        self.server(wizard=True, scenario="travel-" + setup_name)
         wizard = self.wizard()
-        fixture = json.loads((Path(__file__).parent / "scenarios/travel.json").read_text())
-        for command in fixture[setup_name]:
-            self.assertNotIn("Server error", wizard.command(command))
         wizard.command("release")
         player, initial = self.client()
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=support.SPECTATOR_TOKEN)

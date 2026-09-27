@@ -1,8 +1,11 @@
 # Checkpoints and retained history
 
-Phase C adds periodic snapshots to background saving. Current games use protocol 13, ruleset
-`places-v12` and save format **7**, rejecting every older format. Format 7 adds
+Phase C adds periodic snapshots to background saving. Current games use protocol 14, ruleset
+`items-v14` and save format **9**, rejecting every older format. Format 7 adds
 shared character-owned place names to the format-6 navigation checkpoint tables.
+Format 8 pins authored scenario inputs and records wizard validation status.
+Format 9 retains item specs, quantities and character identity knowledge; rewind
+restores both knowledge and the item-ID allocator along with quantities/ownership.
 Checkpoints preserve the asynchronous acknowledgement and explicit-save contracts
 in [background saving](background-saving.md).
 

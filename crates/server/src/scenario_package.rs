@@ -1,0 +1,896 @@
+//! Ordinary authored inputs. Filesystem access stays in the server; construction
+//! uses the same deterministic world operations as other simulation callers.
+use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
+use std::path::{Component, Path};
+use std::sync::Arc;
+
+use crate::{Failure, Scenario};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tor_simulation::Game;
+use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
+
+pub const RULESET: &str = "items-v14";
+const VALIDATOR: &str = "tor-scenario-2";
+const MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+fn fail(message: impl AsRef<str>) -> Failure {
+    Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
+}
+fn require(ok: bool, message: impl AsRef<str>) -> Result<(), Failure> {
+    if ok {
+        Ok(())
+    } else {
+        Err(fail(message))
+    }
+}
+fn label(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Manifest {
+    pub format: u32,
+    pub id: String,
+    pub version: String,
+    pub ruleset: String,
+    pub files: Vec<String>,
+    pub default_character: u64,
+    #[serde(default)]
+    pub themes: Vec<String>,
+    #[serde(default)]
+    pub zones: BTreeMap<String, Zone>,
+    #[serde(default)]
+    pub archetypes: BTreeMap<String, Archetype>,
+    #[serde(default)]
+    pub appearance_pools: BTreeMap<String, AppearancePool>,
+    pub characters: Vec<Character>,
+    pub objective: Option<Objective>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Zone {
+    pub themes: Option<Vec<String>>,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppearancePool {
+    pub appearances: Vec<String>,
+    #[serde(default)]
+    pub confounding: bool,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Archetype {
+    pub identity: Option<String>,
+    pub appearance_pool: Option<String>,
+    #[serde(default)]
+    pub stackable: bool,
+    #[serde(default)]
+    pub properties: BTreeMap<String, String>,
+    pub name: Option<String>,
+    pub turn_ticks: Option<u64>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Character {
+    #[serde(default)]
+    pub known_identities: Vec<String>,
+    pub id: u64,
+    pub anchor: String,
+    #[serde(default = "hundred")]
+    pub turn_ticks: u64,
+    #[serde(default = "omit")]
+    pub unselected: String,
+    pub ai: Option<String>,
+}
+fn hundred() -> u64 {
+    100
+}
+fn omit() -> String {
+    "omit".into()
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Objective {
+    pub anchor: String,
+    pub item: Option<u64>,
+    pub disclosed: bool,
+    pub continue_play: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegionFile {
+    pub regions: Vec<RegionDef>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegionDef {
+    pub id: u64,
+    pub name: String,
+    pub size: [i32; 3],
+    #[serde(default)]
+    pub chamber: bool,
+    pub zone: Option<String>,
+    pub gravity: Option<[i32; 3]>,
+    #[serde(default)]
+    pub gravity_overrides: Vec<Gravity>,
+    #[serde(default)]
+    pub anchors: BTreeMap<String, [i32; 3]>,
+    #[serde(default)]
+    pub walls: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub openings: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub places: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub portals: Vec<Portal>,
+    #[serde(default)]
+    pub doors: Vec<Door>,
+    #[serde(default)]
+    pub items: Vec<Item>,
+    #[serde(default)]
+    pub actors: Vec<Actor>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Gravity {
+    pub at: [i32; 3],
+    pub vector: [i32; 3],
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Portal {
+    pub at: [i32; 3],
+    pub direction: String,
+    pub to: String,
+    #[serde(default)]
+    pub turns: u8,
+    #[serde(default = "one")]
+    pub width: u16,
+    #[serde(default = "one")]
+    pub height: u16,
+}
+fn unit_quantity() -> u64 {
+    1
+}
+fn one() -> u16 {
+    1
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Door {
+    pub id: u64,
+    pub at: [i32; 3],
+    pub open: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Item {
+    #[serde(default = "unit_quantity")]
+    pub quantity: u64,
+    pub stackable: Option<bool>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, String>,
+    pub id: u64,
+    pub at: [i32; 3],
+    pub archetype: Option<String>,
+    pub name: Option<String>,
+    pub carried_by: Option<u64>,
+    #[serde(default)]
+    pub seed_names: Vec<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Actor {
+    pub id: u64,
+    pub at: [i32; 3],
+    pub archetype: Option<String>,
+    pub turn_ticks: Option<u64>,
+    /// External control supports deterministic multi-actor test drivers. AI is deferred.
+    #[serde(default = "external")]
+    pub controller: String,
+    pub ai: Option<String>,
+}
+fn external() -> String {
+    "external".into()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Certificate {
+    pub validator: String,
+    pub ruleset: String,
+    pub content_hash: String,
+    pub files: BTreeMap<String, String>,
+    pub regions: usize,
+    pub model_hash: String,
+    pub coverage: String,
+}
+/// Immutable package snapshot embedded in the save, never re-read on resume.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Package {
+    pub manifest: Manifest,
+    pub regions: Vec<RegionDef>,
+    pub certificate: Certificate,
+    pub validated: bool,
+    pub selected: u64,
+}
+
+fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+fn read(root: &Path, relative: &str) -> Result<String, Failure> {
+    require(
+        !relative.is_empty()
+            && Path::new(relative)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_))),
+        "Package paths must be relative without '..'",
+    )?;
+    let base = root
+        .canonicalize()
+        .map_err(|e| fail(format!("{}: {e}", root.display())))?;
+    let path = base
+        .join(relative)
+        .canonicalize()
+        .map_err(|e| fail(format!("{relative}: {e}")))?;
+    require(
+        path.starts_with(&base),
+        "Package file resolves outside package directory",
+    )?;
+    require(
+        path.metadata().map_err(|e| fail(e.to_string()))?.len() <= MAX_BYTES,
+        "Package file exceeds 8 MiB",
+    )?;
+    std::fs::read_to_string(path).map_err(|e| fail(format!("{relative}: {e}")))
+}
+fn parse<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T, Failure> {
+    toml::from_str(text).map_err(|e| fail(format!("{name}: {e}")))
+}
+fn read_package(root: &Path) -> Result<Package, Failure> {
+    let text = read(root, "scenario.toml")?;
+    let manifest: Manifest = parse(&text, "scenario.toml")?;
+    require(manifest.format == 1, "Unsupported scenario format")?;
+    require(
+        manifest.ruleset == RULESET,
+        "Missing exact ruleset dependency",
+    )?;
+    require(label(&manifest.id), "Invalid scenario ID")?;
+    let version: Vec<_> = manifest.version.split('.').collect();
+    require(
+        version.len() == 2
+            && version.iter().all(|v| {
+                !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()) && v.parse::<u32>().is_ok()
+            }),
+        "Version must be author-controlled major.minor",
+    )?;
+    require(
+        !manifest.files.is_empty() && manifest.files.len() <= 256,
+        "Expected 1..256 content files",
+    )?;
+    let mut files = BTreeMap::from([("scenario.toml".into(), digest(text.as_bytes()))]);
+    let mut regions = Vec::new();
+    let mut total = text.len();
+    for file in &manifest.files {
+        require(
+            file.ends_with(".toml") && !files.contains_key(file),
+            "Duplicate or non-TOML content file",
+        )?;
+        let text = read(root, file)?;
+        total += text.len();
+        require(total <= MAX_BYTES as usize, "Package exceeds 8 MiB")?;
+        let content: RegionFile = parse(&text, file)?;
+        regions.extend(content.regions);
+        files.insert(file.clone(), digest(text.as_bytes()));
+    }
+    let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
+    let model_hash =
+        digest(&serde_json::to_vec(&(&manifest, &regions)).map_err(|e| fail(e.to_string()))?);
+    let certificate = Certificate { model_hash, validator: VALIDATOR.into(), ruleset: RULESET.into(), content_hash, files, regions: regions.len(), coverage: "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof".into() };
+    Ok(Package {
+        selected: manifest.default_character,
+        manifest,
+        regions,
+        certificate,
+        validated: false,
+    })
+}
+
+pub fn validate(root: &Path) -> Result<Certificate, Failure> {
+    let mut package = read_package(root)?;
+    package.check()?;
+    for character in &package.manifest.characters {
+        package.selected = character.id;
+        for seed in [0, 1, 42] {
+            require(
+                package.build(seed, false)? == package.build(seed, false)?,
+                "Nondeterministic scenario construction",
+            )?;
+        }
+    }
+    let data = serde_json::to_vec_pretty(&package.certificate).map_err(|e| fail(e.to_string()))?;
+    std::fs::write(root.join("validation.json"), data).map_err(|e| fail(e.to_string()))?;
+    Ok(package.certificate)
+}
+
+pub fn load(
+    root: &Path,
+    seed: u64,
+    selected: Option<u64>,
+    allow_unvalidated: bool,
+) -> Result<Scenario, Failure> {
+    let mut package = read_package(root)?;
+    package.selected = selected.unwrap_or(package.manifest.default_character);
+    package.validated = read(root, "validation.json")
+        .ok()
+        .and_then(|s| serde_json::from_str::<Certificate>(&s).ok())
+        .is_some_and(|c| c == package.certificate);
+    require(
+        package.validated || allow_unvalidated,
+        "Scenario is unvalidated or stale; run tor-scenario validate <directory>",
+    )?;
+    // Cheap identity/capability checks; full geometry proof belongs to the utility.
+    package.check_identity()?;
+    package.supported()?;
+    Ok(Scenario {
+        seed,
+        actors: vec![],
+        regions: package.regions.len() as u64,
+        workload_version: None,
+        package: Some(Arc::new(package)),
+    })
+}
+
+fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
+    Location {
+        region: RegionId(region),
+        position: Position { x, y, z },
+    }
+}
+impl Package {
+    pub fn region_themes(&self, region: u64) -> Option<&[String]> {
+        let region = self.regions.iter().find(|r| r.id == region)?;
+        Some(
+            region
+                .zone
+                .as_ref()
+                .and_then(|z| self.manifest.zones.get(z))
+                .and_then(|z| z.themes.as_deref())
+                .unwrap_or(&self.manifest.themes),
+        )
+    }
+    pub(crate) fn check_identity(&self) -> Result<(), Failure> {
+        require(
+            self.manifest.ruleset == RULESET
+                && self.certificate.ruleset == RULESET
+                && self.certificate.validator == VALIDATOR,
+            "Missing exact package/validator dependency",
+        )?;
+        require(
+            self.certificate.model_hash
+                == digest(
+                    &serde_json::to_vec(&(&self.manifest, &self.regions))
+                        .map_err(|e| fail(e.to_string()))?,
+                ),
+            "Pinned scenario content hash mismatch",
+        )?;
+        require(
+            self.manifest
+                .characters
+                .iter()
+                .any(|c| c.id == self.selected),
+            "Unknown selected character ID",
+        )
+    }
+    fn supported(&self) -> Result<(), Failure> {
+        require(
+            self.manifest.objective.is_none(),
+            "Scenario requires victory mechanics (milestone 4d)",
+        )?;
+        require(
+            !self
+                .regions
+                .iter()
+                .any(|r| r.gravity.is_some() || !r.gravity_overrides.is_empty()),
+            "Scenario requires gravity mechanics (milestone 4c)",
+        )?;
+        require(
+            !self
+                .regions
+                .iter()
+                .flat_map(|r| &r.actors)
+                .any(|a| a.controller == "ai")
+                && !self
+                    .manifest
+                    .characters
+                    .iter()
+                    .any(|c| c.id != self.selected && c.unselected == "ai"),
+            "Scenario requires AI mechanics (milestone 4d)",
+        )
+    }
+    fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
+        let mut anchors = BTreeMap::new();
+        for r in &self.regions {
+            for (name, p) in &r.anchors {
+                require(label(name) && !name.contains('/'), "Invalid anchor ID")?;
+                require(
+                    anchors
+                        .insert(format!("{}/{}", r.id, name), loc(r.id, *p))
+                        .is_none(),
+                    "Duplicate anchor",
+                )?;
+            }
+        }
+        Ok(anchors)
+    }
+    pub fn check(&self) -> Result<(), Failure> {
+        self.check_identity()?;
+        require(
+            (1..=256).contains(&self.regions.len()),
+            "Expected 1..256 authored regions; streaming is deferred",
+        )?;
+        require(
+            !self.manifest.characters.is_empty() && self.manifest.characters.len() <= 64,
+            "Expected 1..64 starting characters",
+        )?;
+        require(
+            self.manifest.themes.iter().all(|s| label(s))
+                && self.manifest.zones.iter().all(|(id, z)| {
+                    label(id) && z.themes.as_ref().is_none_or(|p| p.iter().all(|s| label(s)))
+                }),
+            "Invalid zone/theme identifier",
+        )?;
+        self.appearance_mapping(0)?;
+        let identities: BTreeSet<_> = self
+            .manifest
+            .archetypes
+            .iter()
+            .map(|(id, a)| a.identity.as_ref().unwrap_or(id))
+            .collect();
+        require(
+            self.manifest
+                .characters
+                .iter()
+                .all(|c| c.known_identities.iter().all(|id| identities.contains(id))),
+            "Unknown initial item identity",
+        )?;
+        let mut actor_ids = BTreeSet::new();
+        for c in &self.manifest.characters {
+            require(
+                c.id > 0 && c.id < u64::MAX && actor_ids.insert(c.id) && c.turn_ticks > 0,
+                "Duplicate/invalid character ID or duration",
+            )?;
+            require(
+                matches!(c.unselected.as_str(), "omit" | "ai")
+                    && (c.unselected == "ai") == c.ai.is_some()
+                    && c.ai.as_ref().is_none_or(|s| label(s)),
+                "Invalid unselected character controller",
+            )?;
+        }
+        let mut region_ids = BTreeSet::new();
+        let mut item_ids = BTreeSet::new();
+        let mut door_ids = BTreeSet::new();
+        for r in &self.regions {
+            require(
+                r.id > 0
+                    && region_ids.insert(r.id)
+                    && label(&r.name)
+                    && (1..=32).contains(&r.size[0])
+                    && (1..=32).contains(&r.size[1])
+                    && (1..=8).contains(&r.size[2]),
+                format!("Region {}: invalid ID/name/bounds", r.id),
+            )?;
+            require(
+                r.zone
+                    .as_ref()
+                    .is_none_or(|z| self.manifest.zones.contains_key(z)),
+                "Unknown zone reference",
+            )?;
+            for a in &r.actors {
+                require(
+                    a.id > 0 && a.id < u64::MAX && actor_ids.insert(a.id),
+                    "Duplicate/invalid actor ID",
+                )?;
+                require(
+                    matches!(a.controller.as_str(), "external" | "ai")
+                        && (a.controller == "ai") == a.ai.is_some()
+                        && a.ai.as_ref().is_none_or(|s| label(s)),
+                    "Invalid actor controller",
+                )?;
+            }
+            for i in &r.items {
+                require(
+                    i.id > 0 && i.id < u64::MAX && item_ids.insert(i.id),
+                    "Duplicate/invalid item ID",
+                )?;
+            }
+            for d in &r.doors {
+                require(
+                    d.id > 0 && d.id < u64::MAX && door_ids.insert(d.id),
+                    "Duplicate/invalid door ID",
+                )?;
+            }
+        }
+        for r in &self.regions {
+            for i in &r.items {
+                require(
+                    i.carried_by.is_none_or(|id| actor_ids.contains(&id)),
+                    "Unknown inventory owner",
+                )?;
+            }
+        }
+        for (id, a) in &self.manifest.archetypes {
+            require(
+                label(id)
+                    && a.name.as_ref().is_none_or(|s| label(s))
+                    && a.turn_ticks != Some(0)
+                    && a.properties.len() <= 32
+                    && a.properties.iter().all(|(k, v)| {
+                        label(k) && v.len() <= 80 && !v.chars().any(char::is_control)
+                    }),
+                "Invalid archetype",
+            )?;
+        }
+        let anchors = self.anchors()?;
+        for c in &self.manifest.characters {
+            require(
+                anchors.contains_key(&c.anchor),
+                format!("Character {}: missing anchor {}", c.id, c.anchor),
+            )?;
+        }
+        if let Some(o) = &self.manifest.objective {
+            require(
+                anchors.contains_key(&o.anchor) && o.item.is_none_or(|id| item_ids.contains(&id)),
+                "Invalid objective anchor/item reference",
+            )?;
+        }
+        Ok(())
+    }
+    fn appearance_mapping(&self, seed: u64) -> Result<BTreeMap<String, String>, Failure> {
+        let mut result = BTreeMap::new();
+        let mut signatures = BTreeMap::new();
+        for (key, a) in &self.manifest.archetypes {
+            let identity = a.identity.as_ref().unwrap_or(key);
+            require(label(identity), "Invalid item identity")?;
+            let signature = (&a.name, &a.appearance_pool);
+            if let Some(previous) = signatures.insert(identity, signature) {
+                require(
+                    previous == signature,
+                    "One identity must have one name and appearance pool",
+                )?;
+            }
+            if let Some(pool) = &a.appearance_pool {
+                require(
+                    a.name.is_some() && self.manifest.appearance_pools.contains_key(pool),
+                    "Unknown appearance pool or missing identity name",
+                )?;
+            }
+        }
+        for (key, pool) in &self.manifest.appearance_pools {
+            require(
+                label(key)
+                    && !pool.appearances.is_empty()
+                    && pool.appearances.len() <= 4096
+                    && pool.appearances.iter().all(|s| label(s)),
+                "Invalid appearance pool",
+            )?;
+            let unique: BTreeSet<_> = pool.appearances.iter().collect();
+            require(
+                pool.confounding || unique.len() == pool.appearances.len(),
+                "Duplicate appearances require confounding",
+            )?;
+            let identities: BTreeSet<_> = self
+                .manifest
+                .archetypes
+                .iter()
+                .filter(|(_, a)| a.appearance_pool.as_ref() == Some(key))
+                .map(|(id, a)| a.identity.as_ref().unwrap_or(id))
+                .collect();
+            require(
+                pool.confounding || identities.len() <= pool.appearances.len(),
+                "Appearance pool too small",
+            )?;
+            let mut appearances: Vec<_> = pool.appearances.iter().enumerate().collect();
+            appearances.sort_by_key(|(index, _)| {
+                let mut hash = Sha256::new();
+                hash.update(seed.to_le_bytes());
+                hash.update(key.as_bytes());
+                hash.update((*index as u64).to_le_bytes());
+                <[u8; 32]>::from(hash.finalize())
+            });
+            for (index, identity) in identities.into_iter().enumerate() {
+                result.insert(
+                    identity.clone(),
+                    appearances[index % appearances.len()].1.clone(),
+                );
+            }
+        }
+        Ok(result)
+    }
+    fn archetype(&self, key: &Option<String>) -> Result<Archetype, Failure> {
+        key.as_ref()
+            .map(|key| {
+                self.manifest
+                    .archetypes
+                    .get(key)
+                    .cloned()
+                    .ok_or_else(|| fail(format!("Unknown archetype {key}")))
+            })
+            .unwrap_or(Ok(Archetype::default()))
+    }
+    pub(crate) fn build(&self, seed: u64, runtime: bool) -> Result<Game, Failure> {
+        self.check()?;
+        if runtime {
+            self.supported()?;
+        }
+        let anchors = self.anchors()?;
+        let mut game = Game::new(
+            World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
+            seed,
+        );
+        game.set_material_surfaces(true);
+        for r in &self.regions {
+            let region = Region {
+                id: RegionId(r.id),
+                name: r.name.clone(),
+                bounds: Extent::new(r.size[0], r.size[1], r.size[2])
+                    .ok_or_else(|| fail("Invalid region extent"))?,
+            };
+            (if r.chamber {
+                game.add_chamber(region)
+            } else {
+                game.add_region(region)
+            })
+            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+        }
+        for r in &self.regions {
+            for p in &r.walls {
+                game.set_wall(loc(r.id, *p), true)
+                    .map_err(|e| fail(format!("Region {} wall: {e:?}", r.id)))?;
+            }
+            for p in &r.openings {
+                game.set_wall(loc(r.id, *p), false)
+                    .map_err(|e| fail(format!("Region {} opening: {e:?}", r.id)))?;
+            }
+        }
+        for r in &self.regions {
+            for p in &r.portals {
+                let direction = match p.direction.as_str() {
+                    "north" => Direction::North,
+                    "east" => Direction::East,
+                    "south" => Direction::South,
+                    "west" => Direction::West,
+                    "up" => Direction::Up,
+                    "down" => Direction::Down,
+                    _ => return Err(fail("Invalid portal direction")),
+                };
+                let to = *anchors
+                    .get(&p.to)
+                    .ok_or_else(|| fail(format!("Missing portal anchor {}", p.to)))?;
+                game.connect_area(
+                    Passage {
+                        from: loc(r.id, p.at),
+                        direction,
+                        to,
+                    },
+                    p.turns,
+                    p.width,
+                    p.height,
+                )
+                .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
+            }
+            for p in &r.places {
+                game.set_place_hint(loc(r.id, *p), true)
+                    .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
+            }
+            for g in &r.gravity_overrides {
+                require(
+                    game.authored_cell_valid(loc(r.id, g.at)),
+                    "Gravity override outside traversable geometry",
+                )?;
+            }
+        }
+        for (name, position) in &anchors {
+            require(
+                game.authored_cell_valid(*position),
+                format!("Anchor {name}: outside traversable geometry"),
+            )?;
+        }
+        let mut actors = BTreeMap::new();
+        for c in &self.manifest.characters {
+            if c.id == self.selected || (!runtime && c.unselected == "ai") {
+                actors.insert(
+                    c.id,
+                    (
+                        *anchors
+                            .get(&c.anchor)
+                            .ok_or_else(|| fail("Missing character anchor"))?,
+                        c.turn_ticks,
+                    ),
+                );
+            }
+        }
+        for r in &self.regions {
+            for a in &r.actors {
+                let ticks = a
+                    .turn_ticks
+                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .unwrap_or(100);
+                require(
+                    actors.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
+                    "Duplicate actor ID",
+                )?;
+            }
+        }
+        for (id, (at, ticks)) in actors {
+            game.spawn_authored_actor(
+                id,
+                at,
+                NonZeroU64::new(ticks).ok_or_else(|| fail("Zero actor duration"))?,
+            )
+            .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
+        }
+        let appearances = self.appearance_mapping(seed)?;
+        let mut items: Vec<_> = self
+            .regions
+            .iter()
+            .flat_map(|r| r.items.iter().map(move |i| (r.id, i)))
+            .collect();
+        items.sort_by_key(|(_, i)| i.id);
+        for (region, i) in items {
+            let archetype = self.archetype(&i.archetype)?;
+            let name = if i.seed_names.is_empty() {
+                i.name
+                    .clone()
+                    .or(archetype.name.clone())
+                    .ok_or_else(|| fail("Item needs a name or archetype"))?
+            } else {
+                require(
+                    i.name.is_none(),
+                    "Item cannot have both name and seed_names",
+                )?;
+                i.seed_names[(seed % i.seed_names.len() as u64) as usize].clone()
+            };
+            require(
+                label(&name) && i.seed_names.iter().all(|s| label(s)),
+                "Invalid item name",
+            )?;
+            let key = i.archetype.clone().unwrap_or_else(|| name.clone());
+            let identity = archetype.identity.clone().unwrap_or_else(|| key.clone());
+            let concealed = archetype.appearance_pool.is_some();
+            require(
+                !concealed || (i.name.is_none() && i.seed_names.is_empty()),
+                "Concealed items cannot override their identity name",
+            )?;
+            let appearance = appearances
+                .get(&identity)
+                .cloned()
+                .unwrap_or_else(|| name.clone());
+            let stackable = i.stackable.unwrap_or(archetype.stackable);
+            require(
+                self.manifest.objective.as_ref().and_then(|o| o.item) != Some(i.id) || !stackable,
+                "Objective item instances must be non-stackable",
+            )?;
+            let mut properties = archetype.properties.clone();
+            properties.extend(i.properties.clone());
+            let spec = tor_simulation::ItemSpec {
+                archetype: key,
+                identity,
+                name,
+                appearance,
+                concealed,
+                stackable,
+                properties,
+            };
+            require(
+                i.quantity > 0 && (stackable || i.quantity == 1),
+                "Invalid item quantity or non-stackable count",
+            )?;
+            require(
+                spec.properties.len() <= 32
+                    && spec.properties.iter().all(|(k, v)| {
+                        label(k) && v.len() <= 80 && !v.chars().any(char::is_control)
+                    }),
+                "Invalid item properties",
+            )?;
+            // Inventory of omitted characters is omitted with its owner.
+            if i.carried_by.is_some_and(|id| {
+                self.manifest.characters.iter().any(|c| c.id == id)
+                    && id != self.selected
+                    && (runtime
+                        || self
+                            .manifest
+                            .characters
+                            .iter()
+                            .any(|c| c.id == id && c.unselected == "omit"))
+            }) {
+                continue;
+            }
+            game.place_item_stack(
+                i.id,
+                loc(region, i.at),
+                i.carried_by.map(tor_simulation::ActorId),
+                i.quantity,
+                spec,
+            )
+            .map_err(|e| fail(format!("Item {}: {e:?}", i.id)))?;
+        }
+        for c in &self.manifest.characters {
+            if c.id == self.selected || c.unselected != "omit" {
+                for identity in &c.known_identities {
+                    game.learn_identity(tor_simulation::ActorId(c.id), identity)
+                        .map_err(|_| fail("Unknown initial item identity"))?;
+                }
+            }
+        }
+        let mut doors: Vec<_> = self
+            .regions
+            .iter()
+            .flat_map(|r| r.doors.iter().map(move |d| (r.id, d)))
+            .collect();
+        doors.sort_by_key(|(_, d)| d.id);
+        for (region, d) in doors {
+            game.place_authored_door(d.id, loc(region, d.at), d.open)
+                .map_err(|e| fail(format!("Door {}: {e:?}", d.id)))?;
+        }
+        Ok(game)
+    }
+    /// Only structural edits that invalidate an authored anchor break validation.
+    /// World mutation APIs independently enforce topology/entity consistency.
+    pub(crate) fn state_valid(&self, game: &Game) -> bool {
+        game.authored_links_clear()
+            && self
+                .anchors()
+                .is_ok_and(|anchors| anchors.values().all(|p| game.authored_cell_valid(*p)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn authored_default_matches_existing_fixture_at_every_seed_variant() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = read_package(&root).unwrap();
+        for seed in [0, 1, 2, 42] {
+            let mut actual = package.build(seed, true).unwrap();
+            let mut expected = Game::two_room_in_stone(seed);
+            expected
+                .spawn_actor(loc(1, [1, 1, 0]), NonZeroU64::new(100).unwrap())
+                .unwrap();
+            // Packages now retain archetype identity; the legacy diagnostic
+            // fixture has only ordinary names. Verify the complete disclosed
+            // state and deterministic play rather than erasing that identity.
+            let actor = tor_simulation::ActorId(1);
+            assert_eq!(
+                actual.observe(actor).unwrap(),
+                expected.observe(actor).unwrap()
+            );
+            for action in [
+                tor_simulation::Action::Take {
+                    item: tor_simulation::ItemId(1),
+                    quantity: None,
+                },
+                tor_simulation::Action::Drop {
+                    item: tor_simulation::ItemId(1),
+                    quantity: None,
+                },
+                tor_simulation::Action::Move(Direction::East),
+                tor_simulation::Action::Wait,
+            ] {
+                assert_eq!(actual.act(actor, action), expected.act(actor, action));
+                assert_eq!(
+                    actual.observe(actor).unwrap(),
+                    expected.observe(actor).unwrap()
+                );
+            }
+        }
+    }
+}

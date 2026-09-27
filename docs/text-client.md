@@ -41,6 +41,8 @@ requests **immediate** pickup and fails when out of reach. `look`, `inventory`,
 `wait`, `control`, `release`, `sync`, `history [before-id]`, `note`, `bookmark`,
 `help`, `quit`, and opaque `wizard` commands retain their original behavior.
 Names may be full names or trailing noun phrases; ambiguity asks for `take #id`.
+`take 3 #id` and `drop 2 #id` transfer quantities; omitting the count transfers the
+entire selected stack. Inventory and ground lists display counts.
 This explicit mode keeps existing development scenarios reproducible. The normal
 adventure interface is tested separately through actual client processes.
 
@@ -79,8 +81,8 @@ that user's private notes. Other-user privacy is enforced by the server.
 The server saves accepted actions and notes in background batches. Use `save`
 for an explicit durable barrier; normal quit also saves before disconnecting.
 A crash may roll back recent acknowledged play. Restart with the same save path
-and reconnect to recover the last saved prefix. Protocol 13 and save format 7
-are required; the ruleset remains `places-v12`. See
+and reconnect to recover the last saved prefix. Protocol 14 and save format 9
+are required; the ruleset remains `items-v14`. See
 [background saving](background-saving.md) for timing and failure handling.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
@@ -121,11 +123,17 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 13.
+and selections from an abandoned branch. Server and clients must use protocol 14.
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on
-arrival. Current `places-v12` games support travel.
+arrival. Current `items-v14` games support travel.
 
 [Door interactions](doors.md) add open/close, examination, clarification and
 approach intentions to the adventure interface.
+
+## Item quantities and knowledge
+
+See [items and character knowledge](items.md) for quantity-aware pickup/drop,
+stack identity, randomized appearances, disclosed protocol fields, scenario
+authoring, compatibility, and the versioned item profiling workload.

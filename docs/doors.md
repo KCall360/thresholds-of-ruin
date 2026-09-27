@@ -86,7 +86,7 @@ rejected. Door identity and state rewind with the world. Privileged coordinates
 remain backend-only; ordinary history contains sanitized wizard summaries.
 
 Only the current fixture and rules are supported. Older saves are not migrated.
-All clients must use protocol 13.
+All clients must use protocol 14.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 
@@ -99,7 +99,7 @@ have focused tests. Shared memory tests cover stale door state and refresh.
 Frontend tests cover clarification, intentions, glyphs, selection and commands.
 Raw WebSocket tests enforce spectator and wizard permissions.
 
-`scripts/scenarios/doors.json` and `scripts/test_doors_process.py` drive actual
+`scenarios/tests/doors-*` and `scripts/test_doors_process.py` drive actual
 server/text/headless/native ASCII processes: normal-game approach-and-close,
 native O/C followed by direction keys, actor-perspective spectator agreement, hidden contents and stale
 memory, closed-route rejection, rotated joins, cancellation, arrival hazards,

@@ -364,3 +364,12 @@ command and rewind boundary. Checkpoints share remembered name maps across
 boundaries. Client lists derive visibility only from the current disclosed scene;
 full map persistence and offscreen destination selection remain deferred. See
 [durable place knowledge](place-knowledge.md).
+
+## Authored package boundary
+
+The server owns TOML parsing, file integrity, validation artifacts, and immutable
+scenario inputs in saves. `tor-scenario` explicitly validates complete bounded
+authored packages. Construction calls deterministic simulation/world APIs; these
+crates do not acquire filesystem dependencies. The package schema is independent
+of wizard commands and client protocol types. Clients continue receiving only
+actor-specific observations. See [scenario packages](scenario-packages.md).

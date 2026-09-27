@@ -121,6 +121,9 @@ impl Game {
             || game.items.iter().any(|(id, item)| {
                 id.0 == 0
                     || id.0 >= game.next_item_id
+                    || item.quantity == 0
+                    || (!item.spec.stackable && item.quantity != 1)
+                    || !item.spec.valid()
                     || match item.location {
                         ItemLocation::Ground(location) => !game.world.contains(location),
                         ItemLocation::Carried(actor) => !game.actors.contains_key(&actor),

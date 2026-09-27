@@ -106,7 +106,7 @@ text/ASCII process coverage remains required alongside this headless frontend.
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
 They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `places-v12`.
+[the adventure slice](text-adventure.md). Saves use `items-v14`.
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

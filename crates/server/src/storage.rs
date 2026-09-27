@@ -387,7 +387,7 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
         .map_err(|_| invalid_archive())?;
     // SQLite must get the first opportunity to recover a hot rollback journal,
     // including a partially extended database page from an interrupted write.
-    if version != 7
+    if version != 9
         || app != APP_ID
         || integrity != "ok"
         || file.metadata().map_err(|_| storage_failure())?.len() % page_size != 0
@@ -536,7 +536,7 @@ impl Store {
                 },
             )?;
             let tx = conn.transaction().map_err(|_| storage_failure())?;
-            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=7; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
+            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=9; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
             for (index, record) in initial.records.iter().enumerate() {

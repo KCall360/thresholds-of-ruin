@@ -28,12 +28,9 @@ class AsciiMemoryProcesses(unittest.TestCase):
     def tile(self, frame, x, y=0, z=0):
         return next(t for t in frame["map_tiles"] if t["position"] == {"x":x,"y":y,"z":z})
 
-    def setup_wizard(self, section):
+    def setup_wizard(self):
         wizard = self.launch("tor-client-text", ["--connect",self.address], token=headless.WIZARD_TOKEN)
         wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/ascii-memory.json").read_text())
-        for command in fixture[section]:
-            self.assertNotIn("Server error",wizard.command(command))
         wizard.command("release")
         return wizard
 
@@ -81,8 +78,8 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.assertFalse(any(t["remembered"] for t in resumed["map_tiles"]))
 
     def test_rotated_crossing_keeps_item_aligned_and_rewind_clears_chart(self):
-        self.server(wizard=True)
-        wizard = self.setup_wizard("rotated")
+        self.server(wizard=True, scenario="ascii-memory-rotated")
+        wizard = self.setup_wizard()
         window, initial = self.window()
         self.assertEqual(self.tile(initial,-1)["glyph"],"!")
         self.key(window,"right")
@@ -97,8 +94,8 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.assertFalse(any(t["remembered"] for t in rewound["map_tiles"]))
 
     def test_spectator_hides_unseen_actor_but_retains_item_and_ignores_hidden_changes(self):
-        self.server(wizard=True)
-        wizard = self.setup_wizard("actors")
+        self.server(wizard=True, scenario="ascii-memory-actors")
+        wizard = self.setup_wizard()
         window, initial = self.window(support.SPECTATOR_TOKEN)
         self.assertEqual(self.tile(initial,4)["glyph"],"&")
         self.assertNotIn("Server error",wizard.command("wizard wall 3 2 0 0 closed"))

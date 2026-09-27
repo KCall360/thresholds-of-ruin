@@ -5,6 +5,7 @@ mod developer;
 mod engine;
 pub mod journal;
 pub mod performance_fixture;
+pub mod scenario_package;
 mod session;
 mod storage;
 pub use storage::{inspect_save, SavePolicy, SaveStatus};
