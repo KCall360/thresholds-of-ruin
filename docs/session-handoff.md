@@ -62,6 +62,19 @@ boundaries are recorded in the guide. Timing excludes transport/native presentat
 and does not establish long-history scaling.
 
 The merged 4a/4b main commit `17bab2f` has the same source tree as `818f2f4`;
-publication rebases only the new 4c commit onto that merged main baseline. Review
+implementation commit `d8515fb` was rebased onto that merged main baseline, and
+the normalized source hashes still match the verified code. Review
 the feature PR, require Windows and Linux CI before merging, and obtain user merge
 authorization. Then proceed to 4d. Deferred 3p work remains open.
+
+## Publication blocked pending explicit user approval
+
+Automatic approval review rejected `git push -u origin codex/milestone-4c-physics`
+and PR creation. Its stated reason was that implementation approval did not
+explicitly authorize external disclosure/publication of the private source tree.
+No push or PR creation occurred. Do not retry publication through another tool or
+workaround without user approval. The implementation is complete locally; the
+reviewable PR description is prepared in `.local/4c-pr-body.md`. Ask whether the
+user authorizes pushing this branch to the configured GitHub remote and opening
+its PR. Once authorized, publish, attach the PR to the task, and require Windows
+and Linux CI plus separate merge authorization before merging.
