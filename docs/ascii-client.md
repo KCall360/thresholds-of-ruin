@@ -226,3 +226,13 @@ stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
 
 ASCII F6/F7 browse disclosed height slices without advancing time; spectators can use them too. Mouse selection follows the displayed slice.
+
+## Combat
+
+Press A to select a visible actor, Up/Down to choose, and Enter to attack.
+Manual movement toward a visible hostile attacks by default. Set
+`--bump-attacks hostile|any|off` to choose the client interpretation; travel stops
+instead of attacking. The header shows exact own HP and attack progress; visible
+enemies have qualitative injury descriptions. Space continues saved recovery
+when unready, or performs an ordinary wait when ready. Repeat an interrupted
+attack to resume valid preparation. Victory/death remain visible after restart.

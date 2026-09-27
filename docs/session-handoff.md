@@ -1,80 +1,72 @@
-# Session handoff — milestone 4c complete locally
+# Session handoff — milestone 4d complete locally
 
-Updated 2026-09-27. The user approved the physics proposals and requested all of
-4c before 4d. The implementation is on `codex/milestone-4c-physics`, ready for
-review and Windows/Linux CI. No merge is authorized yet. The [roadmap](milestones.md)
-remains the status source of truth.
+Updated 2026-09-27. The user authorized implementing 4d to completion.
+Branch: `codex/milestone-4d-dungeon`, based on merged 4c PR #34 (`c8efdd5`).
+Implementation is complete and being published as a review PR. Windows/Linux CI
+and review must pass before merge; neither is claimed by local verification.
 
-## Delivered
+The implementation and rule contract are in [dungeon gameplay](dungeon.md).
+The ordinary launch default is `scenarios/first-dungeon`. Protocol 16, save 11,
+ruleset `dungeon-v16`, validator `tor-scenario-4`; no prerelease save migration.
+All 28 authored packages have LF source files and valid regenerated certificates.
 
-See [physics](physics.md): rigid cell bodies, 24 cube rotations, portal straddling,
-averaged local gravity, fixed-point drift and terminal speed, support/sliding,
-actor/item integration, inherited dropped-item motion, impact hooks, authoring and
-wizard inputs, own-body disclosure, height browsing (ASCII F6/F7), and exact
-checkpoint/replay/retry/rewind state. The main plane retains beveled doorway sight;
-height slices use conservative voxel rays. Frame-aware surfaces and stair landings
-remain correctly oriented. Resting waits and same-tick handoffs avoid scene work.
+## Verification and evidence
 
-The default playable character is two cells tall. Crouching/ducking and posture
-changes remain deferred. No HP damage, combat, AI, death, or victory is added; 4d
-owns the first complete dungeon loop. Protocol 15, save/SQLite format 10, ruleset
-`physics-v15`, and validator `tor-scenario-3` intentionally reject older prerelease
-formats. All 24 authored packages validate, including physics and sideways-portal
-acceptance packages. Gravity tables share world geometry across action/rewind state.
+The full Rust workspace passed 307 tests in each debug/release profile, none
+ignored. Formatting, all-target Clippy, private rustdoc with warnings denied,
+architecture, documentation, and all package certificates passed. Evidence:
+`.local/4d-workspace-{debug,release}-complete.log`,
+`.local/4d-clippy-final-complete.log`, `.local/4d-rustdoc-final.log`,
+`.local/4d-packages-lf.log`, `.local/4d-architecture-final.log`, and
+`.local/4d-docs-final.log`.
 
-## Verified locally
+Python debug discovery ran 120 tests: 116 passed, and four hit host temp/mouse
+permission restrictions. The affected modules passed with a workspace-local temp
+directory and desktop access (`.local/4d-python-debug-retry.log`). Full release
+process coverage passed 80 tests (`.local/4d-python-release-qualified.log`) before
+the late checkpoint/performance fixes; full Rust and targeted dungeon acceptance
+were rerun after those fixes.
 
-- Rust: 276 tests each in debug and release, no failures.
-- Python: 114 tests in the full debug suite; 76 release process tests, all passed.
-- Formatting, all-target Clippy, private rustdoc with warnings denied, architecture
-  boundaries, documentation links, and all authored-package validation passed.
-- Real text/ASCII clients cover falling, landing, rotated crossings, body cells,
-  height browsing, blocked movement, saved continuation, and existing interactions.
-- All three desktop launchers connected with fresh saves and cleaned up only owned
-  processes. Final native captures were visually inspected.
+The final dungeon acceptance suite passed all four scenarios in both profiles
+(`.local/4d-dungeon-{debug,release}-complete.log`), exercising the full default
+dungeon, text retrieval/escape and saved victory, native combat, and saved death.
+One preceding debug run timed out on the final text save. It passed in isolation
+and in both subsequent complete runs; no definitive cause was established. The
+test now preserves server diagnostics on a failed save barrier. The same run
+exposed a misleading terminal `look` wait hint, which was fixed; text-client tests
+and all-target lint were rerun (`.local/4d-text-closeout-checks.log`).
 
-Final debug tests used `CARGO_BUILD_JOBS=2` and `CARGO_PROFILE_DEV_DEBUG=0` to avoid
-Windows linker/paging pressure; debug assertions remained enabled. Release used
-the ordinary optimized profile. Earlier failed logs retain build contention,
-native access/startup failures, and the fixed doorway and benchmark regressions;
-final application suites ran sequentially after builds completed.
+Native target-selection, victory, death, and control-hint screenshots were
+inspected (`.local/4d-visual-qa/`). All three existing desktop launchers (ASCII,
+Text, Text + ASCII Spectator) connect to the final release build, preserve fresh
+saves, and clean up owned processes (`.local/4d-desktop-final.log`).
 
-Local evidence is retained under `.local/`: `4c-rust-{debug,release}-publish.log`,
-`4c-python-{debug,release}-publish.log`, `4c-clippy-publish.log`,
-`4c-rustdoc-publish.log`, `4c-fmt-publish.log`, `4c-architecture-publish.log`,
-`4c-docs-publish.log`, `4c-desktop-publish.log`, and `4c-visual-qa/`.
-Normalized implementation hashes are in `4c-source-hashes.json` and are verified
-before publication. Machine-local saves, tokens, logs, and captures stay out of Git.
+## Performance and next milestone
 
-## Performance and next steps
+Long-history profiling caught an AI checkpoint JSON-key bug. Ordered visit entries
+with duplicate rejection fix it; the forced-checkpoint restart regression first
+failed, then passed. Attack visibility avoids unrelated observation fields,
+unchanged ticks avoid duplicate validation, and unchanged scenes avoid navigation
+refresh. Stable operation-count regressions pass. Accepted combat evidence is
+`.local/4d-combat-navigation.jsonl` and its `-summary.json`.
+Two-actor p95 is below 4 ms; eight-actor p95 remains about 11.7 ms, dominated by
+all-actor before/after observations. This is recorded in deferred 3p, with the
+8 ms target unchanged. Full measurements and limitations are in the dungeon guide.
+The matching 4c/4d ordinary workloads also passed: command p95 changed from
+0.946 to 0.964 ms (small) and 3.389 to 3.410 ms (large). Evidence is
+`.local/4d-complete-comparison.json` and the matching JSONL files. Failed and
+pre-optimization evidence remains local; the save timeout excerpt is preserved in
+`.local/4d-save-timeout-investigation.md`.
 
-The [physics guide](physics.md#local-performance-evidence--2026-09-27) records
-reproduction commands, sample counts, p50/p95/max, work/byte counts, and save/resume
-measurements. Matched existing command p95 is 0.968/3.450 ms (small/large), versus
-0.831/2.175 ms baseline. Body/frame-aware perception accounts for the remaining
-increase; scene counts are unchanged. Both existing cases remain below the 8 ms
-p95 target. Dense eight-actor falling still exceeds it and remains a documented
-3p stress-case gap; no target was relaxed and full 3p closure is not claimed.
+Next milestone is 4e. Its plan must account for frozen attack progress/recovery,
+AI memory and visit locations, motion and pending effects, stable item/objective
+references, and deterministic reactivation. Current checkpoint validation assumes
+referenced locations exist in the loaded world; define how inactive regions retain
+those references before changing that invariant. Preserve the ordinary 4d dungeon,
+checkpoint/retry/rewind, disclosure, and native-client acceptance fixtures.
 
-Raw final measurements are `.local/4c-final-*`; failed and earlier optimization
-runs are retained separately. The preserved 4b binary hash and measurement
-boundaries are recorded in the guide. Timing excludes transport/native presentation
-and does not establish long-history scaling.
-
-The merged 4a/4b main commit `17bab2f` has the same source tree as `818f2f4`;
-implementation commit `d8515fb` was rebased onto that merged main baseline, and
-the normalized source hashes still match the verified code. Review
-the feature PR, require Windows and Linux CI before merging, and obtain user merge
-authorization. Then proceed to 4d. Deferred 3p work remains open.
-
-## Publication blocked pending explicit user approval
-
-Automatic approval review rejected `git push -u origin codex/milestone-4c-physics`
-and PR creation. Its stated reason was that implementation approval did not
-explicitly authorize external disclosure/publication of the private source tree.
-No push or PR creation occurred. Do not retry publication through another tool or
-workaround without user approval. The implementation is complete locally; the
-reviewable PR description is prepared in `.local/4c-pr-body.md`. Ask whether the
-user authorizes pushing this branch to the configured GitHub remote and opening
-its PR. Once authorized, publish, attach the PR to the task, and require Windows
-and Linux CI plus separate merge authorization before merging.
+Use `CARGO_BUILD_JOBS=2`, `CARGO_PROFILE_DEV_DEBUG=0`, UTF-8 Python, and workspace-local
+temp files on this Windows host. Avoid editing Rust inputs during builds. Native
+mouse tests need desktop permission. System Python lacks Pillow; the bundled
+runtime Python runs `.local/4d-visual-qa.py`. Local saves, logs, and screenshots
+remain outside Git.

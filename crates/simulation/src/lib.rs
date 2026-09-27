@@ -4,6 +4,8 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 mod actions;
+pub mod ai;
+pub mod combat;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod items;
@@ -38,6 +40,7 @@ pub struct ItemId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    Attack { target: ActorId },
     SetDoor { door: u64, open: bool },
     Move(Direction),
     Take { item: ItemId, quantity: Option<u64> },
@@ -62,6 +65,9 @@ pub enum GameError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    AttackStarted {
+        target: ActorId,
+    },
     DoorChanged {
         door: u64,
         open: bool,
@@ -93,13 +99,14 @@ pub struct ActionOutcome {
     pub actor: ActorId,
     pub at_tick: u64,
     pub kind: OutcomeKind,
-    pub next_actor: ActorId,
+    pub next_actor: Option<ActorId>,
     pub next_tick: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Actor {
+    combat: Option<combat::CombatState>,
     body: BodySpec,
     motion: MotionState,
     location: Location,
@@ -130,6 +137,7 @@ struct Item {
 /// the server layer; no actor receives special player privileges here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
+    combat: combat::CombatWorld,
     physics: physics::Physics,
     material_surfaces: bool,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
@@ -244,6 +252,7 @@ impl Game {
 
     pub fn new(world: World, seed: u64) -> Self {
         Self {
+            combat: combat::CombatWorld::new(seed),
             physics: physics::Physics::default(),
             material_surfaces: false,
             navigation: BTreeMap::new(),
@@ -279,6 +288,7 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                combat: None,
                 body: BodySpec::default(),
                 motion: MotionState::default(),
                 location,
@@ -366,6 +376,11 @@ impl Game {
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
+        if let Some(combat) = &mut actor.combat {
+            if combat.pending.take().is_some() {
+                actor.ready_at = self.tick;
+            }
+        }
         actor.visited.insert(location.region);
         Ok(())
     }
@@ -428,16 +443,33 @@ impl Game {
 
     /// Stable ordering: earliest ready time, then actor identity.
     pub fn next_actor(&self) -> Option<ActorId> {
+        if self.combat.outcome.terminal {
+            return None;
+        }
+        if let Some(id) = self.combat.input_boundaries.iter().find(|id| {
+            self.actors
+                .get(id)
+                .is_some_and(|a| a.alive() && a.ready_at <= self.tick)
+        }) {
+            return Some(*id);
+        }
         self.actors
             .iter()
+            .filter(|(_, a)| {
+                a.combat
+                    .as_ref()
+                    .is_none_or(|c| c.hp > 0 && c.pending.as_ref().is_none_or(|p| !p.active))
+            })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))
             .map(|(id, _)| *id)
     }
 
     fn occupied(&self, location: Location) -> bool {
         self.actors.values().any(|actor| {
-            self.body_cells(actor.location, actor.orientation, &actor.body)
-                .is_some_and(|cells| cells.iter().any(|(at, _)| *at == location))
+            actor.alive()
+                && self
+                    .body_cells(actor.location, actor.orientation, &actor.body)
+                    .is_some_and(|cells| cells.iter().any(|(at, _)| *at == location))
         })
     }
 }

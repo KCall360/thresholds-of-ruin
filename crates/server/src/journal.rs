@@ -30,19 +30,21 @@ impl Command {
     }
 }
 
-impl From<Command> for tor_protocol::Command {
-    fn from(command: Command) -> Self {
+impl TryFrom<Command> for tor_protocol::Command {
+    type Error = &'static str;
+    fn try_from(command: Command) -> Result<Self, Self::Error> {
         match command {
+            Command::PausePreparation => Err("Preparation suspension is backend-only"),
             Command::Wizard {
                 expected_revision,
                 operation,
-            } => Self::Wizard {
+            } => Ok(Self::Wizard {
                 expected_revision,
                 operation: serde_json::to_string(&operation).expect("developer command serializes"),
-            },
+            }),
             other => {
                 serde_json::from_value(serde_json::to_value(other).expect("command serializes"))
-                    .expect("ordinary command has the same schema")
+                    .map_err(|_| "Command has no wire representation")
             }
         }
     }
@@ -71,6 +73,10 @@ impl HistoryEntry {
             HistoryContent::Action { action, event } => Content::Action {
                 action: action.clone(),
                 event: match event {
+                    Event::PreparationPaused => VisibleEvent::PreparationPaused,
+                    Event::AttackStarted { target } => {
+                        VisibleEvent::AttackStarted { target: *target }
+                    }
                     Event::DoorChanged { door, open } => VisibleEvent::DoorChanged {
                         door: *door,
                         open: *open,
@@ -144,6 +150,7 @@ pub struct RegionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    PausePreparation,
     RenamePlace {
         expected_revision: u64,
         key: String,
@@ -176,6 +183,10 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    PreparationPaused,
+    AttackStarted {
+        target: ActorId,
+    },
     DoorChanged {
         door: u64,
         open: bool,

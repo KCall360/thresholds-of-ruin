@@ -423,3 +423,41 @@ with unchanged small/large `latency_bench --case` comparisons.
 See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+## Combat workload v1
+
+`combat_bench` adds a separate workload without changing `performance-v1`.
+It derives ordinary validated packages from `scenarios/tests/dungeon-loop`, scales
+to 2/8 combat actors and 0/1,000 preceding commands, and runs three samples per
+combination. High HP keeps combat active for 64 measured commands per sample.
+
+```sh
+cargo run --release -p tor-server --example combat_bench --locked > combat.jsonl
+python scripts/combat_performance_report.py combat.jsonl > combat-summary.json
+```
+
+Decision selection and profiled engine command intervals are separate (engine
+validation also recomputes an AI decision). Phase totals over measured commands identify
+simulation, perception, navigation, revision comparison, and checkpoint-capture
+cost; reported phase means divide measured totals by the 192-command case size.
+Navigation-refresh counts cover only those measured commands. Disclosed updates are constructed outside the
+client-application interval; ASCII canvas drawing excludes native presentation.
+Save barriers and exact checkpoint restart are measured separately. Scene/body
+work counts include setup-history commands as well as the measured 64-command
+window; disclosed bytes describe the final actor state. Save bytes describe the
+closed durable database. The validator rejects incomplete scale/sample matrices,
+wrong command counts, and nonfinite intervals. Native correctness is covered by
+`scripts/test_dungeon_process.py`; this benchmark does not claim transport or
+input-to-display latency.
+
+For a same-machine comparison, preserve the pre-change release `latency_bench`
+binary and run both versions with these matching ordinary cases:
+
+```sh
+latency_bench --case r8-a1-h100-memory --quick --cycles 5
+latency_bench --case r64-a8-h100-memory --cycles 3
+```
+
+Keep raw samples, p50/p95/max and operation counts with the feature findings in
+[dungeon gameplay](dungeon.md). Do not mix results collected during builds or
+process-test runs. Existing provisional targets and deferred 3p work still apply.

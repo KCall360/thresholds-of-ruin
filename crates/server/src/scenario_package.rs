@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "physics-v15";
-const VALIDATOR: &str = "tor-scenario-3";
+pub const RULESET: &str = "dungeon-v16";
+const VALIDATOR: &str = "tor-scenario-4";
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 fn fail(message: impl AsRef<str>) -> Failure {
@@ -32,6 +32,10 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default)]
+    pub factions: BTreeMap<String, std::collections::BTreeSet<String>>,
+    #[serde(default)]
+    pub ai_profiles: BTreeMap<String, tor_simulation::ai::AiProfile>,
     pub format: u32,
     pub id: String,
     pub version: String,
@@ -64,6 +68,7 @@ pub struct AppearancePool {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    pub combat: Option<tor_simulation::combat::CombatSpec>,
     pub body: Option<tor_simulation::BodySpec>,
     pub identity: Option<String>,
     pub appearance_pool: Option<String>,
@@ -77,6 +82,7 @@ pub struct Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    pub combat: Option<tor_simulation::combat::CombatSpec>,
     pub body: Option<tor_simulation::BodySpec>,
     pub velocity: Option<[i64; 3]>,
     #[serde(default)]
@@ -190,6 +196,7 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
+    pub combat: Option<tor_simulation::combat::CombatSpec>,
     pub body: Option<tor_simulation::BodySpec>,
     pub velocity: Option<[i64; 3]>,
     pub id: u64,
@@ -397,23 +404,44 @@ impl Package {
         )
     }
     fn supported(&self) -> Result<(), Failure> {
-        require(
-            self.manifest.objective.is_none(),
-            "Scenario requires victory mechanics (milestone 4d)",
-        )?;
-        require(
-            !self
-                .regions
-                .iter()
-                .flat_map(|r| &r.actors)
-                .any(|a| a.controller == "ai")
-                && !self
-                    .manifest
-                    .characters
+        for (faction, enemies) in &self.manifest.factions {
+            require(
+                label(faction)
+                    && enemies
+                        .iter()
+                        .all(|e| self.manifest.factions.contains_key(e)),
+                "Invalid faction relationship",
+            )?;
+        }
+        for (name, profile) in &self.manifest.ai_profiles {
+            require(label(name) && profile.valid(), "Invalid AI profile")?;
+        }
+        for spec in self
+            .manifest
+            .characters
+            .iter()
+            .filter_map(|c| c.combat.as_ref())
+            .chain(
+                self.manifest
+                    .archetypes
+                    .values()
+                    .filter_map(|a| a.combat.as_ref()),
+            )
+            .chain(
+                self.regions
                     .iter()
-                    .any(|c| c.id != self.selected && c.unselected == "ai"),
-            "Scenario requires AI mechanics (milestone 4d)",
-        )
+                    .flat_map(|r| &r.actors)
+                    .filter_map(|a| a.combat.as_ref()),
+            )
+        {
+            require(
+                spec.valid()
+                    && (self.manifest.factions.is_empty()
+                        || self.manifest.factions.contains_key(&spec.faction)),
+                "Invalid combat attributes or faction",
+            )?;
+        }
+        Ok(())
     }
     fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
         let mut anchors = BTreeMap::new();
@@ -625,11 +653,9 @@ impl Package {
             })
             .unwrap_or(Ok(Archetype::default()))
     }
-    pub(crate) fn build(&self, seed: u64, runtime: bool) -> Result<Game, Failure> {
+    pub(crate) fn build(&self, seed: u64, _runtime: bool) -> Result<Game, Failure> {
         self.check()?;
-        if runtime {
-            self.supported()?;
-        }
+        self.supported()?;
         let anchors = self.anchors()?;
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
@@ -732,7 +758,7 @@ impl Package {
         }
         let mut actors = BTreeMap::new();
         for c in &self.manifest.characters {
-            if c.id == self.selected || (!runtime && c.unselected == "ai") {
+            if c.id == self.selected || c.unselected == "ai" {
                 actors.insert(
                     c.id,
                     (
@@ -765,7 +791,24 @@ impl Package {
             .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
         }
         for c in &self.manifest.characters {
-            if c.id == self.selected || (!runtime && c.unselected == "ai") {
+            if c.id == self.selected || c.unselected == "ai" {
+                if let Some(spec) = c.combat.clone().or_else(|| {
+                    self.manifest
+                        .objective
+                        .as_ref()
+                        .map(|_| tor_simulation::combat::CombatSpec::default())
+                }) {
+                    game.configure_combat(tor_simulation::ActorId(c.id), spec)
+                        .map_err(|_| fail("Invalid character combat specification"))?;
+                }
+                if c.id != self.selected && c.unselected == "ai" {
+                    let profile =
+                        c.ai.as_ref()
+                            .and_then(|name| self.manifest.ai_profiles.get(name))
+                            .ok_or_else(|| fail("Unknown character AI profile"))?;
+                    game.configure_ai(tor_simulation::ActorId(c.id), profile.clone())
+                        .map_err(|_| fail("AI requires combat attributes"))?;
+                }
                 if let Some(body) = &c.body {
                     game.set_body(tor_simulation::ActorId(c.id), body.clone())
                         .map_err(|_| fail("Character body does not fit"))?;
@@ -778,6 +821,22 @@ impl Package {
         }
         for r in &self.regions {
             for a in &r.actors {
+                if let Some(spec) = a
+                    .combat
+                    .as_ref()
+                    .or(self.archetype(&a.archetype)?.combat.as_ref())
+                {
+                    game.configure_combat(tor_simulation::ActorId(a.id), spec.clone())
+                        .map_err(|_| fail("Invalid actor combat specification"))?;
+                }
+                if a.controller == "ai" {
+                    let profile =
+                        a.ai.as_ref()
+                            .and_then(|name| self.manifest.ai_profiles.get(name))
+                            .ok_or_else(|| fail("Unknown actor AI profile"))?;
+                    game.configure_ai(tor_simulation::ActorId(a.id), profile.clone())
+                        .map_err(|_| fail("AI requires combat attributes"))?;
+                }
                 if let Some(body) = a
                     .body
                     .as_ref()
@@ -859,12 +918,11 @@ impl Package {
             if i.carried_by.is_some_and(|id| {
                 self.manifest.characters.iter().any(|c| c.id == id)
                     && id != self.selected
-                    && (runtime
-                        || self
-                            .manifest
-                            .characters
-                            .iter()
-                            .any(|c| c.id == id && c.unselected == "omit"))
+                    && self
+                        .manifest
+                        .characters
+                        .iter()
+                        .any(|c| c.id == id && c.unselected == "omit")
             }) {
                 continue;
             }
@@ -894,6 +952,34 @@ impl Package {
         for (region, d) in doors {
             game.place_authored_door(d.id, loc(region, d.at), d.open)
                 .map_err(|e| fail(format!("Door {}: {e:?}", d.id)))?;
+        }
+        if self.manifest.characters.iter().any(|c| c.combat.is_some())
+            || self.manifest.objective.is_some()
+        {
+            let objective =
+                self.manifest
+                    .objective
+                    .as_ref()
+                    .map(|o| tor_simulation::combat::Objective {
+                        anchor: anchors[&o.anchor],
+                        item: o.item.map(tor_simulation::ItemId),
+                        disclosed: o.disclosed,
+                        continue_play: o.continue_play,
+                    });
+            let characters = self
+                .manifest
+                .characters
+                .iter()
+                .filter(|c| c.id == self.selected || c.unselected == "ai")
+                .map(|c| tor_simulation::ActorId(c.id))
+                .collect();
+            game.configure_run(
+                tor_simulation::ActorId(self.selected),
+                characters,
+                objective,
+                self.manifest.factions.clone(),
+            )
+            .map_err(|_| fail("Invalid run configuration"))?;
         }
         Ok(game)
     }

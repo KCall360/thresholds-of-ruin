@@ -3,7 +3,7 @@
 //! Validation is read-only and includes recovery-time overflow checks. Effects
 //! and scheduling run immediately afterward, with no callback, yield, or external
 //! mutation between them. A prepared action is transient, never a saved job or a
-//! client-visible promise. Future timed actions must revalidate at each boundary.
+//! client-visible promise. Persisted attack progress revalidates at each boundary.
 
 use crate::{
     movement_cost, Action, ActionOutcome, ActorId, Game, GameError, ItemLocation, OutcomeKind,
@@ -21,12 +21,20 @@ struct PreparedAction {
 
 impl Game {
     /// Apply one valid action atomically. Invalid requests and blocked movement
-    /// are free. Current effects occur immediately, followed by recovery time;
-    /// recovery is not partially completed work and cannot be resumed.
+    /// are free. Immediate actions apply effects before recovery; attacks commit
+    /// wind-up progress. Recovery is not partially completed work and cannot resume.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
         let prepared = self.prepare_action(id, action)?;
+        if let Some((expected, ai)) = self.choose_ai(id) {
+            if expected != action {
+                return Err(GameError::InvalidLocation);
+            }
+            self.combat.ai.insert(id, ai);
+        }
         self.physics.impacts.clear();
+        self.combat.input_boundaries.remove(&id);
         self.physics.displaced.clear();
+        self.combat.events.clear();
         self.apply_action_effect(&prepared);
         Ok(self.finish_action(prepared))
     }
@@ -34,10 +42,32 @@ impl Game {
     /// Action-specific validity and timing are settled before any mutation.
     fn prepare_action(&self, id: ActorId, action: Action) -> Result<PreparedAction, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        self.next_item_id
+            .checked_add(self.actors.len() as u64)
+            .ok_or(GameError::IdentityExhausted)?;
+        if actor.combat.as_ref().is_some_and(|c| c.hp == 0) {
+            return Err(GameError::UnknownActor);
+        }
         if self.next_actor() != Some(id) {
             return Err(GameError::NotActorsTurn);
         }
         let (kind, duration) = match action {
+            Action::Attack { target } => {
+                if !self.attack_available(id, target) {
+                    return Err(GameError::InvalidLocation);
+                }
+                let c = actor.combat.as_ref().unwrap();
+                let duration = c
+                    .pending
+                    .as_ref()
+                    .filter(|p| p.target == target)
+                    .map_or(c.spec.attack.wind_up, |p| p.remaining);
+                self.tick
+                    .checked_add(duration)
+                    .and_then(|t| t.checked_add(c.spec.attack.recovery))
+                    .ok_or(GameError::TimeExhausted)?;
+                (OutcomeKind::AttackStarted { target }, duration)
+            }
             Action::SetDoor { door, open } => {
                 let location = self
                     .world
@@ -127,7 +157,16 @@ impl Game {
         } = *prepared;
         let actor = self.actors.get_mut(&id).expect("actor validated above");
         actor.orientation = new_orientation;
+        if !matches!(
+            kind,
+            OutcomeKind::Waited | OutcomeKind::AttackStarted { .. }
+        ) {
+            if let Some(c) = actor.combat.as_mut() {
+                c.pending = None;
+            }
+        }
         match kind {
+            OutcomeKind::AttackStarted { target } => self.start_attack(id, target),
             OutcomeKind::DoorChanged { door, open } => {
                 let location = self.world.door_location(door).expect("validated door");
                 self.world.set_door(location, open);
@@ -165,10 +204,32 @@ impl Game {
             ..
         } = prepared;
         self.actors.get_mut(&id).expect("validated actor").ready_at = ready_at;
-        let next_actor = self.next_actor().expect("acting actor is still present");
-        let next_tick = self.actors[&next_actor].ready_at;
-        self.advance_physics(next_tick);
-        self.tick = next_tick;
+        self.resolve_attacks();
+        self.check_objective();
+        loop {
+            if self.combat.outcome.terminal {
+                break;
+            }
+            let decision = self.next_actor().map(|id| self.actors[&id].ready_at);
+            let next_tick = match (decision, self.next_attack_tick()) {
+                (Some(a), Some(b)) => a.min(b),
+                (Some(t), None) | (None, Some(t)) => t,
+                (None, None) => self.tick,
+            };
+            let previous_tick = self.tick;
+            self.tick = self.advance_physics(next_tick);
+            if self.tick != previous_tick {
+                self.resolve_attacks();
+                self.check_objective();
+            }
+            if self
+                .next_actor()
+                .is_none_or(|id| self.actors[&id].ready_at <= self.tick)
+            {
+                break;
+            }
+        }
+        let next_actor = self.next_actor();
         ActionOutcome {
             actor: id,
             at_tick,

@@ -61,22 +61,21 @@ catch-up burst. A journey ends on:
 - Cancellation, an accepted manual action, or a replacement travel request.
 - A blocked move or save-queue admission failure; no further steps are attempted.
 - A newly perceived potential hazard relative to the trip's starting view.
-  Currently, other actors count conservatively as potential hazards because
-  hostility is not modeled. Repeated views of your own actor do not count.
+  Other actors conservatively count as potential hazards, including nonhostile
+  actors. Repeated views of your own actor do not count.
   New ordinary terrain, ground items, and place hints do not interrupt travel.
   Hazard detection stops before another step; arrival takes precedence when the
   revealing step also reaches the destination.
 - Another actor requiring input, rather than automatically waiting its turn.
 - Controller release/disconnect or an accepted wizard setup/rewind.
 
-There is no combat, hostility, trap, or dangerous-terrain system yet. The backend
-hazard classification can grow with those mechanics without treating all new
-information as dangerous. Actors already visible when a trip starts do not count
-as new hazards, but still block movement normally. Wizard changes stop active jobs even when their changes are elsewhere.
-
-Damage-triggered interruption is explicitly assigned to milestone 4d alongside
-HP/damage mechanics. [Milestone 3 acceptance](milestone-3-closeout.md) documents
-current narration and slow-client recovery separately from deferred 3p timing.
+Positive HP loss interrupts travel at the next service action boundary; fully
+resisted damage does not. Travel never turns movement into an attack. Actors
+already visible when a trip starts do not count as new hazards, but still block
+movement normally. Wizard changes stop active jobs even when their changes are
+elsewhere. Traps and additional dangerous-terrain classifications remain future
+work. See [dungeon gameplay](dungeon.md) for damage and attack interruption, and
+[milestone 3 acceptance](milestone-3-closeout.md) for narration/recovery coverage.
 
 A cancel request applies at an action boundary and cannot undo committed steps.
 Travel status and active jobs are session-local. Restart restores completed moves,

@@ -2,7 +2,7 @@
 
 Milestone 4a adds ordinary TOML input packages and an explicit offline validator.
 Packages work in normal games and with `--wizard`; authoring does not execute
-wizard commands. Items extend this foundation with protocol 15. Save format 10 and `physics-v15`
+wizard commands. Items extend this foundation with protocol 16. Save format 11 and `dungeon-v16`
 reject earlier pre-release saves; there is no migration.
 
 ## Author and run
@@ -65,13 +65,12 @@ Unselected characters default to omission, including their inventory. Region
 actors specify `id`, `at`, optional archetype/duration, and `controller`.
 `external` supports the existing actor-control/test-driver interface. Optional
 AI assignments use `controller = "ai"`, or character `unselected = "ai"`, plus
-an `ai` identifier. Active AI configurations are refused until milestone 4d.
+an `ai` identifier. AI identifiers resolve to manifest `ai_profiles`; see [dungeon gameplay](dungeon.md).
 
 Region gravity vectors/sparse overrides, body declarations, initial velocity,
 and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
-`continue_play`) remain validated and preserved but runtime refuses victory
-mechanics until 4d. Generation, dependency
+`continue_play`) are implemented in milestone 4d. Generation, dependency
 registries, streaming, equipment and the dungeon loop are outside 4a. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.
@@ -146,3 +145,23 @@ explain its outstanding timing tails, or relax any timing gate.
 See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+## Combat authoring
+
+The manifest declares `factions` as faction names mapped to hostile faction names,
+and `ai_profiles` as names mapped to `memory_ticks` and `flee_percent` settings.
+Actors and characters may specify `combat`; actor archetypes may provide it as a
+default. An instance `combat` record replaces the archetype record as a whole.
+The record supports `name`, `max_hp`, `defense`, `faction`, `attack`, `immunities`,
+and `reductions`. Attack records contain `bonus`, `wind_up`, `recovery`, and a
+`damage` map keyed by damage type. See `scenarios/first-dungeon` for an example.
+
+AI actors require combat attributes and a known AI profile. Unselected AI starting
+characters retain their authored inventory. The selected character begins at an
+explicit input boundary even when its numeric ID follows an AI actor. Ordinary
+actor decisions otherwise retain stable time/identity ordering.
+
+A participating character without an explicit combat record receives the default
+combat attributes when the package defines an objective. This keeps objective-only
+packages observable in both clients, including immediate victory at the start.
+Packages without combat or objectives retain the noncombat diagnostic behavior.

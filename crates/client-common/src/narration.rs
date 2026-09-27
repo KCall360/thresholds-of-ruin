@@ -31,7 +31,42 @@ pub fn observation(
     if let Some(event) = event {
         lines.insert(0, action(event, after));
     }
+    if let Some(combat) = &after.combat {
+        if before.tick != after.tick || before.combat != after.combat {
+            lines.extend(combat.messages.clone());
+            if before.combat.as_ref().is_none_or(|c| {
+                c.hp != combat.hp || c.victory != combat.victory || c.dead != combat.dead
+            }) {
+                lines.push(combat_status(combat));
+            }
+        }
+    }
     lines
+}
+
+pub fn combat_status(c: &CombatView) -> String {
+    let mut text = format!("HP {}/{}", c.hp, c.max_hp);
+    if c.dead {
+        text.push_str(" — You died. This run has ended.");
+    } else if c.victory {
+        text.push_str(if c.terminal {
+            " — Victory! This run has ended."
+        } else {
+            " — Victory! You may continue exploring."
+        });
+    } else if let Some(remaining) = c.preparation_remaining {
+        text.push_str(&format!(
+            " — Attack preparation: {remaining} ticks remaining{}.",
+            if c.preparation_active {
+                ""
+            } else {
+                " (interrupted)"
+            }
+        ));
+    } else if c.recovery_remaining > 0 {
+        text.push_str(&format!(" — Recovering: {} ticks.", c.recovery_remaining));
+    }
+    text
 }
 
 fn describe_changes(
@@ -90,7 +125,7 @@ fn describe_changes(
             ));
         }
     }
-    if before.ready != after.ready {
+    if before.ready != after.ready && after.combat.as_ref().is_none_or(|c| !c.terminal) {
         lines.push(
             if after.ready {
                 "You can act again."
@@ -153,6 +188,8 @@ pub fn action(event: &Event, view: &Observation) -> String {
             format!("You {} the {name}.", if *open { "open" } else { "close" })
         }
         Event::Waited => "Time passes.".into(),
+        Event::PreparationPaused => "Your preparation is paused until you act again.".into(),
+        Event::AttackStarted { .. } => "You prepare to attack.".into(),
     }
 }
 
@@ -274,5 +311,29 @@ mod tests {
         waiting.ready = false;
         assert_eq!(changes(&before, &waiting), ["You must wait."]);
         assert_eq!(changes(&waiting, &before), ["You can act again."]);
+    }
+    #[test]
+    fn terminal_outcomes_do_not_instruct_the_player_to_wait() {
+        let before = observation();
+        for dead in [false, true] {
+            let mut after = before.clone();
+            after.ready = false;
+            after.combat = Some(CombatView {
+                hp: if dead { 0 } else { 30 },
+                max_hp: 30,
+                preparation_remaining: None,
+                preparation_active: false,
+                recovery_remaining: 0,
+                actors: vec![],
+                messages: vec![],
+                objective: None,
+                victory: !dead,
+                dead,
+                terminal: true,
+            });
+            let text = super::observation(&before, &after, None).join(" ");
+            assert!(!text.contains("must wait"));
+            assert!(text.contains(if dead { "You died" } else { "Victory" }));
+        }
     }
 }

@@ -3,7 +3,7 @@ use tor_protocol::*;
 
 pub mod adventure;
 
-pub const HELP: &str = "Commands: places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: attack <actor>, places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -26,6 +26,26 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         }))
     };
     match (verb.as_str(), rest) {
+        ("attack" | "hit" | "fight", noun) => {
+            let mut actors: Vec<_> = state
+                .observation
+                .visible_actors
+                .iter()
+                .filter(|a| {
+                    a.id != state.observation.actor
+                        && (a.name.to_lowercase().contains(&noun.to_lowercase())
+                            || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok())
+                                == Some(a.id.0))
+                })
+                .collect();
+            actors.sort_by_key(|a| a.id);
+            actors.dedup_by_key(|a| a.id);
+            match actors.as_slice() {
+                [actor] => action(Action::Attack { target: actor.id }),
+                [] => Err("No matching actor is visible.".into()),
+                _ => Err("Which actor? Use attack #id.".into()),
+            }
+        }
         ("places", "") => Ok(Input::Places),
         ("name", rest) => rename_place(rest, state),
         ("wizard", rest) => parse_wizard(rest, state.revision),
@@ -67,6 +87,16 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 [] => Err("No matching door is visible.".into()),
                 _ => Err("Which door? Use open #id or close #id.".into()),
             }
+        }
+        ("wait" | ".", "")
+            if !state.observation.ready
+                && state
+                    .observation
+                    .combat
+                    .as_ref()
+                    .is_some_and(|c| !c.terminal) =>
+        {
+            Ok(Input::Request(Request::Continue))
         }
         ("wait" | ".", "") => action(Action::Wait),
         ("control", "") => Ok(Input::Request(Request::AcquireControl)),
@@ -243,6 +273,11 @@ pub fn describe(state: &StateView) -> String {
             "Waiting for another actor."
         }
     )];
+    if let Some(c) = &o.combat {
+        lines.push(tor_client_common::narration::combat_status(c));
+        lines.extend(c.objective.clone());
+        lines.extend(c.messages.clone());
+    }
     for item in &o.ground_items {
         lines.push(format!(
             "You see {} x {} (#{}), at offset ({}, {}, {}).{}",

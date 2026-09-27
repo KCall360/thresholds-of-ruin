@@ -1,7 +1,7 @@
 format = 1
 id = "items"
 version = "1.0"
-ruleset = "physics-v15"
+ruleset = "dungeon-v16"
 files = ["regions.toml"]
 default_character = 1
 characters = [

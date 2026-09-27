@@ -1,0 +1,53 @@
+[[regions]]
+id = 1
+name = "Threshold"
+size = [7,5,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { "west" = [0,2,0], "east" = [6,2,0], "exit" = [1,2,0] }
+places = [[3,2,0]]
+portals = [{ at = [6,2,0], direction = "east", to = "2/west", height = 2 }]
+
+[[regions]]
+id = 2
+name = "Broken gallery"
+size = [7,5,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { "west" = [0,2,0], "east" = [6,2,0], "shortcut" = [3,0,0] }
+places = [[3,2,0]]
+portals = [{ at = [0,2,0], direction = "west", to = "1/east", height = 2 }, { at = [6,2,0], direction = "east", to = "3/west", height = 2 }, { at = [3,0,0], direction = "north", to = "4/shortcut", height = 2 }]
+actors = [{ id = 3, at = [4,2,0], archetype = "scout", controller = "ai", ai = "tactical", turn_ticks = 80 }]
+
+[[regions]]
+id = 3
+name = "Watch chamber"
+size = [7,5,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { "west" = [0,2,0], "east" = [6,2,0] }
+places = [[3,2,0]]
+portals = [{ at = [0,2,0], direction = "west", to = "2/east", height = 2 }, { at = [6,2,0], direction = "east", to = "4/west", height = 2 }]
+actors = [{ id = 4, at = [4,2,0], archetype = "guardian", controller = "ai", ai = "tactical", turn_ticks = 100 }]
+
+[[regions]]
+id = 4
+name = "Ember hall"
+size = [7,5,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { "west" = [0,2,0], "east" = [6,2,0], "shortcut" = [3,4,0] }
+places = [[3,2,0]]
+portals = [{ at = [0,2,0], direction = "west", to = "3/east", height = 2 }, { at = [6,2,0], direction = "east", to = "5/west", height = 2 }, { at = [3,4,0], direction = "south", to = "2/shortcut", height = 2 }]
+actors = [{ id = 5, at = [4,2,0], archetype = "wisp", controller = "ai", ai = "tactical", turn_ticks = 100 }]
+
+[[regions]]
+id = 5
+name = "Reliquary"
+size = [7,5,2]
+chamber = true
+gravity = [0,0,-1]
+anchors = { "west" = [0,2,0], "east" = [6,2,0] }
+places = [[3,2,0]]
+portals = [{ at = [0,2,0], direction = "west", to = "4/east", height = 2 }]
+items = [{ id = 100, at = [4,2,0], name = "dawn seal" }]

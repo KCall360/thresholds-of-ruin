@@ -1,0 +1,10 @@
+format = 1
+id = "dungeon-death"
+version = "1.0"
+ruleset = "dungeon-v16"
+files = ["regions.toml"]
+default_character = 1
+factions = { delvers = ["ruin"], ruin = ["delvers"] }
+ai_profiles = { tactical = { memory_ticks = 200, flee_percent = 0 } }
+objective = { anchor = "1/exit", item = 100, disclosed = true, continue_play = false }
+characters = [{ id = 1, anchor = "1/exit", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 100, wind_up = 20, recovery = 80, damage = { keen = 10 } } } }]

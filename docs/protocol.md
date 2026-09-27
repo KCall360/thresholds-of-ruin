@@ -1,6 +1,6 @@
-# Server protocol and annotations (version 15)
+# Server protocol and annotations (version 16)
 
-The `tor-server` executable serves the two-room simulation over JSON WebSockets.
+The `tor-server` executable serves authored dungeon scenarios over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
 internals. `tor-client-common::ClientState` validates ordered updates and keeps
 the current disclosed state plus a bounded recent history. The shared `Connection`
@@ -55,10 +55,10 @@ allowlist after review; future wizard mutations must remain denied.
 An attached spectator receives every accepted action and result for their actor,
 plus the same disclosed state that a controlling client receives. This includes
 pickup, movement, and wait; rejected commands and local UI inputs are not gameplay
-history. The current game has no combat or autonomous mobs. As these systems are
-added, their perceived actions/events must enter this stream with integration
-coverage. This is an actor-perspective view: hidden rooms and other actors' private
-commands are not exposed. Spectators cannot write even private annotations.
+history. Combat and autonomous actors publish actor-specific health, progress,
+qualitative injuries, and perceived narration through the same stream. This is an
+actor-perspective view: hidden rooms and other actors' private commands and
+numerical combat attributes are not exposed. Spectators cannot write even private annotations.
 
 Annotation privacy still follows authenticated identity and audience. The built-in
 `spectator` user sees actor-visible notes, not `local`'s private notes. The library
@@ -76,7 +76,7 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Saves must use format 10 and ruleset `physics-v15`; older formats
+must upgrade. Saves must use format 10 and ruleset `dungeon-v16`; older formats
 and rulesets are rejected. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
@@ -325,7 +325,7 @@ See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
 surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
-Only protocol 15, save format 10, and `physics-v15` are supported; there are no
+Only protocol 15, save format 10, and `dungeon-v16` are supported; there are no
 historical rules implementations or save importers.
 
 
@@ -356,3 +356,20 @@ and backend frames are never serialized. Visible actor cells can repeat an actor
 ID at different observer-relative positions; undisclosed body cells remain hidden.
 Both clients narrate involuntary motion and impact, and ASCII F6/F7 browse disclosed
 height slices. See [physics](physics.md) for numerical and persistence rules.
+
+## Dungeon combat (protocol 16)
+
+Attack actions carry a disclosed target actor ID. Movement never implicitly
+attacks. Combat observations carry own HP, preparation/recovery, qualitative
+visible-actor injury/hostility, disclosed narration, objective text when enabled,
+and durable victory/death status. They do not carry enemy numerical attributes,
+AI memory, internal coordinates, or RNG state. Non-combat diagnostic fixtures
+omit the optional combat view.
+
+After reconnecting during preparation, a journaled input boundary preserves
+progress and waits for fresh input. Repeat the attack to resume. If a saved run
+is in recovery with AI ready, `continue` resumes autonomous scheduling without
+starting a new player action; text `wait` and ASCII Space issue it while unready.
+Only the attached controller can continue. Spectators cannot request it.
+
+Save format 11 and ruleset `dungeon-v16` reject older prerelease saves.

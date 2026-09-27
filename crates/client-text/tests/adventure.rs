@@ -299,3 +299,37 @@ fn doors_are_examined_clarified_and_approached_without_entering_the_barrier() {
     s.revision += 1;
     assert!(matches!(d.interpret("take door", &s), Intent::Say(_)));
 }
+
+#[test]
+fn attacks_clarify_visible_names_and_never_select_an_unknown_id() {
+    let mut state = state();
+    for id in [2, 3] {
+        state.observation.visible_actors.push(ActorView {
+            id: ActorId(id),
+            name: "ruin guard".into(),
+            description: String::new(),
+            position: Position {
+                x: id as i32,
+                y: 0,
+                z: 0,
+            },
+        });
+    }
+    let mut dialogue = Dialogue::default();
+    assert!(matches!(
+        dialogue.interpret("attack guard", &state),
+        Intent::Say(_)
+    ));
+    assert_eq!(
+        dialogue.interpret("2", &state),
+        Intent::Action(Action::Attack { target: ActorId(3) })
+    );
+    assert_eq!(
+        dialogue.interpret("attack #2", &state),
+        Intent::Action(Action::Attack { target: ActorId(2) })
+    );
+    assert!(matches!(
+        dialogue.interpret("attack #99", &state),
+        Intent::Say(_)
+    ));
+}

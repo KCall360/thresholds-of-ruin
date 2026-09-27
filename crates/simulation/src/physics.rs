@@ -279,6 +279,7 @@ impl Game {
                 self.world.walkable(*at)
                     && !self.actors.iter().any(|(other, a)| {
                         *other != id
+                            && a.alive()
                             && self
                                 .body_cells(a.location, a.orientation, &a.body)
                                 .is_some_and(|other_cells| other_cells.iter().any(|(p, _)| p == at))
@@ -417,20 +418,24 @@ impl Game {
             .is_none()
         })
     }
-    pub(crate) fn advance_physics(&mut self, until: u64) {
+    pub(crate) fn advance_physics(&mut self, until: u64) -> u64 {
         if until <= self.tick {
-            return;
+            return self.tick;
         }
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
-            return;
+            return until;
         }
         for tick in self.tick + 1..=until {
+            self.tick = tick;
             let mut active = false;
             let ids: Vec<_> = self.actors.keys().copied().collect();
             for id in ids {
                 let a = &self.actors[&id];
+                if !a.alive() {
+                    continue;
+                }
                 if !self.needs_integration(
                     PhysicsEntity::Actor(id),
                     a.location,
@@ -458,6 +463,9 @@ impl Game {
                 a.orientation = frame;
                 a.motion = motion;
                 a.visited.insert(at.region);
+                if self.combat.outcome.terminal {
+                    return tick;
+                }
             }
             let ids: Vec<_> = self
                 .items
@@ -502,7 +510,19 @@ impl Game {
             if !active {
                 break;
             }
+            self.resolve_attacks();
+            self.check_objective();
+            if self.combat.outcome.terminal {
+                return tick;
+            }
+            if self
+                .next_actor()
+                .is_some_and(|id| self.actors[&id].ready_at <= tick)
+            {
+                return tick;
+            }
         }
+        until
     }
     fn needs_integration(
         &self,
@@ -587,7 +607,7 @@ impl Game {
                                     Direction::from_delta(rotate_vector(rotation, component))?;
                                 let (target, _) = self.world.physics_neighbor(cell, dir)?;
                                 self.actors.iter().find_map(|(id, a)| {
-                                    if entity == PhysicsEntity::Actor(*id) {
+                                    if entity == PhysicsEntity::Actor(*id) || !a.alive() {
                                         return None;
                                     }
                                     self.body_cells(a.location, a.orientation, &a.body)
@@ -611,9 +631,28 @@ impl Game {
                                 PhysicsEntity::Item(id) => self.items[&id].quantity,
                             },
                         });
+                        let damage = crate::combat::impact_damage(motion.velocity[axis]);
                         motion.velocity[axis] = 0;
                         motion.displacement[axis] = 0;
                         motion.acceleration_remainder[axis] = 0;
+                        if let PhysicsEntity::Actor(id) = entity {
+                            if damage > 0 {
+                                let actor = self.actors.get_mut(&id).expect("integrated actor");
+                                actor.location = at;
+                                actor.orientation = frame;
+                                actor.motion = motion.clone();
+                                self.apply_damage(
+                                    id,
+                                    &std::collections::BTreeMap::from([(
+                                        crate::combat::DamageType::Impact,
+                                        damage,
+                                    )]),
+                                );
+                                if !self.alive(id) {
+                                    return (at, frame, MotionState::default());
+                                }
+                            }
+                        }
                     }
                 }
             }

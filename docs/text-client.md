@@ -137,3 +137,12 @@ approach intentions to the adventure interface.
 See [items and character knowledge](items.md) for quantity-aware pickup/drop,
 stack identity, randomized appearances, disclosed protocol fields, scenario
 authoring, compatibility, and the versioned item profiling workload.
+
+## Combat
+
+Use `attack <name>` or `attack #id`. Ambiguous names use the normal clarification
+flow without consuming time. Attacking does not automatically approach a target.
+The client reports exact own HP, qualitative visible enemy injuries, attack
+interruption, and victory/death. Repeat the same valid attack to resume interrupted
+preparation; `wait` preserves it. After reconnecting in recovery, `wait` continues
+the existing scheduler before another action can be chosen.

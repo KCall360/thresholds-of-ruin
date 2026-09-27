@@ -2,7 +2,7 @@
 
 Milestone 4c introduces rigid occupied-cell bodies, all 24 proper cube rotations,
 gravity, drift, and collision hooks. Crouching, ducking, turning, torque, pushing,
-bounce, crushing, and HP damage are deferred. A body must fit without changing
+bounce, and crushing are deferred. A body must fit without changing
 posture. Its cell-offset representation leaves room for later posture changes.
 
 ## Bodies and coordinates
@@ -73,7 +73,9 @@ bodies, without simultaneous swaps or momentum transfer.
 Backend impact records contain entity, tick, reference location, collision axis,
 region-local normal, other actor when applicable, incoming normal velocity, and
 mass. Ordinary gravity acceleration and portal coordinate changes never cause
-impacts. HP, damage thresholds, resistance, and death belong to 4d.
+impacts. Milestone 4d applies impact damage at contact, through the same HP,
+resistance, interruption, and death rules used by combat. See
+[dungeon gameplay](dungeon.md) for the threshold and typed-damage contract.
 
 Dropped items inherit the carrier's motion and frame. Pickup absorbs that motion
 without transferring momentum to the carrier. Moving stacks merge only when
