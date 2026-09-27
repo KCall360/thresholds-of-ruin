@@ -79,8 +79,8 @@ that user's private notes. Other-user privacy is enforced by the server.
 The server saves accepted actions and notes in background batches. Use `save`
 for an explicit durable barrier; normal quit also saves before disconnecting.
 A crash may roll back recent acknowledged play. Restart with the same save path
-and reconnect to recover the last saved prefix. Protocol 12 and save format 4
-are required; the ruleset remains `diagonal-v11`. See
+and reconnect to recover the last saved prefix. Protocol 13 and save format 7
+are required; the ruleset remains `places-v12`. See
 [background saving](background-saving.md) for timing and failure handling.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
@@ -121,11 +121,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 12.
+and selections from an abandoned branch. Server and clients must use protocol 13.
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on
-arrival. Current `diagonal-v11` games support travel.
+arrival. Current `places-v12` games support travel.
 
 [Door interactions](doors.md) add open/close, examination, clarification and
 approach intentions to the adventure interface.

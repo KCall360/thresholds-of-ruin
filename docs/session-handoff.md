@@ -1,12 +1,30 @@
-# Session handoff — milestone 3p client timing
+# Session handoff — milestone 3 interactions and travel
 
-## Verified starting publication
+## Current direction
+
+At the user's direction, milestone 3p is deferred, still open, and no longer
+blocks feature work. The initial shared action extension points now separate
+validation/timing, effect application and scheduling without changing gameplay,
+protocol, saves or rules. Concrete partial progress remains future work; see the
+[simulation guide](simulation-slice.md#shared-action-extension-points) and
+[architecture](architecture.md#time-and-actions). Durable place knowledge is implemented and verified locally;
+see [the feature guide](place-knowledge.md) and
+[verification findings](place-knowledge-findings.md). Continue milestone 3 with semantic
+narration/interruption and slow-client resynchronization acceptance. Extend wizard placement as needed to
+reproduce interactions and failures. Follow the [roadmap](milestones.md) and
+retain the ongoing feature performance checks in [development practices](../CONTRIBUTING.md).
+The timing findings below remain unresolved evidence, not a completion claim.
+
+## Starting checkout and retained publication context
+
+The action extension-point refactor starts from local commit `ea80533`, the merge
+of PR #30. The publication details below describe the preceding 3p investigation.
 
 PR #29 merged at `37a913dedc05b18b366c34e6ba6f728468381ec4` at
 2026-09-25 17:49:33 UTC. Windows/Linux CI passed on final head
 `a098f341553c256d7775f71754d470bece2765d6` at 17:48:33/17:49:00 UTC.
-GitHub was queried directly. This follow-up uses `codex/3p-client-timing`;
-consult its PR for final publication and CI state.
+GitHub was queried directly during that investigation. The timing follow-up used
+`codex/3p-client-timing`; consult PR #30 for its final publication and CI state.
 
 Read [the client timing findings](3p-client-timing.md),
 [checkpoint reduction](3p-checkpoint-growth.md), [original audit](3p-closeout.md),
@@ -16,8 +34,9 @@ Read [the client timing findings](3p-client-timing.md),
 
 ## Preserved contracts
 
-Format 6 intentionally rejects format 5 under the approved pre-release policy.
-Protocol 12 and `diagonal-v11` remain unchanged. The complete 256-region checkpoint
+Current durable places use format 7, protocol 13 and `places-v12`, rejecting older
+versions under the pre-release policy. The following checkpoint measurements
+describe the preceding format-6 baseline. The complete 256-region checkpoint
 remains 9.92 MB under the unchanged 64 MiB cap. Exact recovery, rewind, disclosure,
 bounded queues and resynchronization behavior are unchanged. Maintain the Text,
 ASCII and Text + ASCII Spectator desktop launchers; do not restore the removed
@@ -47,9 +66,9 @@ Separate one-cycle comparisons complete 495 acknowledgements each; their success
 does not qualify the failed longer runs. See the findings for raw evidence,
 hashes, verification, measurement boundaries and limitations.
 
-## Next step
+## Deferred 3p follow-up
 
-Capture thread scheduling and blocked-write evidence around the remaining native
+When 3p resumes, capture thread scheduling and blocked-write evidence around the remaining native
 and headless-report stalls, then fix or explicitly resolve those costs and qualify
 the longer client workload. WPR's CPU-trace probe failed to enable the local
 system performance profiling policy (`0xc5585011`); no policy was changed or
@@ -57,7 +76,8 @@ kernel trace started. Obtain that profiling capability before assigning wall
 intervals to descheduling or pure I/O.
 Keep failed runs, nullable final diagnostic costs and historical measurements.
 
-After 3p gates pass, milestone 3 resumes with shared resumable actions, durable
-place knowledge, semantic narration/interruption and slow-client resynchronization
-acceptance. No interaction or travel feature is added here. Publish through a PR
-and merge only after Windows/Linux CI pass on its final head.
+The action refactor and durable-place feature form one publication checkpoint
+alongside the retained sequencing changes. Offscreen place travel and concrete resumable action
+progress remain deferred. Accumulate
+planning edits locally; publish at a meaningful checkpoint through a PR and merge
+only after Windows/Linux CI pass on its final head.

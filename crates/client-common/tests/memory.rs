@@ -7,7 +7,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "has_control":false,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
             "actor":1,"tick":tick,"position":{"x":1,"y":1,"z":0},
-            "visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
+            "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
             "ready":true
         }}
     }))
@@ -27,6 +27,51 @@ fn update(next: Snapshot, sequence: u64) -> StreamUpdate {
             event: None,
         },
     }
+}
+
+#[test]
+fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
+    let mut client = ClientState::from_snapshot(snapshot(1, 0, 0)).unwrap();
+    let mut next = snapshot(1, 0, 1);
+    next.state.observation.places.push(PlaceView {
+        key: "offscreen".into(),
+        name: "Quiet Reverie".into(),
+    });
+    let mut change = update(next.clone(), 1);
+    if let UpdateBody::Observation { event, .. } = &mut change.body {
+        *event = Some(Box::new(HistoryEntry {
+            id: EntryId("rename".into()),
+            branch: next.branch.clone(),
+            actor: ActorId(1),
+            tick: 0,
+            author: Author::User {
+                user: "player".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::PlaceRenamed {
+                key: "offscreen".into(),
+                name: "Quiet Reverie".into(),
+            },
+        }));
+    }
+    client.apply(change).unwrap();
+    assert_eq!(
+        client.state().observation.places,
+        next.state.observation.places
+    );
+    assert!(client.memory().all(|cell| cell.key != "offscreen"));
+    assert_eq!(
+        ClientState::from_snapshot(next)
+            .unwrap()
+            .state()
+            .observation
+            .places,
+        client.state().observation.places
+    );
+    let mut rewind = snapshot(1, 0, 0);
+    rewind.branch = BranchId("rewound".into());
+    client.replace_snapshot(rewind).unwrap();
+    assert!(client.state().observation.places.is_empty());
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 12 is required. Save format remains 3.
+region names, and frontend language. Protocol 13 is required. Save format remains 3.
 
 ## ASCII controls
 
@@ -112,7 +112,7 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-Only the current `diagonal-v11` ruleset is supported. Start a fresh game after
+Only the current `places-v12` ruleset is supported. Start a fresh game after
 an incompatible revision; saves are not migrated.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,

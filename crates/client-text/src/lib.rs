@@ -3,12 +3,13 @@ use tor_protocol::*;
 
 pub mod adventure;
 
-pub const HELP: &str = "Commands: look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Look,
     Inventory,
+    Places,
     Help,
     Quit,
     Request(Request),
@@ -25,6 +26,8 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         }))
     };
     match (verb.as_str(), rest) {
+        ("places", "") => Ok(Input::Places),
+        ("name", rest) => rename_place(rest, state),
         ("wizard", rest) => parse_wizard(rest, state.revision),
         ("branch-history", rest) => {
             let (branch, before) = word(rest);
@@ -296,6 +299,7 @@ pub fn inventory(state: &StateView) -> String {
 
 pub fn history(entry: &HistoryEntry) -> String {
     let content = match &entry.content {
+        HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", safe(name)),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => safe(summary),
         HistoryContent::Action { event, .. } => format!("{event:?}"),
@@ -318,5 +322,50 @@ fn parse_wizard(text: &str, expected_revision: u64) -> Result<Input, String> {
     Ok(Input::Command(Command::Wizard {
         expected_revision,
         operation: text.into(),
+    }))
+}
+
+/// Listing order is deterministic within a disclosed snapshot; names need not be unique.
+pub fn places(state: &StateView) -> String {
+    if state.observation.places.is_empty() {
+        return "You have not discovered any places yet.".into();
+    }
+    state
+        .observation
+        .places
+        .iter()
+        .enumerate()
+        .map(|(i, place)| {
+            let visible = state
+                .observation
+                .visible_cells
+                .iter()
+                .any(|c| c.key == place.key && !c.wall);
+            format!(
+                "{}. {} ({})",
+                i + 1,
+                safe(&place.name),
+                if visible { "in sight" } else { "remembered" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn rename_place(rest: &str, state: &StateView) -> Result<Input, String> {
+    let (number, name) = word(rest);
+    let place = number
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .and_then(|i| state.observation.places.get(i))
+        .ok_or("Use places, then name <place number> <new name>.")?;
+    if name.is_empty() || name.len() > 80 || name.chars().any(char::is_control) {
+        return Err("Names need 1–80 UTF-8 bytes and no control characters.".into());
+    }
+    Ok(Input::Command(Command::RenamePlace {
+        expected_revision: state.revision,
+        key: place.key.clone(),
+        name: name.into(),
     }))
 }

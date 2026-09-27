@@ -82,6 +82,7 @@ async fn run() -> Result<(), Error> {
                 match parse(&line, connection.state.state()) {
                     Ok(Input::Quit) => break,
                     Ok(Input::Look) => println!("{}", describe(connection.state.state())),
+                    Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
                     Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
                     Ok(Input::Help) => println!("{HELP}"),
                     Ok(Input::Request(request)) => transact(&mut connection, request).await?,

@@ -28,6 +28,111 @@ fn hints(engine: &Engine) -> Vec<serde_json::Value> {
 }
 
 #[test]
+fn durable_places_are_disclosed_once_renamed_freely_replayed_and_rewound() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("places.db");
+    let mut engine = Engine::open_with_policy(
+        &path,
+        Scenario::two_room(42),
+        tor_server::SavePolicy {
+            checkpoint_interval: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    engine.enable_wizard().unwrap();
+    let initial = engine.state(ActorId(1)).unwrap();
+    assert_eq!(initial.observation.places.len(), 2);
+    let place = initial.observation.places[0].clone();
+    let command = Command::RenamePlace {
+        expected_revision: initial.revision,
+        key: place.key.clone(),
+        name: "Hearth of Echoes".into(),
+    };
+    let branch = engine.branch().clone();
+    let renamed = engine
+        .command(
+            "player",
+            "text",
+            ActorId(1),
+            "rename",
+            &branch,
+            command.clone(),
+        )
+        .unwrap();
+    assert!(
+        engine
+            .command("player", "text", ActorId(1), "rename", &branch, command)
+            .unwrap()
+            .duplicate
+    );
+    let state = engine.state(ActorId(1)).unwrap();
+    assert_eq!(state.observation.tick, initial.observation.tick);
+    assert_eq!(state.revision, initial.revision + 1);
+    assert_eq!(state.observation.places[0].name, "Hearth of Echoes");
+    for (id, key, name) in [
+        ("unknown", "unseen", "Name"),
+        ("blank", place.key.as_str(), " "),
+        ("control", place.key.as_str(), "Bad\nName"),
+    ] {
+        let result = engine.command(
+            "player",
+            "text",
+            ActorId(1),
+            id,
+            &branch,
+            Command::RenamePlace {
+                expected_revision: state.revision,
+                key: key.into(),
+                name: name.into(),
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(engine.state(ActorId(1)).unwrap(), state);
+    }
+    setup(&mut engine, "room", "room 3 5 3 1 Secret author name").unwrap();
+    setup(&mut engine, "hidden", "place 3 2 1 0 on").unwrap();
+    assert_eq!(
+        engine.observation(ActorId(1)).unwrap().places,
+        state.observation.places
+    );
+    setup(&mut engine, "visit", "teleport 1 3 1 1 0").unwrap();
+    let discovered = engine.observation(ActorId(1)).unwrap();
+    assert_eq!(discovered.places.len(), 3);
+    assert!(!serde_json::to_string(&discovered)
+        .unwrap()
+        .contains("Secret author name"));
+    setup(&mut engine, "away", "teleport 1 1 1 1 0").unwrap();
+    setup(&mut engine, "remove", "place 3 2 1 0 off").unwrap();
+    assert_eq!(
+        engine.observation(ActorId(1)).unwrap().places,
+        discovered.places
+    );
+    let saved = engine.state(ActorId(1)).unwrap();
+    engine.flush().unwrap();
+    assert!(engine.save_status().checkpoint_bytes > 0);
+    drop(engine);
+    let mut engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), saved);
+    engine.enable_wizard().unwrap();
+    setup(
+        &mut engine,
+        "rewind-name",
+        &format!("rewind {}", renamed.entry.id.0),
+    )
+    .unwrap();
+    assert_eq!(
+        engine.observation(ActorId(1)).unwrap().places,
+        state.observation.places
+    );
+    setup(&mut engine, "rewind-initial", "rewind initial").unwrap();
+    assert_eq!(
+        engine.observation(ActorId(1)).unwrap().places,
+        initial.observation.places
+    );
+}
+
+#[test]
 fn unnamed_hints_are_visible_only_with_their_cells_and_restore_on_replay_and_rewind() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("hints.json");

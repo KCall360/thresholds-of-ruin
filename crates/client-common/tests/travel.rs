@@ -5,7 +5,7 @@ fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
         "actor":1,"branch":"branch","cursor":{"sequence":0,"tick":0},"has_control":true,"travel":null,
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":0,"observation":{"actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"visible_cells":[],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true}}
+        "state":{"wizard_game":false,"revision":0,"observation":{"actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"places":[],"visible_cells":[],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true}}
     })).unwrap()).unwrap()
 }
 fn update(sequence: u64, steps: u64, phase: TravelPhase, entry: bool) -> StreamUpdate {

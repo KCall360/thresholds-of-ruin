@@ -7,7 +7,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
         "has_control":true,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
             "actor":1,"tick":revision,"position":{"x":0,"y":0,"z":0},
-            "visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
+            "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
                 "stairs_up":false,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),

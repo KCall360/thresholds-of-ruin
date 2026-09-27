@@ -21,12 +21,29 @@ and an integration acceptance scenario for its complete user-visible behavior.
 Add regression tests for bug fixes. Update the project documentation and milestone
 status with the behavior, limitations, and how the feature is verified.
 
+Keep successful test output out of agent/conversation context. Run the required
+unit and integration tests, redirecting stdout and stderr to local log files,
+and check their exit codes. Return only a compact pass/fail summary on success;
+do not load passing test listings or full logs into context. On failure, inspect
+and surface the relevant failure output, expanding log inspection only as needed
+to diagnose it. Retain logs for investigation without committing routine test
+output. Quiet reporting must not skip tests or hide failures, skipped checks,
+or checks that could not run.
+
 Treat performance as an ongoing feature requirement, not a one-time milestone.
 Maintain the profiling instrumentation, versioned workload fixtures, real-client
 drivers, and report validators as production code changes. When adding a feature,
 extend the representative workloads to exercise its latency-sensitive paths and
 relevant scale dimensions; keep existing workload versions and recorded baselines
 meaningful instead of silently changing their meaning.
+
+Deferring milestone 3p does not defer profiling maintenance. Update affected
+instrumentation, drivers, report schemas/validators and reproduction instructions
+alongside feature changes, and verify that representative profiling runs still
+produce actionable measurements. Keep timing boundaries explicit and distinguish
+application work from diagnostic/reporting overhead; preserve failed runs and
+measurement limitations. Summarize useful findings rather than loading raw
+profiling logs into context unless investigation requires them.
 
 Run targeted release-build performance checks for changes to simulation,
 perception, persistence, protocol delivery, or client application/rendering.

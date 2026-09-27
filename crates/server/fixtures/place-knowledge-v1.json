@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "seed": 42,
+  "extra_rooms": [0, 64],
+  "hints": [[1, 1, 0], [2, 1, 0], [1, 2, 0], [2, 2, 0]],
+  "samples": 100,
+  "checkpoint_interval": 16
+}

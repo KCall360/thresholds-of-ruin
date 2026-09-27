@@ -3,6 +3,30 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn places_modal_displays_memory_and_renames_without_travel_or_time() {
+    let mut snapshot = state().snapshot();
+    snapshot.state.observation.places.push(PlaceView {
+        key: "forgotten-cell".into(),
+        name: "Quiet Reverie".into(),
+    });
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Places }), Effect::None);
+    assert!(app.places_open);
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    app.input(Input::Text {
+        text: "Home of Echoes".into(),
+    });
+    assert!(
+        matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
+        command: Command::RenamePlace { key, name, expected_revision: 3 }, ..
+    }) if key == "forgotten-cell" && name == "Home of Echoes")
+    );
+}
+
+#[test]
 fn travel_selection_is_free_and_submits_an_opaque_cell_key() {
     let mut app = App::new();
     app.role = AccessRole::Player;
@@ -98,7 +122,7 @@ fn state() -> ClientState {
         "state":{"wizard_game":false,"revision":3,"observation":{
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
 
-            "visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
+            "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[{"reachable":true,"item":{"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true

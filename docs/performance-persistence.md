@@ -249,9 +249,11 @@ The [format-6 follow-up](3p-checkpoint-growth.md) reduces the complete 256-regio
 checkpoint from 765 MB to 9.92 MB without changing the 64 MiB cap. The user approved
 format-5 rejection before implementation. Full checkpoint-enabled saved exploration,
 exact recovery, bounded replay and native explored-world acceptance now pass.
-Milestone 3p remains open for recurrent acknowledgement/presentation-tail evidence;
+Milestone 3p is deferred, still open, for recurrent acknowledgement/presentation-tail evidence;
 opt-in server/client/reader correlation records the relevant boundaries. No later
-interaction or travel feature is introduced, and no latency target is relaxed.
+interaction or travel feature is introduced by this performance work, and no latency
+target is relaxed. At the user's direction, remaining 3p closure no longer blocks
+milestone 3 feature work; ongoing feature performance checks still apply.
 
 The [client timing investigation](3p-client-timing.md) now separates request
 diagnostic writing, native presentation return, report encoding/output and reader

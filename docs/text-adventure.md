@@ -74,12 +74,15 @@ the frontend authority to invent a connection. Bearings follow the observer fram
 including rotated joins.
 
 This is a conservative visible-anchor grouping, not a general room segmentation
-algorithm. Named/persistent places, unhinted-place inference, remembered offscreen
-destinations and richer shape summaries remain future work. Descriptions do not
+algorithm. [Durable place knowledge](place-knowledge.md) adds persistent mnemonic names and
+renaming. Unhinted-place inference, remembered offscreen destinations and richer
+shape summaries remain future work. Descriptions do not
 invent enclosed walls or use internal region names.
 
 ## Intentions and conversation
 
+- `places`: list learned names, marked in sight or remembered.
+- `name <place number> <new name>`: rename a listed place without taking a turn.
 - `look` / `l`: describe current sight and visible ways onward.
 - `examine <thing>` / `x <thing>` / `look at <thing>`: inspect disclosed appearance;
   `examine walls` and `examine floor` describe visible surface material.

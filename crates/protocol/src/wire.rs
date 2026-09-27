@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,7 +97,15 @@ pub struct ActorView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaceView {
+    pub key: String,
+    /// Character-owned mnemonic, not an authored region name.
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
+    pub places: Vec<PlaceView>,
     pub actor: ActorId,
     pub tick: u64,
     pub position: Position,
@@ -199,6 +207,11 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    RenamePlace {
+        expected_revision: u64,
+        key: String,
+        name: String,
+    },
     Travel {
         expected_revision: u64,
         destination: String,
@@ -237,6 +250,10 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    PlaceRenamed {
+        key: String,
+        name: String,
+    },
     Travel {
         destination: String,
     },

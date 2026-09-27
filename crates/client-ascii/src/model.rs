@@ -5,6 +5,7 @@ use tor_protocol::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
+    Places,
     Travel,
     Up,
     Down,
@@ -55,6 +56,9 @@ pub struct NoteDraft {
 }
 
 pub struct App {
+    pub places_open: bool,
+    pub place_selected: usize,
+    pub place_name: Option<String>,
     pub travel_cursor: Option<Position>,
     pub role: AccessRole,
     pub state: Option<ClientState>,
@@ -78,6 +82,9 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
+            places_open: false,
+            place_selected: 0,
+            place_name: None,
             travel_cursor: None,
             role: AccessRole::Spectator,
             state: None,
@@ -141,16 +148,23 @@ impl App {
             self.note = None;
             self.pickup.clear();
             self.door_direction = None;
+            self.places_open = false;
+            self.place_name = None;
             self.history_page = None;
             self.history_scroll = 0;
             self.status = "Timeline changed; pending selections cleared.".into();
         }
         if old.is_some_and(|(_, revision)| revision != state.state().revision) {
+            self.place_name = None;
+            self.place_selected = self
+                .place_selected
+                .min(state.state().observation.places.len().saturating_sub(1));
             self.pickup.clear();
             self.door_direction = None;
             self.travel_cursor = None;
         }
         if !state.has_control() {
+            self.place_name = None;
             self.door_direction = None;
             self.travel_cursor = None;
         }
@@ -163,6 +177,8 @@ impl App {
 
     pub fn disconnect(&mut self, message: String) {
         self.travel_cursor = None;
+        self.place_name = None;
+        self.places_open = false;
         self.connected = false;
         self.busy = false;
         self.note = None;
@@ -173,6 +189,13 @@ impl App {
 
     pub fn input(&mut self, input: Input) -> Effect {
         if let Input::Key { key: Key::Escape } = input {
+            if self.place_name.take().is_some() {
+                return Effect::None;
+            }
+            if self.places_open {
+                self.places_open = false;
+                return Effect::None;
+            }
             if self.travel_cursor.take().is_some() {
                 self.status = "Travel selection cancelled.".into();
                 return Effect::None;
@@ -204,6 +227,63 @@ impl App {
             return Effect::Quit;
         }
         if !self.connected || self.busy {
+            return Effect::None;
+        }
+        if self.places_open {
+            if let Some(name) = &mut self.place_name {
+                match input {
+                    Input::Text { text } => {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if name.len() + ch.len_utf8() <= 80 {
+                                name.push(ch);
+                            }
+                        }
+                    }
+                    Input::Key {
+                        key: Key::Backspace,
+                    } => {
+                        name.pop();
+                    }
+                    Input::Key { key: Key::Enter } if !name.trim().is_empty() => {
+                        let name = name.trim().to_owned();
+                        self.place_name = None;
+                        let state = self.state.as_ref().expect("attached");
+                        if self.role == AccessRole::Spectator || !state.has_control() {
+                            self.status = "Naming places requires control.".into();
+                            return Effect::None;
+                        }
+                        let Some(place) = state.state().observation.places.get(self.place_selected)
+                        else {
+                            return Effect::None;
+                        };
+                        return self.command(Command::RenamePlace {
+                            expected_revision: state.state().revision,
+                            key: place.key.clone(),
+                            name,
+                        });
+                    }
+                    _ => {}
+                }
+            } else {
+                let state = self.state.as_ref().expect("attached");
+                let count = state.state().observation.places.len();
+                match input {
+                    Input::Key { key: Key::Up } => {
+                        self.place_selected = self.place_selected.saturating_sub(1)
+                    }
+                    Input::Key { key: Key::Down } => {
+                        self.place_selected = (self.place_selected + 1).min(count.saturating_sub(1))
+                    }
+                    Input::Key { key: Key::Enter } if count > 0 => {
+                        if self.role == AccessRole::Spectator || !state.has_control() {
+                            self.status = "Naming places requires control.".into();
+                        } else {
+                            self.place_name = Some(String::new());
+                        }
+                    }
+                    _ => {}
+                }
+            }
             return Effect::None;
         }
         if let Some(draft) = &mut self.note {
@@ -279,7 +359,10 @@ impl App {
             }
         }
         if self.role == AccessRole::Spectator
-            && !matches!(key, Key::History | Key::OlderHistory | Key::RecentHistory)
+            && !matches!(
+                key,
+                Key::Places | Key::History | Key::OlderHistory | Key::RecentHistory
+            )
         {
             self.status = "Spectator access is read-only.".into();
             return Effect::None;
@@ -436,6 +519,7 @@ impl App {
                     return Effect::None;
                 };
                 if !state.has_control() {
+                    self.place_name = None;
                     self.status = "You are observing. Press F3 to request control.".into();
                 } else if !state.state().observation.ready {
                     self.status = "Waiting for another actor to act.".into();
@@ -480,6 +564,11 @@ impl App {
                         Effect::None
                     }
                 }
+            }
+            Key::Places => {
+                self.places_open = true;
+                self.place_selected = 0;
+                Effect::None
             }
             Key::Note => {
                 if let Some(state) = &self.state {
@@ -551,6 +640,7 @@ impl App {
             return Effect::None;
         };
         if !state.has_control() {
+            self.place_name = None;
             self.door_direction = None;
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
@@ -622,6 +712,7 @@ pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
 
 pub fn history_text(entry: &HistoryEntry) -> String {
     match &entry.content {
+        HistoryContent::PlaceRenamed { name, .. } => format!("Place named {}.", name),
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {

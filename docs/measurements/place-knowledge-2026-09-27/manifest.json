@@ -1,0 +1,56 @@
+{
+  "commit": "ea8053307fd8db40d57f4c9a971d57f07b3b17d9",
+  "dirty": true,
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "note": "Raw output is retained locally under target/local-logs/place-knowledge; successful test listings are not committed.",
+  "files": {
+    "target/local-logs/place-knowledge/before-r8.jsonl": {
+      "bytes": 1260951,
+      "sha256": "b299f843d55592984c2ddaec9397a6976bd992c74e45e2e2f692591a89233f6a"
+    },
+    "target/local-logs/place-knowledge/before-r256.jsonl": {
+      "bytes": 1260031,
+      "sha256": "690027e53fe7f30236654230a3b00d6398db10ce189bdcb7340c1525e0faac69"
+    },
+    "target/local-logs/place-knowledge/after-r8.jsonl": {
+      "bytes": 1258824,
+      "sha256": "6bb48592b7e1075566f0abba872286daa08a3294357cc6f5d873cb054a830a79"
+    },
+    "target/local-logs/place-knowledge/after-r256.jsonl": {
+      "bytes": 1260886,
+      "sha256": "da1fe215abe96293fcf3fb03a1821a6136d456e1a8ed088e5b91fdeb74aa038c"
+    },
+    "target/local-logs/place-knowledge/after-r8-repeat.jsonl": {
+      "bytes": 1259019,
+      "sha256": "959e323fb83bffb9287cfe0b930b7a2820576b4a4fda3e082357b8a725c84451"
+    },
+    "target/local-logs/place-knowledge/places.jsonl": {
+      "bytes": 59546,
+      "sha256": "8e413538443b2d5471b4fcae3ce03148ccc607912832fef8aad6f9309dcba47d"
+    },
+    "target/local-logs/place-knowledge/native-run/rooms-0/result.json": {
+      "bytes": 46979,
+      "sha256": "22726bea86aba1f482308e38c306ef513972d102464e118d642379d230097ffa"
+    },
+    "target/local-logs/place-knowledge/native-run/rooms-64/result.json": {
+      "bytes": 67619,
+      "sha256": "e42629e468c8ee57dd67e4682d50b42a269aeabe30d2d256db5babe574ba3494"
+    },
+    "target/local-logs/place-knowledge/native-fresh/rooms-0/result.json": {
+      "bytes": 66855,
+      "sha256": "572e0a461c12c462bbca68180a68da7cf8d229e7cf157dbee2fbc326f7570e2c"
+    },
+    "target/local-logs/place-knowledge/native-fresh/rooms-64/result.json": {
+      "bytes": 86785,
+      "sha256": "61e68c2a6b9e8548eb911455868d21984e509830b09c11b69a38d896c4424fce"
+    }
+  },
+  "sources": {
+    "crates/simulation/src/actions.rs": "5aabfe8a1e6a6c0eb49ed28c0fffe53224c24e38e0f879db0701452058b53ed5",
+    "crates/simulation/src/places.rs": "5acfccc5e0f37f5d29c9638e5eee8607922894d276d9e6c01edd79e90fe6e3fa",
+    "crates/server/examples/place_bench.rs": "e724479e72160f5231586b104a23841bccc9f0305f29965aa148aeac85bea930",
+    "crates/server/fixtures/place-knowledge-v1.json": "7e86c9f2da9f4dd77b5556931464680456730b6a434f01092fedc483a29747f8",
+    "scripts/place_performance_driver.py": "1771750eb1694c07b6280b321760797f864793758e93ae85aaa5a1caed1c8a98",
+    "scripts/place_performance_report.py": "f8fed8c3ab28c3f174d2a4dabb59fa2f1895f0c1ce494b82479790412377cbfa"
+  }
+}
