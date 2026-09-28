@@ -180,6 +180,22 @@ total world size; theme assets without entity disclosure; reconnect and gap
 snapshots; fallback for unexpected assets. Keep the current explicit-save
 barriers and consistent crash rollback.
 
+### 3s — Three-dimensional sight
+
+A separate effort from 4e: design accepted, implementation not started. It
+replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
+with a single 3D rule for every observer. Sight lines start at a declared eye
+cell. Floors, ceilings and walls are ordinary seen solid cells, and only their
+convex exposed edges are beveled. Observation updates become view deltas. This
+breaks the protocol and save format, which the maintainer has authorized. See
+the [three-dimensional sight design](sight-3d.md).
+
+**Acceptance:** an exact reference implementation; equivalence with today's
+shadowcasting on single-level maps, with every difference reviewed; reciprocity
+between empty cells; the scenario cases and existing suites listed in the
+design, each run with one-, two- and three-cell-tall observers; the 4d acceptance tests and performance requirements; and any
+accelerated layer proven identical to the reference.
+
 ### 3p — Performance and scalable persistence
 
 Deferred at the maintainer's direction and still open. Phases A–E and the

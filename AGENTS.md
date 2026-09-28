@@ -117,6 +117,11 @@ objective references, with deterministic reactivation. Keep the 4d dungeon,
 checkpoint, retry, rewind, disclosure, and native-client acceptance tests
 passing, along with its performance requirements.
 
+**3s — three-dimensional sight (next, separate from 4e).** The design is accepted;
+see [three-dimensional sight](docs/sight-3d.md). Start with an exact reference
+implementation and its equivalence and reciprocity tests before any
+acceleration. A NetHack-style ASCII client redesign is deferred until after 3s.
+
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the
 eight-actor combat and dense-falling p95 overruns and the deferred client
