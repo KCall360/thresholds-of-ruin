@@ -76,6 +76,37 @@ fn main() {
             }
         }
     }
+    // The first dungeon's layout: 7x5x2 rooms in a row, joined by one-wide,
+    // two-high doorways in the middle of their east and west walls.
+    let mut dungeon = World::new(vec![], vec![]).unwrap();
+    for id in 1..=3 {
+        dungeon
+            .add_chamber(Region {
+                id: RegionId(id),
+                name: String::new(),
+                bounds: Extent::new(7, 5, 2).unwrap(),
+            })
+            .unwrap();
+    }
+    for id in 1..=2 {
+        for (from, direction, to) in [
+            (at(id, 6, 2), Direction::East, at(id + 1, 0, 2)),
+            (at(id + 1, 0, 2), Direction::West, at(id, 6, 2)),
+        ] {
+            dungeon
+                .connect_area(
+                    Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                    1,
+                    2,
+                )
+                .unwrap();
+        }
+    }
     println!("scenario,radius,builder,mean_us");
     let planar = [
         ("open", open, at(1, 32, 32)),
@@ -94,10 +125,25 @@ fn main() {
     for (name, world, feet, eye) in [
         ("room", &room, at(1, 8, 8), lift(at(1, 8, 8), 1)),
         ("hall", &hall, at(1, 8, 8), lift(at(1, 8, 8), 2)),
+        (
+            "dungeon_centre",
+            &dungeon,
+            at(2, 3, 2),
+            lift(at(2, 3, 2), 1),
+        ),
+        (
+            "dungeon_doorway",
+            &dungeon,
+            at(2, 6, 2),
+            lift(at(2, 6, 2), 1),
+        ),
     ] {
         report(name, 8, "shadow", || world.shadow_scene(feet, 0, 8));
         report(name, 8, "volume", || world.volume_scene(feet, 0, 8));
         report(name, 8, "eye", || world.eye_scene(eye, 0, 8));
+        report(name, 8, "eye_reference", || {
+            world.eye_scene_reference(eye, 0, 8)
+        });
     }
 }
 

@@ -198,25 +198,39 @@ than migrated, and version bumps are recorded in the roadmap.
 
 ## Performance plan
 
-The cost is built and verified in three layers. Each faster layer must produce
+Speed-ups are built and verified in layers. Each faster layer must produce
 exactly the same results as the layer below.
 
-1. **Reference implementation.** A straightforward exact segment-against-
-   polyhedron test. Each beveled cube is the intersection of at most 18
-   half-spaces, so testing a segment means clipping it against those planes in
-   integers. This implementation defines correctness and serves as the test
-   oracle.
-2. **Precomputed occlusion masks.** On an ordinary grid, the sight lines that a
-   blocker at a given offset cuts are the same wherever the observer stands. So
-   each is precomputed once, as a bitmask over (target, sample point) pairs, for
-   each piece of a partition of the cube into a core, edge strips and corner
-   pieces. A blocker contributes the pieces its bevel set keeps. Offsets reached
-   through portals or region seams fall back to the reference implementation.
-   One case needs care: a segment that runs exactly along an internal seam
-   between two kept pieces is blocked by the whole shape but is inside neither
-   piece. With centres on integer points this isn't rare, so the mask layer must
-   treat it the same way as the reference.
-3. **Scene cache.** Scenes are keyed by eye location and frame. Each world chunk
+1. **Reference implementation** (`World::eye_scene_reference`). A
+   straightforward exact segment-against-polyhedron test. Each beveled cube is
+   the intersection of at most 18 half-spaces, so testing a segment means
+   clipping it against those planes in integers. This implementation defines
+   correctness and serves as the test oracle.
+2. **Accelerated scene** (`World::eye_scene`). The same model, made faster:
+   - **Direct routes.** A route inside the eye's region whose bounding box spans
+     no exit plane is a plain offset. It's computed directly, and a target
+     outside the region is missing geometry.
+   - **Plain steps.** Other routes are walked, but a step is looked up in the
+     topology only if it leaves the region's storage or starts on an exit's
+     plane in that exit's direction. Only those steps can be redirected by a
+     passage or by rim projection.
+   - **Per-scene caches.** Each cell's state and exposed faces are computed
+     once per scene.
+   - **Traversal instead of a bounding box.** A sight line tests only the cells
+     whose closed cube it meets, found slab by slab along its major axis, rather
+     than every cell in its bounding box.
+   - **Cube first.** A blocker is tested as a plain cube before its bevels are
+     looked up.
+
+   Randomized and layout-specific tests require identical output to the
+   reference.
+3. **Not needed so far: precomputed occlusion masks.** On an ordinary grid, the
+   sight lines a blocker at a given offset cuts are the same wherever the
+   observer stands, so they could be precomputed as bitmasks per piece of the
+   cube. Lines running exactly along seams between pieces make this delicate.
+   Layer 2 already beats the current builder, so this layer is deferred unless
+   measurements call for it.
+4. **Scene cache, if needed.** Scenes are keyed by eye location and frame. Each world chunk
    has a change counter, increased by door changes and terrain edits. A cached
    scene is valid while every chunk within range plus one cell is unchanged. The
    extra cell is needed because bevels depend on neighbours. The cache is
@@ -299,7 +313,17 @@ tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
 - **Walls.** Visible wall counts are similar (30,101 with Ford and 30,345 in 3D
   on the 11×11 sample), with differences in both directions. Ford counts a wall
   whose corner peeks out from behind another; 3D requires a visible face centre.
-- **Speed (release build, range 8, mean per scene).** A dungeon-style room seen
-  by a humanoid takes 876 µs, compared with 295 µs for the current voxel
-  builder and 10 µs for 2D shadowcasting. A three-cell hall seen by a giant
-  takes 966 µs. The accelerated layers are needed before gameplay integration.
+- **Speed.** Release build, range 8, mean time per scene, from `fov_bench`:
+
+  | Case | 2D shadowcasting | Current voxel builder | 3D reference | 3D accelerated |
+  | --- | --- | --- | --- | --- |
+  | Room, humanoid eye | 10 µs | 307 µs | 881 µs | 124 µs |
+  | Three-cell hall, giant eye | 13 µs | 426 µs | 1,028 µs | 166 µs |
+  | First-dungeon layout, room centre | 28 µs | 470 µs | 1,133 µs | 208 µs |
+  | First-dungeon layout, in a doorway | 25 µs | 452 µs | 1,125 µs | 271 µs |
+
+  The accelerated scene is about twice as fast as the voxel builder the dungeon
+  uses today. It's still slower than 2D shadowcasting, which sees far less.
+  Profiling showed that routes across joins dominated until plain steps
+  skipped the topology lookups. Gameplay-level timings come from
+  `scripts/perf_compare.py` once 3D sight is wired in.

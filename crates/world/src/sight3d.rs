@@ -26,12 +26,12 @@ struct Volume<'a> {
 
 /// Strictly bounded parameter interval along a segment, as exact fractions.
 #[derive(Clone, Copy)]
-struct Fraction {
-    n: i64,
-    d: i64,
+pub(crate) struct Fraction {
+    pub(crate) n: i64,
+    pub(crate) d: i64,
 }
 impl Fraction {
-    fn less(self, other: Self) -> bool {
+    pub(crate) fn less(self, other: Self) -> bool {
         self.n * other.d < other.n * self.d
     }
 }
@@ -169,10 +169,11 @@ impl Volume<'_> {
 }
 
 impl World {
-    /// Exact 3D sight from the centre of `eye`, with offsets relative to the eye
-    /// cell in the observer's `frame`. Stair landings are not included; abstract
-    /// stair links are traversal, not geometry.
-    pub fn eye_scene(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
+    /// Reference exact 3D sight from the centre of `eye`, with offsets relative
+    /// to the eye cell in the observer's `frame`. Stair landings are not
+    /// included; abstract stair links are traversal, not geometry. This is the
+    /// test oracle for the accelerated [`World::eye_scene`].
+    pub fn eye_scene_reference(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
         if !self.walkable(eye) {
             return vec![];
         }

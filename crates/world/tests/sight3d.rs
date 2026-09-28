@@ -608,3 +608,148 @@ fn abstract_stair_links_are_not_seen_through() {
         );
     }
 }
+
+fn assert_matches_reference(world: &World, eye: Location, frame: u8, radius: u8, context: &str) {
+    assert_eq!(
+        world.eye_scene(eye, frame, radius),
+        world.eye_scene_reference(eye, frame, radius),
+        "{context}: eye {eye:?}, frame {frame}, radius {radius}"
+    );
+}
+
+#[test]
+fn accelerated_scene_matches_the_reference_in_random_rooms_with_doors() {
+    for seed in 1..=12u64 {
+        let mut rng = Rng(0xA076_1D64_78BD_642F ^ seed);
+        let (w, d, h) = (7, 6, 3);
+        let mut world = chamber(w, d, h);
+        let mut door_id = 1;
+        for z in 0..h {
+            for y in 0..d {
+                for x in 0..w {
+                    let roll = rng.next() % 100;
+                    if roll < 20 {
+                        world.set_wall(at(1, x, y, z), true).unwrap();
+                    } else if roll < 26 {
+                        world
+                            .place_door(at(1, x, y, z), door_id, roll < 23)
+                            .unwrap();
+                        door_id += 1;
+                    }
+                }
+            }
+        }
+        for _ in 0..6 {
+            let eye = at(
+                1,
+                (rng.next() % w as u64) as i32,
+                (rng.next() % d as u64) as i32,
+                (rng.next() % h as u64) as i32,
+            );
+            let frame = (rng.next() % 24) as u8;
+            for radius in [3, 8] {
+                assert_matches_reference(&world, eye, frame, radius, &format!("seed {seed}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn accelerated_scene_matches_the_reference_across_portals_cycles_and_stairs() {
+    for r in 0..24 {
+        let (world, remote) = rotated_half(r);
+        for (eye, frame) in [
+            (at(1, 1, 1, 1), 0),
+            (at(1, 2, 0, 0), 0),
+            (remote(0, 2, 1), r),
+            (remote(2, 1, 0), r),
+        ] {
+            assert_matches_reference(&world, eye, frame, 8, &format!("rotation {r}"));
+        }
+    }
+    let mut cycle = World::new(
+        vec![Region {
+            id: RegionId(1),
+            name: "cycle".into(),
+            bounds: Extent::new(3, 3, 2).unwrap(),
+        }],
+        vec![],
+    )
+    .unwrap();
+    cycle
+        .connect_area(
+            Passage {
+                from: at(1, 2, 0, 0),
+                direction: Direction::East,
+                to: at(1, 0, 0, 0),
+            },
+            0,
+            3,
+            2,
+        )
+        .unwrap();
+    for frame in 0..24 {
+        assert_matches_reference(&cycle, at(1, 1, 1, 0), frame, 8, "cycle");
+    }
+    let mut stairs = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut stairs, 1, (4, 4, 2));
+    stone_room(&mut stairs, 2, (4, 4, 2));
+    stairs
+        .connect(
+            Passage {
+                from: at(1, 1, 1, 1),
+                direction: Direction::Up,
+                to: at(2, 1, 1, 0),
+            },
+            0,
+        )
+        .unwrap();
+    for z in 0..2 {
+        assert_matches_reference(&stairs, at(1, 1, 1, z), 0, 8, "stairs");
+        assert_matches_reference(&stairs, at(1, 2, 2, z), 5, 8, "stairs");
+    }
+}
+
+#[test]
+fn accelerated_scene_matches_the_reference_in_the_first_dungeon_layout() {
+    // 7x5x2 rooms in a row, joined by one-wide, two-high doorways.
+    let mut world = World::new(vec![], vec![]).unwrap();
+    for id in 1..=3 {
+        stone_room(&mut world, id, (7, 5, 2));
+    }
+    for id in 1..=2 {
+        for (from, direction, to) in [
+            (at(id, 6, 2, 0), Direction::East, at(id + 1, 0, 2, 0)),
+            (at(id + 1, 0, 2, 0), Direction::West, at(id, 6, 2, 0)),
+        ] {
+            world
+                .connect_area(
+                    Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                    1,
+                    2,
+                )
+                .unwrap();
+        }
+    }
+    world.place_door(at(2, 6, 2, 0), 1, false).unwrap();
+    for open in [false, true] {
+        world.set_door(at(2, 6, 2, 0), open);
+        for region in 1..=3 {
+            for z in 0..2 {
+                for y in 0..5 {
+                    for x in 0..7 {
+                        let eye = at(region, x, y, z);
+                        if world.walkable(eye) {
+                            assert_matches_reference(&world, eye, 0, 8, &format!("open {open}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
