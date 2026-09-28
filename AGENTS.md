@@ -33,6 +33,19 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   committed documentation as if other readers can open them. Summarize the
   results in the relevant guide instead.
 
+## Performance measurements
+
+- For release before/after comparisons, use `scripts/perf_compare.py BASE --case ...`
+  rather than hand-built reference binaries. Don't run it while builds or test
+  suites are running, and report its tables compactly: cases, n, p50/p95/max,
+  and any count changes or failed runs.
+- Add accepted headline results to `perf/ledger.jsonl` with
+  `scripts/perf_ledger.py add`. Compare timings only between lines with the same
+  machine fingerprint.
+- Raw samples go to GitHub release assets, never Git. **Ask the maintainer
+  before creating any release or uploading anything.** See the
+  [performance harness](docs/performance-harness.md#publishing-raw-measurements).
+
 ## Publishing
 
 Batch plan and documentation updates and publish at meaningful checkpoints or

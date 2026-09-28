@@ -7,6 +7,118 @@ features change, and use targeted release-build checks as described in the
 [testing policy](testing.md#performance-testing); the full matrix isn't required
 for every change.
 
+## Before-and-after comparisons
+
+Use `scripts/perf_compare.py` for the targeted release comparison each
+latency-sensitive change needs:
+
+```sh
+python scripts/perf_compare.py main --case r8-a1-h100-memory --case r64-a8-h100-memory
+python scripts/perf_compare.py main --case combat:a8-h1000 --rounds 4
+python scripts/perf_compare.py main --case r8-a8-h100-durable --temp-dir F:/tor-perf-tmp -- --save-target-ms 10
+```
+
+The script checks out the base ref in a Git worktree, builds the release
+benchmark examples there and in the working tree, and copies both binaries
+into a new run directory, recording their SHA-256 hashes. It then runs them
+interleaved on this machine: base, head, base, head, for `--rounds` pairs
+(default three). Each run is validated by the report validator from its own
+tree. Failed or rejected runs are kept, excluded from the tables, and make the
+script exit nonzero.
+
+A case is either a `latency_bench` case name (`--cycles` sets its cycle count,
+default five) or `WORKLOAD[:GROUP]` for `combat`, `physics`, `items`, `client`,
+or `places`. Those workloads always run their complete matrix, because their
+validators require it; the group only selects what's displayed. Arguments after
+`--` go to every benchmark invocation, and validator flags such as `--phase-d`
+or `--narration` are passed through to the validators.
+
+The output shows, for each case, pooled n/p50/p95/max per timing metric, the
+range of per-round p95 values (a quick read on run-to-run noise), and the
+operation and byte counts side by side. Counts should be identical across
+rounds; any that vary are marked. A warning is printed if the base and head
+workload versions differ, since their timings aren't comparable.
+
+- Saves go to a temporary directory inside the run directory unless
+  `--temp-dir` selects a volume. Choose it deliberately; the machine
+  fingerprint records the storage type of that volume.
+- The script refuses to start measuring while `cargo` or `rustc` processes are
+  running. `--allow-competing` overrides this and is recorded.
+- `--no-build` reuses binaries that are already built. Don't edit Rust inputs
+  while a build is running.
+- Run directories and base worktrees live in the gitignored `.local` directory.
+  Remove old worktrees with `git worktree remove`.
+
+Each run directory holds `comparison.json` (machine fingerprint, commits,
+binary hashes, commands, every run's exit and validation status, and the pooled
+results) and a `.tar.gz` bundle of it with the compressed raw samples and logs.
+Record the cases, sample counts, percentiles, counts, and limitations with the
+change, as the [testing policy](testing.md#targeted-checks-for-each-change)
+requires.
+
+## Performance ledger
+
+[`perf/ledger.jsonl`](../perf/ledger.jsonl) is a small committed history of
+accepted headline measurements, one JSON line per case and metric. Each line
+records the date, commit and dirty flag, workload name and version, case,
+metric, a machine fingerprint (CPU, logical CPUs, RAM, OS build, and the
+storage type, filesystem, model, and bus of the save volume, plus a short hash
+of those fields), the build profile, n, p50/p95/max, key operation and byte
+counts, and the URL and SHA-256 of the raw data.
+
+Compare timings only between lines with the same machine fingerprint, build
+profile, and workload version. Counts are deterministic and comparable across
+machines. `python scripts/perf_ledger.py fingerprint --path DIR` prints this
+machine's record for the volume holding `DIR`.
+
+The ledger is seeded with the headline cases whose raw samples are preserved in
+the [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs/measurements):
+Phase B, C, and D at 256 regions, 8 actors, and 10,000 actions; the Phase E
+client workload; the journal-only saved 256-region discovery; and the action
+foundation refactor. Their notes say which machine details the archive
+didn't record. The item, place, and scenario sets aren't seeded, because
+their archived data doesn't identify the measured commit or their raw samples
+weren't kept.
+
+Add a line only for an accepted headline result, in the same change as the
+finding it supports:
+
+```sh
+python scripts/perf_ledger.py add --comparison RUN/comparison.json --unit latency:r64-a8-h100-memory \
+  --group r64-a8-h100-memory --metric authoritative_total \
+  --raw-url https://github.com/KCall360/thresholds-of-ruin/releases/download/TAG/BUNDLE
+```
+
+`add` takes the head side by default (`--side base` for the reference), omits
+counts that varied between rounds, and refuses entries that fail the format
+check. `python scripts/perf_ledger.py check` validates the file, and the Python
+suite runs the same check. The check covers format only; it never applies
+timing thresholds.
+
+## Publishing raw measurements
+
+Raw samples don't go in Git. Each measurement set is published as the bundle
+from its run directory, attached to its own GitHub release, and the ledger
+links to it. **Ask the maintainer before creating a release or uploading
+anything.** Once approved:
+
+1. Make sure the measured head commit has been pushed. The release tag points
+   at it.
+2. Create one release per measurement set, named
+   `perf-YYYY-MM-DD-<short-description>`, marked as a pre-release so it's never
+   shown as the latest game release. The notes list the cases, commands,
+   machine fingerprint, whether the tree was dirty, and limitations.
+
+   ```sh
+   gh release create perf-2026-10-01-combat-observations --target COMMIT --prerelease \
+     --title "Performance: combat observations" --notes-file NOTES.md RUN/BUNDLE.tar.gz
+   ```
+
+3. Download the asset again and check that its SHA-256 matches the local
+   bundle.
+4. Add ledger lines with `perf_ledger.py add --raw-url` pointing at the release
+   asset, and commit them with the change.
+
 ## Shared deterministic fixture and trace
 
 The versioned specification is
@@ -115,7 +227,8 @@ saves also acquire the lock, including attempts to overwrite an active save.
 Every matrix case records final save size and normal restart/replay time, which
 includes strict frame validation and checkpoint-tail replay; startup does not rewrite the archive. Replay is not replaced with the
 fixture seeding shortcut. The report validates disclosed state after restart.
-Raw samples must be retained with the source/build that produced them.
+Raw samples must be retained with the source/build that produced them; see
+[publishing raw measurements](#publishing-raw-measurements).
 
 ## Observable 256-region run
 
@@ -233,10 +346,10 @@ workload version 2 with actor and door sight changes; omitting the flag keeps
 version 1. Both use 64/20,956 remembered cells and 1/64-update bursts. See
 [narration and stream recovery](narration-and-recovery.md).
 
-Build a reference checkout with this same example, retain its executable, then
-build the changed implementation. Run matched binaries without competing builds
-or tests. Keep raw samples, sample counts, percentiles, source/binary hashes and
-hardware metadata. The validator enforces exact ordering, version, memory/chart
+Compare against a reference with `perf_compare.py BASE --case client` (see
+[before-and-after comparisons](#before-and-after-comparisons)), which builds
+and runs matched binaries and keeps raw samples, sample counts, percentiles,
+binary hashes and the machine fingerprint. The validator enforces exact ordering, version, memory/chart
 counts and finite nonnegative phase timings, not machine-specific latency gates.
 The allocation-retention and glyph-oracle Rust tests provide stable regressions.
 
@@ -441,12 +554,11 @@ wrong command counts, and nonfinite intervals. Native correctness is covered by
 `scripts/test_dungeon_process.py`; this benchmark does not claim transport or
 input-to-display latency.
 
-For a same-machine comparison, preserve the pre-change release `latency_bench`
-binary and run both versions with these matching ordinary cases:
+For a same-machine comparison, run the combat workload together with matching
+ordinary cases:
 
 ```sh
-latency_bench --case r8-a1-h100-memory --quick --cycles 5
-latency_bench --case r64-a8-h100-memory --cycles 3
+python scripts/perf_compare.py BASE --case combat --case r8-a1-h100-memory --case r64-a8-h100-memory
 ```
 
 Keep raw samples, p50/p95/max and operation counts with the feature findings in

@@ -98,8 +98,9 @@ counts are the durable result.
 | E | Client responsiveness | 64 updates on a 20,956-cell remembered map: apply p95 fell from 549 ms to 39 ms and render p95 from 6.6 ms to 3.0 ms. |
 | Format 6 | Region-shared checkpoint navigation | Fully explored 256-region checkpoint fell from 765 MB to 9.9 MB (the cap stays 64 MiB). Full checkpoint-enabled exploration, exact restart, and native input during a blocked save all pass. |
 
-Full reports, raw samples, manifests, and the original storage review are
-preserved in the
+The headline cases are recorded in the
+[performance ledger](performance-harness.md#performance-ledger). Full reports,
+raw samples, manifests, and the original storage review are preserved in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs).
 
 ## Open work
