@@ -45,6 +45,7 @@ cover the rest of the contribution workflow.
 | Actual-process acceptance | The real server and clients work end to end | `scripts/test_*_process.py` |
 | Scenario packages | Authored content validates and loads | `scenarios/`, `crates/server/tests/scenario_packages.rs` |
 | Documentation | Local links resolve, guides are indexed, and stated versions match the code | `scripts/test_documentation.py` |
+| Performance tooling | Comparison logic and the performance ledger's format (never timing thresholds) | `scripts/test_perf_compare.py`, `scripts/test_perf_ledger.py` |
 | Dependency boundaries | Crates only depend on permitted crates | `scripts/check_architecture.py`, `scripts/test_check_architecture.py` |
 
 ### Acceptance tests with real applications
@@ -222,9 +223,10 @@ application/rendering:
 1. Choose cases that exercise the changed behavior plus a representative
    existing interaction (for example `latency_bench --case r8-a1-h100-memory` and
    `--case r64-a8-h100-memory`).
-2. Preserve the pre-change release binary and run matching cases on the **same
-   machine and configuration**, with no builds or test suites running at the
-   same time.
+2. Run base and head release binaries interleaved on the **same machine and
+   configuration**, with no builds or test suites running at the same time.
+   [`scripts/perf_compare.py`](performance-harness.md#before-and-after-comparisons)
+   does this: `python scripts/perf_compare.py main --case r8-a1-h100-memory`.
 3. Record the cases, sample counts, p50/p95/maximum latency, relevant
    operation and byte counts, and limitations.
 4. Investigate material regressions and tail spikes before calling the feature
@@ -239,8 +241,9 @@ Profiling never replaces the correctness tests above.
 
 - **Enforced in CI:** deterministic operation counts, scale ratios, byte-growth
   bounds, and report-validator contracts (for example, waits construct no scenes;
-  one-hop horizon queries expand one region regardless of catalog size).
-  Put stable scaling regressions in automated tests.
+  one-hop horizon queries expand one region regardless of catalog size), and
+  the performance ledger's format. Put stable scaling regressions in automated
+  tests.
 - **Diagnostic only:** wall-clock timings. They depend on the machine, so
   they're recorded with the change rather than used as pass/fail gates.
 
@@ -253,5 +256,12 @@ Profiling never replaces the correctness tests above.
 - Not reproducing a tail spike doesn't mean it's fixed. Don't subtract
   unexplained intervals or attribute them without evidence.
 - Record the machine, storage volume, toolchain, source commit, and binary
-  hashes with measurements. Keep raw samples and logs out of Git; summarize the
-  results, cases, and limitations in the relevant feature guide.
+  hashes with measurements. Wall-clock timings are comparable only on the same
+  machine, storage, build profile, and workload version; operation and byte
+  counts are deterministic.
+- Keep raw samples and logs out of Git. Publish each accepted measurement set's
+  raw data as a GitHub release asset (ask the maintainer first), add its
+  headline cases to the
+  [performance ledger](performance-harness.md#performance-ledger), and
+  summarize the results, cases, and limitations in the relevant feature guide.
+  See [publishing raw measurements](performance-harness.md#publishing-raw-measurements).

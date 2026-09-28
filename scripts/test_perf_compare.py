@@ -1,0 +1,171 @@
+import unittest
+
+import perf_compare as compare
+
+
+def latency_rows(case="r8-a1-h100-memory", times=(1.0, 2.0, 3.0), blocked=5.0, save_bytes=4096):
+    samples = [{"kind": "sample", "case": case, "expected": "moved", "phases_ms": {"authoritative_total": t},
+                "profile": {"scene_calls": 2, "records_serialized": 1, "timed_out": False}, "client_memory": 10 + i}
+               for i, t in enumerate(times)]
+    samples.append({"kind": "sample", "case": case, "expected": "blocked",
+                    "phases_ms": {"authoritative_total": blocked}, "profile": None, "client_memory": 99})
+    return [
+        {"kind": "case", "case": case, "trace_version": 1},
+        *samples,
+        {"kind": "case_end", "case": case, "history_end": 103, "rewind_count": 3, "final_save_bytes": save_bytes,
+         "final_flush_ms": 0.5, "restart_replay_ms": 7.0,
+         "recovery": {"records_loaded": 103, "records_replayed": 3, "checkpoint_sequence": 100},
+         "save_status": {"journal_bytes": 600, "checkpoints": 1, "checkpoint_bytes": 900, "error": None}},
+        {"kind": "summary", "case": case, "label": "mixed", "phase": "authoritative_total", "p95_ms": 3.0},
+    ]
+
+
+class CaseParsing(unittest.TestCase):
+    def test_latency_cases_are_separate_units(self):
+        units = compare.parse_cases(["r8-a1-h100-memory", "r64-a8-h100-durable"], cycles=3)
+        self.assertEqual(["latency:r8-a1-h100-memory", "latency:r64-a8-h100-durable"], [u.id for u in units])
+        self.assertEqual(("--case", "r8-a1-h100-memory", "--cycles", "3"), units[0].args)
+        self.assertEqual(("r8-a1-h100-memory",), units[0].groups)
+
+    def test_workload_groups_share_one_complete_run(self):
+        units = compare.parse_cases(["combat:a8-h1000", "combat:a2-h0", "combat:a8-h1000", "physics"], cycles=5)
+        self.assertEqual(["combat", "physics"], [u.id for u in units])
+        self.assertEqual(("a8-h1000", "a2-h0"), units[0].groups)
+        self.assertEqual((), units[0].args, "Validators require the complete matrix")
+        self.assertEqual((), units[1].groups, "A bare workload shows every group")
+        self.assertEqual((), compare.parse_cases(["combat:a8-h0", "combat"], 5)[0].groups)
+
+    def test_unknown_cases_are_rejected(self):
+        for case in ("r8-a1-memory", "latency", "latency:r8-a1-h100-memory", "nonexistent:x"):
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                compare.parse_cases([case], cycles=5)
+
+    def test_validator_flags_follow_the_benchmark(self):
+        latency = compare.parse_cases(["r8-a1-h100-memory"], 5)[0]
+        extra = ["--phase-d", "--save-target-ms", "10"]
+        self.assertEqual(["--case", "r8-a1-h100-memory", "--phase-d"], latency.validator_args(extra))
+        client = compare.parse_cases(["client"], 5)[0]
+        self.assertEqual(["--narration"], client.validator_args(["--narration"]))
+        self.assertEqual([], compare.parse_cases(["combat"], 5)[0].validator_args(extra))
+
+
+class Scheduling(unittest.TestCase):
+    def test_rounds_interleave_base_and_head(self):
+        units = compare.parse_cases(["r8-a1-h100-memory", "combat"], 5)
+        order = [(r, u.id, side) for r, u, side in compare.schedule(units, 2)]
+        self.assertEqual([
+            (1, "latency:r8-a1-h100-memory", "base"), (1, "latency:r8-a1-h100-memory", "head"),
+            (1, "combat", "base"), (1, "combat", "head"),
+            (2, "latency:r8-a1-h100-memory", "base"), (2, "latency:r8-a1-h100-memory", "head"),
+            (2, "combat", "base"), (2, "combat", "head"),
+        ], order)
+
+
+class Extraction(unittest.TestCase):
+    def test_latency_uses_the_mixed_distribution_and_deterministic_counts(self):
+        timings, counts, version = compare.extract_latency(latency_rows())
+        case = "r8-a1-h100-memory"
+        self.assertEqual(1, version)
+        self.assertEqual([1.0, 2.0, 3.0], timings[case]["authoritative_total"], "Blocked attempts are excluded")
+        self.assertEqual([7.0], timings[case]["restart_replay_ms"])
+        self.assertEqual(6, counts[case]["profile.scene_calls"])
+        self.assertNotIn("profile.timed_out", counts[case], "Booleans are not counts")
+        self.assertEqual(99, counts[case]["client_memory"])
+        self.assertEqual((4096, 3, 1, 600), (counts[case]["final_save_bytes"], counts[case]["recovery.records_replayed"],
+                                             counts[case]["save_status.checkpoints"],
+                                             counts[case]["save_status.journal_bytes"]))
+
+    def test_saved_traversals_read_nested_persistence(self):
+        rows = [{"kind": "traversal", "case": "traversal-r8", "trace_version": 1},
+                {"kind": "sample", "case": "traversal-r8", "expected": "moved",
+                 "phases_ms": {"authoritative_total": 1.5}, "profile": {"scene_calls": 1}, "client_memory": 5},
+                {"kind": "traversal_end", "case": "traversal-r8", "history_end": 1, "client_memory": 5,
+                 "persistence": {"final_save_bytes": 77, "checkpoint_json_bytes": 88, "restart_replay_ms": 2.0,
+                                 "final_flush_ms": 1.0, "recovery": {"records_replayed": 1},
+                                 "save_status": {"journal_bytes": 50}}}]
+        timings, counts, _ = compare.extract_latency(rows)
+        self.assertEqual([2.0], timings["traversal-r8"]["restart_replay_ms"])
+        self.assertEqual((77, 88, 1, 50), tuple(counts["traversal-r8"][k] for k in (
+            "final_save_bytes", "checkpoint_json_bytes", "recovery.records_replayed", "save_status.journal_bytes")))
+
+    def test_row_workloads_split_timings_from_counts(self):
+        rows = [{"workload": "combat", "version": 1, "actors": 8, "history": 0, "sample": s,
+                 "command_ms": [1.0, 2.0], "save_ms": 4.0, "phase_totals_ms": {"simulation": 1.0},
+                 "scenes": 10, "saved_bytes": 100, "falling": True} for s in range(2)]
+        timings, counts, version = compare.extract_rows(rows, compare.WORKLOADS["combat"])
+        self.assertEqual(1, version)
+        self.assertEqual({"command_ms": [1.0, 2.0, 1.0, 2.0], "save_ms": [4.0, 4.0]}, timings["a8-h0"])
+        self.assertEqual({"scenes": 20, "saved_bytes": 200}, counts["a8-h0"])
+
+    def test_group_names(self):
+        self.assertEqual("a8-i128-c8-falling", compare.WORKLOADS["physics"].group(
+            {"actors": 8, "items": 128, "cells": 8, "falling": True}))
+        self.assertEqual("i1000-id256", compare.WORKLOADS["items"].group({"items": 1000, "identities": 256}))
+        self.assertEqual("c20956-b64", compare.WORKLOADS["client"].group({"cells": 20956, "burst": 64}))
+        places = compare.WORKLOADS["places"].group
+        self.assertEqual("rooms64-rename", places({"extra_rooms": 64, "kind": "sample", "label": "rename"}))
+        self.assertEqual("rooms64-recovery", places({"extra_rooms": 64, "kind": "recovery"}))
+
+    def test_items_version_field(self):
+        rows = [{"workload_version": 1, "items": 16, "identities": 8, "sample": 0, "transfers": 20,
+                 "transfer_ms": [0.5], "scenes": 3}]
+        timings, counts, version = compare.extract_rows(rows, compare.WORKLOADS["items"])
+        self.assertEqual((1, {"scenes": 3}), (version, counts["i16-id8"]))
+
+
+class Pooling(unittest.TestCase):
+    def test_rounds_are_pooled_before_percentiles(self):
+        first = compare.extract_latency(latency_rows(times=[1.0] * 10))[:2]
+        second = compare.extract_latency(latency_rows(times=[1.0] * 9 + [50.0]))[:2]
+        stats = compare.pool([first, second])["r8-a1-h100-memory"]["timings"]["authoritative_total"]
+        self.assertEqual((20, 1.0, 1.0, 50.0), (stats["n"], stats["p50_ms"], stats["p95_ms"], stats["max_ms"]))
+        self.assertEqual([1.0, 50.0], stats["round_p95_ms"])
+
+    def test_varying_counts_are_flagged(self):
+        first = compare.extract_latency(latency_rows(save_bytes=4096))[:2]
+        second = compare.extract_latency(latency_rows(save_bytes=8192))[:2]
+        counts = compare.pool([first, second])["r8-a1-h100-memory"]["counts"]
+        self.assertEqual(103, counts["history_end"])
+        self.assertEqual({"min": 4096, "max": 8192, "missing_rounds": 0}, counts["final_save_bytes"])
+
+    def test_counts_missing_from_a_round_are_not_reported_as_stable(self):
+        first = ({}, {"g": {"scenes": 4}})
+        second = ({}, {"g": {}})
+        self.assertEqual({"min": 4, "max": 4, "missing_rounds": 1}, compare.pool([first, second])["g"]["counts"]["scenes"])
+
+
+class Formatting(unittest.TestCase):
+    def test_side_by_side_table(self):
+        base = compare.pool([compare.extract_latency(latency_rows(times=[2.0] * 20))[:2]])["r8-a1-h100-memory"]
+        head = compare.pool([compare.extract_latency(latency_rows(times=[1.0] * 20, save_bytes=5000))[:2]])[
+            "r8-a1-h100-memory"]
+        text = compare.format_group("latency r8-a1-h100-memory", base, head)
+        row = next(line for line in text.splitlines() if line.strip().startswith("head") and "-50.0%" in line)
+        self.assertIn("1.000", row)
+        self.assertRegex(text, r"final_save_bytes\s+4096\s+5000\s+\+904")
+        self.assertRegex(text, r"history_end\s+103\s+103\s+=")
+
+    def test_missing_side_and_varying_counts(self):
+        head = {"timings": {"x_ms": {"n": 1, "p50_ms": 1.0, "p95_ms": 1.0, "max_ms": 1.0, "round_p95_ms": [1.0]}},
+                "counts": {"bytes": {"min": 1, "max": 2, "missing_rounds": 0}}}
+        text = compare.format_group("t", {"timings": {}, "counts": {"bytes": 1}}, head)
+        self.assertRegex(text, r"x_ms\s+base\s+-")
+        self.assertRegex(text, r"bytes\s+1\s+varies 1\.\.2\s+\?")
+
+
+class Changes(unittest.TestCase):
+    def test_changes_below_timer_resolution_are_equal(self):
+        self.assertEqual("=", compare._change(0.0001, 0.0003))
+        self.assertEqual("+100.0%", compare._change(1.0, 2.0))
+        self.assertEqual("n/a", compare._change(0.0, 1.0))
+
+
+class Processes(unittest.TestCase):
+    def test_process_listing_parsers(self):
+        windows = '"cargo.exe","1234","Console","1","10,000 K"\n"explorer.exe","2","Console","1","1 K"\n'
+        self.assertEqual(["cargo.exe", "explorer.exe"], compare.parse_process_names(windows))
+        self.assertEqual(["rustc", "bash"], compare.parse_process_names("/usr/bin/rustc\nbash\n\n"))
+
+
+if __name__ == "__main__":
+    unittest.main()

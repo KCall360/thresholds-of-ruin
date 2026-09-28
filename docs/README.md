@@ -43,7 +43,7 @@ authoritative until the guide is corrected.
 | --- | --- |
 | Testing requirements and how to run the checks | [Testing and verification](testing.md) |
 | Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
-| Benchmarks and profiling drivers | [Performance harness](performance-harness.md) |
+| Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
 | Privileged setup for testing | [Wizard mode](wizard-mode.md) |
 | Accepted future requirements | [Game design plan](game-design-plan.md) |
 
