@@ -96,4 +96,5 @@ pub use shared::Shared;
 mod rotation;
 pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};
 
+mod sight3d;
 mod volume_scene;

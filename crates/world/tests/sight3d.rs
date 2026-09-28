@@ -1,0 +1,318 @@
+//! Reference 3D sight: see docs/sight-3d.md.
+use std::collections::BTreeSet;
+
+use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
+
+fn at(region: u64, x: i32, y: i32, z: i32) -> Location {
+    Location {
+        region: RegionId(region),
+        position: Position { x, y, z },
+    }
+}
+
+fn chamber(width: i32, depth: i32, height: i32) -> World {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(1),
+            name: "test".into(),
+            bounds: Extent::new(width, depth, height).unwrap(),
+        })
+        .unwrap();
+    world
+}
+
+/// Visible absolute positions in region 1 from an eye cell.
+fn seen(world: &World, eye: Location) -> BTreeSet<(i32, i32, i32)> {
+    world
+        .eye_scene(eye, 0, 8)
+        .iter()
+        .map(|c| {
+            let p = c.location.position;
+            (p.x, p.y, p.z)
+        })
+        .collect()
+}
+
+fn manhattan(a: (i32, i32, i32), b: (i32, i32, i32)) -> i32 {
+    (a.0 - b.0).abs() + (a.1 - b.1).abs() + (a.2 - b.2).abs()
+}
+
+/// Deterministic xorshift for reproducible random layouts.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+}
+
+#[test]
+fn open_room_discloses_every_floor_ceiling_and_wall_face_for_every_eye_height() {
+    let (w, d, h) = (7, 7, 3);
+    let world = chamber(w, d, h);
+    // One-cell rat, two-cell humanoid, and three-cell giant eyes.
+    for eye_z in 0..h {
+        let eye = (3, 3, eye_z);
+        let visible = seen(&world, at(1, eye.0, eye.1, eye.2));
+        let mut expected = BTreeSet::new();
+        for z in -1..=h {
+            for y in -1..=d {
+                for x in -1..=w {
+                    let interior =
+                        (0..w).contains(&x) && (0..d).contains(&y) && (0..h).contains(&z);
+                    let outside = [x < 0 || x >= w, y < 0 || y >= d, z < 0 || z >= h];
+                    // A shell cell has an exposed face only when it is outside
+                    // the interior along exactly one axis.
+                    let exposed = outside.iter().filter(|o| **o).count() == 1;
+                    if (interior || exposed) && manhattan(eye, (x, y, z)) <= 8 {
+                        expected.insert((x, y, z));
+                    }
+                }
+            }
+        }
+        assert_eq!(visible, expected, "eye height {eye_z}");
+        for cell in world.eye_scene(at(1, eye.0, eye.1, eye.2), 0, 8) {
+            assert!(
+                world.terrain(cell.location).is_some(),
+                "never discloses missing geometry"
+            );
+        }
+    }
+}
+
+#[test]
+fn waist_wall_hides_nearby_floor_from_a_humanoid_and_all_of_it_from_a_rat() {
+    let world = {
+        let mut world = chamber(8, 3, 2);
+        world.set_wall(at(1, 1, 1, 0), true).unwrap();
+        world
+    };
+    let humanoid = seen(&world, at(1, 0, 1, 1));
+    let rat = seen(&world, at(1, 0, 1, 0));
+    assert!(
+        !humanoid.contains(&(1, 1, -1)),
+        "floor under the wall has no exposed face"
+    );
+    assert!(
+        !humanoid.contains(&(2, 1, -1)),
+        "floor just behind the wall"
+    );
+    assert!(
+        humanoid.contains(&(3, 1, -1)),
+        "floor further back, seen over the wall"
+    );
+    assert!(humanoid.contains(&(1, 1, 0)), "the wall itself");
+    for x in 2..=5 {
+        assert!(
+            !rat.contains(&(x, 1, -1)),
+            "rat sees no floor behind the wall at x={x}"
+        );
+    }
+    assert!(
+        rat.contains(&(1, 1, 1)),
+        "rat sees the air just above the wall"
+    );
+    assert!(
+        !rat.contains(&(4, 1, 1)),
+        "a low line to air further back cuts the wall"
+    );
+}
+
+#[test]
+fn head_height_air_is_seen_from_every_eye_height() {
+    let world = chamber(6, 3, 2);
+    for eye_z in 0..2 {
+        let visible = seen(&world, at(1, 0, 1, eye_z));
+        for x in 0..6 {
+            assert!(
+                visible.contains(&(x, 1, 1)),
+                "air at x={x} from eye height {eye_z}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_low_creature_can_see_legs_its_taller_neighbour_cannot_see_back() {
+    // A shelf at head height in front of the humanoid; the rat is beyond it.
+    let mut world = chamber(6, 3, 2);
+    world.set_wall(at(1, 1, 1, 1), true).unwrap();
+    world.set_wall(at(1, 2, 1, 1), true).unwrap();
+    let humanoid_eye = seen(&world, at(1, 0, 1, 1));
+    let rat_eye = seen(&world, at(1, 3, 1, 0));
+    assert!(rat_eye.contains(&(0, 1, 0)), "rat sees the humanoid's legs");
+    assert!(
+        !humanoid_eye.contains(&(3, 1, 0)),
+        "humanoid's eye can't see the rat"
+    );
+    assert!(
+        !rat_eye.contains(&(0, 1, 1)),
+        "eye-to-eye sight stays reciprocal"
+    );
+}
+
+#[test]
+fn sight_between_empty_cells_is_reciprocal_in_random_volumes() {
+    for seed in 1..=4u64 {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
+        let (w, d, h) = (5, 5, 3);
+        let mut world = chamber(w, d, h);
+        let mut empty = Vec::new();
+        for z in 0..h {
+            for y in 0..d {
+                for x in 0..w {
+                    if rng.chance(25) {
+                        world.set_wall(at(1, x, y, z), true).unwrap();
+                    } else {
+                        empty.push((x, y, z));
+                    }
+                }
+            }
+        }
+        let scenes: Vec<_> = empty
+            .iter()
+            .map(|&(x, y, z)| seen(&world, at(1, x, y, z)))
+            .collect();
+        for (i, a) in empty.iter().enumerate() {
+            for (j, b) in empty.iter().enumerate() {
+                assert_eq!(
+                    scenes[i].contains(b),
+                    scenes[j].contains(a),
+                    "seed {seed}: {a:?} and {b:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Whether the eye-to-centre line for `offset` passes exactly through the
+/// centre of a face of some opaque cell: a bevel tip, which only touches.
+fn grazes_face_centre(world: &World, eye: Location, offset: (i32, i32)) -> bool {
+    let (dx, dy) = (2 * offset.0, 2 * offset.1);
+    (-9..=9).any(|x: i32| {
+        (-9..=9).any(|y: i32| {
+            let cell = at(1, eye.position.x + x, eye.position.y + y, 0);
+            world.opaque(cell)
+                && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(fx, fy)| {
+                    let (px, py) = (2 * x + fx, 2 * y + fy);
+                    px * dy == py * dx
+                        && px * dx + py * dy > 0
+                        && px.abs() <= dx.abs()
+                        && py.abs() <= dy.abs()
+                })
+        })
+    })
+}
+
+/// On single-level maps, empty cells match Ford's 2D shadowcasting except where
+/// a line passes exactly through a bevel tip. Touching never blocks in 3D; Ford's
+/// row scan breaks those exact ties by rounding. Wall cells differ because faces
+/// are tested at their centres rather than by any exposed portion.
+#[test]
+fn single_level_maps_match_two_dimensional_shadowcasting_for_open_cells() {
+    let mut wall_differences = 0;
+    let mut grazes = 0;
+    for seed in 1..=40u64 {
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03 ^ seed);
+        let region = Region {
+            id: RegionId(1),
+            name: "plane".into(),
+            bounds: Extent::new(11, 11, 1).unwrap(),
+        };
+        let mut world = World::new(vec![region], vec![]).unwrap();
+        for y in 0..11 {
+            for x in 0..11 {
+                if (x, y) != (5, 5) && rng.chance(30) {
+                    world.set_wall(at(1, x, y, 0), true).unwrap();
+                }
+            }
+        }
+        let eye = at(1, 5, 5, 0);
+        let split = |cells: Vec<tor_world::SightCell>| {
+            let mut open = BTreeSet::new();
+            let mut walls = BTreeSet::new();
+            for c in cells {
+                let key = (c.offset.x, c.offset.y, c.offset.z);
+                if world.opaque(c.location) {
+                    walls.insert(key);
+                } else {
+                    open.insert(key);
+                }
+            }
+            (open, walls)
+        };
+        let (open3, walls3) = split(world.eye_scene(eye, 0, 8));
+        let (open2, walls2) = split(world.shadow_scene(eye, 0, 8));
+        assert!(
+            open2.is_subset(&open3),
+            "seed {seed}: 3D hides an open cell"
+        );
+        for extra in open3.difference(&open2) {
+            assert!(
+                grazes_face_centre(&world, eye, (extra.0, extra.1)),
+                "seed {seed}: {extra:?} is extra without an exact bevel-tip graze"
+            );
+            grazes += 1;
+        }
+        wall_differences += walls3.symmetric_difference(&walls2).count();
+    }
+    assert!(grazes > 0, "the fixture exercises exact bevel-tip grazes");
+    eprintln!("bevel-tip grazes: {grazes}; wall-cell differences: {wall_differences}");
+}
+
+#[test]
+fn dividing_a_space_into_regions_does_not_change_the_3d_scene() {
+    let whole = World::new(
+        vec![Region {
+            id: RegionId(1),
+            name: "whole".into(),
+            bounds: Extent::new(10, 5, 2).unwrap(),
+        }],
+        vec![],
+    )
+    .unwrap();
+    let mut split = World::new(
+        vec![
+            Region {
+                id: RegionId(1),
+                name: "a".into(),
+                bounds: Extent::new(5, 5, 2).unwrap(),
+            },
+            Region {
+                id: RegionId(2),
+                name: "b".into(),
+                bounds: Extent::new(5, 5, 2).unwrap(),
+            },
+        ],
+        vec![],
+    )
+    .unwrap();
+    split
+        .connect_area(
+            Passage {
+                from: at(1, 4, 0, 0),
+                direction: Direction::East,
+                to: at(2, 0, 0, 0),
+            },
+            0,
+            5,
+            2,
+        )
+        .unwrap();
+    for eye in [at(1, 3, 2, 0), at(1, 3, 2, 1)] {
+        let view = |world: &World| {
+            world
+                .eye_scene(eye, 0, 8)
+                .iter()
+                .map(|c| (c.offset, c.wall))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(view(&split), view(&whole));
+    }
+}

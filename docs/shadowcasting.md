@@ -58,6 +58,8 @@ These tests are included in Windows/Linux CI discovery for debug and release.
 
 Run `cargo run -p tor-world --release --example fov_bench` to measure current
 scene construction, including topology and sorting. The benchmark covers open
-rooms, pillars, a broad rotated join, and a cycle at radii 8 and 16. Timings are
+rooms, pillars, a broad rotated join, and a cycle at radii 8 and 16, plus
+dungeon-style chambers. It compares 2D shadowcasting, the voxel height-slice
+builder, and the reference [3D sight](sight-3d.md) builder. Timings are
 diagnostic, not pass/fail thresholds. Historical ray implementations and their
 comparison benchmark have been removed.

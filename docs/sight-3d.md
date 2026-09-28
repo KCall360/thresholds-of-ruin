@@ -273,3 +273,24 @@ not make those items worse.
 
 Still open: the delta encoding, and whether the accelerated layers are needed.
 Both are settled by measurement.
+
+## Reference implementation findings
+
+The reference is `World::eye_scene`, in `crates/world/src/sight3d.rs`, with
+tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
+
+- **Empty cells compared with 2D shadowcasting.** Across 2,000 random
+  single-level maps (about 97,000 open cells seen by Ford), 3D sight saw every
+  open cell Ford saw, plus 619 more (0.6%). Every extra cell is on a line that
+  passes exactly through a wall's bevel tip (a face centre). Touching never
+  blocks in 3D, while Ford's row scan breaks these exact ties by rounding, and
+  not consistently: one line in the sample passed one tip and was stopped at
+  the next. The comparison test asserts exactly this: 3D sees a superset of
+  Ford's open cells, and every extra cell grazes a bevel tip.
+- **Walls.** Visible wall counts are similar (30,101 with Ford and 30,345 in 3D
+  on the 11×11 sample), with differences in both directions. Ford counts a wall
+  whose corner peeks out from behind another; 3D requires a visible face centre.
+- **Speed (release build, range 8, mean per scene).** A dungeon-style room seen
+  by a humanoid takes 876 µs, compared with 295 µs for the current voxel
+  builder and 10 µs for 2D shadowcasting. A three-cell hall seen by a giant
+  takes 966 µs. The accelerated layers are needed before gameplay integration.
