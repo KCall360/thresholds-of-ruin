@@ -51,23 +51,23 @@ must be saved before privileged commands can execute. Once queued, the lineage
 remains marked even if the first flush fails; authority stays disabled until a
 successful retry. Rewind cannot clear the marker.
 
-## Format 6
+## Save file format
 
-The format-6 compatibility decision rejects format 5, as explicitly authorized
-for this pre-release checkpoint change. Current games use protocol 15 and `physics-v15`; format 8 adds pinned scenario inputs.
-Only the current format is supported; old JSON and format-4/5 SQLite saves are rejected without an
+Only the current save format is supported; older saves are rejected without an
 importer. The filename extension is immaterial. The database uses bundled SQLite
 through `rusqlite`, confined to the server crate. The `journal` table holds the
 immutable replay base at sequence zero and the active tail; `history` holds records
 covered by the selected checkpoint. Global sequence numbers remain contiguous
 across both tables. SQLite transactions commit complete batches. The database uses
-`journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and
-`user_version=6`. SQLite's temporary rollback journal is part of transaction
+`journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and a
+`user_version` equal to the current save format. SQLite's temporary rollback journal is part of transaction
 recovery and must not be manually deleted after a crash.
 
 Each row contains a 24-byte little-endian frame header:
 
-`magic | format:u16=6 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
+`magic | frame_format:u16=6 | kind:u16 | sequence:u64 | payload_len:u32 | crc32c:u32`
+
+The frame layout has its own version (6), independent of the save format.
 
 The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the permanent
 wizard marker uses kind 2. CRC32C covers header bytes 4–19 and the payload, with
@@ -111,5 +111,5 @@ and process termination before/after a SQLite commit. Server shutdown is tested
 while the service still owns the engine, so an implicit destructor cannot mask
 a missing shutdown barrier.
 
-See the [focused measurement plan](performance-persistence.md#phase-b-verification-and-measurement)
-and [harness guide](performance-harness.md) for performance boundaries.
+See the [performance plan](performance-persistence.md) and
+[harness guide](performance-harness.md) for performance boundaries.

@@ -1,11 +1,13 @@
-# First simulation slice
+# Simulation
 
-`tor-simulation` implements the authoritative in-memory rules for the current
-playable slice. It uses only the standard library and `tor-world`; it performs no
-I/O, rendering, wall-clock access, or implicit random sampling. This page records
-the implemented fixture and rules, not the future dungeon-gameplay scope.
+`tor-simulation` implements the authoritative in-memory rules. It uses only the standard library and `tor-world`; it performs no
+I/O, rendering, wall-clock access, or implicit random sampling. This page covers
+the core actor, time, and perception rules and the built-in test fixture. Combat
+and AI are in [dungeon gameplay](dungeon.md), items in [items](items.md), and
+bodies and gravity in [physics](physics.md). Games normally start from an
+authored [scenario package](scenario-packages.md).
 
-## Scenario and geometry
+## Built-in fixture and geometry
 
 `Game::two_room_in_stone(seed)` creates two 5 x 3 x 2 empty room interiors
 inside finite stone shells, connected through a 1 x 1 hall with two empty height
@@ -19,8 +21,9 @@ Start an actor at region 1, position (1,1,0), on the seeded token. The stone tab
 is at region 2 (2,1,0), seven eastward steps away through the open hall. Closing
 the door blocks movement and sight through the hall. The seed chooses copper,
 silver, or iron for the token. Layout generation and random gameplay mechanics
-are deferred, so this fixture needs no PRNG state. Historical `Game::two_room`
-and `Game::two_room_with_place_hints` layouts remain available for old-save replay.
+are deferred, so this fixture needs no PRNG state. The simpler `Game::two_room`
+and `Game::two_room_with_place_hints` layouts remain as diagnostic fixtures for
+tests.
 
 `World` validates unique region IDs, in-bounds passage endpoints, boundary exits,
 and unique (source cell, direction) connections. Cardinal and vertical movement
@@ -30,10 +33,10 @@ the same cell. Occupancy only blocks another actor.
 
 The [portal-geometry slice](portal-geometry.md) adds clockwise passage rotations,
 opaque wall terrain and explicit up/down links for stairs. Horizontal connections
-must exit a boundary; vertical links may start in the interior. Gravity and support remain pending; [independent doors](doors.md) now obstruct
-sight and movement. Rectangular joins can cover multiple cells. Passages are not door entities
-and do not constrain where future doors can be placed. Old-rule saves retain
-the original vertical-step behavior.
+must exit a boundary; vertical links may start in the interior. Gravity and
+support are described in [physics](physics.md); [independent doors](doors.md)
+obstruct sight and movement. Rectangular joins can cover multiple cells.
+Passages aren't door entities and don't constrain where doors can be placed.
 
 ## Actors and time
 
@@ -52,7 +55,7 @@ An action takes effect at the current tick and incurs recovery time:
 | Action | Recovery time | Preconditions |
 | --- | --- | --- |
 | Cardinal/vertical move | Actor's base duration | Valid geometry; destination free of other actors |
-| Diagonal move (diagonal-v11) | `ceil(base × √2)` | Clear destination and at least one clear side |
+| Diagonal move | `ceil(base × √2)` | Clear destination and at least one clear side |
 | Take | Half base duration, rounded up | Item lies on the actor's cell |
 | Open/close door | Actor's base duration | Visible, reachable door; changed state; no obstruction when closing |
 | Wait | Actor's base duration | Actor is scheduled to act |
@@ -83,8 +86,9 @@ world changes. Effect application and scheduling have no fallible operations.
 These are extension points for future timed actions, not implemented partial
 progress or interruption behavior. Current effects still happen at the action's
 starting tick, and all actors use the same deterministic recovery scheduler.
-Travel remains a server-managed sequence of ordinary moves. The refactor changed no formats; current place knowledge uses protocol 15, save
-format 10 and `physics-v15`. The [architecture](architecture.md#time-and-actions)
+Travel remains a server-managed sequence of ordinary moves. Attacks, added
+later, are the first timed action built on these extension points; see
+[dungeon gameplay](dungeon.md). The [architecture](architecture.md#time-and-actions)
 defines where future persistent progress and revalidation belong.
 
 The action-boundary behavior tests cover immediate effects and exact recovery for
@@ -114,11 +118,9 @@ Operation and byte totals match before/after in both cases. No regression appear
 in these samples; lower timings do not establish a refactor-induced speedup because
 host scheduling and CPU conditions are uncontrolled. These stationary traces do
 not qualify persistence, fully explored map memory or native presentation, and do
-not close deferred 3p findings. Reproduction commands, source/artifact checksums
-and compressed samples are recorded in the
-[manifest](measurements/action-foundation-2026-09-26/manifest.json); distributions
-and operation totals are in the
-[summary](measurements/action-foundation-2026-09-26/summary.json).
+not close deferred 3p findings. The
+[archived manifest and summary](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs/measurements/action-foundation-2026-09-26) record the
+reproduction commands, checksums, distributions, and operation totals.
 
 ## Perception and inventory
 
@@ -134,8 +136,8 @@ Seeing an item elsewhere in a room does not make it reachable. Taking hidden,
 unknown, already carried, and out-of-reach items produces the same unavailable
 error. Visited place knowledge changes when an actor enters a room, not when a
 client decides to query it. Looking through a portal does not mark a place visited.
-Clients retain separate last-seen cell contents, which may be stale. Existing
-Saves use `physics-v15`; older rulesets are rejected. Sound remains later work.
+Clients retain separate last-seen cell contents, which may be stale. Sound
+remains later work.
 Server games add an initially open door.
 
 ## Validation and remaining work
@@ -155,9 +157,9 @@ updates, and durable action/annotation history. The [text](text-client.md) and
 [graphical ASCII](ascii-client.md) frontends now exercise this slice through actual
 process tests, including cross-frontend control transfer and save/resume.
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
-They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `physics-v15`.
+[Unnamed place hints](place-hints.md) add perceived cell anchors without labels
+or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;
+text uses them as described in [the adventure interface](text-adventure.md).
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

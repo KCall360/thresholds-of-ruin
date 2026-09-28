@@ -1,288 +1,160 @@
-# Performance and scalable persistence plan
+# Performance and scalable persistence
 
-## Purpose
+This page covers milestone **3p**: the latency targets, the persistence and
+state-sharing design, what has been achieved, and what's still open. The
+[performance harness](performance-harness.md) has the reproduction commands, and
+the [testing policy](testing.md#performance-testing) has the rules every change
+follows.
 
-This milestone makes responsiveness and scale explicit engineering constraints
-before dungeon gameplay expands the world, entity count, and action history. It
-does not weaken deterministic simulation, actor-specific disclosure, idempotent
-requests, or wizard rewind.
+**Status:** deferred and still open. Phases A–E and the explored-world checkpoint
+reduction are implemented. At the maintainer's direction, the remaining closure
+work no longer blocks feature milestones, but every feature is still
+performance-checked, and no target has been relaxed.
 
-Phase A is complete. The [measured findings](phase-a-findings.md) retain the
-validated baseline. The harness measures ordinary mixed commands through a shared deterministic
-fixture, including boundaries, doors, elevations, LOS changes, and multiple
-actors. The [harness guide](performance-harness.md) defines reproducible commands
-and measurement boundaries. The [storage review](persistence-review.md) separates
-the historical Phase A writer from the revised [background-save contract](background-saving.md).
-The user authorized Phase B with asynchronous acknowledgements and performance as a primary driver.
-The [Phase B findings](phase-b-findings.md) retain the focused comparison.
+## Targets and guiding criteria
 
-Milestone 4d adds the [combat workload findings](dungeon.md). Eight-actor combat
-still exceeds the 8 ms p95 target after removing duplicate attack validation and
-unnecessary navigation refreshes. Phase timing identifies all-actor before/after
-observation construction as the largest remaining cost. This is tracked with the
-already-deferred 3p scaling work; the latency target is unchanged. The ordinary
-comparison cases and smaller combat cases remain within target.
+These product decisions govern the milestone:
 
-## Recorded decisions and guiding criteria
+1. **Ordinary acknowledgements are asynchronous.** An action is acknowledged
+   once it's admitted to a bounded in-memory queue and published. Recent
+   acknowledged play can be lost in a crash. Explicit save, normal client exit,
+   graceful server shutdown, and wizard enablement wait for storage. See
+   [background saving](background-saving.md).
+2. **Old saves are unsupported.** Format changes reject older saves; there's no
+   importer.
+3. **Latency targets are provisional:** for an ordinary locally saved action in a
+   release build, **p95 below 8 ms and maximum below 33 ms**, with no meaningful
+   upward trend between 100 and 10,000 retained actions. Measurements may justify
+   tightening or adjusting them. Meeting them isn't a license to leave a clearly
+   wasteful path in place.
 
-The milestone uses these product decisions:
-
-1. **Ordinary acknowledgements are asynchronous.** They follow successful bounded
-   queue admission and in-memory publication. Recent acknowledged play may be
-   lost after a crash. Configurable target age, idle opportunity, maximum age,
-   and queue pressure schedule background saves. Explicit save, normal client
-   exit, graceful server shutdown, and wizard enablement retain durable barriers.
-2. **Old saves are intentionally unsupported.** This is a pre-release project,
-   so the new persistence layout will advance the save format and reject older
-   formats. There is no historical-format importer or compatibility reader. Tests,
-   fixtures, documentation, and the sample saves move to the new format together.
-3. **Latency targets are provisional.** Initial release-build goals are p95 below
-   8 ms and maximum below 33 ms for an ordinary locally saved action, with no
-   meaningful upward trend between 100 and 10,000 retained actions. Measurement
-   may show that these limits should be tightened or adjusted. They are not a
-   license to stop optimizing a clearly wasteful path.
-
-The governing criteria are **scalable and fast**, in that order when a tradeoff
-is unavoidable. Work proportional to newly committed data is preferred over work
-proportional to total history, dungeon size, or retained branches. Within that
-constraint, minimize absolute and tail latency under the chosen save contract while preserving
-determinism, disclosure, and consistent recovery. CI enforces scale and regression ratios
-rather than fragile machine-specific wall-clock numbers.
+Optimize for being **scalable, then fast**. Prefer work proportional to newly
+committed data over work proportional to total history, dungeon size, or retained
+branches. Within that constraint, minimize absolute and tail latency while
+preserving determinism, disclosure, and consistent recovery. CI enforces
+operation counts and scale ratios, not machine-specific wall-clock numbers.
 
 ## Measurement model
 
-Profiling remains maintained after milestone 3p. Every later gameplay and client
-feature must keep instrumentation and report validation working and add relevant
-representative workloads when it introduces new performance-sensitive behavior.
-Use targeted release-build comparisons to check that new features do not add
-material action or presentation latency; a full matrix is reserved for broad
-changes or evidence that focused checks are insufficient. Record matched cases,
-sample counts, p50/p95/maximum, scale/operation counts, and unresolved regressions.
-Follow [development practices](../CONTRIBUTING.md) for workload versioning,
-before/after comparisons, and escalation. Correctness checks remain required.
+The harness:
 
-The checked-in Phase A harness measures:
-
-- retain mean, p50, p95, and maximum rather than aggregate averages;
-- measure 1, 8, 64, and 256 connected regions, including portals, obstacles,
-  doors, multiple elevations, and repeated movement across region boundaries;
-- measure histories at 0, 100, 1,000, and 10,000 actions;
-- isolate simulation transition, navigation, perception, revision detection,
-  candidate capture, rewind snapshot, encoding, write/flush, sync, replacement,
+- keeps mean, p50, p95, and maximum rather than aggregate averages;
+- covers 1, 8, 64, and 256 connected regions (portals, obstacles, doors,
+  elevations, and repeated boundary crossings), 1 and 8 actors, and histories of
+  0, 100, 1,000, and 10,000 actions;
+- times exclusive phases: candidate capture, checkpoint capture, simulation,
+  navigation, perception, revision comparison, rewind snapshot, encoding, I/O,
   publication, client update application, and rendering;
-- add multi-actor cases because revision detection currently observes every
-  actor before and after an action; and
-- record save size, bytes written per action, and normal restart/replay time.
-  Allocation instrumentation is deferred; its overhead and unsafe-code policy
-  implications have not been resolved.
+- records save size, bytes per action, and restart/replay time; and
+- grows remembered map knowledge in a separate full-traversal (discovery) trace,
+  because stationary local loops can't reveal costs that grow with exploration.
 
-Wall-clock benchmarks remain diagnostic. Deterministic operation counts, file
-growth bounds, and ratios between small and large cases are suitable for stable
-automated regression tests.
+Allocation instrumentation is deferred: no low-overhead approach has been
+established under the workspace's `unsafe` prohibition.
 
-## Persistence design
+## Current design
 
-The [background journal](background-saving.md) introduced in Phase B now uses
-format 6 with region-shared checkpoints:
+- **Append journal.** Each accepted action encodes only its new record and is
+  admitted to a bounded queue before publication. One storage worker writes
+  atomic SQLite batches outside the engine lock. See
+  [background saving](background-saving.md).
+- **Checkpoints.** Periodic snapshots and logical compaction bound the replay
+  needed at startup, while all history stays retained. Navigation knowledge is
+  pooled by source region, so explored worlds stay small. See
+  [checkpoints](checkpoints.md).
+- **State sharing.** Command candidates own only decision state, revisions, the
+  current branch, and at most 128 shared rewind boundaries. World collections,
+  items, and navigation use copy-on-write ownership. Waits construct no scenes;
+  other actions build one scene per observation and reuse it.
+- **Client delivery.** Client updates are validated before mutation without
+  copying remembered map memory. ASCII delivers ordered updates through a bounded
+  channel, limits event work per frame, and indexes rendering lookups.
 
-1. Validate and simulate in a transactional candidate, encode only the new record,
-   and admit it to the bounded pending queue. Rejection leaves published state
-   and request identity unchanged.
-2. Publish immediately after admission. One worker owns SQLite batch transactions
-   outside the engine/session lock. Idle opportunities defer normal saving;
-   maximum age and queue pressure force progress under continuing activity.
-3. Explicit saves wait for the accepted sequence captured by the request. Failed
-   background saves retain pending records and block new mutations until retry.
-4. Startup recovers SQLite transactions, validates every frame, restores the
-   selected checkpoint and replays its tail. Receipts, abandoned branches, and
-   private notes remain retained. The permanent wizard marker is saved before authority is enabled.
-5. Phase C atomically selects a checkpoint and moves its covered journal rows
-   into retained history. SQLite rollback journals protect this entire transaction;
-   obsolete checkpoint pages are reused without deleting history.
+Rollback stays inside the authoritative server. There's no speculative client
+simulation or long-lived observation cache.
 
-## State and rollback work
+### Data structures and caching
 
-Phase D removes broad command candidates and repeated scene construction:
+Ordered collections are kept for deterministic behavior and aren't replaced
+wholesale. Optimize individual access patterns only after profiling shows
+they matter. Cache scenes or observations by authoritative revision only if
+construction remains a measured cost. Invalidate caches from explicit change
+sets, and test cached results against uncached ones. Speculative presentation
+is a possible later experiment, only once durable local p95 meets the target
+and remote latency dominates.
 
-- transactions own game state, revisions, current branch and at most 128 shared
-  rewind boundaries; history and receipt indexes are never cloned by commands;
-- world collections, items and actor navigation use copy-on-write ownership;
-- ordinary waits update revisions from explicit time/readiness effects without
-  constructing scenes or observations; full-view oracle tests verify equivalence;
-- other actions conservatively compare every actor, with one scene reused for
-  observation, material surfaces, door approaches and navigation; and
-- navigation refresh examines visible connections and detaches shared knowledge
-  only when facts change, copying the affected source-region maps rather than all
-  discovered cells. Region exits use the existing ordered map's range.
+## What each phase achieved
 
-Rollback stays internal to the authoritative server. Queue rejection discards the
-candidate before changing history, receipts or published game state. No speculative
-client simulation or long-lived observation cache is introduced. Full-history
-copying remains available only to explicit detached persistence diagnostics.
+Measured on the maintainer's Windows machine (Intel i7-9750H, 16 GiB RAM,
+saves on an NTFS hard disk). Timings are diagnostic; the ratios and operation
+counts are the durable result.
 
-## Data structures and caching
+| Phase | Change | Headline result |
+| --- | --- | --- |
+| A | Baseline harness and contracts | Durable p95 was 51–1,293 ms, dominated by file sync. The largest case wrote 12.4 GiB for a 5.7 MiB save, and restart took 110 s. |
+| B | Append journal, asynchronous acknowledgements | 256 regions / 8 actors / 10,000 actions: p95 fell from 855 ms to 15.6 ms. Each action encodes one ~600-byte record. |
+| C | Checkpoints and compaction | Largest-case restart fell from 119 s to 7 s (records replayed: 11,499 to 474). |
+| D | Removing state copies, scaling observations | Largest saved case p95 fell from 14.2 ms to 2.5 ms; all selected cases met 8 ms / 33 ms. Restart fell to 0.66 s. |
+| E | Client responsiveness | 64 updates on a 20,956-cell remembered map: apply p95 fell from 549 ms to 39 ms and render p95 from 6.6 ms to 3.0 ms. |
+| Format 6 | Region-shared checkpoint navigation | Fully explored 256-region checkpoint fell from 765 MB to 9.9 MB (the cap stays 64 MiB). Full checkpoint-enabled exploration, exact restart, and native input during a blocked save all pass. |
 
-Ordered collections are currently valuable for deterministic behavior and are
-not globally replaced. Optimize individual access patterns only after profiling:
+Full reports, raw samples, manifests, and the original storage review are
+preserved in the
+[`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs).
 
-- retain the bounded ordered-map range for region exits; add a separate index
-  only if later measurements justify it;
-- index visible cells and occupants for repeated lookup during observation and
-  rendering instead of repeatedly scanning vectors;
-- make client update application transactional without cloning the entire
-  remembered map on every update, using a small validated change set or
-  copy-on-write ownership;
-- cache actor scenes/observations by authoritative revision only if repeated
-  construction remains material after redundant calls are removed; and
-- invalidate caches from explicit world/entity change sets, with tests comparing
-  cached and uncached results.
+## Open work
 
-Speculative presentation is a later, optional experiment. It cannot reduce
-authoritative completion time, and rollback artifacts may be more distracting
-than a short bounded wait in a turn-based client. Reconsider it only after local
-durable p95 latency meets the target and remote latency becomes the dominant
-cost.
+These items stop 3p from closing:
 
-## Delivery phases
+- **Client timing tails.** Rare end-to-end delays up to 2.9 s were recorded in
+  native-client runs. Investigation located some of them in diagnostic calls:
+  a 633 ms request-diagnostic write and a 442 ms stdout write, while server
+  handlers stayed short. One 197 ms stall is inside the native presentation and
+  pacing call itself. Next step: capture thread-scheduling and blocked-write
+  evidence around these stalls. (A Windows Performance Recorder kernel trace was
+  refused by system policy, `0xc5585011`, so a different method or machine is
+  needed.)
+- **Longer eight-client workload.** Two three-cycle attempts failed: one hit the
+  diagnostic log cap, the other a snapshot-readiness timeout with a 27 s headless
+  ready-report call. They stand as failures until that workload passes; shorter
+  successes don't replace them.
+- **Historical acknowledgement and presentation tails** (182–772 ms, recorded
+  during Phases D and E) didn't recur in later runs, but not reproducing them
+  doesn't make them fixed.
+- **Eight-actor combat** p95 is about 11.7 ms, above the 8 ms target.
+  Building before-and-after observations for every actor costs about 5 ms per
+  command. See [dungeon gameplay](dungeon.md#performance).
+- **Dense falling physics** (8 actors, 128 moving items) p95 is about 22.5 ms.
+  See [physics](physics.md#performance).
 
-### Phase A — Baseline and contracts
+Explicitly deferred scaling work (still measured, never an excuse for a
+regression within the current 8–256-region, 100–10,000-action envelope):
 
-The shared fixture and trace, combined scale matrix, exclusive phase timings,
-actual-client driver, and current-writer fault tests are implemented. At that checkpoint,
-storage used the version-3 whole archive; buffered streaming serialization
-has been restored to measure the intended writer. No append journal, checkpoint,
-rotation, or caching implementation is included.
+- region streaming and active-horizon loading (milestone 4e);
+- startup cost that is linear in retained history (frame validation, history
+  loading, receipt rebuilding);
+- actor-count scaling of non-wait observations; item, place, and history query
+  indexes; large travel searches;
+- connection-lifetime client map memory and moving-chart work;
+- synchronous optional diagnostic I/O;
+- hardware power-loss qualification and allocation profiling.
 
-#### Findings and reviewed proposal
+## Completion criteria
 
-The earlier wait-only averages and sync values divided by an unrelated batch
-size are withdrawn. Use only the complete per-command release measurements
-linked from the [harness guide](performance-harness.md). Successful mixed
-commands and intentional blocked attempts have separate distributions; actual
-client acknowledgement/presentation measurements have different boundaries from
-server-only phases.
+3p is complete when:
 
-The [storage review](persistence-review.md) specifies the proposed version-4
-frame layout, checksum coverage, maximum payload, save/generation identity,
-uncertain-write reconciliation, conservative corrupt-tail handling, checkpoint
-contents/selection, and future file fault schedules. It also records the missing
-Windows/Linux name-durability guarantee in the Phase A writer. Passing restart
-tests does not meet the full OS/power-failure contract.
-
-That review records Phase A evidence. The current Phase B contract supersedes its
-synchronous publication and two-file installation proposal. Phase C uses the same
-SQLite transaction boundary for checkpoint selection and rotation.
-
-### Phase B — Append journal
-
-Implement framed append records in atomic background batches. Preserve command
-atomicity, saved-receipt recovery, history filtering, and branch identity while
-allowing publication before persistence. Policy and storage details are in the
-[background-saving guide](background-saving.md).
-
-#### Phase B verification and measurement
-
-Keep comprehensive storage correctness coverage: bootstrap durability on Windows
-and Linux, interrupted writes, corruption, uncertain I/O, lost acknowledgements,
-duplicate/conflicting retries, retained branches, annotation privacy, and permanent
-wizard marking. Process-restart tests alone do not prove power-loss durability.
-
-Reuse Phase A workload definitions and retained baseline results with this focused
-performance subset; do not routinely repeat the full 64-case characterization:
-
-- Measure per-action encoded bytes and committed batch bytes at 100 and 10,000 retained actions.
-  Assert that only the new frame is appended, previous row payloads remain intact,
-  and the replay base is unchanged. SQLite physical page writes are a separate metric. Persistence work must scale with new data.
-- Run the mixed durable workload at eight regions, one/eight actors, and
-  100/10,000 retained actions (four cases). Compare encoding, write/flush, sync,
-  and total p50/p95/maximum with the matching Phase A samples. Add matched memory
-  cases when needed to isolate remaining engine costs.
-- Run one 256-region, eight-actor, 10,000-action durable case and a representative
-  actual-client workload, using the established timing boundaries.
-- Measure normal restart/replay and verify recovered state for each selected save.
-  Bounded startup work belongs to Phase C.
-
-Repeat the broader matrix or discovery/rendering study only for unexplained
-regressions, inconsistent focused results, or changes affecting those paths.
-Record the selected cases, results, and any expanded investigation in the findings.
-These Phase B measurements preceded Phase D candidate-copy removal; file-sync
-latency can remain substantial. Phase B must remove history-dependent persistence
-encoding/write amplification under the revised asynchronous save contract; it need not meet every
-later phase's total-latency or startup target.
-
-### Phase C — Checkpoints and compaction
-
-Complete and merged in PR #25. See [checkpoints](checkpoints.md) for the
-contract and [Phase C findings](phase-c-findings.md) for retained measurements.
-Periodic background checkpoints retain simulation/navigation, revisions, current
-branch and all 128 rewind boundaries. History frames and receipts move unchanged
-into retained storage in the same transaction that installs the snapshot and
-rotates the journal. Startup reads history but only simulates the remaining tail.
-
-Focused release verification uses `latency_bench --phase-c`: the four saved
-eight-region cases at one/eight actors and 100/10,000 retained actions, plus the
-256-region/eight-actor/10,000-action case. Run matched checkpoint-disabled and
-enabled policies with identical workloads and save timing. Record capture cost,
-worker encoding size/time, p50/p95/maximum command latency and restart/replayed
-record counts. Validate with `performance_report.py --phase-c`. Include actual
-text/ASCII/headless restart and unsaved-tail rollback tests. Full matrix expansion
-is conditional on unexplained regressions or broader changes.
-
-### Phase D — State-copy and observation scaling
-
-Implemented; see [Phase D findings](phase-d-findings.md) for measurements and
-limits. `--phase-d` selects the nine focused memory/durable cases plus full growing
-discovery at eight and 256 regions. The original version-1 fixture ordering remains
-unchanged; profiling schema version 2 validates the reduced operation counts.
-Use `--discovery-only` to isolate accumulated map knowledge. Actual-client process,
-rewind, retry, rejection, checkpoint and full-view equivalence tests remain required.
-Phase E remains separate client application/rendering work.
-
-### Phase E — Client responsiveness
-
-Merged in PR #27 after Windows/Linux CI passed on its final commit. Shared client updates validate before
-mutation without cloning historical memory; ASCII delivers ordered updates through
-bounded queues, budgets event work per turn, and indexes rendering lookups.
-The versioned client workload covers large remembered maps and burst updates;
-native process tests exercise blocked saves and checkpoints. See
-[Phase E findings](phase-e-findings.md) for measurements and unresolved native
-presentation tail limits. The broader 3p acceptance criteria remain separate.
-
-## Closeout disposition
-
-The [3p closeout audit](3p-closeout.md) records acknowledgement-tail follow-up,
-checkpoint-disabled/enabled saved exploration and the acceptance checklist.
-The [format-6 follow-up](3p-checkpoint-growth.md) reduces the complete 256-region
-checkpoint from 765 MB to 9.92 MB without changing the 64 MiB cap. The user approved
-format-5 rejection before implementation. Full checkpoint-enabled saved exploration,
-exact recovery, bounded replay and native explored-world acceptance now pass.
-Milestone 3p is deferred, still open, for recurrent acknowledgement/presentation-tail evidence;
-opt-in server/client/reader correlation records the relevant boundaries. No later
-interaction or travel feature is introduced by this performance work, and no latency
-target is relaxed. At the user's direction, remaining 3p closure no longer blocks
-milestone 3 feature work; ongoing feature performance checks still apply.
-
-The [client timing investigation](3p-client-timing.md) now separates request
-diagnostic writing, native presentation return, report encoding/output and reader
-receipt. It identifies recurrent diagnostic-call stalls but also retains a native
-presentation/pacing-call tail and two failed longer client attempts. Capped deferred
-logging is a diagnostic experiment, not a runtime queue change or a closure waiver.
-Thread scheduling/blocked-write attribution and long-run client qualification remain
-the next 3p step; checkpoint recovery and the approved format-6 policy are unchanged.
-
-## Verification and completion
-
-The milestone is complete when:
-
-- ordinary acknowledgements follow queue admission; explicit save acknowledgements
-  follow a committed batch covering their captured prefix;
+- ordinary acknowledgements follow queue admission, and explicit-save
+  acknowledgements follow a committed batch covering the captured prefix;
 - interrupted writes recover the last valid committed boundary without duplicate
-  action execution or disclosure inconsistency;
+  execution or disclosure inconsistency;
 - append and checkpoint growth are bounded and restart replay is measured;
-- latency does not materially grow across the history and dungeon scale matrix;
+- latency doesn't materially grow across the history and dungeon-size matrix;
 - rewind, retained branches, annotations, request retry, save locking, and wizard
-  marking retain their existing behavior;
+  marking keep their behavior;
+- the historical and current timing tails are explained and resolved;
 - Windows and Linux pass unit, integration, protocol, release, and actual-client
   process tests; and
-- this guide is updated from proposed design to implemented behavior and known
-  limitations.
+- actual text and ASCII clients stay responsive during saving and checkpointing.
+
+Process-restart tests don't establish hardware power-loss durability; that
+remains outside these criteria.

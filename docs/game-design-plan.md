@@ -1,8 +1,9 @@
 # Game design requirements and architectural considerations
 
 This is the forward-looking project plan consolidated from the September 2026
-design discussion. It describes intended behavior, not implemented features.
-[The roadmap](milestones.md) owns sequencing and status; [architecture](architecture.md)
+design discussion. It records accepted requirements; many are now implemented
+(milestones 4a–4d), and others are still ahead. [The roadmap](milestones.md)
+says which, and owns sequencing and status; [architecture](architecture.md)
 owns system boundaries. Settled requirements below guide implementation without
 requiring every later feature in the first playable milestone. Open details are
 deliberately retained as considerations, not silently selected defaults.
@@ -95,8 +96,8 @@ deliberately retained as considerations, not silently selected defaults.
 
 ## Portal geometry, bodies, and gravity
 
-- Extend aperture rotations beyond the current z-axis-only transform restrictions,
-  including z-facing joins. Stairs are separate geometry/traversal concepts.
+- Aperture rotations cover all 24 proper cube rotations, including z-facing
+  joins. Stairs are separate geometry/traversal concepts.
   Preserve independent region coordinates and non-Euclidean connections.
 - Each cell resolves gravity from an absolute sparse override or its region's
   default direction and strength. Directions initially use the six local grid

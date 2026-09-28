@@ -1,7 +1,7 @@
 # Doors
 
-Games use **diagonal-v11**, with an
-initially open wooden door in a 1x1 hall between two 5x3 rooms. The hall has no
+The `scenarios/two-room` package has an initially open wooden door in a 1x1
+hall between two 5x3 rooms. The hall has no
 place hint; each room retains its own interior anchor for text navigation.
 
 ```text
@@ -13,7 +13,6 @@ place hint; each room retains its own interior anchor for text navigation.
 Here `/` is the open door and `#` the walls flanking its one-cell hall. Doors
 remain independent, cell-sized world entities: interior doors and doors on join
 endpoints obey the same rules. Opening or closing does not change topology.
-Protocol **11** retains surface facts and adds diagonal directions; save format **3** is unchanged.
 
 ## Playing
 
@@ -45,9 +44,8 @@ without approaching. Headless clients submit ordinary actions:
 ## Rules and perception
 
 - Open and close each cost the acting actor's normal movement/wait recovery time.
-- New diagonal-v11 games allow cardinal and diagonal reach, using the same
-  one-clear-side corner rule as movement. Older games retain cardinal reach.
-  The backend resolves rotated joins. Standing in a doorway is not standing beside it.
+- Doors can be reached cardinally or diagonally, using the same one-clear-side
+  corner rule as movement. The backend resolves rotated joins. Standing in a doorway is not standing beside it.
 - Closed doors block movement and sight but are not walls. The door itself is
   visible; cells, objects, and actors beyond it are disclosed only if another
   unobstructed sightline exists. New games use [symmetric shadowcasting](shadowcasting.md),
@@ -85,8 +83,7 @@ rules. Closed placement cannot cover actors or items; duplicate placement is
 rejected. Door identity and state rewind with the world. Privileged coordinates
 remain backend-only; ordinary history contains sanitized wizard summaries.
 
-Only the current fixture and rules are supported. Older saves are not migrated.
-All clients must use protocol 15.
+Only the current rules are supported; older saves aren't migrated.
 Locks, keys, containers, destruction, transparent doors, and multi-cell door
 entities remain future work. A wide join can have individual door cells.
 

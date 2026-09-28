@@ -114,8 +114,8 @@ own-body motion and collision sensations are disclosed without gravity maps,
 hidden bodies, or collision-target identities. Both playable clients use shared
 motion narration; ASCII draws disclosed height panels.
 
-Protocol 15, save/SQLite format 10, ruleset `physics-v15`, and validator
-`tor-scenario-3` reject older prerelease formats. Gravity tables share world-geometry storage across actions and rewind boundaries.
+Physics state is part of the current save format; older prerelease saves are
+rejected. Gravity tables share world-geometry storage across actions and rewind boundaries.
 Checkpoints retain body frames,
 velocity, displacement, gravity, integration remainders, and boundary sensations.
 Retries do not integrate twice; journal replay, restart, and rewind restore the
@@ -136,13 +136,13 @@ It records samples, integration/body-resolution counts, and disclosed/save bytes
 Existing latency workload versions remain unchanged for before/after comparison.
 Only changed observer states are applied/drawn, matching live stream delivery;
 client sample counts can therefore be lower than command counts in multi-actor
-cases. Timing results and final verification status are recorded in the session handoff.
+cases. Results are under [performance](#performance).
 
 ASCII F6/F7 browse disclosed height slices without advancing time; spectators can use them too. Mouse selection follows the displayed slice.
 
-## Local performance evidence — 2026-09-27
+## Performance
 
-Windows release builds, measured sequentially on the same machine with other builds and tests stopped. The preserved 4b baseline executable has SHA-256 `46487aece856994eca7cbcc0134def91b134eaa0a1ea9f1f8e4f85d489000661`. Baseline source tree `818f2f4` matches merged main `17bab2f`.
+Measured 2026-09-27 in Windows release builds, sequentially on the same machine with other builds and tests stopped. The baseline is the preserved 4b release executable.
 
 Existing workload versions and traces are unchanged: `r8-a1-h100-memory --quick --cycles 5` and `r64-a8-h100-memory --cycles 3`. These measure successful mixed-trace engine command calls, not native input-to-presentation latency; intentionally blocked probes retain separate labels in the raw reports.
 
@@ -185,4 +185,4 @@ Dense eight-actor falling remains above the 8 ms p95 target. Its cost is concent
 
 Counts and bytes are per sample, including harness disclosure reads outside timed commands. Save/resume distributions have only three samples each and remain diagnostic. Samples do not establish 10,000-action history scaling, network latency, or native responsiveness targets.
 
-Raw local evidence: `.local/4c-final-before-{small,large}.jsonl`, `.local/4c-final-after-{small,large}.jsonl`, `.local/4c-final-comparison.json`, `.local/4c-final-physics.jsonl`, and `.local/4c-final-physics-report.json`. Earlier failed and pre-optimization runs are retained separately. Reproduce physics reports with `python scripts/physics_performance_report.py <physics-jsonl>`.
+Raw samples are kept outside the repository. Reproduce physics reports with `python scripts/physics_performance_report.py <physics-jsonl>`.

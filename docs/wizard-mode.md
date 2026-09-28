@@ -20,7 +20,7 @@ Set distinct credentials in the server's PowerShell session:
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
 $env:TOR_WIZARD_TOKEN = [guid]::NewGuid().ToString('N')
-cargo run -p tor-server -- --wizard --listen 127.0.0.1:4000 --seed 42 --save saves/wizard.json
+cargo run -p tor-server -- --wizard --listen 127.0.0.1:4000 --seed 42 --save saves/wizard.db
 ```
 
 `--wizard` is an explicit server administration operation: it creates a marked
@@ -48,8 +48,11 @@ the service; session accounts must separately have `AccessRole::Wizard`.
 ## Text commands
 
 The client forwards developer text without interpreting its geometry; only the
-server parses these commands. Coordinates in this developer console are region-local integers, with north decreasing y. The current fixture has two 5 by 3 by 2 interiors and an adjoining
-hall stored with region 1; stone shells extend one cell beyond the interiors. Supported commands are:
+server parses these commands. Coordinates in this developer console are
+region-local integers, with north decreasing y. The examples below assume the
+`scenarios/two-room` package: two 5 by 3 by 2 interiors and an adjoining hall
+stored with region 1, with stone shells extending one cell beyond the interiors.
+Supported commands are:
 
 | Command | Behavior |
 | --- | --- |
@@ -64,7 +67,7 @@ hall stored with region 1; stone shells extend one cell beyond the interiors. Su
 | `branch-history <branch-id> [before-id]` | Read permitted entries on an abandoned branch |
 
 New-rule games also support `wizard room`, `wizard connect` and `wizard wall`;
-see [geometry setup](portal-geometry.md#geometry-setup) for arguments and examples.
+see [geometry setup](portal-geometry.md#authorized-developer-setup) for arguments and examples.
 
 Placement/teleportation consume no ordinary action time. Teleport preserves
 recovery times and reveals the destination to the relocated actor. New actors
@@ -92,7 +95,7 @@ authenticated author and actor, and public history contains only a sanitized
 summary and rewind flag. Full parameters/results remain in the backend journal.
 Ordinary action/result disclosure and note audiences retain their normal rules.
 
-Protocol version **11** retains role `wizard`, required `state.wizard_game`, and
+The protocol includes role `wizard`, required `state.wizard_game`, and
 `history_branch`. Developer input is opaque text parsed only by the server;
 observations are backend-resolved scenes without internal geometry. Snapshots use
 an empty request ID and establish an explicit stream boundary after setup/rewind;
@@ -103,13 +106,12 @@ expected actor revisions, and branch checks prevent stale or duplicate mutations
 Denied roles are checked before receipt lookup. Exact authorized retries return
 the original receipt without replaying the operation.
 
-Save format **3** preserves the root branch, permanent marker, and chronological
-records with authenticated receipts. Replaying the records reconstructs all
-branches and the bounded decision cache; the final branch is determined by the
-rewind records. Only format-4, `diagonal-v11` saves load; older formats and
-rulesets are rejected. Rewind restores complete
-simulation state, including scheduler, knowledge, inventory, and ID allocation.
-The fixture has no evolving RNG; future RNG state belongs in these boundaries.
+The save preserves the root branch, permanent marker, and chronological records
+with authenticated receipts. Replaying the records reconstructs all branches and
+the bounded decision cache; the final branch is determined by the rewind records.
+Only the current save format and ruleset load. Rewind restores complete
+simulation state, including scheduler, knowledge, inventory, ID allocation, and
+the seeded combat random stream.
 
 ## Verification
 
@@ -174,7 +176,7 @@ the current connection's privileges.
 | --- | --- | --- |
 | Objects | Place supported items at an explicit location or in supported containment; specify supported properties | Basic items in the foundation; richer properties with interactions |
 | Mobs/actors | Spawn supported actor or creature archetypes at explicit locations with validated settings | Existing actor types first; enemy archetypes with combat |
-| Rooms | Place bounded rooms, walls and rotated passages/stair links | Implemented with observer-scene-v3 wide joins; validate bounds and topology atomically |
+| Rooms | Place bounded rooms, walls and rotated passages/stair links | Implemented with wide joins; validate bounds and topology atomically |
 | Teleport | Relocate an explicit actor to a valid region-local position, including across rooms/elevations | Foundation for existing geometry; extend with geometry features |
 | Turn rewind | Restore a recorded decision boundary and continue on a new branch while preserving the abandoned future | Bounded initial history in the foundation; scalable storage later |
 
@@ -252,12 +254,11 @@ a new feature, driving actual server/frontend processes rather than only calling
 internal setup APIs. Assert both authoritative results and the observations shown
 to the client. These scenarios are part of the feature's completion criteria,
 along with focused behavior tests and updated documentation; see
-[development practices](../CONTRIBUTING.md). Until wizard mode is available,
-existing fixtures and process tests must still verify each new feature.
+[testing policy](testing.md#scenario-packages-and-wizard-scripts).
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
-They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
+[Unnamed place hints](place-hints.md) add perceived cell anchors without labels
+or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;
+text uses them as described in [the adventure interface](text-adventure.md).
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

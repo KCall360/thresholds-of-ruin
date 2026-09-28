@@ -42,9 +42,8 @@ disclosure.
 The simulation stores remembered names alongside actor navigation, in shared
 source-region maps. Refresh inspects only the perceived scene; unchanged
 knowledge does not detach storage. Checkpoints deduplicate place maps across
-rewind boundaries. Protocol 15 sends only opaque actor-specific cell keys and
+rewind boundaries. The protocol sends only opaque actor-specific cell keys and
 names in `observation.places`; it sends no region coordinates or authored labels.
-Current save format 10 and `physics-v15` reject prior versions under the pre-release policy. Durable places were introduced in format 7.
 
 ## Verification
 
@@ -56,8 +55,8 @@ scenario runs actual text, headless and native ASCII clients through discovery,
 renaming, spectators, stale knowledge, save/reconnect and rewind.
 
 Focused profiling includes matching existing movement cases and a versioned
-place-knowledge workload; see the [performance harness](performance-harness.md).
-Milestone 3p remains deferred and open.
-
-The [verification findings](place-knowledge-findings.md) record local tests,
-performance comparisons, diagnostic limitations and retained evidence.
+place-knowledge workload; see the
+[performance harness](performance-harness.md#durable-place-workload-v1). When the
+feature was introduced, a rename took 1.3 ms p95 with 258 known places, and the
+existing movement cases were unchanged within measurement noise. The
+[archived findings](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/place-knowledge-findings.md) have the full comparison.

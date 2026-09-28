@@ -1,15 +1,11 @@
-# Performance harness and Phase A verification
+# Performance harness
 
-Status: Phase A complete, 2026-09-24. The [measured findings](phase-a-findings.md)
-retain the complete release baseline and verification. Phase B background
-storage is implemented; see the [Phase B findings](phase-b-findings.md).
-Phase C adds [checkpoints](checkpoints.md) and focused `--phase-c` comparisons.
-Phase D adds `--phase-d` state-copy and full growing-discovery checks; see the
-[Phase D findings](phase-d-findings.md).
-Maintain this harness as features evolve and use targeted release-build checks
-under the [development practices](../CONTRIBUTING.md); the full matrix is not
-required for every change. The governing scope remains
-[performance and scalable persistence](performance-persistence.md).
+This page explains how to run the benchmarks, profiling drivers, and report
+validators. Targets, results, and open work are in the
+[performance plan](performance-persistence.md). Keep this harness working as
+features change, and use targeted release-build checks as described in the
+[testing policy](testing.md#performance-testing); the full matrix isn't required
+for every change.
 
 ## Shared deterministic fixture and trace
 
@@ -20,7 +16,7 @@ consume this file. Simulation remains free of clocks, filesystem and client code
 No wizard setup or hidden-state client access is needed for this fixture.
 
 `tor-server --regions 1..=256 --actors 1..=8` selects the diagnostic fixture.
-Without `--regions`, ordinary new games retain the two-room scenario. Existing
+Without `--regions`, new games use an authored scenario package. Existing
 saves retain their scenario. One requested region is exactly one region; invalid
 counts and unsupported fixture versions fail. Every room has comparable 9x9x2
 local geometry, an occluder, a wall with a closed door, explicit up/down links,
@@ -49,10 +45,6 @@ door IDs and destination cell keys from current observations and respects
 readiness, branch and revision. The Phase A tests exposed and corrected missing
 readiness revision changes during same-tick multi-actor handoffs. Readiness is now
 part of revision comparison; these handoffs are delivered to real clients.
-Protocol 15, save format 10, and `physics-v15` are currently in use. Multi-actor archives
-whose receipts were produced before this readiness correction may fail strict
-replay because their expected revisions differ. Failed replay preserves the
-original file; no migration or relaxed replay validation is provided.
 
 ## Measurement boundaries and reproduction
 
@@ -92,10 +84,9 @@ navigation's scene work belongs to navigation. These nested calls are counted
 at their actual simulation call sites, without adding their time twice.
 `unattributed` accounts for the rest of total authoritative command latency.
 
-Phase A's retained results measured buffered whole-archive JSON writes, sync,
-and replacement. Current Phase B command timing measures record encoding/queue
-admission in `serialization`; command-path write/flush, sync, and replacement
-counts are zero. Worker `save_status` reports accepted/durable sequences, pending
+Command timing measures record encoding and queue admission in
+`serialization`. Command-path write/flush, sync, and replacement counts are zero;
+those phases remain in the schema from the original synchronous writer. Worker `save_status` reports accepted/durable sequences, pending
 bytes/age, batches, application bytes committed, and last batch duration.
 Checkpoint diagnostics add the selected sequence, count, encoded size and encoding
 time. Restart diagnostics separate loaded history records from simulated tail
@@ -126,14 +117,7 @@ includes strict frame validation and checkpoint-tail replay; startup does not re
 fixture seeding shortcut. The report validates disclosed state after restart.
 Raw samples must be retained with the source/build that produced them.
 
-## Observable 256-region run and desktop maintenance
-
-For milestone 3 semantic presentation, run `cargo run --release --locked -p
-tor-client-ascii --example client_bench -- --narration` and validate the resulting
-JSON lines with `python scripts/client_performance_report.py FILE --narration`.
-This selects version 2 actor/door sight changes; omitting the flag preserves the
-original version 1 workload. Both use 64/20,956 remembered cells and 1/64-update
-bursts. See [milestone 3 findings](milestone-3-closeout.md).
+## Observable 256-region run
 
 ```sh
 cargo build --workspace --bins --locked
@@ -161,13 +145,6 @@ they include transport, native client processing and diagnostic JSON reporting
 GPU timestamps. `request_to_ready_ms` records the complete headless response.
 Pacing, snapshot requests and progress annotations are outside these intervals.
 
-The three machine-local shortcuts are Text, ASCII, and Text + ASCII Spectator.
-The 256 Region Spectator shortcut has been removed; its command-line driver remains. Their scripts and icons use the explicitly rebuilt
-`target/release` binaries. The paired game's text helper uses that same directory.
- Verify real connections and presented
-frames, helper paths, separate spectator credentials, fresh saves and owned
-cleanup whenever updating binaries; `cargo check` is insufficient.
-
 ## Stable tests and verification
 
 Rust tests cover exact world sizes, ordinary and rotated joins, LOS, stairs,
@@ -184,9 +161,7 @@ API denial is an environment failure and must be reported or rerun with desktop
 access, never silently skipped. Windows/Linux CI is required before merging.
 
 The [background-saving guide](background-saving.md) describes current storage
-and recovery tests. The [persistence review](persistence-review.md) retains
-historical Phase A evidence. Process tests do not prove hardware power-loss
-behavior. Checkpoints and logical compaction are covered by the current recovery tests.
+and recovery tests. Process tests do not prove hardware power-loss behavior. Checkpoints and logical compaction are covered by the current recovery tests.
 
 ## Focused Phase B run
 
@@ -201,6 +176,20 @@ Production defaults remain configurable and are listed in
 [background saving](background-saving.md). Use the current raw schema when
 interpreting asynchronous worker metrics; the Phase A report's physical I/O
 counts are not interchangeable with application journal bytes.
+
+## Focused checkpoint run
+
+```sh
+cargo run --release --locked -p tor-server --example latency_bench -- --phase-c --cycles 3 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 --checkpoint-interval 1024 > phase-c.jsonl
+python scripts/performance_report.py phase-c.jsonl --phase-c
+```
+
+This runs the four saved eight-region cases (one/eight actors, 100/10,000
+retained actions) and the 256-region, eight-actor, 10,000-action case. Run it with
+`--checkpoint-interval 0` as well, using identical workloads and save timing, to
+compare against full replay. The report covers capture cost, worker encoding size
+and time, command p50/p95/maximum, and restart loaded/replayed record counts. Add
+`--case NAME` to either command for a single case.
 
 ## Focused Phase D and growing discovery
 
@@ -219,8 +208,7 @@ actual observation on other actions. Retained version-1 profiling remains valid.
 Do not interpret a mixed median dominated by scheduled waits as movement latency;
 retain per-label distributions and individual tails.
 
-
-## Focused Phase E client study
+## Client workloads
 
 ```sh
 cargo run --release --locked -p tor-client-ascii --example client_bench > client.jsonl
@@ -238,6 +226,13 @@ memory and tile lookup costs; it is not an authoritative world/discovery workloa
 Continue `latency_bench --discovery-only` for real movement and growing knowledge.
 The original server fixture/version/order and retained validators are unchanged.
 
+For semantic narration, run `cargo run --release --locked -p tor-client-ascii
+--example client_bench -- --narration` and validate the JSON lines with
+`python scripts/client_performance_report.py FILE --narration`. This selects
+workload version 2 with actor and door sight changes; omitting the flag keeps
+version 1. Both use 64/20,956 remembered cells and 1/64-update bursts. See
+[narration and stream recovery](narration-and-recovery.md).
+
 Build a reference checkout with this same example, retain its executable, then
 build the changed implementation. Run matched binaries without competing builds
 or tests. Keep raw samples, sample counts, percentiles, source/binary hashes and
@@ -249,9 +244,8 @@ Actual-client samples now retain native frame phase diagnostics when available.
 `--no-capture` isolates PPM writing while preserving native presentation and JSON
 reporting. Default capture behavior is unchanged for existing workloads and the
 desktop demonstration. The driver timestamp includes transport, scheduling and
-diagnostic work; it is not interchangeable with pure update/draw timing. See
-[Phase E findings](phase-e-findings.md) and the [ASCII diagnostic boundaries](ascii-client.md#responsiveness-and-diagnostic-timing).
-
+diagnostic work; it is not interchangeable with pure update/draw timing. See the
+[ASCII diagnostic boundaries](ascii-client.md#responsiveness-and-diagnostic-timing).
 
 `request_to_ack_ms` retains its historical driver-consumption timestamp. New runs
 also include `request_to_ack_line_ms`, stamped when the reader receives the JSON
@@ -259,7 +253,7 @@ acknowledgement line, before diagnostic log writing/flushing and queue delivery.
 Their difference isolates delay inside the driver; neither is a server-only time.
 Existing retained reports without the new field remain valid.
 
-## Saved-discovery closeout measurement
+## Saved-discovery measurement
 
 ```sh
 cargo build --release --locked -p tor-server --example latency_bench
@@ -267,7 +261,7 @@ cargo build --release --locked -p tor-server --example latency_bench
 target/release/examples/latency_bench --saved-discovery --checkpoint-interval 0 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > saved.jsonl
 python scripts/performance_report.py saved.jsonl --saved-discovery
 # Checkpoint-enabled full traversal:
-target/release/examples/latency_bench --saved-discovery --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > checkpoint-failure.jsonl
+target/release/examples/latency_bench --saved-discovery --checkpoint-interval 1024 --save-target-ms 10 --save-max-ms 50 --save-idle-ms 1 > checkpoint.jsonl
 ```
 
 Use `.exe` on Windows and explicitly select the save volume with TMP/TEMP.
@@ -281,13 +275,11 @@ includes capture and deduplication, outside action/flush timings. It uses an
 equal-length dummy save UUID and the ordinary workload's record count as sequence.
 
 Interval 64 supplies a stress comparison and a successful eight-region checkpoint.
-Historical format-5 large enabled traversals emitted failure records;
-the report validator continues to reject those incomplete runs. Format 6 must
-complete both enabled intervals. Do not report its accepted prefix as a complete
-benchmark pass. Background timing affects the rejection point. Existing detached
-modes, workload ordering and retained report interpretation remain unchanged.
-See the [closeout audit](3p-closeout.md) for retained raw files and blocker disposition.
-
+An incomplete traversal emits failure records, which the report validator
+rejects; both enabled intervals must complete. Never report an accepted prefix as
+a complete benchmark pass. Background timing affects where a failing run stops.
+Existing detached modes, workload ordering and report interpretation are
+unchanged.
 
 ## Explored-save native acceptance
 
@@ -309,7 +301,6 @@ blocked checkpoint on that genuinely explored save. Set
 `TOR_SAVED_EXPLORATION_REGIONS=256` for the complete large acceptance case.
 The restarted client starts with its normal connection-local memory, while the
 traversal client retains every disclosed observation throughout exploration.
-
 
 ## Opt-in timing correlation
 
@@ -361,8 +352,8 @@ or suppress frame reporting. It moves diagnostic disk writes outside measured
 actions; JSON work, pipe I/O, Python parsing/retention and scheduling remain inside.
 The default synchronous stdout logging and historical workload meanings remain.
 Use fresh directories and retain failed runs; never interpret a rejected prefix
-as full traversal. See [the client timing investigation](3p-client-timing.md).
-
+as full traversal. Current timing findings are in the
+[performance plan](performance-persistence.md#open-work).
 
 ## Durable place workload v1
 
@@ -375,7 +366,7 @@ wizard edits; later scenario packages will replace authored setup. Samples alter
 ```sh
 cargo run --release -p tor-server --example place_bench --locked > places.jsonl
 python scripts/place_performance_report.py places.jsonl > places-summary.jsonl
-python scripts/place_performance_driver.py --bin-dir target/release --output .local/places-native-run
+python scripts/place_performance_driver.py --bin-dir target/release --output target/places-native-run
 ```
 
 The engine harness times discovery/navigation, command processing, observation
@@ -403,7 +394,7 @@ for a distinct attachment case: durable names remain, while connection-local
 diagnostic cell memory and history retention reset. The driver also records ack
 line arrival, ready reader/queue work, cell counts and the size of ready JSON
 re-encoded by Python (not network byte counts). Keep both cases; see the
-[place-knowledge findings](place-knowledge-findings.md).
+[archived place-knowledge findings](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/place-knowledge-findings.md).
 
 ## Scenario package workload v1
 

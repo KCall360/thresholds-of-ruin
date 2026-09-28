@@ -1,84 +1,73 @@
 # Project documentation
 
-This directory separates what exists from what is intended:
-
-- [Project status and roadmap](milestones.md) is the source of truth for completed,
-  active, and planned work.
-- [Architecture](architecture.md) records the system boundaries and the reasons
-  behind them. Statements about future work are explicitly identified there.
-- [Game design plan](game-design-plan.md) consolidates future requirements,
-  architectural considerations, and intentionally deferred details.
-- The implementation guides below describe behavior that exists in the current
-  tree, its compatibility constraints, and its verification.
-- [Development practices](../CONTRIBUTING.md) defines how changes are designed,
-  tested, documented, and published.
-
-When implementation and documentation disagree, the code and automated tests are
-authoritative until the documentation is corrected. A feature is not complete
-until its guide and the roadmap are updated together.
-
-- [Bodies, portals, and gravity](physics.md) describes milestone 4c mechanics and verification.
+Guides describe what exists now. The roadmap and design plan describe what's
+planned. When the code and a guide disagree, the code and its tests are
+authoritative until the guide is corrected.
 
 ## Start here
 
-| Need | Document |
+| I want to… | Read |
 | --- | --- |
-| Understand the project and run checks | [Repository README](../README.md) |
+| Find out what the game is and play it | [Repository README](../README.md) |
+| Look up server and client options | [Command-line reference](server-options.md) |
 | See what works and what comes next | [Project status and roadmap](milestones.md) |
-| Resume implementation work | [Session handoff](session-handoff.md) |
-| Review milestone 3 acceptance and next steps | [Milestone 3 closeout](milestone-3-closeout.md) |
-| Understand boundaries and design decisions | [Architecture](architecture.md) |
-| Review accepted future game requirements | [Game design plan](game-design-plan.md) |
-| Review 3p closure blockers and saved exploration | [Milestone 3p closeout audit](3p-closeout.md) |
-| Review explored checkpoint reduction and remaining timing gates | [Format-6 findings](3p-checkpoint-growth.md) |
-| Separate diagnostic reporting from native delivery | [3p client timing investigation](3p-client-timing.md) |
-| Review background-save measurements | [Phase B findings](phase-b-findings.md) |
-| Review client responsiveness and presentation tails | [Phase E findings](phase-e-findings.md) |
-| Review state-copy and observation scaling | [Phase D findings](phase-d-findings.md) |
-| Review checkpoint and startup measurements | [Phase C findings](phase-c-findings.md) |
-| Configure saves and understand crash recovery | [Background saving](background-saving.md) |
-| Understand bounded replay and retained history | [Checkpoints](checkpoints.md) |
-| Run the server or integrate a client | [Protocol and persistence](protocol.md) |
-| Author and validate a scenario | [Scenario packages](scenario-packages.md) |
-| Transfer item quantities and understand identification | [Items and character knowledge](items.md) |
-| Play in a terminal | [Text client](text-client.md) |
-| Play in a native window | [Graphical ASCII client](ascii-client.md) |
-| Drive scripted acceptance scenarios | [Headless client](headless-client.md) |
+| Contribute a change | [Development practices](../CONTRIBUTING.md) and the [testing policy](testing.md) |
+| Understand the system's boundaries and why | [Architecture](architecture.md) |
+| Work on the repo as an AI agent | [AGENTS.md](../AGENTS.md) |
 
-## Implemented behavior
+## Playing
 
-These pages describe current behavior rather than proposals.
-
-| Area | Documents |
+| Topic | Guide |
 | --- | --- |
-| Simulation | [Simulation slice](simulation-slice.md), [diagonal movement](diagonal-movement.md), [doors](doors.md) |
-| Geometry and perception | [Portal geometry](portal-geometry.md), [shadowcasting](shadowcasting.md), [material volumes](material-volumes.md), [place hints](place-hints.md) |
-| Client knowledge and presentation | [ASCII memory](ascii-memory.md), [text adventure](text-adventure.md) |
-| Navigation | [Backend travel](travel.md) |
-| Engineering plans | [Performance and scalable persistence](performance-persistence.md), [performance harness](performance-harness.md), [Phase A findings](phase-a-findings.md), [persistence design review](persistence-review.md) |
-| Development tools | [Wizard mode](wizard-mode.md) |
+| Terminal play | [Text client](text-client.md), [adventure commands](text-adventure.md) |
+| Windowed play | [Graphical ASCII client](ascii-client.md), [remembered map](ascii-memory.md) |
+| Combat, AI, victory, and death | [Dungeon gameplay](dungeon.md) |
+| Items and identification | [Items and character knowledge](items.md) |
+| Travel | [Backend travel](travel.md) |
+| Place names | [Durable place knowledge](place-knowledge.md) |
 
-Feature guides describe current behavior. Runtime support is limited to the current
-protocol, save format, and ruleset listed in
-[the roadmap](milestones.md#current-implementation). Pre-release revisions need not
-preserve save compatibility or historical rules implementations.
+## How the game works
 
-## Documentation maintenance
+| Area | Guides |
+| --- | --- |
+| Rules and time | [Simulation](simulation-slice.md), [diagonal movement](diagonal-movement.md), [doors](doors.md) |
+| Geometry and physics | [Portal geometry](portal-geometry.md), [material volumes](material-volumes.md), [bodies, portals, and gravity](physics.md), [region streaming](region-streaming.md) |
+| Perception | [Shadowcasting](shadowcasting.md), [place hints](place-hints.md), [narration and stream recovery](narration-and-recovery.md) |
+| Server and protocol | [Protocol and annotations](protocol.md), [headless client](headless-client.md) |
+| Saving | [Background saving](background-saving.md), [checkpoints](checkpoints.md) |
+| Content | [Scenario packages](scenario-packages.md) |
 
-For every behavior change:
+## Development
 
-1. Update the relevant implementation guide with user-visible behavior,
-   limitations, compatibility, and verification.
-2. Update [the roadmap](milestones.md) if scope or status changed.
-3. Update [architecture](architecture.md) only when a boundary or durable design
-   decision changed; do not use it as a feature changelog.
-4. Update the repository README only when the quick start or project-wide summary
-   changed.
-5. Link every new document from this index. Remove superseded prose instead of
-   leaving an unlabelled historical plan beside current guidance.
+| Topic | Guide |
+| --- | --- |
+| Testing requirements and how to run the checks | [Testing and verification](testing.md) |
+| Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
+| Benchmarks and profiling drivers | [Performance harness](performance-harness.md) |
+| Privileged setup for testing | [Wizard mode](wizard-mode.md) |
+| Accepted future requirements | [Game design plan](game-design-plan.md) |
 
-- [Durable place knowledge](place-knowledge.md): character-owned names, discovery, persistence and client lists.
-- [Place knowledge findings](place-knowledge-findings.md): correctness and focused release measurements.
+Historical findings, closeout audits, session handoffs, and raw measurements
+from before 2026-09-28 are preserved in the
+[`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs).
 
-- [Dungeon gameplay](dungeon.md): milestone 4d rules, controls, and verification status.
-- [Region streaming foundations](region-streaming.md): structural preload planning, authoring utility, and remaining 4e work.
+## Maintaining the docs
+
+When behavior changes:
+
+1. Update the relevant guide with user-visible behavior, limitations, and how
+   it's verified. Replace outdated statements; don't leave history beside
+   current behavior.
+2. Update the [roadmap](milestones.md) if scope or status changed. It's the only
+   place that states the current protocol, save format, ruleset, and validator
+   versions. Elsewhere, say "current".
+3. Update the [architecture](architecture.md) only when a boundary or durable
+   design decision changed. It isn't a changelog.
+4. Update the repository README only when the player-facing summary or quick
+   start changed.
+5. Add every new guide to a table on this page.
+6. Don't cite PR numbers, commit hashes, CI runs, or local-only files (such as
+   `.local/` logs). Summarize the evidence instead.
+
+`scripts/test_documentation.py` checks local links, this index, and the stated
+versions.

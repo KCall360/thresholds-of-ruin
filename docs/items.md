@@ -69,8 +69,8 @@ item-use or identification action is introduced.
 Clients receive only disclosed `name`, `description`, `appearance`, `identified`,
 quantity and instance ID. Hidden archetype/identity keys and properties are never
 wire fields. History and wizard summaries do not serialize authoritative specs.
-Protocol 15, save format/SQLite version 10, ruleset `physics-v15`, and validator
-`tor-scenario-3` replace the previous versions without migration readers.
+Items use the current protocol, save format, ruleset, and scenario validator;
+older prerelease saves are rejected without migration.
 
 ## Verification and profiling
 
@@ -99,18 +99,12 @@ Retain scenario workload v1 unchanged for matching before/after comparisons.
 New item mechanics have no pre-4b behavior baseline. Neither workload closes the
 deferred 3p long-run findings or replaces real-client acceptance tests.
 
-### Recorded results (2026-09-27, Windows)
+### Recorded results
 
-Verification passed: 257 Rust tests in each of debug and release, 108 debug
-Python checks, 73 release process checks, all-target Clippy, rustdoc with warnings
-denied, and all 22 package validations. Text, ASCII, and Text + ASCII Spectator
-desktop launchers connected successfully, retained fresh saves, and cleaned up
-their owned processes. Linux verification remains a CI requirement.
-
-The [measurement summary](measurements/items-2026-09-27/summary.json) records
-p50/p95/maximum, sample counts and operation/byte counts. Its
-[manifest](measurements/items-2026-09-27/manifest.json) identifies source, binary
-and raw artifact hashes. The baseline is the local unpublished 4a implementation.
+Measured 2026-09-27 on the maintainer's Windows machine, against the 4a
+implementation as the baseline. The
+[archived summary and manifest](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs/measurements/items-2026-09-27) record all distributions,
+operation and byte counts, and source and binary hashes.
 
 | Items / identities | Transfer p95 / max (ms) | Client apply p95 (ms) | Canvas p95 (ms) | Save p95 (ms) | Restart p95 (ms) |
 | --- | --- | --- | --- | --- | --- |

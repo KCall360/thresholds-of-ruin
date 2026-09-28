@@ -13,7 +13,7 @@ In one PowerShell terminal, set a session token and start the server:
 
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
-cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.json
+cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.db
 ```
 
 In another terminal, set `TOR_SERVER_TOKEN` to that same token, then run:
@@ -28,8 +28,8 @@ The client accepts a numeric loopback socket address, including `[::1]:4000`.
 
 The client attaches and requests control. `--observe` skips that request. If control
 is occupied, the client stays connected as an observer. The normal prompt is `>`.
-Try `examine token`, `take it`, `east`, and `take tablet`. Directions use backend
-travel; `stop` cancels, and `step east` requests one careful step. Read
+Try `look`, `examine <thing>`, `take <thing>`, a compass direction such as `east`,
+and `attack <name>`. Directions use backend travel; `stop` cancels, and `step east` requests one careful step. Read
 [adventure commands and behavior](text-adventure.md) before scripting this mode.
 
 ## Development scripting interface
@@ -81,8 +81,7 @@ that user's private notes. Other-user privacy is enforced by the server.
 The server saves accepted actions and notes in background batches. Use `save`
 for an explicit durable barrier; normal quit also saves before disconnecting.
 A crash may roll back recent acknowledged play. Restart with the same save path
-and reconnect to recover the last saved prefix. Protocol 15 and save format 10
-are required; the ruleset remains `physics-v15`. See
+and reconnect to recover the last saved prefix. See
 [background saving](background-saving.md) for timing and failure handling.
 
 On a lost connection or invalid stream, the client exits with an error. Automatic
@@ -113,8 +112,7 @@ rules for notes. History remains available; control, gameplay, and note-writing
 inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
-does not restrict that credential. Server and clients must all use protocol
-version 12. Real process tests cover live spectator
+does not restrict that credential. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -123,11 +121,11 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 15.
+and selections from an abandoned branch.
 
 [Unnamed place hints](place-hints.md) now support the initial text place heuristic.
 [Text travel](text-adventure.md) composes backend travel with optional pickup on
-arrival. Current `physics-v15` games support travel.
+arrival.
 
 [Door interactions](doors.md) add open/close, examination, clarification and
 approach intentions to the adventure interface.

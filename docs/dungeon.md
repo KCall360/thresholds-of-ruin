@@ -1,8 +1,7 @@
-# Dungeon gameplay — milestone 4d
+# Dungeon gameplay
 
-Merged in PR #35 at `2fb5169`, after Windows and Linux CI passed on final head
-`f887435`. Region streaming and generation (4e) have started with structural
-preload planning; see [region streaming foundations](region-streaming.md).
+Milestone 4d added the first complete game loop: explore, fight, retrieve a
+unique item, and escape.
 
 ## Rules
 
@@ -41,9 +40,9 @@ scenario settings.
 ## Controls and disclosure
 
 Text uses `attack <name>` or `attack #id`, with clarification for ambiguous names.
-ASCII uses A to select an actor, Up/Down to choose, and Enter to attack.
-`--bump-attacks hostile|any|off` controls manual movement interpretation; the
-default is hostile. Simulation movement remains distinct from attacking, and
+ASCII uses A to select an actor, Up/Down to choose, and Enter to attack. The
+ASCII client's `--bump-attacks hostile|any|off` option controls whether moving
+into an actor attacks it; the default is hostile. Simulation movement remains distinct from attacking, and
 travel never attacks automatically.
 
 Clients receive exact own HP and preparation/recovery, qualitative visible enemy
@@ -79,26 +78,24 @@ starting character can, including a scenario-controlled optional companion.
 
 ## Compatibility and verification
 
-The implementation uses protocol 16, save format 11, ruleset `dungeon-v16`, and
-validator `tor-scenario-4`. Previous prerelease saves are rejected. Scenario
-certificates must be regenerated after package source edits.
+Combat uses the current protocol, save format, ruleset, and scenario validator;
+older prerelease saves are rejected. Regenerate scenario certificates after
+editing package sources.
 
-Focused simulation boundary tests, the complete authored dungeon walkthrough,
-and durable preparation/victory/death restart tests pass. Four actual-client
-acceptance tests pass, including the full default dungeon in native ASCII.
-The Rust workspace passed 307 tests in each of debug and release, with none
-ignored. Formatting, all-target Clippy, private rustdoc with warnings denied,
-architecture checks, and all 28 package certificates pass. Python debug discovery
-and the full release process suite passed with the environment retries described
-in the [handoff](session-handoff.md); final dungeon tests passed in both profiles.
-The three desktop launchers connect, retain fresh saves, and clean up their owned
-processes. Native target selection, victory, death, and controls were inspected.
-Performance findings and limitations follow; Windows/Linux CI passed before merge.
+Simulation tests cover attack preparation and interruption, immunity, reach
+through corners and rotated portals, AI target choice, victory eligibility,
+death and corpses, and identical continuation from checkpointed progress and
+RNG. Server tests walk through the complete authored dungeon, restart durably
+with pending attacks, victory, and death, and keep AI memory across a forced
+checkpoint. `scripts/test_dungeon_process.py` runs four actual-client acceptance
+scenarios in both profiles: the complete default dungeon in native ASCII, text
+retrieval with saved victory, native bump-attack retrieval and escape, and
+persistent death. Scenarios live in `scenarios/tests/dungeon-*`.
 
-## Local performance evidence — 2026-09-27
+## Performance
 
-Release builds on the same Windows machine, with no build or process-test work
-running concurrently. Combat workload v1 has three samples per case and 64
+Measured 2026-09-27 in release builds on the maintainer's Windows machine, with
+no build or process-test work running concurrently. Combat workload v1 has three samples per case and 64
 measured commands per sample; 0 or 1,000 prior commands exercise history scaling.
 The engine is profiled, and reporting, update construction, save barriers, and
 restart are outside command timing. Client drawing measures the software canvas,
@@ -142,14 +139,11 @@ latency. This matrix does not establish 10,000-action scaling or network latency
 
 The long-history run exposed invalid JSON encoding of AI visit locations at
 checkpoints. The corrected ordered-entry encoding is covered by a forced-checkpoint
-restart regression. Failed and pre-optimization runs remain under `.local/4d-*`.
-Accepted combat evidence: `.local/4d-combat-navigation.jsonl` and
-`.local/4d-combat-navigation-summary.json`.
-
+restart regression.
 
 ### Matching ordinary-play baseline
 
-The preserved 4c release binary (`c8efdd5`) and final 4d build ran the same
+The preserved 4c release binary and final 4d build ran the same
 in-memory `latency_bench` cases on this host: `r8-a1-h100-memory --quick --cycles 5`
 and `r64-a8-h100-memory --cycles 3`. This comparison keeps the existing workload
 meaning; combat is measured separately above. Values are p50 / p95 / maximum ms.
@@ -178,7 +172,5 @@ the raw profiles; disk bytes and serialized records are zero in both builds.
 | large / 4c | 5912 | 5912 | 5888 | 1503 |
 | large / 4d | 5912 | 5912 | 5888 | 1503 |
 
-Evidence: `.local/4d-complete-{before,after}-{small,large}.jsonl` and
-`.local/4d-complete-comparison.json`; baseline binary hashes are retained in
-`.local/4d-baseline/hashes.json`. The selected cases do not establish the deferred
-full 3p matrix or large-world streaming performance.
+The selected cases don't establish the deferred full 3p matrix or large-world
+streaming performance. Raw samples are kept outside the repository.
