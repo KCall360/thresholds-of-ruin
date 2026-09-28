@@ -316,3 +316,295 @@ fn dividing_a_space_into_regions_does_not_change_the_3d_scene() {
         assert_eq!(view(&split), view(&whole));
     }
 }
+
+fn stone_room(world: &mut World, id: u64, (w, d, h): (i32, i32, i32)) {
+    world
+        .add_chamber(Region {
+            id: RegionId(id),
+            name: "room".into(),
+            bounds: Extent::new(w, d, h).unwrap(),
+        })
+        .unwrap();
+}
+
+fn shape(world: &World, eye: Location, frame: u8) -> Vec<(Position, bool)> {
+    world
+        .eye_scene(eye, frame, 8)
+        .into_iter()
+        .map(|c| (c.offset, c.wall))
+        .collect()
+}
+
+/// The far half of a 6x3x2 room stored in region 2 under cube rotation `r`,
+/// shifted so its storage starts at zero. Returns the local-to-storage map.
+fn rotated_half(r: u8) -> (World, impl Fn(i32, i32, i32) -> Location) {
+    use tor_world::{inverse_rotation, rotate_vector};
+    let dims = [3i64, 3, 2];
+    let corners: Vec<[i64; 3]> = (0..8)
+        .map(|i| {
+            rotate_vector(
+                r,
+                [0, 1, 2].map(|a| if i >> a & 1 == 1 { dims[a] - 1 } else { 0 }),
+            )
+        })
+        .collect();
+    let min = [0, 1, 2].map(|a| corners.iter().map(|c| c[a]).min().unwrap());
+    let size = rotate_vector(r, dims).map(|v| v.abs() as i32);
+    let remote = move |x: i32, y: i32, z: i32| {
+        let p = rotate_vector(r, [x, y, z].map(i64::from));
+        at(
+            2,
+            (p[0] - min[0]) as i32,
+            (p[1] - min[1]) as i32,
+            (p[2] - min[2]) as i32,
+        )
+    };
+    let mut world = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut world, 1, (3, 3, 2));
+    stone_room(&mut world, 2, (size[0], size[1], size[2]));
+    world
+        .connect_area(
+            Passage {
+                from: at(1, 2, 0, 0),
+                direction: Direction::East,
+                to: remote(0, 0, 0),
+            },
+            r,
+            3,
+            2,
+        )
+        .unwrap();
+    // The reverse join is anchored at the face's minimum storage corner.
+    let face: Vec<_> = (0..3)
+        .flat_map(|y| (0..2).map(move |z| (y, z)))
+        .map(|(y, z)| (remote(0, y, z), (y, z)))
+        .collect();
+    let (anchor, (y0, z0)) = *face.iter().min_by_key(|(l, _)| l.position).unwrap();
+    let back = Direction::West.rotated(r);
+    let extent = |axis: fn(&Position) -> i32| {
+        let values: Vec<_> = face.iter().map(|(l, _)| axis(&l.position)).collect();
+        (values.iter().max().unwrap() - values.iter().min().unwrap() + 1) as u16
+    };
+    let (width, height) = match back {
+        Direction::East | Direction::West => (extent(|p| p.y), extent(|p| p.z)),
+        Direction::North | Direction::South => (extent(|p| p.x), extent(|p| p.z)),
+        _ => (extent(|p| p.x), extent(|p| p.y)),
+    };
+    let passage = Passage {
+        from: anchor,
+        direction: back,
+        to: at(1, 2, y0, z0),
+    };
+    // A vertical join must be physical; plain vertical links are stairs.
+    if matches!(back, Direction::Up | Direction::Down) {
+        world.connect_portal_area(passage, inverse_rotation(r), width, height)
+    } else {
+        world.connect_area(passage, inverse_rotation(r), width, height)
+    }
+    .unwrap();
+    (world, remote)
+}
+
+#[test]
+fn a_room_split_under_every_cube_rotation_looks_unsplit_from_both_sides() {
+    let mut whole = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut whole, 1, (6, 3, 2));
+    for r in 0..24 {
+        let (split, remote) = rotated_half(r);
+        for x in 1..5 {
+            for y in 0..3 {
+                for z in 0..2 {
+                    let (eye, frame) = if x < 3 {
+                        (at(1, x, y, z), 0)
+                    } else {
+                        (remote(x - 3, y, z), r)
+                    };
+                    assert_eq!(
+                        shape(&split, eye, frame),
+                        shape(&whole, at(1, x, y, z), 0),
+                        "rotation {r}, eye ({x}, {y}, {z})"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_narrow_rotated_doorway_looks_unsplit_with_the_door_open_or_closed() {
+    for turns in 0..4u8 {
+        let remote = |x: i32, y: i32, z: i32| {
+            let (x, y) = match turns {
+                0 => (x, y),
+                1 => (2 - y, x),
+                2 => (4 - x, 2 - y),
+                _ => (y, 4 - x),
+            };
+            at(2, x, y, z)
+        };
+        let mut split = World::new(vec![], vec![]).unwrap();
+        let mut whole = World::new(vec![], vec![]).unwrap();
+        for (world, width) in [(&mut split, 6), (&mut whole, 11)] {
+            stone_room(world, 1, (width, 3, 2));
+            for y in [0, 2] {
+                for z in [0, 1] {
+                    world.set_wall(at(1, 5, y, z), true).unwrap();
+                }
+            }
+            world.place_door(at(1, 5, 1, 0), 1, true).unwrap();
+        }
+        let far = if turns % 2 == 0 { (5, 3, 2) } else { (3, 5, 2) };
+        stone_room(&mut split, 2, far);
+        split
+            .connect_area(
+                Passage {
+                    from: at(1, 5, 1, 0),
+                    direction: Direction::East,
+                    to: remote(0, 1, 0),
+                },
+                turns,
+                1,
+                2,
+            )
+            .unwrap();
+        split
+            .connect_area(
+                Passage {
+                    from: remote(0, 1, 0),
+                    direction: Direction::West.rotated(turns),
+                    to: at(1, 5, 1, 0),
+                },
+                (4 - turns) % 4,
+                1,
+                2,
+            )
+            .unwrap();
+        for open in [true, false] {
+            split.set_door(at(1, 5, 1, 0), open);
+            whole.set_door(at(1, 5, 1, 0), open);
+            for x in 0..11 {
+                for y in 0..3 {
+                    for z in 0..2 {
+                        if !whole.walkable(at(1, x, y, z)) {
+                            continue;
+                        }
+                        let (eye, frame) = if x < 6 {
+                            (at(1, x, y, z), 0)
+                        } else {
+                            (remote(x - 6, y, z), turns)
+                        };
+                        assert_eq!(
+                            shape(&split, eye, frame),
+                            shape(&whole, at(1, x, y, z), 0),
+                            "turns {turns}, eye ({x}, {y}, {z}), open {open}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_shaft_split_by_a_physical_vertical_portal_looks_unsplit() {
+    let mut whole = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut whole, 1, (3, 3, 4));
+    let mut split = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut split, 1, (3, 3, 2));
+    stone_room(&mut split, 2, (3, 3, 2));
+    split
+        .connect_portal_area(
+            Passage {
+                from: at(1, 0, 0, 1),
+                direction: Direction::Up,
+                to: at(2, 0, 0, 0),
+            },
+            0,
+            3,
+            3,
+        )
+        .unwrap();
+    split
+        .connect_portal_area(
+            Passage {
+                from: at(2, 0, 0, 0),
+                direction: Direction::Down,
+                to: at(1, 0, 0, 1),
+            },
+            0,
+            3,
+            3,
+        )
+        .unwrap();
+    for z in 0..4 {
+        for y in 0..3 {
+            for x in 0..3 {
+                let eye = if z < 2 {
+                    at(1, x, y, z)
+                } else {
+                    at(2, x, y, z - 2)
+                };
+                assert_eq!(
+                    shape(&split, eye, 0),
+                    shape(&whole, at(1, x, y, z), 0),
+                    "eye ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn rotating_the_observer_frame_rotates_offsets_and_nothing_else() {
+    use tor_world::rotate_vector;
+    let mut world = chamber(5, 4, 3);
+    world.set_wall(at(1, 3, 1, 0), true).unwrap();
+    world.set_wall(at(1, 1, 2, 1), true).unwrap();
+    let eye = at(1, 2, 2, 1);
+    let upright: BTreeSet<_> = world
+        .eye_scene(eye, 0, 8)
+        .into_iter()
+        .map(|c| (c.location, c.offset))
+        .collect();
+    for frame in 0..24 {
+        let turned: BTreeSet<_> = world
+            .eye_scene(eye, frame, 8)
+            .into_iter()
+            .map(|c| {
+                let p = rotate_vector(frame, [c.offset.x, c.offset.y, c.offset.z].map(i64::from));
+                let offset = Position {
+                    x: p[0] as i32,
+                    y: p[1] as i32,
+                    z: p[2] as i32,
+                };
+                (c.location, offset)
+            })
+            .collect();
+        assert_eq!(turned, upright, "frame {frame}");
+    }
+}
+
+#[test]
+fn abstract_stair_links_are_not_seen_through() {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut world, 1, (3, 3, 2));
+    stone_room(&mut world, 2, (3, 3, 2));
+    world
+        .connect(
+            Passage {
+                from: at(1, 1, 1, 1),
+                direction: Direction::Up,
+                to: at(2, 1, 1, 0),
+            },
+            0,
+        )
+        .unwrap();
+    for z in 0..2 {
+        let scene = world.eye_scene(at(1, 1, 1, z), 0, 8);
+        assert!(scene.iter().all(|c| c.location.region == RegionId(1)));
+        assert!(
+            scene.iter().any(|c| c.location == at(1, 1, 1, 2)),
+            "the physical ceiling above the stair is seen instead"
+        );
+    }
+}

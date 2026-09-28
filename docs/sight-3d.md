@@ -279,6 +279,15 @@ Both are settled by measurement.
 The reference is `World::eye_scene`, in `crates/world/src/sight3d.rs`, with
 tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
 
+- **Portals and rotations.** A room split across a join looks identical to the
+  unsplit room from both sides under all 24 cube rotations, including sideways
+  and upside-down storage. The same holds for a narrow rotated doorway with its
+  door open or closed, and for a shaft split by a physical vertical portal.
+  Rotating the observer's frame rotates offsets and changes nothing else.
+  Abstract stair links are never seen through; the physical ceiling above a
+  stair is seen instead. A vertical join is only see-through when it's built as
+  a physical portal.
+
 - **Empty cells compared with 2D shadowcasting.** Across 2,000 random
   single-level maps (about 97,000 open cells seen by Ford), 3D sight saw every
   open cell Ford saw, plus 619 more (0.6%). Every extra cell is on a line that
