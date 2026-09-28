@@ -1,74 +1,93 @@
 # Thresholds of Ruin
 
-A turn-based roguelike with one authoritative Rust backend and interchangeable
-frontends: graphical ASCII, interactive fiction, and, eventually, immersive 3D.
-The name is provisional; the code and content are original, with NetHack used as
-a gameplay reference.
+A turn-based roguelike dungeon crawler with one authoritative game server and
+interchangeable frontends. Play the same game as a **text adventure** or in a
+**graphical ASCII** window, switch between them mid-game, or let a friend watch
+through a read-only spectator view. An immersive 3D frontend may come later.
 
-## Current state
+The world is built from connected regions that don't need to fit together in
+ordinary space: passages can rotate, loop back on themselves, or lead sideways
+into a shaft with its own gravity. You only ever see what your character can
+perceive. The server never sends a client anything the character hasn't
+discovered.
 
-The repository contains an authored dungeon with an explore, fight, retrieve,
-and escape loop. It currently provides:
+The name is provisional. The code and content are original, with NetHack as a
+gameplay reference.
 
-- timed melee, typed damage, enemy AI, persistent death, and a retrieval/escape objective;
-- a deterministic simulation with movement, waiting, quantity-aware pickup/drop,
-  stacking, character-owned item knowledge, doors, inventory,
-  finite material volumes, portal-connected geometry, stairs, visibility, and
-  actor-specific perception;
-- a local, authenticated WebSocket server with saved action history, annotations,
-  control transfer, read-only spectators, travel, replay, and bounded wizard
-  rewind;
-- playable text and native graphical ASCII clients, plus a JSON-lines headless
-  client for scripted acceptance tests; and
-- client-held last-seen map memory that never exposes undisclosed world state; and
-- validated, self-contained TOML scenario packages with pinned save inputs; and
-- durable character-owned place names, learned on first sight, with renaming and
-  remembered-place lists in text (`places`) and ASCII (F5).
+## What you can play today
 
-New games use protocol **16**, save format **11**, and ruleset
-**`dungeon-v16`**. The server rejects any other protocol, save format, or ruleset.
-The default authored package is a compact five-area dungeon: fight its inhabitants,
-retrieve the dawn seal, and return to the entrance. Use `--scenario scenarios/two-room`
-for the original development fixture. Milestone 4d is implemented; see [dungeon gameplay](docs/dungeon.md).
+The default adventure is a compact five-chamber dungeon. Fight its inhabitants
+(a scout, a guardian, and a wisp), recover the **dawn seal** from the far
+chamber, and return to the entrance. Death is permanent.
 
-For the exact implementation matrix and next work, see the
-[project status and roadmap](docs/milestones.md). The [documentation index](docs/README.md)
-routes to player guides, implementation details, and design reasoning.
+Along the way you'll find:
 
-## Run locally
+- timed melee combat with typed damage and enemies that search, attack, and
+  flee based on what they can see and remember;
+- items that stack and split, and a corpse and dropped belongings where
+  anyone falls;
+- doors, stairs, diagonal movement, and travel to any place you've seen;
+- places your character names as they discover them, which you can rename; and
+- a map that remembers what you've seen, greyed out once it's out of sight.
 
-Install Rust through [rustup](https://rustup.rs/). On Windows, the default MSVC
-toolchain also requires Visual Studio Build Tools with the C++ tools and Windows
-SDK. The checked-in toolchain file selects stable Rust, rustfmt, and Clippy.
+This is an early development build: there's one authored dungeon, no
+procedural generation yet, and no packaged installer.
 
-Start the server in PowerShell:
+## Play
+
+You need [Rust](https://rustup.rs/). On Windows, the default MSVC toolchain also
+needs Visual Studio Build Tools with the C++ tools and Windows SDK. The
+repository's toolchain file selects stable Rust automatically.
+
+**1. Start the server.** It needs a secret token that clients use to connect.
+In PowerShell:
 
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
-cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.db
+cargo run -p tor-server -- --seed 42 --save saves/game.db
 ```
 
-In another PowerShell terminal, set the same token and choose a client:
+On Linux, run `export TOR_SERVER_TOKEN=$(openssl rand -hex 16)` instead of the
+first line.
+
+**2. Connect a client** in another terminal, after setting `TOR_SERVER_TOKEN` to
+the same token:
 
 ```powershell
-$env:TOR_SERVER_TOKEN = '<same token>'
-cargo run -p tor-client-text -- --connect 127.0.0.1:4000 --actor 1
-# or
-cargo run -p tor-client-ascii -- --connect 127.0.0.1:4000 --actor 1
+cargo run -p tor-client-text                 # text adventure
+cargo run -p tor-client-ascii                # graphical ASCII window
 ```
 
-See the [text client guide](docs/text-client.md),
-[ASCII client guide](docs/ascii-client.md), or
-[headless client contract](docs/headless-client.md) for controls and other roles.
-The server accepts numeric loopback addresses only; remote deployment and account
-administration are not implemented.
+In the text client, try `look`, `examine`, `take`, `attack`, compass directions
+like `east`, and `help`. In the ASCII client, use the arrow keys or HJKL/YUBN to
+move, A to attack, G to pick up, and `_` or a mouse click to travel.
 
-Ordinary acknowledgements do not wait for disk. See [background saving](docs/background-saving.md)
-for configurable save timing, crash rollback, and explicit save/normal-exit barriers.
+To resume later, restart the server with the same `--save` path. Quitting a
+client normally saves first; a crash can lose the last few moments of play.
 
-## Development
+**Guides:** [text client](docs/text-client.md) and
+[adventure commands](docs/text-adventure.md) ·
+[ASCII client](docs/ascii-client.md) · [dungeon rules](docs/dungeon.md) ·
+[all options](docs/server-options.md)
 
-Run the full local verification suite before publishing a change:
+The server only accepts connections from the same computer. Remote play,
+packaged builds, and automatic server launch are on the
+[roadmap](docs/milestones.md).
+
+## Develop
+
+Start with the [documentation index](docs/README.md), then read:
+
+- [development practices](CONTRIBUTING.md): architecture rules, compatibility,
+  documentation, and publishing;
+- the [testing policy](docs/testing.md): every change needs unit, integration,
+  and real-application tests, passing on Windows and Linux in debug and release,
+  with performance tooling kept up to date;
+- the [architecture](docs/architecture.md) and the
+  [project status and roadmap](docs/milestones.md); and
+- [AGENTS.md](AGENTS.md) if you're an AI coding agent.
+
+Run the full local check suite before publishing a change:
 
 ```sh
 cargo fmt --all --check
@@ -79,25 +98,12 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_architecture.py
 ```
 
-Graphical process tests require a desktop. Linux CI supplies X11 development
-libraries, Xvfb, xauth, and xdotool and runs Python discovery under
-`xvfb-run -a -s "-screen 0 1280x1024x24"`. Windows uses the native desktop.
-Missing displays are test failures rather than skipped graphical tests.
+The Python suite launches the real server and clients, including native windows,
+so it needs a desktop (Linux CI uses Xvfb). GitHub Actions runs every check on
+Windows and Linux. See the [testing policy](docs/testing.md#running-the-checks)
+for details, including release-mode process tests and API documentation builds.
 
-Python is used only for development checks. GitHub Actions runs the checks on
-Windows and Linux, in debug and release where applicable, and builds Rust API
-documentation with warnings denied. Set `TOR_TEST_PROFILE=release` to point the
-process tests at optimized binaries.
-
-Read [the architecture](docs/architecture.md),
-[project status and roadmap](docs/milestones.md), and
-[development practices](CONTRIBUTING.md) before making changes.
-
-## Platform and scope
-
-Windows is the primary platform; Linux is tested continuously. Automatic server
-launch, packaged builds, remote networking, and procedural dungeon generation remain roadmap work. Combat, death, and the retrieval/escape
-objective are implemented in milestone 4d.
+Windows is the primary platform; Linux is tested continuously.
 
 ## License
 

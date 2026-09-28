@@ -1,11 +1,9 @@
 # Material volumes and enclosed rooms
 
-New games use **diagonal-v11** and protocol **11**. Rooms and passages are
-empty cells carved inside finite solid stone. Each cell is a **5-foot cube**.
-The two starting rooms retain their 5-by-3-cell interiors and one-cell connecting
-hall; both rooms and the hall have two empty vertical layers (10-foot clearance).
-Actors stand in the lower layer. The room anchors, items, door, and travel distances
-are unchanged.
+Rooms and passages are empty cells carved inside finite solid stone. Each cell
+is a **5-foot cube**. In the `scenarios/two-room` package, the two 5-by-3-cell
+rooms and their one-cell connecting hall have two empty vertical layers
+(10-foot clearance). Actors stand in the lower layer.
 
 | Local z | Standard room |
 | --- | --- |
@@ -38,8 +36,8 @@ independent, cell-sized barriers; this slice does not add multi-cell door bodies
 
 ## Perception and clients
 
-Horizontal sight retains symmetric shadowcasting. Protocol 10 adds nullable
-`floor` and `ceiling` facts to disclosed cells, each with a material name and a
+Horizontal sight retains symmetric shadowcasting. Disclosed cells carry nullable
+`floor` and `ceiling` facts, each with a material name and a
 positive `distance` in cells to the solid cell. A standard floor is at distance 1
 downward; its top face is at the actor's feet. A standard ceiling is at distance 2
 upward, placing its underside 10 feet above the actor's feet.
@@ -91,15 +89,11 @@ unsupported.
 
 ## Timing, compatibility, and verification
 
-Gravity, falling, digging, destruction, body clearance, and material-specific
-interactions remain deferred. Actor position is the cell containing their feet;
-ordinary vertical movement still requires an explicit stair/link. Empty headroom
-does not grant upward movement, and removing support does not cause a fall.
-
-Current saves use format **10** and ruleset `physics-v15`.
-Start a new game after a format or rules update. All connected
-clients must use protocol 15. Existing launchers use `target/doors/debug` and
-continue creating fresh normal saves.
+Digging, destruction, and material-specific interactions remain deferred.
+Gravity, falling, and multi-cell bodies are described in [physics](physics.md).
+Ordinary vertical movement still requires an explicit stair or link; empty
+headroom doesn't grant upward movement. Start a new game after a format or rules
+update.
 
 World tests cover finite shells, unallocated space, vertical probe limits and
 barriers, and split/unsplit equivalence across ordinary and rotated joins.
@@ -127,25 +121,4 @@ all four rotations.
 
 The actual ASCII regression steps to the west of the door, onto it, and to its
 east, asserts both floor corners and wall cells, compares headless observations,
-and verifies closing/opening and save/resume. Protocol 15 and save format 10 stay
-unchanged; material-rims-v10 distinguishes corrected replay from the initial
-material-volumes-v9 rules.
-
-## Movement latency diagnostics
-
-`cargo run -p tor-server --example latency_bench --locked` measures scene and
-observation costs separately from action processing with memory-only and disk
-journals. Add `--release` for optimized timings. Results are diagnostic, with no
-machine-dependent pass/fail threshold.
-
-On the development Windows machine, debug observations took about 1.2 ms.
-Unbuffered JSON journal writes dominated movement latency and grew with history:
-disk-backed action batches averaged 62 ms initially and 220 ms by 300 actions.
-Buffering serialization reduced these to 19 ms and 24 ms respectively. A separate
-real headless client/server measurement of 30 moves improved from a 39 ms median
-to 23 ms. These are local measurements, not latency guarantees.
-
-The writer explicitly flushes before the existing file sync and atomic replacement;
-save format, replay rules, and acknowledgement ordering are unchanged. Existing
-saves benefit immediately. Complete-journal rewriting still limits long sessions;
-periodic snapshots and more efficient storage remain future work.
+and verifies closing/opening and save/resume.

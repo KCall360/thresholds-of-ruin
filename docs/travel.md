@@ -2,7 +2,7 @@
 
 The current rules support travel to an actor's known cell,
 identified by its opaque disclosed key. This is a server capability, independent of place hints,
-region names, and frontend language. Protocol 15 and save format 10 are current.
+region names, and frontend language.
 
 ## ASCII controls
 
@@ -75,7 +75,8 @@ already visible when a trip starts do not count as new hazards, but still block
 movement normally. Wizard changes stop active jobs even when their changes are
 elsewhere. Traps and additional dangerous-terrain classifications remain future
 work. See [dungeon gameplay](dungeon.md) for damage and attack interruption, and
-[milestone 3 acceptance](milestone-3-closeout.md) for narration/recovery coverage.
+[narration and stream recovery](narration-and-recovery.md) for slow and broken
+connections.
 
 A cancel request applies at an action boundary and cannot undo committed steps.
 Travel status and active jobs are session-local. Restart restores completed moves,
@@ -115,8 +116,8 @@ cannot stop a newer trip. A failed replacement request leaves an existing job al
 
 ## Compatibility and verification
 
-Only the current `physics-v15` ruleset is supported. Start a fresh game after
-an incompatible revision; saves are not migrated.
+Only the current ruleset is supported. Start a fresh game after an incompatible
+revision; saves are not migrated.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,
 cycles, stale terrain, free rejection, deterministic replay/rewind, receipts,

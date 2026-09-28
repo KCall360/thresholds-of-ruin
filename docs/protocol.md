@@ -1,4 +1,4 @@
-# Server protocol and annotations (version 16)
+# Server protocol and annotations
 
 The `tor-server` executable serves authored dungeon scenarios over JSON WebSockets.
 `tor-protocol` defines the wire types without depending on world or simulation
@@ -15,7 +15,7 @@ In PowerShell, generate a token for this terminal session and start the server:
 
 ```powershell
 $env:TOR_SERVER_TOKEN = [guid]::NewGuid().ToString('N')
-cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.json
+cargo run -p tor-server -- --listen 127.0.0.1:4000 --seed 42 --save saves/game.db
 ```
 
 Clients need that token. Do not put it in a URL or save it in the repository.
@@ -67,7 +67,7 @@ share private-note visibility but have independent write authority. Actor allowl
 apply to both roles. The existing `--observe` option merely skips a player client's
 initial control request and is not an access restriction.
 
-Protocol version 15 requires a backend-resolved observer-relative scene. Positions
+The protocol requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
 Cells also carry terrain `material` (empty for carved voids) and nullable
@@ -76,8 +76,7 @@ Cells also carry terrain `material` (empty for carved voids) and nullable
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
 The role in `welcome` and permanent wizard marker remain required. Old clients
-must upgrade. Saves must use format 10 and ruleset `dungeon-v16`; older formats
-and rulesets are rejected. See [geometry](portal-geometry.md).
+must upgrade. Only the current save format and ruleset are accepted. See [geometry](portal-geometry.md).
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
@@ -86,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":15,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":16,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -249,8 +248,8 @@ A background worker saves atomic batches. Acknowledged unsaved play can be lost
 on a crash. Explicit save, normal player-client exit, and graceful server shutdown
 wait for persistence; enabling wizard authority also waits for its permanent
 marker. A sidecar `.lock` file prevents concurrent server writers. See
-[background saving](background-saving.md) for policy, failure handling, format 10,
-and the tested durability boundaries.
+[background saving](background-saving.md) for policy, failure handling, the save
+format, and the tested durability boundaries.
 
 ```json
 {"type":"request","request_id":"save-1","request":{"type":"save"}}
@@ -325,11 +324,10 @@ See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
 surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
-Only protocol 15, save format 10, and `dungeon-v16` are supported; there are no
+Only the current protocol, save format, and ruleset are supported; there are no
 historical rules implementations or save importers.
 
-
-## Durable places (protocol 15)
+## Durable places
 
 `observation.places` is the complete authoritative list of learned anchor keys
 and character-owned mnemonic names. It includes offscreen knowledge, without
@@ -349,7 +347,7 @@ authoring, compatibility, and the versioned item profiling workload.
 
 ## Physics disclosure
 
-Protocol 15 adds optional own-body `motion`: velocity, fixed-point units per cell,
+Observations include optional own-body `motion`: velocity, fixed-point units per cell,
 and displacement/impact sensations from the latest action boundary. Static
 single-cell diagnostic views may omit it. Gravity fields, hidden collision targets,
 and backend frames are never serialized. Visible actor cells can repeat an actor
@@ -357,7 +355,7 @@ ID at different observer-relative positions; undisclosed body cells remain hidde
 Both clients narrate involuntary motion and impact, and ASCII F6/F7 browse disclosed
 height slices. See [physics](physics.md) for numerical and persistence rules.
 
-## Dungeon combat (protocol 16)
+## Dungeon combat
 
 Attack actions carry a disclosed target actor ID. Movement never implicitly
 attacks. Combat observations carry own HP, preparation/recovery, qualitative
@@ -371,5 +369,3 @@ progress and waits for fresh input. Repeat the attack to resume. If a saved run
 is in recovery with AI ready, `continue` resumes autonomous scheduling without
 starting a new player action; text `wait` and ASCII Space issue it while unready.
 Only the attached controller can continue. Spectators cannot request it.
-
-Save format 11 and ruleset `dungeon-v16` reject older prerelease saves.

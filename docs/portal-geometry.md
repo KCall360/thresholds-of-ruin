@@ -9,7 +9,7 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-New games use `physics-v15`. Body/gravity scenes preserve [symmetric shadowcasting](shadowcasting.md) on the
+Body/gravity scenes preserve [symmetric shadowcasting](shadowcasting.md) on the
 main plane and use conservative 3D voxel rays for height slices. Static diagnostic
 scenes retain their established sight.
 See [physics](physics.md). Both use eight Manhattan steps. Topology is resolved separately from opacity;
@@ -17,7 +17,7 @@ all 24 proper cube rotations and translation map observer offsets across
 joins. Crossing consumes distance, including self-links and cycles. A physical
 cell may have multiple visible occurrences in non-Euclidean geometry. The scene
 preserves those occurrences at distinct offsets. The world API caps sight radius
-at 16; the current game fixes it at eight. Older rulesets are rejected.
+at 16; the current game fixes it at eight.
 
 A rectangular join glues an entire aperture with one affine transform. Every
 constituent crossing is validated before any mutation commits. Horizontal joins
@@ -81,7 +81,7 @@ the same identity. Wide joins are supported by the current ruleset.
 
 ## Protocol and memory
 
-Protocol **11** sends positions as relative x/y/z offsets, with the actor at zero.
+The protocol sends positions as relative x/y/z offsets, with the actor at zero.
 Each visible cell carries an opaque key, position, wall flag, and semantic stair
 flags. Items carry `reachable`; sight does not grant pickup reach. Movement
 history reports the chosen direction. Observations and history contain no region
@@ -104,8 +104,7 @@ disclosed views cannot establish a consistent alignment.
 
 ## Saves and verification
 
-Save format **3** contains the private view-identity salt. Formats 1 and 2 and
-rulesets other than `diagonal-v11` are rejected.
+Saves contain the private view-identity salt.
 
 Tests compare one region against the same space split by a wide join, including
 all visible offsets. They cover rotations, consistent movement, height offsets,
@@ -115,9 +114,9 @@ history, reach, current-format replay, and rewind. `scripts/scenarios/wide-join.
 clients. They test continuous sight, movement/pickup, hidden changes, stale
 memory, stairs, restart, and rewind on Windows/Linux in debug and release.
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 6.
-They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `diagonal-v11`.
+[Unnamed place hints](place-hints.md) add perceived cell anchors without labels
+or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;
+text uses them as described in [the adventure interface](text-adventure.md).
 
 [Backend travel](travel.md) supports known-cell destinations. The
 [text adventure interface](text-adventure.md) supports travel and approach-then-pickup.

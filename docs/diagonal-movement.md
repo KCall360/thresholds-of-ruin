@@ -1,7 +1,7 @@
 # Diagonal movement and reach
 
-Games use **diagonal-v11**, with protocol **11** and save format **3**. Previous
-rulesets and save formats are unsupported; start a fresh game after an upgrade.
+Actors can move and reach diagonally as well as along the four cardinal
+directions.
 
 ## Rules
 

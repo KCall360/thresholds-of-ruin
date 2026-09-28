@@ -8,12 +8,12 @@ geometry and contents, infer locations without hints, or ignore them entirely.
 
 Map authors and future generators choose anchors explicitly. Hints are independent
 of regions and portals: a region can contain several hints or none, and a perceived
-space can span internal joins. The current authored two-space scenario places a
-hint at each space's center. There is no procedural generator yet.
+space can span internal joins. The `scenarios/two-room` package places a hint at
+each room's center. There is no procedural generator yet.
 
 ## Disclosure and memory
 
-Protocol **13** requires `place_hint` on each disclosed `visible_cells` entry.
+The protocol requires `place_hint` on each disclosed `visible_cells` entry.
 Only perceived cells carry hints; there is no dungeon-wide marker list. The
 existing opaque cell key identifies the location, and the existing relative
 position locates each visible occurrence. Repeated views of the same cell through
@@ -50,8 +50,7 @@ Public wizard history retains sanitized summaries, not hidden marker locations.
 
 ## Compatibility and verification
 
-Only the current `physics-v15` ruleset and save format 10 are supported.
-All connected binaries must use protocol 15. Normal games are never implicitly
+Only the current ruleset and save format are supported. Normal games are never implicitly
 promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale

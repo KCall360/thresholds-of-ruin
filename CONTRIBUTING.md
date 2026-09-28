@@ -1,159 +1,105 @@
 # Development practices
 
-Accumulate small project-plan, strategy, and documentation updates locally.
-Publish them to GitHub at meaningful checkpoints, such as a completed feature or
-milestone or a consolidated strategy revision, or when the user explicitly asks.
-Do not create or push a separate PR for every planning clarification. A request
-to update the plan alone does not require immediate publication.
+This page describes how changes to Thresholds of Ruin are designed, tested,
+documented, and published. AI coding agents should also read [AGENTS.md](AGENTS.md).
 
-When publishing, use a feature branch and PR; require Windows and Linux CI to
-pass before merging. Keep this publication cadence separate from the testing
-requirements below: delaying a push does not postpone feature verification.
+Before making changes, read the [architecture](docs/architecture.md), the
+[project status and roadmap](docs/milestones.md), and the
+[testing policy](docs/testing.md).
 
-Use test-driven development for simulation rules, protocol behavior, and client
-interactions: write a failing behavior test, implement it, then refactor with
-the tests passing. Prefer assertions about outcomes to copies of implementation
-details. Keep main green; incomplete acceptance scenarios belong in the milestone
-document until implementation starts, not in permanently ignored tests.
+## Testing
 
-Every new feature must include automated behavior tests at the layers it changes
-and an integration acceptance scenario for its complete user-visible behavior.
-Add regression tests for bug fixes. Update the project documentation and milestone
-status with the behavior, limitations, and how the feature is verified.
+Every change must be tested, and the full policy is in
+[testing and verification](docs/testing.md). In short:
 
-Preserve agent/conversation context by searching for relevant symbols and sections
-before reading whole files. Start with change summaries, then inspect targeted
-diffs; bound command output and expand only when needed. Reuse established facts
-and decisions, revisiting their sources when they change or uncertainty requires
-it. Summarize investigations with conclusions, evidence paths, and unresolved
-questions rather than full intermediate transcripts. Keep progress updates focused
-on new findings, meaningful changes, and blockers.
+- Use test-driven development for simulation rules, protocol behavior, and
+  client interactions: write a failing behavior test, implement, then refactor.
+- Every feature needs behavior tests at each layer it changes **and** an
+  acceptance test that launches the real server and clients.
+- Every bug fix needs a regression test that fails before the fix.
+- Everything must pass on **Windows and Linux**, in **debug and release**.
+- Keep profiling instrumentation, workloads, and validators working, and run
+  targeted release-build performance comparisons for latency-sensitive changes.
+- Keep `main` green. Don't merge ignored or known-failing tests.
 
-At meaningful checkpoints, maintain `docs/session-handoff.md` with current scope,
-decisions, verification summaries and evidence paths, blockers, and next steps.
-Link to authoritative guides instead of duplicating them. Keep bulky reproducible
-details in local logs; context preservation must not skip required work or conceal
-failures, limitations, or evidence needed to assess a conclusion.
+Run the checks listed in the [testing policy](docs/testing.md#running-the-checks)
+before pushing, and report any check you couldn't run.
 
-Keep successful test output out of agent/conversation context. Run the required
-unit and integration tests, redirecting stdout and stderr to local log files,
-and check their exit codes. Return only a compact pass/fail summary on success;
-do not load passing test listings or full logs into context. On failure, inspect
-and surface the relevant failure output, expanding log inspection only as needed
-to diagnose it. Retain logs for investigation without committing routine test
-output. Quiet reporting must not skip tests or hide failures, skipped checks,
-or checks that could not run.
+## Architecture rules
 
-Treat performance as an ongoing feature requirement, not a one-time milestone.
-Maintain the profiling instrumentation, versioned workload fixtures, real-client
-drivers, and report validators as production code changes. When adding a feature,
-extend the representative workloads to exercise its latency-sensitive paths and
-relevant scale dimensions; keep existing workload versions and recorded baselines
-meaningful instead of silently changing their meaning.
+These are enforced in review and, where possible, by tests.
 
-Deferring milestone 3p does not defer profiling maintenance. Update affected
-instrumentation, drivers, report schemas/validators and reproduction instructions
-alongside feature changes, and verify that representative profiling runs still
-produce actionable measurements. Keep timing boundaries explicit and distinguish
-application work from diagnostic/reporting overhead; preserve failed runs and
-measurement limitations. Summarize useful findings rather than loading raw
-profiling logs into context unless investigation requires them.
+- **Deterministic simulation.** `tor-world` and `tor-simulation` must not read
+  wall-clock time, access the filesystem or network, or depend on UI code.
+  Randomness must be explicitly seeded and persisted. Don't use unordered
+  iteration to resolve simulation outcomes.
+- **Backend owns the truth.** The backend owns rules, visibility, appearance
+  facts, and actor knowledge. Clients receive only disclosed observations. Don't
+  serialize internal world state into protocol messages or leak hidden facts
+  through interaction metadata or errors.
+- **No global player.** Every actor has explicit identity and control
+  ownership. Doors are independent entities; they don't need to sit on portal
+  apertures.
+- **Dependency boundaries.** `scripts/check_architecture.py` enforces the
+  permitted internal crate edges for all targets, including optional, build, and
+  development dependencies. New crates and intentional boundary changes need an
+  explicit policy update in that script. The check isn't a sandbox: new external
+  libraries still need review (for example, to avoid I/O in simulation code).
+- **Original work.** Write original code and content. NetHack is a gameplay
+  reference, not a source to copy.
 
-Run targeted release-build performance checks for changes to simulation,
-perception, persistence, protocol delivery, or client application/rendering.
-Choose cases that exercise the changed behavior plus a representative existing
-interaction, and compare matching before/after cases on the same machine and
-configuration. Include small/large cases for affected scale dimensions such as
-history, regions, actors, items, or remembered cells. Record the selected cases,
-sample counts, p50/p95/maximum latency, relevant operation/byte counts, and any
-limitations. Investigate material regressions and tail spikes before considering
-the feature complete; do not silently relax targets to accommodate new features.
-Preserve determinism, disclosure, recovery, and input responsiveness while
-optimizing. See the [performance plan](docs/performance-persistence.md) for the
-current provisional latency targets and measurement boundaries.
+## Formats and compatibility
 
-The full performance matrix is not required for every change. Expand the focused
-checks when results are inconsistent, a regression is unexplained, or the change
-affects several subsystems. Documentation-only changes do not require latency
-benchmarks. Targeted profiling does not replace required correctness tests or the
-pre-publication verification below. Keep stable scale/operation-count regressions
-in automated tests; machine-dependent timing measurements remain diagnostic.
+The project is pre-release, so it supports only the **current** protocol, save
+format, and ruleset. They're listed in the
+[roadmap](docs/milestones.md#current-implementation).
 
-Keep documentation roles distinct. `docs/milestones.md` is the status and roadmap
-source of truth, `docs/architecture.md` records durable boundaries and rationale,
-and feature guides specify implemented behavior. Link every guide from
-`docs/README.md`; `scripts/test_documentation.py` rejects broken local links and
-unindexed guides. Delete superseded claims instead of preserving an unlabelled
-historical plan beside current behavior.
+- When a format changes, update callers, fixtures, scenario certificates, and
+  documentation together.
+- Saves are disposable across revisions. Don't add importers, compatibility
+  readers, historical rules implementations, or defaults just to load old saves.
+- Keep version rejection and strict replay checks.
+- Supporting multiple installed ruleset or generator versions is planned as a
+  later, explicit compatibility milestone. It isn't an exception to this policy.
 
-Use scripted [wizard mode](docs/wizard-mode.md) commands where appropriate as the
-final integration test: launch the actual server and frontend, construct a
-reproducible scenario through authorized wizard commands, exercise the feature,
-and assert the resulting state and client-visible behavior.
-For example, place a mob and equipment, teleport into position, then use ordinary
-combat actions to verify combat. Test a wizard feature through its own privileged
-commands. Include save/resume or rewind when relevant to the feature.
+## Documentation
 
-Once scenario packages are implemented, use ordinary validated packages for
-authored initial setup in unit, integration, and real-client process tests.
-Keep assertions/action sequences in the test harness, with stable entity/anchor
-references checked against the fixture. Wizard commands remain appropriate for
-testing privileged behavior and deliberate runtime mutations, not as a substitute
-for the scenario format. Test checkpoints are ordinary reproducibly created saves.
+Keep documentation roles distinct:
 
-Wizard scenarios complement focused unit/protocol tests and normal-play coverage.
-Setup shortcuts must not bypass the behavior under test, and wizard success does
-not establish that the feature works or is properly restricted in a normal game.
-Keep command scripts, seeds, and expected outcomes in version control and run the
-applicable process tests in Windows and Linux CI.
+- [`docs/milestones.md`](docs/milestones.md) is the single source of truth for
+  status, scope, and the current format versions.
+- [`docs/architecture.md`](docs/architecture.md) records durable boundaries and
+  the reasons for them. It isn't a changelog.
+- Feature guides describe **current** behavior, controls, limitations, and how
+  the feature is verified.
+- The [game design plan](docs/game-design-plan.md) records accepted future
+  requirements.
 
-Run the commands in README.md before pushing. Both Windows and Linux CI must pass.
-Document any checks that could not run locally.
+When behavior changes, update the relevant guide and the roadmap in the same
+change. Replace superseded statements rather than leaving history beside current
+behavior. Guides say "the current protocol" rather than repeating version
+numbers. Git history and pull requests record who changed what and when, so
+guides don't list PR numbers, commit hashes, or CI runs. Link every new guide
+from [`docs/README.md`](docs/README.md); `scripts/test_documentation.py` rejects
+broken local links, unindexed guides, and version numbers that don't match the
+code. The [documentation index](docs/README.md#maintaining-the-docs) has the
+checklist.
 
-CI also tests optimized builds and builds documentation with `RUSTDOCFLAGS=-D warnings`.
-The dependency policy in `scripts/check_architecture.py` enforces declared internal
-crate edges for all targets, including optional, build, and development dependencies.
-New crates and intentional boundary changes require an explicit policy update.
-External library suitability (such as avoiding I/O in simulation code) still
-requires review; this guard is not a sandbox for Rust code.
+## Publishing
 
-The simulation must not read wall-clock time, access the filesystem/network, or
-depend on UI code. Randomness must be explicitly seeded and persistable. Do not
-use unordered iteration to resolve simulation outcomes.
+- Work on a feature branch and open a pull request. Windows and Linux CI must
+  pass before merging.
+- Batch small plan, strategy, and documentation updates, and publish them at
+  meaningful checkpoints (a completed feature or milestone, or a consolidated
+  strategy revision), or when the maintainer asks. Don't open a separate PR for
+  every planning clarification.
+- Publishing later never postpones verification. Features are tested as they're
+  built.
 
-The backend owns rules, visibility, appearance facts, and actor knowledge. Clients
-may only receive disclosed observations. Do not serialize internal world state
-into protocol messages or provide hidden facts through interaction metadata.
+## Secrets and local files
 
-Each actor has explicit identity and control ownership. Avoid a global player.
-Doors are independent entities; they need not be on portal apertures.
-
-When protocol, save, or rules formats change, update callers and fixtures together;
-the project supports only the current versions. During pre-release, saves are
-disposable across revisions: do not add importers, compatibility readers,
-historical rules implementations, or defaults solely to load older saves.
-The future scenario design records exact dependencies and anticipates multiple
-installed ruleset/generator versions; this is a later explicit compatibility
-milestone, not an exception to the current pre-release policy.
-Keep version rejection and strict current-rules replay checks; update fixtures
-with the implementation instead of preserving obsolete behavior.
-Preserve original code and content;
-NetHack is a gameplay reference, not a source to copy.
-
-Frontend milestones must include tests launching the actual applications in
-addition to parser, input-model, presentation-model, and protocol tests. The
-graphical tests need an explicitly configured display environment in CI.
-
-Never commit credentials, local saves, or private configuration.
-
-On the Windows development machine, keep the user's desktop launchers current
-whenever the build is updated: Text, ASCII, and Text + ASCII Spectator.
-The 256 Region Spectator desktop launcher was removed at the user's request;
-retain its reusable benchmark driver, not a desktop shortcut. Verify each launcher's helper scripts and
-actual executable targets, build every required binary, and check a real client
-connection. `cargo check` alone does not update executables. Preserve fresh saves
-per launch, prior saves, separate spectator credentials, and owned-process
-cleanup. Machine-local links, credentials, and saves stay outside Git; reusable
-scenario specifications/drivers belong in version control. See the
-[harness guide](docs/performance-harness.md#observable-256-region-run-and-desktop-maintenance)
-for the shared demonstration and verification procedure.
+Never commit credentials, local saves, logs, or private configuration. Server
+tokens belong in environment variables, not in URLs, command-line arguments, or
+files in the repository. Machine-local launchers and their credentials stay
+outside Git; reusable scenario specifications and drivers belong in version
+control.

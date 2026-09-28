@@ -1,13 +1,9 @@
 # Checkpoints and retained history
 
-Phase C adds periodic snapshots to background saving. Current games use protocol 15, ruleset
-`physics-v15` and save format **10**, rejecting every older format. Format 7 adds
-shared character-owned place names to the format-6 navigation checkpoint tables.
-Format 8 pins authored scenario inputs and records wizard validation status.
-Format 9 retains item specs, quantities and character identity knowledge; rewind
-restores both knowledge and the item-ID allocator along with quantities/ownership.
-Checkpoints preserve the asynchronous acknowledgement and explicit-save contracts
-in [background saving](background-saving.md).
+Checkpoints add periodic snapshots to background saving, so a restart only has
+to simulate the actions since the latest snapshot. They preserve the
+asynchronous acknowledgement and explicit-save contracts in
+[background saving](background-saving.md).
 
 ## Capture and scheduling
 
@@ -28,14 +24,16 @@ profiling tracks their effect rather than assuming background work is free.
 The snapshot contains the current simulation and scheduler state, navigation
 knowledge, identities, current branch, revisions, permanent wizard flag and all
 retained rewind boundaries (at most 128). Identical worlds and item maps across those boundaries are encoded once.
-Format 6 pools navigation cells and edges independently by source region. Each
+Navigation cells and edges are pooled independently by source region, and so are
+remembered place names. Each
 navigation instance holds ordered table references; equal region contents are
 stored once even when ownership differs. Reference decoding shares the maps
 without expanding repeated cell/edge payloads. Empty or mixed-region table
 entries, invalid/duplicate/out-of-order references and malformed fields fail closed.
 This preserves historical changes and deletions rather than merging knowledge
-from different rewind boundaries. The explicitly approved pre-release compatibility
-decision rejects format-5 saves; no migration or compatibility reader is included. World geometry is shared independently of door state, so opening
+from different rewind boundaries. Item specs, quantities, character identity
+knowledge, and the item-ID allocator are included, so rewind restores them all.
+World geometry is shared independently of door state, so opening
 a door does not duplicate the entire dungeon. Runtime control leases, client-held map memory and active travel
 jobs retain their existing restart behavior and are not restored from this snapshot.
 Backend snapshot types never cross the client protocol boundary.
@@ -83,10 +81,10 @@ capture changes the effective replay bound.
 
 A snapshot exceeding the size limit fails saving rather than publishing an
 unrecoverable checkpoint. The limit bounds encoded bytes, not all in-memory
-snapshot allocations. The original [closeout audit](3p-closeout.md) measured 765 MB for the
-format-5 fully explored 256-region fixture. Format 6 removes repeated source-region
-knowledge; regression coverage requires the same complete fixture to fit below
-16 MiB with the production 64 MiB cap unchanged. This is a measured fixture
+snapshot allocations. Before navigation was pooled by region, a fully explored
+256-region fixture needed a 765 MB checkpoint; pooling reduced it to 9.9 MB.
+Regression coverage requires that complete fixture to fit below 16 MiB, with the
+production 64 MiB cap unchanged. This is a measured fixture
 bound, not an arbitrary-world guarantee or region streaming implementation.
 SQLite/process
 tests establish transaction recovery, not hardware power-loss guarantees; filesystem/device limitations from the background-save guide apply.
@@ -106,9 +104,9 @@ database page-alignment validation.
 clients across checkpoint saves and restart, including loss of an acknowledged
 unsaved tail. The performance harness exposes `checkpoint_capture` separately from
 record encoding, worker checkpoint size/encoding time, selected sequence and
-startup loaded/replayed counts. See the [performance plan](performance-persistence.md#phase-c--checkpoints-and-compaction)
-for targeted comparisons and the [development practices](../CONTRIBUTING.md) for
-maintaining these checks as features evolve.
+startup loaded/replayed counts; see the [performance harness](performance-harness.md).
 
-The [Phase C findings](phase-c-findings.md) retain the focused release comparisons,
-the consecutive same-binary follow-up, raw samples and measurement limitations.
+In the largest measured case (256 regions, 8 actors, 10,000 retained actions),
+the default interval cut restart time from 119 s to 7 s with no action-latency
+regression. Results for later work are in the
+[performance plan](performance-persistence.md#what-each-phase-achieved).

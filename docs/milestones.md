@@ -1,373 +1,239 @@
 # Project status and roadmap
 
-This is the source of truth for project scope and sequence. It distinguishes
-implemented behavior from planned work; feature guides contain the detailed rules
-and verification. “Complete” means implemented, documented, and covered by the
-appropriate unit, integration, protocol, and actual-client process tests.
+This is the source of truth for project scope, sequence, and the current format
+versions. It separates implemented behavior from planned work; feature guides
+contain the detailed rules and verification. "Complete" means implemented,
+documented, and covered by the tests required by the [testing policy](testing.md).
 
 ## Current implementation
 
-The current tree is a playable development slice built around a deterministic
-two-room fixture. New games use protocol **16**, save format **11**, and ruleset
-**`dungeon-v16`**. Older protocols, save formats, and rulesets are rejected
-rather than migrated or silently upgraded.
+The current tree is a playable development build. The default game is the
+authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
+retrieve the dawn seal, and escape.
+
+**Current formats:** protocol **16**, save format **11**, ruleset
+**`dungeon-v16`**, scenario validator **`tor-scenario-4`**. The server rejects
+any other protocol, save format, or ruleset rather than migrating it. Other
+documents refer to these as "current" instead of repeating the numbers, and
+`scripts/test_documentation.py` checks that these values match the code.
 
 | Area | Status | Implemented scope |
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
-| Simulation | Complete for the slice | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
-| Geometry | Complete for the slice | Bounded 3D regions, rotated and elevated joins, finite stone volumes, actor-relative scenes |
-| Perception | Complete for the slice | Symmetric shadowcasting, disclosed surfaces/entities, opaque cell keys, stale client memory |
-| Server and persistence | Complete for the slice | Local authenticated WebSockets, action journal, save/replay, protocol validation, history and annotations |
-| Clients | Complete for the slice | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
-| Access and development | Complete for the slice | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
-| Navigation and interaction | Complete for milestone 3 | Known-cell travel, hazard/cancellation boundaries, prose/examination, clarification, compound pickup/doors, durable places, semantic narration, slow-client recovery acceptance |
-| Authored scenarios | Complete for bounded authored worlds | TOML packages, offline validation, pinned inputs, and converted test setups |
-| Item knowledge | Complete for milestone 4b | Compatible stacks, seeded appearances, character-owned identities, disclosure and recovery |
-| Dungeon gameplay | 4d complete and merged in PR #35 | Timed melee, typed damage, AI, death, retrieval/escape; equipment and generation remain deferred |
+| Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
+| Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
+| Perception | Complete for current scope | Symmetric shadowcasting, disclosed surfaces and entities, opaque cell keys, stale client memory |
+| Server and persistence | Complete for current scope | Local authenticated WebSockets, background journal, checkpoints, replay, history and annotations |
+| Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
+| Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
+| Navigation and interaction | Complete (milestone 3) | Known-cell travel, interruption, prose and examination, clarification, compound pickup/doors, durable places, narration, stream recovery |
+| Authored scenarios | Complete (4a) | TOML packages, offline validation, pinned inputs |
+| Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
+| Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
+| Region streaming | In progress (4e) | Structural catalog and preload-horizon planning only |
+| Performance (3p) | Deferred, open | See [performance plan](performance-persistence.md#open-work) |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
-The current fixture, compatibility behavior, and checks are described in the
-[documentation index](README.md). Notable limitations are intentional: clients
-must be relaunched to reconnect; active travel does not resume after a server
-restart; server listeners are loopback-only; wizard history is bounded; and
-there is no procedural generator or complete game loop.
+Notable current limitations: clients must be relaunched to reconnect; active
+travel doesn't resume after a server restart; the server listens on loopback
+only; wizard history is bounded; every authored region is loaded at once; and
+there's no procedural generation.
 
-## Completed foundations
+## Completed milestones
 
 ### 0 — Repository and architectural boundaries
 
-Complete. The workspace enforces a one-way dependency structure: world and
-simulation contain no UI, network, filesystem, or wall-clock behavior; protocol
-types contain no internal world state; clients consume actor-specific disclosed
-observations. CI validates formatting, linting, tests, dependency boundaries, and
-native client launch behavior on Windows and Linux.
+The workspace enforces a one-way dependency structure: world and simulation
+contain no UI, network, filesystem, or wall-clock behavior; protocol types
+contain no internal world state; clients consume actor-specific disclosed
+observations. CI validates formatting, linting, tests, dependency boundaries,
+and native client launch behavior on Windows and Linux.
 
 ### 1 — Shared playable slice
 
-Complete. The server, text client, and native ASCII client can play and resume the
-same saved game. Actions stream to controllers and observers, control transfer is
+The server, text client, and native ASCII client can play and resume the same
+saved game. Actions stream to controllers and observers, control transfer is
 explicit, spectator credentials are server-enforced, and history preserves scoped
-annotations. Duplicate or stale commands cannot execute an action twice.
+annotations. Duplicate or stale commands can't execute an action twice.
 
 ### 1a — Wizard development foundation
 
-Complete. A distinct credential authorizes reproducible setup, placement,
-teleportation, geometry editing, and bounded rewind. Enabling it permanently marks
-the game lineage; rewinds retain abandoned branches and never become available in
-normal play. See [wizard mode](wizard-mode.md).
+A distinct credential authorizes reproducible setup, placement, teleportation,
+geometry editing, and bounded rewind. Enabling it permanently marks the game
+lineage; rewinds retain abandoned branches and are never available in normal
+play. See [wizard mode](wizard-mode.md).
 
 ### 2 — Geometry and perception foundation
 
-Complete for the present gameplay needs. Implemented slices include
-[portal geometry](portal-geometry.md), [place hints](place-hints.md),
+[Portal geometry](portal-geometry.md), [place hints](place-hints.md),
 [doors](doors.md), [symmetric shadowcasting](shadowcasting.md),
 [finite material volumes](material-volumes.md),
 [ASCII map memory](ascii-memory.md), and
 [diagonal movement](diagonal-movement.md).
 
-Remaining perception work is driven by gameplay rather than more geometry in
-isolation: richer semantic events and sound propagation will be added when interactions
-require them. [Durable place knowledge](place-knowledge.md) now retains learned
-anchor names independently of connection-local map memory.
-
-## Active direction
-
-The [game design plan](game-design-plan.md) records the September 2026 decisions
-and deferred architectural considerations. The sequence below incorporates them
-without marking future systems implemented or expanding the current performance
-work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c merged in PR #34 at `c8efdd5`. Milestone 4d merged in PR #35 at `2fb5169` after Windows/Linux CI passed on head `f887435`. Milestone 4e has started with structural preload planning. The unresolved
-3p findings and acceptance criteria
-remain open; ongoing feature performance checks still apply. Later scale work
-must use scenario/streaming requirements when choosing checkpoint boundaries.
-
-### 3p — Performance and scalable persistence
-
-Status: **deferred, still open; Phases A–E and format-6 checkpoint reduction merged**.
-
-The shared versioned fixture drives focused and mixed movement, normal/rotated
-crossings, doors, stairs, obstacle LOS, and scheduled actor visibility changes.
-The release matrix combines 1/8/64/256 regions, 1/8 actors, and
-0/100/1,000/10,000 retained actions in memory and durable modes. It measures
-exclusive command phases, client application/rendering, actual I/O counts,
-bytes, and normal restart/replay; a separate discovery trace grows map memory.
-
-The [measured findings](phase-a-findings.md) retain the validated 64-case release
-baseline, growing discovery and actual-client samples. The
-[harness guide](performance-harness.md) describes reproduction, the real
-headless/ASCII driver, and the verified 256-region spectator demonstration.
-The [storage review](persistence-review.md) retains historical Phase A evidence.
-Phase B replaces whole-save rewrites with an atomic SQLite append journal and a
-bounded background worker. Ordinary acknowledgements can precede persistence;
-explicit save, normal client exit, graceful server shutdown, and wizard enablement
-wait for their saved prefix. See [background saving](background-saving.md).
-The [Phase B findings](phase-b-findings.md) retain the nine-case comparison and
-actual-client run. Phase B merged in PR #23 after Windows and Linux CI passed.
-Phase C adds periodic atomic checkpoints, logical journal compaction with retained
-history, and bounded tail replay. The [Phase C findings](phase-c-findings.md)
-retain focused release measurements and their limits. See [checkpoints](checkpoints.md) for the format,
-recovery contract, tests and limits. Phase D removes full-history candidate copies, shares rewind state, and reuses
-scene work; see [its findings](phase-d-findings.md). Phase D merged in PR #26 after
-Windows and Linux CI passed. Phase E removes historical-memory copies from client
-updates and ASCII delivery, indexes rendering, budgets native event work, and adds
-save/checkpoint responsiveness tests; see [its findings](phase-e-findings.md).
-Phase E merged in PR #27 after Windows and Linux CI passed on its final commit.
-The [original closeout audit](3p-closeout.md) identified a 765 MB explored-world
-checkpoint against a 64 MiB cap. The [format-6 follow-up](3p-checkpoint-growth.md)
-reduces that same complete 256-region state to 9.92 MB through source-region
-navigation sharing. The user approved rejecting format-5 saves before this change.
-Enabled traversal now completes with exact durable restart and bounded tail replay;
-native full exploration, ASCII/text continuation and native input during a blocked
-checkpoint also pass. The cap, rewind window and runtime queue limits are unchanged.
-PR #29 merged at `37a913d` after Windows/Linux CI passed on final head `a098f34`.
-The broader milestone remains **not ready to close**. The
-[client timing investigation](3p-client-timing.md) preserves the historical
-2,915 ms tail and separates new 633 ms request-diagnostic and 442 ms post-native
-stdout-write stalls from short server handlers. Deferred diagnostic disk logging
-does not eliminate a 197 ms native presentation/pacing-call stall in the small
-saved traversal. Two longer eight-client attempts fail (diagnostic retention cap
-and readiness timeout); shorter successes do not replace them. Full native
-exploration/recovery and real keyboard input during blocked saving still pass.
-When 3p resumes, obtain thread scheduling/blocked-write evidence for those
-native/report intervals and qualify the longer client workload. This follow-up
-no longer blocks milestone 3 feature expansion.
-This is distinct from deferred streaming, history loading and query scaling.
-Process recovery tests do not establish hardware power-loss behavior.
-
-Scope and sequencing are defined in the
-[performance and persistence plan](performance-persistence.md). The milestone
-will replace whole-save rewrites with an append-oriented journal plus bounded
-snapshot/checkpoint work, remove avoidable full-state cloning, profile client
-state application and rendering, and add scale-sensitive regression checks.
-Phase B uses the [focused verification subset](performance-persistence.md#phase-b-verification-and-measurement)
-against the retained Phase A baseline; a full characterization is conditional on
-regressions or broader changes. Storage correctness coverage remains comprehensive.
-Caching, alternate collections, and speculative presentation will be adopted
-only for measured hot paths and must preserve determinism, disclosure, retry,
-rewind, and crash-recovery behavior.
-
-Acceptance requires consistent crash rollback and durable explicit-save barriers;
-bounded p95 and maximum action latency as journal history and dungeon size grow;
-recovery tests at every write boundary; equivalent replay, retry, and rewind
-behavior; and actual-client tests proving the ASCII and text clients remain
-responsive during saving. Because the project is pre-release, the new persistence
-layout will explicitly reject old save formats rather than add a compatibility
-importer.
+Further perception work follows gameplay needs: richer semantic events and sound
+propagation will be added when interactions require them.
 
 ### 3 — Complete interactions and travel
 
-Status: **complete for the agreed slice. Milestone 3p remains deferred and open**.
+Server-managed [travel](travel.md) through known cells, interruption and
+cancellation at action boundaries, ASCII keyboard and mouse destinations,
+[text intentions](text-adventure.md), prose and examination, noun clarification,
+compound approach-and-pickup, open/close doors,
+[durable place knowledge](place-knowledge.md), shared
+[narration and stream recovery](narration-and-recovery.md).
 
-Already implemented: server-managed travel through known cells, interruption and
-cancellation at action boundaries, ASCII keyboard/mouse destinations, text
-direction intentions, prose and examination, noun clarification, compound
-approach-and-pickup, and open/close doors. Durable place knowledge is implemented and locally verified: first-sight
-anchor discovery, automatic mnemonic names, player renaming and persistent lists.
-Offscreen destination selection remains deferred. See the
-[verification findings](place-knowledge-findings.md).
+The simulation's [action extension points](simulation-slice.md#shared-action-extension-points)
+separate validation and timing, effect application, and scheduling. Offscreen
+named-place destinations remain deferred.
 
-The initial action extension points separate validation/timing, effect application
-and scheduling inside the simulation, with unchanged immediate-action semantics.
-See the [simulation guide](simulation-slice.md#shared-action-extension-points).
-Persistent partial progress and concrete interruption policies remain deferred
-until the first timed action needs them.
+**Rules for timed actions** (implemented for attacks in 4d; future timed actions
+follow the same model): interruption preserves still-valid progress. Retrying
+the same action resumes it, waiting preserves it, and other actions or movement
+generally discard it. Damage alone interrupts without erasing progress. Player
+and AI actors share the model, and each action can define its own policies and
+meaningful partial effects. Implement specific progress behavior when an action
+needs it, not as broad speculative machinery.
 
-Closeout adds shared disclosed action/sight-change narration in text and ASCII,
-real-client delayed-delivery and broken-stream/relaunch acceptance, and a service
-test proving slow spectators cannot stop active travel. Existing wizard placement
-commands reproduce the two-actor narration fixture without new setup APIs.
-See [milestone 3 closeout](milestone-3-closeout.md) for behavior and verification.
-Potential-hazard interruption uses newly perceived actors; at the user's explicit
-direction, damage-triggered interruption is implemented in 4d with HP/damage mechanics.
-Use the shared action extension points when later timed actions need progress.
-
-Locks, keys, containers, equipment, and item use are deferred. New item foundations
-are milestone 4b. For future timed actions, interruption preserves still-valid progress; retry resumes,
-waiting preserves it, and other actions/movement generally discard it. Damage
-alone interrupts without erasing progress. Player and AI actors share the model;
-per-action policies and meaningful partial effects remain possible. Implement
-specific progress behavior when an action needs it, rather than broad speculative
-edge-case machinery.
-
-The backend continues to resolve every ordinary step. Clients never receive a
-planned route or future outcome, and ambiguity never consumes simulation time.
-
-## Planned milestones
+The backend resolves every ordinary step. Clients never receive a planned route
+or future outcome, and ambiguity never consumes simulation time.
 
 ### 4a — Authored scenario packages and offline validation
 
-Complete for bounded authored worlds. See [scenario packages](scenario-packages.md)
-for the format, limits, compatibility, and local verification.
+Ordinary TOML packages describe the world and zones, region geometry, gravity
+and anchors, outgoing portals and placements, archetypes with instance
+overrides, theme pools, controller assignments, and objectives. Packages have
+author-controlled `major.minor` versions and stable IDs, and an explicit
+validation utility binds exact content hashes and dependency identities. Any
+authored edit requires revalidation. Startup does inexpensive integrity checks
+and refuses unvalidated or stale scenarios unless a development option allows
+them. Validation is structural and deterministic, with recorded coverage rather
+than an exhaustive gameplay proof.
 
-Ordinary TOML packages precede the first dungeon. Packages contain world
-and zones, region geometry/gravity/anchors, local outgoing portals and placements,
-archetypes with instance overrides, theme pools, controller assignments, and
-objectives. World themes provide defaults; zones replace their pools. Player
-starts use anchors; mobs initially use authored placements instantiated at region
-activation. Starting characters are selected by server option; unselected
-characters can be omitted. Gravity is implemented in 4c. AI and victory declarations are validated
-and retained; milestone 4d activates those mechanics. All authored regions are active in 4a; streaming follows in 4e.
+Wizard edits can mutate loaded structure; they're journaled, mark validation
+broken only when appropriate, and keep the separate permanent wizard-lineage
+flag. See [scenario packages](scenario-packages.md).
 
-Packages use author-controlled major.minor versions and stable IDs, exact content hashes
-and dependency identities, and an explicit validation utility. Any authored edit
-requires revalidation. Startup uses inexpensive integrity checks and refuses
-unvalidated/stale scenarios by default; runtime development options can permit
-them. Structural and deterministic validation are required, with explicit limits
-on large-world sampling rather than an exhaustive gameplay proof.
+### 4b — Items and character knowledge
 
-Verified: ordinary packages load in normal and wizard games and real client
-process tests; invalid references, anchors, geometry, and stale validation fail
-with useful diagnostics. Assertions remain in tests. Wizard can mutate loaded
-structure and existing saves; journal edits, mark validation broken only when
-appropriate, and preserve the separate permanent wizard-lineage flag. Package
-authorship must not rely on a script of wizard setup commands.
-
-### 4b — Items and character knowledge foundations
-
-Status: complete, with Windows verification and recorded performance limitations. See [items](items.md).
-4a and 4b were published together and merged after Windows and Linux CI passed.
-
-Add pickup/drop/inventory with quantities, multiple items per cell, explicitly
-stackable archetypes and matching-property merge rules. Keep ownership/identity
-ready for future capacity, equipment, containers, and item effects. Separate true
-identity from per-character knowledge and deterministic randomized appearances;
-confounding descriptions must not identify unrelated effects. Knowledge persists
-after dropping/consuming items and through saves/replay.
-
-Acceptance: stack split/merge and individual/requested pickup/drop preserve
-quantities and identity, incompatible instances stay separate, and clients never
-receive hidden identities. Both playable clients and save/recovery tests exercise
-these rules. Full identification mechanics, equipment and item use come later.
+Pickup, drop, and inventory with quantities, multiple items per cell, and
+explicitly stackable archetypes with matching-property merge rules. True identity
+is separate from per-character knowledge and deterministic randomized
+appearances; confounding descriptions don't identify unrelated effects.
+Knowledge persists after dropping items and through saves, replay, and rewind.
+Identification gameplay, equipment, and item use come later. See
+[items](items.md).
 
 ### 4c — Multi-cell bodies, rotated portals, and gravity
 
-Status: merged in PR #34. See [physics](physics.md) for implemented rules and verification/performance evidence.
-
-Extend portal transforms including z-facing apertures independently of stairs.
-Add discrete occupied footprints/heights, region gravity and sparse cell overrides,
-aggregate diagonal acceleration, persistent velocity, terminal speed, scheduled
-one-cell translations, drift, and blocked-component collision response. Other
-actors continue on the scheduler. Provide impact-damage hooks and room for
-momentum transfer without requiring a complete physics damage model first.
-
-Approved decisions use averaged acceleration, fixed-point simulation ticks,
-persistent body frames through all 24 rotations, rigid support and sliding,
-and impact-only hooks. Crouching/ducking is deferred; whole bodies must fit.
-
-Acceptance: multi-cell gravity aggregation, rotated crossings, discontinuous and
-zero-gravity fields, diagonal sliding, collision hooks, concurrent scheduled actors,
-and equivalent save/replay outcomes. Include real-client disclosure/presentation
-checks and reproducible scenario packages. Numerical tuning can follow mechanics.
+Portal transforms in all 24 cube rotations, including z-facing apertures
+independent of stairs. Discrete multi-cell bodies, region gravity with sparse
+overrides, averaged acceleration, persistent velocity with a speed cap, drift,
+fixed-point simulation ticks, persistent body frames, rigid support and sliding,
+and impact hooks. Crouching and ducking are deferred; whole bodies must fit. See
+[bodies, portals, and gravity](physics.md).
 
 ### 4d — First complete dungeon loop
 
-Status: merged in PR #35 at `2fb5169` after Windows/Linux CI passed. See
-[dungeon gameplay](dungeon.md) for rules, acceptance evidence, and the eight-actor
-combat performance limitation tracked under deferred 3p.
+Explore, fight, retrieve, and escape through authored scenarios and both
+playable clients. Timed d20-plus-bonus attacks against physical defense, line of
+sight to any occupied target cell, differing speeds, HP, and typed damage
+(energy, impact, keen, spirit, vital) with per-type immunity or flat reduction.
+Enemies use search/attack/flee AI with perception-limited, expiring target
+memory. Victory needs a player character at a named anchor, optionally carrying a
+specific item. Death is persistent and leaves a corpse and dropped inventory.
+Equipment, containers, locks, keys, and usable items aren't included. See
+[dungeon gameplay](dungeon.md).
 
-Implements explore, fight, retrieve, escape through authored scenarios and both
-playable clients. Shared actors support timed d20-plus-bonus attacks versus
-physical defense, LOS to any occupied target cell, differing speeds, HP, typed
-damage, immunity and flat reductions to zero. Initial damage types are energy,
-impact, keen, spirit, and vital; each component independently applies immunity or
-flat reduction before the remaining damage is summed. Initial enemies use search/attack/flee, a transition
-lookup table, and perception-limited expiring target memory. Scenario-selected AI
-also controls optional starting characters.
-
-Victory requires one player character at a named anchor, optionally with a specific
-authored item; visibility and continued play are scenario-configured. Death is
-persistent, leaving a corpse item and inventory at the base cell. Equipment,
-containers, locks, keys, and usable-item effects are not prerequisites.
-
-Positive HP loss interrupts travel and attack preparation without erasing
-still-valid partial preparation. Zero damage does not interrupt. Waiting preserves
-preparation; movement or a different action discards it.
-
-Acceptance: deterministic attack/AI outcomes, actor-independent targeting and
-interruption, drops/corpses, durable death/victory, hidden-information protection,
-and the complete loop using real text/ASCII clients. Tests use ordinary packages,
-with wizard edits only where the test needs them.
+## In progress
 
 ### 4e — Region streaming, generation, and asset palettes
 
-Status: in progress on `codex/milestone-4e-streaming`, based on merged 4d.
-The first slice implements a structural catalog, deterministic directed
+The first slice implements a structural region catalog, deterministic directed
 preload-horizon queries, and a read-only authoring command; see
-[region streaming foundations](region-streaming.md). Runtime freezing/loading,
-generation, and palette delivery remain unimplemented. See the
-[handoff](session-handoff.md) for the 4d state that streaming must preserve.
+[region streaming foundations](region-streaming.md). Runtime freezing and
+loading, generation, and palette delivery aren't implemented yet.
 
-Follow the authored loop with region/zone on-demand generation and large-world
-loading. Dependencies on neighbors use fixed structural metadata only. Preload
-activation persists generated results permanently; distant regions freeze every
-actor/effect. Reactivation performs deterministic deferred updates before normal
-scheduling. Save complete active state, retain frozen regions on disk, and leave
-unactivated areas as pinned scenario/seed/version references. Load the saved
-active horizon first. Define cross-boundary effects and checkpoint/event handling
-before implementing streaming rather than advancing frozen regions implicitly.
+**Streaming.** Generate regions and zones on demand, depending on neighbors only
+through fixed structural metadata. Activation within the preload horizon
+persists generated results permanently; distant regions freeze every actor and
+effect. Reactivation performs deterministic deferred updates before normal
+scheduling. Save the complete active state, keep frozen regions on disk, and
+leave unactivated areas as pinned scenario/seed/version references. Load the
+saved active horizon first. Define cross-boundary effects and checkpoint and
+event handling before implementing streaming, rather than advancing frozen
+regions implicitly. Choose checkpoint boundaries using these scenario and
+streaming requirements.
 
-Add separate palette snapshots/deltas over the existing connection, independent
-revisions and snapshot requests, no acknowledgements, and identifiers only.
-Broad theme pools forecast assets before instances exist; tailor the palette to
-the player's horizon without signaling the next room. Clients resolve dependencies,
-cache independently, and use fallbacks/retry for unexpected assets. Recompute
-palettes on load. The palette protocol can be implemented independently once
-scenario themes exist; no 3D renderer is a prerequisite.
+**Palettes.** Add separate palette snapshots and deltas over the existing
+connection, with independent revisions and snapshot requests, no
+acknowledgements, and identifiers only. Broad theme pools forecast assets before
+instances exist, tailored to the player's horizon without signaling the next
+room. Clients resolve dependencies, cache independently, and use fallbacks and
+retry for unexpected assets. Recompute palettes on load. The palette protocol
+doesn't need a 3D renderer.
 
-Acceptance: equivalent generation/replay with fixed inputs, no region replacement
-or frozen-time advancement, deterministic reactivation, save/load of complete
-actor/item/physics knowledge, bounded loading versus total world size, theme
-assets without entity disclosure, reconnect/gap snapshots, and unexpected-asset
-fallback. Preserve current explicit-save barriers and consistent crash rollback.
+**Acceptance:** equivalent generation and replay with fixed inputs; no region
+replacement or frozen-time advancement; deterministic reactivation; save and
+load of complete actor, item, and physics knowledge; loading bounded relative to
+total world size; theme assets without entity disclosure; reconnect and gap
+snapshots; fallback for unexpected assets. Keep the current explicit-save
+barriers and consistent crash rollback.
+
+### 3p — Performance and scalable persistence
+
+Deferred at the maintainer's direction and still open. Phases A–E and the
+explored-world checkpoint reduction are complete; remaining closure work (client
+timing tails and the longer eight-client workload) no longer blocks feature
+milestones. Every feature still gets performance checks. See the
+[performance plan](performance-persistence.md) for targets, results, and open
+work.
+
+## Planned milestones
 
 ### 4f — Subsequent interaction extensions
 
-Add equipment after items, then item effects and other selected interactions.
-Equipment changes/use consume simulation time and can be interrupted; exercise
-shared progress/resume policies as these actions are introduced. Capacity/weight,
-containers, locks/keys, and richer identification mechanics remain separate scoped
-extensions. Each needs its own behavior and actual-client acceptance scenarios.
+Equipment after items, then item effects and other selected interactions.
+Equipment changes and item use consume simulation time and can be interrupted,
+using the shared progress/resume model. Capacity and weight, containers, locks
+and keys, and richer identification are separate scoped extensions, each with
+its own behavior and actual-client acceptance tests.
 
 ### 5 — Rogue-o-matic bot framework
 
-Build bots on the ordinary disclosed client view, including explicitly uncertain
-knowledge, map memory, inventory, and events. Begin with deterministic exploration
-and scenario-driven test policies. Bots must obey the same visibility, travel, and
-action boundaries as human clients and must never access server world state.
+Bots built on the ordinary disclosed client view, including explicitly uncertain
+knowledge, map memory, inventory, and events. Begin with deterministic
+exploration and scenario-driven test policies. Bots obey the same visibility,
+travel, and action boundaries as human clients and never access server world
+state.
 
 ### 6 — History, recovery, and distribution
 
 Scale wizard rewind and branch retention beyond the current 128-boundary window;
 add replay checksums, stronger interrupted-write recovery, packaged clients, and
 automatic local-server startup or attachment. Verify compatible replay, retained
-branches, and package launch behavior on both supported platforms.
+branches, and package launch behavior on both platforms.
 
-Keep the server independently startable and client-specific launcher presentations.
-Manual saves default to character-named files with no slots, following suspend/resume
-and persistent permadeath. Implement safe save replacement/resumption alongside
-background journals and recovery. Plan exact-version dependency selection and
-multiple installed scenario/ruleset/generator versions; historical migration is
-optional later work, not implicit minor-version compatibility. Ordinary test
-checkpoint saves remain usable through the same load path.
+Keep the server independently startable, with client-specific launcher
+presentations. Manual saves default to character-named files with no slots,
+following suspend/resume and persistent permadeath. Implement safe save
+replacement and resumption alongside the background journal and recovery;
+ordinary test checkpoint saves stay loadable through the same path. Plan exact-version
+dependency selection and multiple installed scenario/ruleset/generator versions;
+historical migration is optional later work.
 
-An immersive 3D frontend is deliberately deferred until ASCII and text gameplay
-validate the protocol and interaction model. Remote authentication, encrypted
-deployment, multiplayer input policy, hunger, and ranged combat
-are also outside the current milestone sequence.
+### Later
+
+An immersive 3D frontend is deferred until ASCII and text gameplay validate the
+protocol and interaction model. Remote authentication, encrypted deployment,
+multiplayer input policy, hunger, and ranged combat are outside the current
+sequence. The [game design plan](game-design-plan.md) records accepted
+requirements for all of these.
 
 ## How the roadmap changes
 
-Performance remains a completion criterion throughout all later milestones.
-Maintain the profiling code and evolve versioned workloads with new features;
-run focused release-build latency and scaling comparisons on the affected paths.
-Investigate material regressions before completing a feature. The full benchmark
-matrix is not required for every change; broaden it for cross-cutting changes or
-unexplained results. See [development practices](../CONTRIBUTING.md) for the
-ongoing profiling and targeted verification requirements.
-
-Every feature must add behavior tests at the layers it changes and an end-to-end
-acceptance scenario using the real applications. Update this file when status or
-scope changes, and update the relevant implementation guide with behavior,
-limitations, compatibility, reasoning, and verification. See
-[development practices](../CONTRIBUTING.md) for the full completion criteria.
+Update this file whenever status or scope changes, alongside the relevant
+feature guide. Every milestone must meet the [testing policy](testing.md):
+behavior tests at each changed layer, an end-to-end acceptance scenario with the
+real applications on Windows and Linux, regression tests for fixed bugs, and
+performance checks that keep profiling tools current and don't relax targets.

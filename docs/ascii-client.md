@@ -1,13 +1,13 @@
 # Graphical ASCII client
 
-`tor-client-ascii` is a native windowed frontend for the two-room playable slice.
+`tor-client-ascii` is a native windowed frontend for the game.
 It renders only the server's disclosed observations and shares the same
 connection/state validation as the text client. Windows and Linux/X11 are tested.
 
 The latest disclosed action and sight-change prose appears above the status bar,
 up to two lines. It shares perceived names and conservative sight-change wording
 with adventure text. This transient narration resets on a fresh snapshot; F2
-still opens durable history. See [milestone 3 acceptance](milestone-3-closeout.md).
+still opens durable history. See [narration and stream recovery](narration-and-recovery.md).
 
 ## Run and play
 
@@ -41,7 +41,7 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | --- | --- |
 | Arrow keys, H/J/K/L | Move west/south/north/east by one cell |
 | Y/U/B/N | Move northwest/northeast/southwest/southeast by one cell |
-| `<` / `>` | Request movement up/down; the current fixture has no vertical route |
+| `<` / `>` | Move up/down where a stair or vertical link exists |
 | Space or period | Wait one action |
 | O / C, then a direction | Open / close the adjacent door using arrows or HJKL/YUBN; no door means a local message and no ticks |
 | G / D | Pick up at your feet / drop from inventory; Up/Down selects, digits set a count, Enter confirms (blank = whole stack) |
@@ -76,15 +76,15 @@ across internal boundaries. Separate visible heights get adjacent panels. The
 actor remains at the view origin; cells outside sight use grey last-seen facts. `#` is wall,
 `.` floor, `!` item, `&` actor, and `<`/`>` stairs. No portal markers or region
 labels are shown. See [observer scenes](portal-geometry.md).
-Overview lists currently show up to five inventory items and four visible items;
-the present fixture has only two items. Richer item inspection is future work.
+Overview lists show up to five inventory items and four visible items. Richer
+item inspection is future work.
 
 ## Switch between clients and resume
 
-1. Start the text client, enter `take token`, and add a note if desired.
+1. Start the text client, take an action, and add a note if you like.
 2. Start ASCII with `--observe`. It receives the same actor's state and live notes.
 3. Enter `release` in text, then press F3 in ASCII.
-4. Press Right five times to enter the far room with the token.
+4. Move around in ASCII.
 5. Press R in ASCII and enter `control` in text to switch back.
 
 Accepted actions and notes are saved in background batches. Normal player-window
@@ -93,7 +93,7 @@ the server with the same save path and relaunch either frontend to resume.
 The GUI keeps its last view with a disconnected status if the connection fails;
 close and relaunch to reconnect. An uncertain request is not automatically retried.
 Inspect history after reconnecting before repeating it. Disconnecting releases
-control. No protocol or save version changes were needed for this frontend.
+control.
 
 ## Development and graphical validation
 
@@ -146,8 +146,7 @@ rules for notes. History remains available; control, gameplay, and note-writing
 inputs are blocked locally and independently rejected by the server.
 
 `--observe` with a player credential remains useful for switching frontends; it
-does not restrict that credential. Server and clients must all use protocol
-version 12. Real process tests cover live spectator
+does not restrict that credential. Real process tests cover live spectator
 updates, denied inputs, note privacy, and read-only access after save/resume.
 
 ## Wizard games
@@ -156,15 +155,14 @@ Both frontends display a permanent **WIZARD GAME** indicator. Setup and rewind
 arrive as explicit fresh snapshots; relaunching is not required for surviving
 actors. The text client forwards the opaque development commands described
 in [wizard mode](wizard-mode.md). Spectators remain read-only. ASCII clears drafts
-and selections from an abandoned branch. Server and clients must use protocol 15.
+and selections from an abandoned branch.
 
-[Unnamed place hints](place-hints.md) add perceived cell anchors in protocol 7.
-They carry no labels or boundaries. Shared memory retains last-seen hints; ASCII does not render them; text now uses them as described in
-[the adventure slice](text-adventure.md). Saves use `physics-v15`.
+[Unnamed place hints](place-hints.md) add perceived cell anchors without labels
+or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;
+text uses them as described in [the adventure interface](text-adventure.md).
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
 with perceived floor material and ceiling height.
-
 
 ## Responsiveness and diagnostic timing
 
@@ -197,7 +195,7 @@ Reports still follow presentation and optional PPM writing. `previous_report_ms`
 includes capture, JSON construction, stdout writing/flushing for the preceding
 reported frame. Diagnostic I/O is synchronous and can delay input; leave these
 options off for ordinary play. They do not measure physical keyboard-to-photon
-latency. See [Phase E findings](phase-e-findings.md) for measured limits.
+latency.
 
 Additional diagnostic fields retain that boundary while separating report work:
 `presented_unix_ns` samples host time just after native presentation returns;
@@ -205,7 +203,8 @@ Additional diagnostic fields retain that boundary while separating report work:
 encoding and stdout writing/flushing for the preceding reported frame. All include
 scheduling within the measured interval. The harness can defer its disk logs for
 comparison; this does not disable the application's synchronous diagnostic output.
-See the [timing investigation](3p-client-timing.md) for attribution and limits.
+Measured tails and their attribution are in the
+[performance plan](performance-persistence.md#open-work).
 
 `test_client_responsiveness_process.py` verifies native Win32/X11 note input while
 SQLite saving is deliberately blocked, both with and without a pending checkpoint,

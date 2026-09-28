@@ -82,8 +82,7 @@ Initial Windows release measurements (2026-09-27, 10,000 samples per case):
 All cases expand two regions and examine four directed links. These sub-microsecond
 query measurements include timer overhead and host scheduling noise; they are
 diagnostic, not timing assertions. The operation-count test is the stable scaling
-gate. Local raw evidence is `.local/4e-horizon-profile.jsonl`.
+gate.
 
-Protocol 16, save format 11, ruleset `dungeon-v16`, and scenario certificates are
-unchanged. Ordinary simulation, scheduling, persistence, and client behavior do
+The planner changes no formats or scenario certificates. Ordinary simulation, scheduling, persistence, and client behavior do
 not use the planner yet.

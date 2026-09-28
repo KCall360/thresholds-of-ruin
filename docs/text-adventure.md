@@ -1,9 +1,9 @@
 # Text adventure slice
 
 The normal text client presents places, objects and intentions rather than grid
-coordinates. Start it through the existing Text desktop shortcut or the command
-in [the text guide](text-client.md). The server remains authoritative; text travel
-uses the same ordinary saved moves as ASCII travel.
+coordinates. Start it with the command in [the text guide](text-client.md). The server remains authoritative; text travel
+uses the same ordinary saved moves as ASCII travel. The examples on this page use
+the small `scenarios/two-room` package.
 
 ```text
 You stand in a space with a stone floor.
@@ -30,7 +30,6 @@ You can head east.
 An interrupted journey is also one response, for example:
 `You start walking east, but stop when a figure comes into view.` The actor's
 name comes from disclosed appearance; the client does not invent monsters.
-
 
 ## Descriptive facts
 
@@ -64,7 +63,7 @@ nearest visible anchor are described as on the floor nearby, or at your feet
 when reachable; directions are reserved for items in another place. With no
 visible anchors, same-elevation items are treated as nearby.
 
-Walkable floor within a place is not an exit. The starting fixture therefore
+Walkable floor within a place is not an exit. The two-room example therefore
 offers east only, and the other place offers west. There is no arbitrary floor-ray
 fallback. Without visible hints, compass travel is unavailable; object approach
 still works, and `step` remains an explicit fine-movement tool in session help.
@@ -127,7 +126,7 @@ Outside compound journeys, shared narration reports newly perceived figures,
 loss of sight, and changes to continuously visible doors. It never names an
 undisclosed cause or claims a disappearing actor died. Unchanged observations
 from another actor no longer repeat the entire room description. Explicit `look`
-and snapshots still describe the scene. See [milestone 3 acceptance](milestone-3-closeout.md).
+and snapshots still describe the scene. See [narration and stream recovery](narration-and-recovery.md).
 
 A pending pickup is connection-local and tied to the exact travel receipt and
 branch. It is discarded on cancellation, any non-arrival termination, snapshot,
@@ -146,7 +145,7 @@ Older save formats and rulesets are unsupported.
 `--script` preserves the original deterministic text command interface: single-cell
 directions, immediate-only pickup, detailed diagnostic output, and `Ready.` framing.
 Existing wizard/geometry process scenarios explicitly select it. Ordinary startup
-and desktop shortcuts select the adventure interface. Explicit `history` remains
+and the desktop launchers select the adventure interface. Explicit `history` remains
 a detailed reference tool, including IDs needed for annotation/rewind anchors.
 
 Behavior tests cover nouns, pronouns, clarification invalidation, ambiguous places,
@@ -163,7 +162,7 @@ The [door slice](doors.md) adds visible doors to descriptions, examination, noun
 clarification and pronouns. `open door` / `close door` approach a disclosed standing
 cell when necessary, then submit an ordinary action with the same interruption
 checks as pickup. `go to door` approaches without manipulating it. Travel never
-automatically opens a door. Current games use `physics-v15` and save format 10.
+automatically opens a door.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
 `examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling

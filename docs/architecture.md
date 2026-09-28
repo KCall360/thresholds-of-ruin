@@ -24,7 +24,7 @@ runtime support; use the roadmap to distinguish planned work from the slice.
 | tor-world | Region-local geometry, entities, containment, portals |
 | tor-simulation | Rules, scheduler, perception, deterministic transitions |
 | tor-protocol | Versioned commands, disclosed observations, semantic events |
-| tor-server | Sessions, validation, networking, travel, persistence |
+| tor-server | Sessions, validation, networking, travel, persistence, scenario packages; also builds the `tor-scenario` authoring tool |
 | tor-client-common | Connections and a model of disclosed observations |
 | tor-client-ascii | Graphical ASCII input and presentation |
 | tor-client-text | Deterministic language parsing, clarification, prose |
@@ -98,8 +98,9 @@ geometry regions. A perceived space may span regions; a region can contain sever
 anchors or none. Hints have no names, descriptions, or area boundaries. Clients
 may combine them with perceived geometry and contents to organize locations.
 The [text adventure slice](text-adventure.md) uses visible hints and object names
-for an initial place/direction heuristic. Richer grouping, persistent labels and
-offscreen waypoint navigation remain future work.
+for an initial place/direction heuristic. Characters also keep persistent names
+for anchors they've seen (see [durable place knowledge](#durable-place-knowledge)).
+Richer grouping and offscreen waypoint navigation remain future work.
 
 Visibility follows portal paths with explicit range limits and cycle handling.
 The backend owns visibility, appearance facts, sound disclosure, and hidden
@@ -111,7 +112,7 @@ The [client-memory slice](headless-client.md) retains received cell
 views in `tor-client-common`, separate from current state. Same-branch snapshots
 preserve memory; new branches clear it. It lasts only for the connection and
 does not infer views from known place names or history. [Portal sight](portal-geometry.md)
-refreshes only currently visible cells. ASCII now displays an aligned
+refreshes only currently visible cells. ASCII displays an aligned
 [remembered map](ascii-memory.md); text memory presentation remains later work.
 
 ## Time and actions
@@ -207,7 +208,7 @@ users, frontends, and trusted backend components. Notes have server-stamped
 provenance, branch identity, actor scope, a state or history-entry anchor, and
 an explicit private or actor-visible audience. Notes do not advance time or action
 revisions. Live updates, history pagination, and durable replay preserve the same
-visibility rules. See [protocol version 12](protocol.md) for the implemented format.
+visibility rules. See the [protocol guide](protocol.md) for the implemented format.
 
 ## Language and interactions
 
@@ -220,8 +221,8 @@ action against current state, even if previously advertised as available.
 Containment, inventory, equipment, doors, locks, and object properties are explicit
 world relationships. Implement a small coherent interaction set first.
 
-The next item core supports stack quantities, pickup/drop/inventory, archetypes
-and instance overrides, and multiple items per cell. Only marked-stackable items
+The [item core](items.md) supports stack quantities, pickup/drop/inventory,
+archetypes and instance overrides, and multiple items per cell. Only marked-stackable items
 with matching relevant properties merge. Keep hidden identity distinct from
 per-character identification and deterministic per-game appearances; clients
 receive only known facts. Equipment, item use, capacity, containers, and locks
@@ -232,9 +233,10 @@ are later extensions.
 [The backend travel slice](travel.md) is implemented for known cells, with ASCII
 `_` selection and mouse-click destinations. Actor navigation knowledge is rebuilt
 from perceived connections at committed boundaries and retained through replay;
-clients still receive no topology. The text client now interprets visible destinations and composes travel with
-optional pickup; see [the adventure interface](text-adventure.md). Active jobs never resume automatically after restart.
-
+clients still receive no topology. The text client interprets visible
+destinations and composes travel with optional pickup; see
+[the adventure interface](text-adventure.md). Active jobs never resume
+automatically after restart.
 
 The server executes travel toward known destinations as a sequence of ordinary
 actions. It resolves and publishes each completed step without disclosing
@@ -243,6 +245,19 @@ progress, including animation or slower pacing, but cannot affect simulation tim
 Threats, damage, blocked paths, newly perceived hazards, arrival, and decisions
 interrupt travel. Player cancellation takes effect at an action boundary; already
 executed actions cannot be cancelled. Navigation cannot use undiscovered terrain.
+
+## Durable place knowledge
+
+Perceived anchors become character-owned remembered points, independent of region
+membership. The simulation stores names beside navigation in shared source-region
+maps, and learns only from authoritative perception boundaries. Deterministic
+mnemonics use seed/discovery order, never authored labels or hidden contents.
+Protocol observations carry opaque cell keys and names, without reconstructing
+unseen geometry. Rename is a controller-only, revision-checked, free journal
+command and rewind boundary. Checkpoints share remembered name maps across
+boundaries. Client lists derive visibility only from the current disclosed scene;
+full map persistence and offscreen destination selection remain deferred. See
+[durable place knowledge](place-knowledge.md).
 
 ## Persistence and history
 
@@ -306,10 +321,9 @@ Privileged mutations must preserve world invariants and deterministic replay.
 The server records their inputs and results, rebuilds affected observations, and
 publishes a fresh snapshot boundary when rewind changes time or branch. Ordinary
 observers keep actor-specific disclosure; privileged inspection, if added, needs
-its own authorized response rather than widening normal observations. Protocol
-version 12, save format 6, and ruleset `diagonal-v11` are the only supported
-runtime formats. Older saves and rulesets are rejected rather than migrated.
-The last 128 chronological decision boundaries are rewindable; older
+its own authorized response rather than widening normal observations. Only the
+current formats are supported; older saves and rulesets are rejected rather than
+migrated. The last 128 chronological decision boundaries are rewindable; older
 branch history remains readable. Wizard authority is global to the game and uses
 a distinct server-configured credential. Text provides privileged commands; ASCII
 displays wizard status and follows explicit setup/rewind snapshots.
@@ -319,6 +333,15 @@ Enabling wizard authority still permanently marks the lineage; only mutations
 that break scenario validation mark the running state unvalidated. Journal those
 mutations and status changes. Wizard games may start from packages or saves;
 ordinary test scenarios use the same package format as normal games.
+
+## Authored package boundary
+
+The server owns TOML parsing, file integrity, validation artifacts, and immutable
+scenario inputs in saves. `tor-scenario` explicitly validates complete bounded
+authored packages. Construction calls deterministic simulation/world APIs; these
+crates do not acquire filesystem dependencies. The package schema is independent
+of wizard commands and client protocol types. Clients continue receiving only
+actor-specific observations. See [scenario packages](scenario-packages.md).
 
 ## Initial content and deferred decisions
 
@@ -352,26 +375,3 @@ ClientState and never exposes world/simulation internals. Window size and redraw
 rate do not affect game time. See the ASCII guide for display/test requirements.
 Choose a 3D renderer after ASCII and text validate the protocol. Avoid speculative
 rendering dependencies in the simulation or wire format.
-
-
-## Durable place knowledge
-
-Perceived anchors become character-owned remembered points, independent of region
-membership. The simulation stores names beside navigation in shared source-region
-maps, and learns only from authoritative perception boundaries. Deterministic
-mnemonics use seed/discovery order, never authored labels or hidden contents.
-Protocol observations carry opaque cell keys and names, without reconstructing
-unseen geometry. Rename is a controller-only, revision-checked, free journal
-command and rewind boundary. Checkpoints share remembered name maps across
-boundaries. Client lists derive visibility only from the current disclosed scene;
-full map persistence and offscreen destination selection remain deferred. See
-[durable place knowledge](place-knowledge.md).
-
-## Authored package boundary
-
-The server owns TOML parsing, file integrity, validation artifacts, and immutable
-scenario inputs in saves. `tor-scenario` explicitly validates complete bounded
-authored packages. Construction calls deterministic simulation/world APIs; these
-crates do not acquire filesystem dependencies. The package schema is independent
-of wizard commands and client protocol types. Clients continue receiving only
-actor-specific observations. See [scenario packages](scenario-packages.md).

@@ -2,12 +2,13 @@
 
 Milestone 4a adds ordinary TOML input packages and an explicit offline validator.
 Packages work in normal games and with `--wizard`; authoring does not execute
-wizard commands. Items extend this foundation with protocol 16. Save format 11 and `dungeon-v16`
-reject earlier pre-release saves; there is no migration.
+wizard commands. Packages target the current ruleset, and older prerelease saves
+are rejected without migration.
 
 ## Author and run
 
-The complete example is `scenarios/two-room`. A package directory contains
+The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
+example, and `scenarios/tests/` holds the test fixtures. A package directory contains
 `scenario.toml`, one or more explicitly listed TOML content files, and the generated
 `validation.json`. Paths must stay inside that directory, including symlink
 resolution. Files and aggregate source are bounded to 8 MiB.
@@ -18,7 +19,7 @@ cargo run -p tor-server --bin tor-server -- --scenario scenarios/two-room --seed
 ```
 
 Set the usual server authentication token first. Omitting `--scenario` selects
-the two-room package. `--character <numeric-id>` selects a starting character;
+`scenarios/first-dungeon`. `--character <numeric-id>` selects a starting character;
 omitting it uses `default_character`. Connect the client using `--actor <id>`.
 `--regions` retains the independently versioned diagnostic workload and conflicts
 with `--scenario`. Existing saves own their inputs; scenario/seed arguments do
@@ -74,8 +75,8 @@ an `ai` identifier. AI identifiers resolve to manifest `ai_profiles`; see [dunge
 Region gravity vectors/sparse overrides, body declarations, initial velocity,
 and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
-`continue_play`) are implemented in milestone 4d. Generation, dependency
-registries, streaming, equipment and the dungeon loop are outside 4a. The current
+`continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Generation,
+dependency registries, streaming, and equipment aren't supported yet. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.
 
@@ -101,23 +102,12 @@ journeys, hidden changes, and wizard authorization/rewind operations stay in the
 test harness. Rewind now returns to the package start, retaining its geometry;
 tests assert restoration of runtime mutations and clearing of later knowledge.
 
-## Local verification and performance
+## Performance
 
-The following records the pre-4b baseline (protocol 13, save format 8,
-`scenarios-v13`); current item behavior and verification are described in
-[items](items.md). Milestone 4a Windows verification passed 246 Rust tests in each of debug and release,
-103 Python checks in debug and 70 real-process checks in release, formatting,
-all-target Clippy, architecture checks and rustdoc with warnings denied. This is
-local verification, not a claim that new Windows/Linux CI has run. The three
-desktop shortcuts also pass actual connection, role, fresh-save and owned-process
-cleanup checks using rebuilt release executables. The full desktop
-rerun resolves three sandbox temporary-directory errors and one denied cursor
-operation; initial logs remain in `.local/4a-*`. Earlier migration failures are
-also retained rather than removed from the record.
-
-[Raw samples and summary](measurements/scenario-packages-2026-09-27/summary.json)
-and [source/binary hashes](measurements/scenario-packages-2026-09-27/manifest.json)
-record release measurements. Existing mixed workloads use 10 cycles, with 290
+Measured 2026-09-27, when packages were introduced (before items), in release
+builds on the maintainer's Windows machine. The
+[archived samples and manifest](https://github.com/KCall360/thresholds-of-ruin/tree/docs-history-2026-09/docs/measurements/scenario-packages-2026-09-27) record the
+distributions and source and binary hashes. Existing mixed workloads use 10 cycles, with 290
 small/630 large command attempts. Command-call p50/p95/max milliseconds change
 from 0.233/0.591/0.798 to 0.226/0.434/0.819 (1 region), and from
 0.402/1.193/2.038 to 0.383/1.097/1.491 (256 regions). These runs show no material
