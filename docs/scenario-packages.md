@@ -35,6 +35,10 @@ wizard access or permit unavailable mechanics. Invalid geometry is always reject
 
 ## Format
 
+The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` command
+inspects a structural preload neighborhood without constructing gameplay state.
+See [region streaming foundations](region-streaming.md) for its output and limits.
+
 The manifest declares `format = 1`, `id`, `version`, `ruleset`, `files`,
 `default_character`, and `characters`. Optional `themes`, `zones`, `archetypes`,
 and `objective` describe the world. Zone theme pools replace world defaults;

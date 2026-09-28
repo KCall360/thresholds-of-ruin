@@ -24,7 +24,7 @@ rather than migrated or silently upgraded.
 | Navigation and interaction | Complete for milestone 3 | Known-cell travel, hazard/cancellation boundaries, prose/examination, clarification, compound pickup/doors, durable places, semantic narration, slow-client recovery acceptance |
 | Authored scenarios | Complete for bounded authored worlds | TOML packages, offline validation, pinned inputs, and converted test setups |
 | Item knowledge | Complete for milestone 4b | Compatible stacks, seeded appearances, character-owned identities, disclosure and recovery |
-| Dungeon gameplay | 4d complete locally; PR review/CI pending | Timed melee, typed damage, AI, death, retrieval/escape; equipment and generation remain deferred |
+| Dungeon gameplay | 4d complete and merged in PR #35 | Timed melee, typed damage, AI, death, retrieval/escape; equipment and generation remain deferred |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
 The current fixture, compatibility behavior, and checks are described in the
@@ -77,7 +77,7 @@ The [game design plan](game-design-plan.md) records the September 2026 decisions
 and deferred architectural considerations. The sequence below incorporates them
 without marking future systems implemented or expanding the current performance
 work. At the user's direction, remaining 3p closure work is deferred and no longer
-blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c merged in PR #34 at `c8efdd5`. Milestone 4d is implemented and verified locally; PR review and Windows/Linux CI are pending. Milestone 4e is next. The unresolved
+blocks feature work. Milestones 3, 4a and 4b are complete and merged. Milestone 4c merged in PR #34 at `c8efdd5`. Milestone 4d merged in PR #35 at `2fb5169` after Windows/Linux CI passed on head `f887435`. Milestone 4e has started with structural preload planning. The unresolved
 3p findings and acceptance criteria
 remain open; ongoing feature performance checks still apply. Later scale work
 must use scenario/streaming requirements when choosing checkpoint boundaries.
@@ -262,7 +262,7 @@ checks and reproducible scenario packages. Numerical tuning can follow mechanics
 
 ### 4d — First complete dungeon loop
 
-Status: complete locally, ready for PR review and Windows/Linux CI. See
+Status: merged in PR #35 at `2fb5169` after Windows/Linux CI passed. See
 [dungeon gameplay](dungeon.md) for rules, acceptance evidence, and the eight-actor
 combat performance limitation tracked under deferred 3p.
 
@@ -291,8 +291,12 @@ with wizard edits only where the test needs them.
 
 ### 4e — Region streaming, generation, and asset palettes
 
-Status: next milestone. See the [handoff](session-handoff.md) for the 4d state that
-streaming must preserve.
+Status: in progress on `codex/milestone-4e-streaming`, based on merged 4d.
+The first slice implements a structural catalog, deterministic directed
+preload-horizon queries, and a read-only authoring command; see
+[region streaming foundations](region-streaming.md). Runtime freezing/loading,
+generation, and palette delivery remain unimplemented. See the
+[handoff](session-handoff.md) for the 4d state that streaming must preserve.
 
 Follow the authored loop with region/zone on-demand generation and large-world
 loading. Dependencies on neighbors use fixed structural metadata only. Preload

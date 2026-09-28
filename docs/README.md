@@ -81,3 +81,4 @@ For every behavior change:
 - [Place knowledge findings](place-knowledge-findings.md): correctness and focused release measurements.
 
 - [Dungeon gameplay](dungeon.md): milestone 4d rules, controls, and verification status.
+- [Region streaming foundations](region-streaming.md): structural preload planning, authoring utility, and remaining 4e work.

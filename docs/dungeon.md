@@ -1,8 +1,8 @@
 # Dungeon gameplay — milestone 4d
 
-Implemented on `codex/milestone-4d-dungeon`, based on merged 4c PR #34
-(`c8efdd5`). Local Windows verification is complete; PR review and Windows/Linux
-CI are required before merge. Region streaming and generation (4e) are next.
+Merged in PR #35 at `2fb5169`, after Windows and Linux CI passed on final head
+`f887435`. Region streaming and generation (4e) have started with structural
+preload planning; see [region streaming foundations](region-streaming.md).
 
 ## Rules
 
@@ -93,7 +93,7 @@ and the full release process suite passed with the environment retries described
 in the [handoff](session-handoff.md); final dungeon tests passed in both profiles.
 The three desktop launchers connect, retain fresh saves, and clean up their owned
 processes. Native target selection, victory, death, and controls were inspected.
-Performance findings and limitations follow; Windows/Linux CI results are pending.
+Performance findings and limitations follow; Windows/Linux CI passed before merge.
 
 ## Local performance evidence — 2026-09-27
 

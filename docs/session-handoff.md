@@ -1,10 +1,45 @@
-# Session handoff — milestone 4d complete locally
+# Session handoff — milestone 4e started
+
+4e work is on `codex/milestone-4e-streaming`. The user authorized starting 4e
+while 4d CI ran, then merging 4d and publishing this foundation in a separate PR.
+PR #35 merged at `2fb5169` after Windows and Linux checks passed on `f887435`.
+
+The first slice adds `RegionCatalog` and deterministic directed horizon planning,
+plus `tor-scenario horizon` and a reproducible release profiling example. See
+[region streaming foundations](region-streaming.md) for implemented behavior,
+API contracts, verification commands, and limits. This is a foundation only:
+ordinary games still activate all regions. No protocol/save/ruleset bump or
+certificate regeneration is needed. The publication checkpoint covers this
+foundation only, not completion of milestone 4e.
+
+Publication verification: all 314 Rust workspace tests passed in each
+debug/release profile (none ignored), alongside 120 Python debug tests and 80
+release process tests. Formatting, workspace all-target Clippy, architecture,
+and private rustdoc with warnings denied passed. Logs are
+`.local/4e-publish-{fmt,clippy,rust-debug,rust-release,python-debug,python-release,architecture,rustdoc}.log`.
+The seven new horizon tests include the real `tor-scenario` process and all 28
+authored catalogs. Earlier targeted logs are `.local/4e-server-{debug,release}.log`.
+The initial missing-API failure is in `.local/4e-horizon-red.log`. The release
+profile is `.local/4e-horizon-profile.jsonl`; p95 is 0.6–0.8 us across 5/256/8,192
+structural regions with constant neighborhood expansion counts. No runtime
+streaming claim is made by these checks. The new PR requires its own Windows
+and Linux CI before merge.
+All three desktop launchers connected to the rebuilt release binaries, retained
+fresh saves, and cleaned up owned processes (`.local/4e-publish-launchers.log`).
+
+Next implement the runtime transition contract before wiring the planner into
+gameplay: pin cross-boundary body/effect dependencies, freeze scheduler and AI
+time without catch-up, preserve stable references into inactive regions, then
+partition persistence and add deterministic generation and palette delivery.
+Do not treat the planner's `deactivate` candidates as permission to unload state.
+Retain the 4d acceptance and performance requirements below.
+
+## 4d publication handoff
 
 Updated 2026-09-27. The user authorized implementing 4d to completion.
 Branch: `codex/milestone-4d-dungeon`, based on merged 4c PR #34 (`c8efdd5`).
-Implementation is complete and published in [draft PR #35](https://github.com/KCall360/thresholds-of-ruin/pull/35).
-The user explicitly authorized publication. Windows/Linux CI and review must pass
-before merge; neither is claimed by local verification.
+Implementation is complete and merged in [PR #35](https://github.com/KCall360/thresholds-of-ruin/pull/35).
+Windows and Linux CI passed on final head `f887435`; merge commit is `2fb5169`.
 
 The implementation and rule contract are in [dungeon gameplay](dungeon.md).
 The ordinary launch default is `scenarios/first-dungeon`. Protocol 16, save 11,
