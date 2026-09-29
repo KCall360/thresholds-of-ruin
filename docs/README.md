@@ -35,7 +35,7 @@ authoritative until the guide is corrected.
 | Perception | [Shadowcasting](shadowcasting.md), [place hints](place-hints.md), [narration and stream recovery](narration-and-recovery.md), [three-dimensional sight (planned)](sight-3d.md) |
 | Server and protocol | [Protocol and annotations](protocol.md), [headless client](headless-client.md) |
 | Saving | [Background saving](background-saving.md), [checkpoints](checkpoints.md) |
-| Content | [Scenario packages](scenario-packages.md) |
+| Content | [Scenario packages](scenario-packages.md), [scenario scripting (planned)](scripting.md) |
 
 ## Development
 
