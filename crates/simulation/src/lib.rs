@@ -16,6 +16,11 @@ mod fixture;
 mod navigation_map;
 mod observation;
 mod places;
+mod streaming;
+pub use streaming::{
+    ReferencePoint, ReferencePointId, ReferenceTarget, RegionRoot, RegionState, RegionTransition,
+    TransitionError, TransitionReport,
+};
 mod travel;
 pub use travel::TravelStep;
 
@@ -148,6 +153,8 @@ pub struct Game {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    /// Region streaming state; empty unless regions were frozen or detached.
+    lifecycle: streaming::Lifecycle,
 }
 
 /// Exact ceil(sqrt(2) * base), with checked integer arithmetic.
@@ -260,6 +267,7 @@ impl Game {
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
+            lifecycle: streaming::Lifecycle::default(),
         }
     }
 
@@ -296,6 +304,7 @@ impl Game {
             },
         );
         self.next_actor_id = next;
+        self.sync_actor_lifecycle(id);
         Ok(id)
     }
 
@@ -395,16 +404,19 @@ impl Game {
         if !self.body_fits(id, location, 0, &self.actors[&id].body) {
             return Err(GameError::Occupied);
         }
+        // A frozen actor's time stands at its freeze; syncing below shifts it.
+        let clock = self.actor_clock(id);
         let actor = self.actors.get_mut(&id).expect("validated actor");
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
         if let Some(combat) = &mut actor.combat {
             if combat.pending.take().is_some() {
-                actor.ready_at = self.tick;
+                actor.ready_at = clock;
             }
         }
         actor.visited.insert(location.region);
+        self.sync_actor_lifecycle(id);
         Ok(())
     }
 
@@ -464,7 +476,8 @@ impl Game {
             .map_err(|_| GameError::InvalidLocation)
     }
 
-    /// Stable ordering: earliest ready time, then actor identity.
+    /// Stable ordering: earliest ready time, then actor identity. Frozen
+    /// actors never act.
     pub fn next_actor(&self) -> Option<ActorId> {
         if self.combat.outcome.terminal {
             return None;
@@ -473,15 +486,17 @@ impl Game {
             self.actors
                 .get(id)
                 .is_some_and(|a| a.alive() && a.ready_at <= self.tick)
+                && !self.actor_frozen(**id)
         }) {
             return Some(*id);
         }
         self.actors
             .iter()
-            .filter(|(_, a)| {
+            .filter(|(id, a)| {
                 a.combat
                     .as_ref()
                     .is_none_or(|c| c.hp > 0 && c.pending.as_ref().is_none_or(|p| !p.active))
+                    && !self.actor_frozen(**id)
             })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))
             .map(|(id, _)| *id)

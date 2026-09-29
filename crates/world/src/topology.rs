@@ -4,6 +4,9 @@ use crate::{Extent, Material, Position, Shared, Terrain};
 
 #[path = "world_checkpoint.rs"]
 pub mod checkpoint;
+#[path = "region_slice.rs"]
+mod region_slice;
+pub use region_slice::RegionSlice;
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -195,6 +198,10 @@ pub struct World {
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: Shared<BTreeMap<RegionId, Extent>>,
     place_hints: Shared<BTreeSet<Location>>,
+    /// Metadata of detached regions, whose content is held elsewhere as a
+    /// [`RegionSlice`]. Omitted from saves while empty.
+    #[serde(default, skip_serializing_if = "no_absent_regions")]
+    absent: Shared<BTreeMap<RegionId, Region>>,
     /// Derived: never saved, and ignored by equality.
     #[serde(skip)]
     pub(crate) sight: crate::sight_cache::SightCache,
@@ -212,6 +219,10 @@ pub struct Door {
 
 /// Doors are at most this many cells tall.
 pub const MAX_DOOR_HEIGHT: u8 = 8;
+
+fn no_absent_regions(absent: &Shared<BTreeMap<RegionId, Region>>) -> bool {
+    absent.is_empty()
+}
 
 fn raised(location: Location, cells: i32) -> Option<Location> {
     Some(Location {
@@ -250,6 +261,14 @@ impl World {
         }) {
             return false;
         }
+        if !self.absent.iter().all(|(id, region)| {
+            *id == region.id && !self.regions.contains_key(id) && {
+                let (x, y, z) = region.bounds.dimensions();
+                x > 0 && y > 0 && z > 0
+            }
+        }) {
+            return false;
+        }
         self.regions.iter().all(|(id, region)| {
             *id == region.id && {
                 let (x, y, z) = region.bounds.dimensions();
@@ -273,10 +292,11 @@ impl World {
                 .all(|location| self.contains(*location))
             && self.chambers.keys().all(|id| self.regions.contains_key(id))
             && self.passages.iter().all(|((from, direction), passage)| {
+                // A link may lead into a detached region.
                 *from == passage.from
                     && *direction == passage.direction
                     && self.contains(*from)
-                    && self.contains(passage.to)
+                    && self.knows(passage.to)
             })
             && self
                 .rotations
@@ -410,6 +430,7 @@ impl World {
             terrain: Shared::new(BTreeMap::new()),
             chambers: Shared::new(BTreeMap::new()),
             place_hints: Shared::new(BTreeSet::new()),
+            absent: Shared::default(),
             sight: Default::default(),
         };
         for region in regions {

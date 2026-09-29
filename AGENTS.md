@@ -99,21 +99,31 @@ preload-horizon planning, the `tor-scenario horizon` command, and the
 `horizon-profile` example. See [region streaming foundations](docs/region-streaming.md).
 Ordinary games still activate every region, and no format bump was needed.
 
-Next, define the runtime transition contract before wiring the planner into
-gameplay:
+In review on the `design/region-lifecycle` branch: the
+[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract),
+implemented in the simulation. Decisions, agreed with the maintainer:
 
-1. Pin cross-boundary body and effect dependencies.
-2. Freeze scheduler and AI time without catch-up.
-3. Keep stable references into inactive regions. Current checkpoint validation
-   assumes that referenced locations exist in the loaded world, so decide how
-   inactive regions keep those references before changing that invariant.
-4. Then partition persistence and add deterministic generation and palette
-   delivery.
+- Whole regions are active, frozen (loaded, time stopped) or detached into a
+  self-contained record. The planner's horizon is what's *loaded*; the active
+  set is smaller.
+- **Reference points** in game state, not hardcoded players, decide what stays
+  active. Characters get observing points by default; scrying or machines may
+  add more.
+- Frozen actors carry freeze stamps; thawing shifts their tick fields, so
+  nothing catches up. Pins keep live references (bodies, attacks, reach)
+  active or loaded; knowledge references may point into detached regions,
+  checked through an identity directory.
+- Lifecycle state is saved only when non-empty, so ordinary saves are
+  unchanged. The on-disk save layout is designed in the doc; building it is
+  the next slice, with **one save-format bump the maintainer has agreed to**.
 
-Don't treat the planner's `deactivate` candidates as permission to unload state.
-The streaming design must account for frozen attack progress and recovery, AI
-memory and visit locations, motion and pending effects, and stable item and
-objective references, with deterministic reactivation. Keep the 4d dungeon,
+Next: wait for CI on its PR and **merge only with the maintainer's approval**.
+Then the per-region storage and record-store slice, then
+engine wiring, where default points must come from the actors the engine
+controls, since packages without combat have no run characters.
+
+Don't treat the planner's `deactivate` candidates as permission to unload
+state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,
 checkpoint, retry, rewind, disclosure, and native-client acceptance tests
 passing, along with its performance requirements.
 
@@ -126,11 +136,9 @@ are 78–87% smaller in the headline `latency_bench` cases; see
 [view deltas](docs/protocol.md#view-deltas). No ledger line was added; that
 needs a raw-data upload, which the maintainer must approve.
 
-In progress on the `design/sight-coverage` branch: the remaining verification
-cases (lintels, pit rims, edge-touching blocks, and a three-cell giant with its
-`sight-3d-giant` package). Every case in the verification plan is now
-covered. Next: open a PR, wait for CI, and **merge only with the maintainer's
-approval**.
+The remaining verification cases (lintels, pit rims, edge-touching blocks, and
+a three-cell giant with its `sight-3d-giant` package) are merged too (PR #43),
+so every case in the verification plan is covered.
 
 After that: the remaining 3s client changes, which still need their scope
 agreed with the maintainer. A NetHack-style ASCII client

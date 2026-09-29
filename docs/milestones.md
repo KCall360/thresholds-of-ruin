@@ -150,9 +150,13 @@ Equipment, containers, locks, keys, and usable items aren't included. See
 ### 4e — Region streaming, generation, and asset palettes
 
 The first slice implements a structural region catalog, deterministic directed
-preload-horizon queries, and a read-only authoring command; see
-[region streaming foundations](region-streaming.md). Runtime freezing and
-loading, generation, and palette delivery aren't implemented yet.
+preload-horizon queries, and a read-only authoring command. The second defines
+the [region lifecycle contract](region-streaming.md#region-lifecycle-contract)
+and implements it in the simulation: reference points (not hardcoded to
+players), pins, frozen time without catch-up, and detaching regions into
+self-contained records that reattach exactly. The engine doesn't use either
+yet. Disk storage of region records, engine wiring, generation and palette
+delivery aren't implemented; see [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only
 through fixed structural metadata. Activation within the preload horizon

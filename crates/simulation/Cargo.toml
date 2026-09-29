@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 tor-world.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

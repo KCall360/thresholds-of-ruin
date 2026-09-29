@@ -19,6 +19,10 @@ pub struct Snapshot {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    /// Region streaming state, omitted while empty so games that never
+    /// stream save exactly as before.
+    #[serde(default, skip_serializing_if = "crate::streaming::Lifecycle::is_empty")]
+    lifecycle: crate::streaming::Lifecycle,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -80,6 +84,7 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
+            lifecycle: self.lifecycle.clone(),
         }
     }
 
@@ -102,11 +107,13 @@ impl Game {
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
+            lifecycle: snapshot.lifecycle,
         };
         let mut occupied = BTreeSet::new();
-        if !game.physics_valid()
+        if !game.lifecycle_valid()
+            || !game.physics_valid()
             || !game.combat_valid()
-            || game.actors.is_empty()
+            || (game.actors.is_empty() && !game.has_detached_actors())
             || game.next_actor_id == 0
             || game.next_item_id == 0
             || game.next_door_id == 0
@@ -121,12 +128,9 @@ impl Game {
                         .is_some_and(|c| !c.spec.valid() || c.hp > c.spec.max_hp)
                     || id.0 >= game.next_actor_id
                     || actor.orientation >= 24
-                    || (actor.alive() && actor.ready_at < game.tick)
+                    || (actor.alive() && actor.ready_at < game.actor_clock(*id))
                     || !game.world.contains(actor.location)
-                    || actor
-                        .visited
-                        .iter()
-                        .any(|id| game.world.region(*id).is_none())
+                    || actor.visited.iter().any(|id| !game.world.knows_region(*id))
                     || !actor.body.valid()
                     || !actor.motion.valid()
                     || actor

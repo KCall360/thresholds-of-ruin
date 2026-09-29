@@ -36,6 +36,7 @@ impl Game {
         self.physics.displaced.clear();
         self.combat.events.clear();
         self.apply_action_effect(&prepared);
+        self.sync_actor_lifecycle(id);
         Ok(self.finish_action(prepared))
     }
 
@@ -207,6 +208,19 @@ impl Game {
         self.actors.get_mut(&id).expect("validated actor").ready_at = ready_at;
         self.resolve_attacks();
         self.check_objective();
+        self.advance_to_next_decision();
+        let next_actor = self.next_actor();
+        ActionOutcome {
+            actor: id,
+            at_tick,
+            kind,
+            next_actor,
+            next_tick: self.tick,
+        }
+    }
+
+    /// Advance time, physics and attacks until the next actor may decide.
+    pub(crate) fn advance_to_next_decision(&mut self) {
         loop {
             if self.combat.outcome.terminal {
                 break;
@@ -229,14 +243,6 @@ impl Game {
             {
                 break;
             }
-        }
-        let next_actor = self.next_actor();
-        ActionOutcome {
-            actor: id,
-            at_tick,
-            kind,
-            next_actor,
-            next_tick: self.tick,
         }
     }
 }

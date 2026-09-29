@@ -26,7 +26,7 @@ impl Navigation {
     pub(crate) fn checkpoint_valid(&self, world: &tor_world::World) -> bool {
         self.places.iter().all(|(location, name)| {
             self.cells.contains_key(location) && crate::places::valid_name(name)
-        }) && self.cells.keys().all(|location| world.contains(*location))
+        }) && self.cells.keys().all(|location| world.knows(*location))
             && self.edges.iter().all(|((from, _), (to, turns))| {
                 *turns < 24 && self.cells.contains_key(from) && self.cells.contains_key(to)
             })

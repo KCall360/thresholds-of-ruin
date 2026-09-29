@@ -4,7 +4,7 @@ use tor_world::{Direction, Location, Position, Region, RegionId};
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 
 /// Manhattan sight range in cells, measured from the eye cell.
-const SIGHT_RANGE: u8 = 8;
+pub(crate) const SIGHT_RANGE: u8 = 8;
 
 /// Where the scene places the landing of the abstract stair the actor stands
 /// on: straight up or down, just beyond any physically visible offset, so it
@@ -394,15 +394,7 @@ impl Game {
         crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         let body = &actor.body;
-        let eye_index = body
-            .cells
-            .iter()
-            .position(|cell| *cell == body.eye)
-            .expect("validated body contains its eye");
-        let Some((eye, eye_frame)) = self
-            .body_cells(actor.location, actor.orientation, body)
-            .map(|cells| cells[eye_index])
-        else {
+        let Some((eye, eye_frame)) = self.eye(id) else {
             return Ok(Vec::new());
         };
         // The body frame is carried across any portal inside the body, so
@@ -435,6 +427,19 @@ impl Game {
         }
         scene.sort_by_key(|c| c.offset);
         Ok(scene)
+    }
+
+    /// The loaded actor's eye cell and frame, if its body resolves.
+    pub(crate) fn eye(&self, id: ActorId) -> Option<(Location, u8)> {
+        let actor = self.actors.get(&id)?;
+        let body = &actor.body;
+        let eye_index = body
+            .cells
+            .iter()
+            .position(|cell| *cell == body.eye)
+            .expect("validated body contains its eye");
+        self.body_cells(actor.location, actor.orientation, body)
+            .map(|cells| cells[eye_index])
     }
 }
 

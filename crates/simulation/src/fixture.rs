@@ -47,6 +47,46 @@ impl Game {
         }
     }
 
+    /// `count` open 12x3 regions in a row, each joined to the next along its
+    /// whole east face, for region lifecycle tests. Sight (8 cells) from
+    /// x = 2 stays inside a region. No actors or items.
+    pub fn region_corridor(seed: u64, count: u64) -> Self {
+        let mut world = World::new(vec![], vec![]).unwrap();
+        for id in 1..=count {
+            world
+                .add_region(Region {
+                    id: RegionId(id),
+                    name: format!("Corridor {id}"),
+                    bounds: Extent::new(12, 3, 1).expect("positive fixture dimensions"),
+                })
+                .expect("valid fixture region");
+        }
+        let at = |region, x| Location {
+            region: RegionId(region),
+            position: Position { x, y: 0, z: 0 },
+        };
+        for id in 1..count {
+            for (from, direction, to) in [
+                (at(id, 11), Direction::East, at(id + 1, 0)),
+                (at(id + 1, 0), Direction::West, at(id, 11)),
+            ] {
+                world
+                    .connect_area(
+                        Passage {
+                            from,
+                            direction,
+                            to,
+                        },
+                        0,
+                        3,
+                        1,
+                    )
+                    .expect("valid fixture topology");
+            }
+        }
+        Self::new(world, seed)
+    }
+
     /// A hand-authored two-room scenario with seed-selected collectible material.
     ///
     /// This is not a procedural dungeon generator. No PRNG is needed for this

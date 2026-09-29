@@ -31,6 +31,7 @@ fn same_geometry(a: &World, b: &World) -> bool {
         terrain,
         chambers,
         place_hints,
+        absent,
         sight: _,
     } = a;
     regions == &b.regions
@@ -42,6 +43,7 @@ fn same_geometry(a: &World, b: &World) -> bool {
         && terrain == &b.terrain
         && chambers == &b.chambers
         && place_hints == &b.place_hints
+        && absent == &b.absent
 }
 
 pub fn serialize<S: Serializer>(worlds: &[World], serializer: S) -> Result<S::Ok, S::Error> {
