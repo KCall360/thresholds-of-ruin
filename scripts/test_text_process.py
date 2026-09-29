@@ -36,6 +36,9 @@ class Process:
         if self.executable.stem == "tor-server" and "--scenario" not in args and "--regions" not in args:
             args = [*args, "--scenario", ROOT / "scenarios/two-room"]
         self.token = token
+        # A server started for another character is saved through that actor.
+        args = list(args)
+        self.character = str(args[args.index("--character") + 1]) if "--character" in args else None
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,
             env={**environment, "TOR_SERVER_TOKEN": token},
@@ -83,7 +86,7 @@ class Process:
                     if self.executable.stem == "tor-server":
                         ready = next((json.loads(line) for line in self.transcript if line.startswith('{') and '"address"' in line), None)
                         if ready:
-                            save_at(self.executable.parent, ready["address"], self.token)
+                            save_at(self.executable.parent, ready["address"], self.token, self.character)
                 finally:
                     self.child.kill()
         finally:
@@ -275,10 +278,11 @@ class TextProcesses(unittest.TestCase):
         self.assertIn("Goodbye.", result.stdout)
 
 
-def save_at(bin_dir, address, token=TOKEN):
+def save_at(bin_dir, address, token=TOKEN, actor=None):
     """Explicit save barrier through a real client; no ordinary-action timing."""
     suffix = ".exe" if os.name == "nt" else ""
-    result = subprocess.run([str(Path(bin_dir)/("tor-client-headless"+suffix)), "--connect", address, "--observe"],
+    result = subprocess.run([str(Path(bin_dir)/("tor-client-headless"+suffix)), "--connect", address, "--observe",
+                             *(["--actor", actor] if actor else [])],
         input=json.dumps({"type":"request","request":{"type":"save"}})+"\n"+json.dumps({"type":"quit"})+"\n",
         text=True, capture_output=True, timeout=35, cwd=ROOT, env={**os.environ,"TOR_SERVER_TOKEN":token})
     if result.returncode or any(json.loads(line).get("error") for line in result.stdout.splitlines() if line.startswith("{")):

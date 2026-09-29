@@ -121,17 +121,19 @@ passing, along with its performance requirements.
 [three-dimensional sight](docs/sight-3d.md). 3D sight, authored door heights,
 client-derived floors and ceilings, and the scene cache are merged (PR #40).
 
-In progress on the `design/view-deltas` branch: view-delta observation updates
-(protocol 18, authorized by the maintainer). The server sends
-`observation_delta` updates against the last state disclosed on each stream,
-and `tor-client-common` expands them to full states; see
-[view deltas](docs/protocol.md#view-deltas). Messages are 78–87% smaller in
-the headline `latency_bench` cases, with `authoritative_total` unchanged
-against `main`. Next: wait for CI on the PR and **merge only with the
-maintainer's approval**. No ledger line was added; that needs a raw-data
-upload, which the maintainer must approve.
+View-delta observation updates are merged too (PR #42, protocol 18): messages
+are 78–87% smaller in the headline `latency_bench` cases; see
+[view deltas](docs/protocol.md#view-deltas). No ledger line was added; that
+needs a raw-data upload, which the maintainer must approve.
 
-After that: the remaining 3s client changes. A NetHack-style ASCII client
+In progress on the `design/sight-coverage` branch: the remaining verification
+cases (lintels, pit rims, edge-touching blocks, and a three-cell giant with its
+`sight-3d-giant` package). Every case in the verification plan is now
+covered. Next: open a PR, wait for CI, and **merge only with the maintainer's
+approval**.
+
+After that: the remaining 3s client changes, which still need their scope
+agreed with the maintainer. A NetHack-style ASCII client
 redesign is deferred until after 3s.
 
 On this machine, rustc can run out of memory when other applications use most

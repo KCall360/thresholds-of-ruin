@@ -311,6 +311,14 @@ not make those items worse.
   - all 24 join rotations, the narrow rotated doorway, the vertical portal shaft,
     frame rotation, and stairs
   - door heights, and the accelerated builder matching the reference
+  - a lintel over two-cell and one-cell openings, which shadows head-height air
+    and the far ceiling while sight passes its beveled lower edges
+  - a pit rim, which hides the bottom beneath it until the observer reaches
+    the edge, seen by one-, two- and three-cell observers
+  - a three-cell giant seeing over a wall two cells high that hides everything
+    beyond it from a humanoid
+  - blocks touching only along a vertical or horizontal edge, which sight
+    passes between in both directions
 - *Scene cache:* `crates/world/tests/sight_cache.rs` compares cached scenes
   with the uncached builder under random wall and door edits, clones and
   rewinds, in the latency fixture, the first dungeon's chambers (rim
@@ -323,11 +331,12 @@ not make those items worse.
   for a body lying sideways after a rotated portal.
 - *End to end:* `scripts/test_sight_process.py` drives the real server with
   headless, text and ASCII clients through a two-cell character's view over a
-  waist wall, a hovering creature, a two-cell door, and save and resume.
+  waist wall, a hovering creature, a two-cell door, and save and resume. The
+  `sight-3d-giant` package runs the same hall as a three-cell giant and as a
+  two-cell humanoid: only the giant sees the creature behind the wall.
 - *Server:* repeated occurrences through a portal loop stay disclosed through
   the server (`crates/server/tests/place_hints.rs`).
-- *Not yet covered:* lintels and pit rims, three-cell observers outside the
-  open-room world test, and a three-cell scenario package.
+- Every case in the verification plan is now covered.
 
 ## Decisions
 
@@ -346,8 +355,8 @@ not make those items worse.
    open above it. An automatic "fill the opening" rule was tried and dropped: it
    gave tall doors in low walls under open space; see [doors](doors.md).
 
-Still open: the delta encoding, settled by measurement. The accelerated
-builder and the scene cache (layers 2 and 4) proved necessary; precomputed
+The delta encoding was settled by measurement; see
+[view deltas](protocol.md#view-deltas). The accelerated builder and the scene cache (layers 2 and 4) proved necessary; precomputed
 occlusion masks (layer 3) haven't been needed.
 
 ## Reference implementation findings

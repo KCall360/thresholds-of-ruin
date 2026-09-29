@@ -842,3 +842,147 @@ fn door_cells_cannot_become_walls_or_hold_a_second_door() {
     assert!(world.place_door(at(1, 4, 1, 1), 8, true, 1).is_err());
     assert!(world.checkpoint_valid(8));
 }
+
+/// A hall one cell deep, so sight in its `y = 0` plane is two-dimensional.
+fn corridor(width: i32, height: i32, walls: &[(i32, i32)]) -> World {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(1),
+            name: "test".into(),
+            bounds: Extent::new(width, 1, height).unwrap(),
+        })
+        .unwrap();
+    for &(x, z) in walls {
+        world.set_wall(at(1, x, 0, z), true).unwrap();
+    }
+    world
+}
+
+/// Seen `(x, z)` cells in the corridor plane, checked against the reference.
+fn seen_plane(world: &World, (x, z): (i32, i32)) -> BTreeSet<(i32, i32)> {
+    let eye = at(1, x, 0, z);
+    assert_matches_reference(world, eye, 0, 8, "corridor");
+    seen(world, eye)
+        .into_iter()
+        .filter(|p| p.1 == 0)
+        .map(|p| (p.0, p.2))
+        .collect()
+}
+
+#[test]
+fn a_lintel_hides_the_far_ceiling_and_head_height_air_behind_it() {
+    // A three-cell hall with a lintel at x = 3 over a two-cell opening.
+    let world = corridor(10, 3, &[(3, 2)]);
+    let rat = seen_plane(&world, (0, 0));
+    let humanoid = seen_plane(&world, (0, 1));
+    let giant = seen_plane(&world, (0, 2));
+    for eye in [&rat, &humanoid, &giant] {
+        assert!(eye.contains(&(3, 2)), "the lintel's face");
+        assert!(
+            !eye.contains(&(3, 3)),
+            "ceiling above the lintel is covered"
+        );
+        assert!(!eye.contains(&(4, 3)), "ceiling just behind the lintel");
+    }
+    // Sight passes the lintel's beveled lower edge to the ceiling one further.
+    assert!(rat.contains(&(5, 3)));
+    assert!(
+        (4..=6).all(|x| rat.contains(&(x, 2))),
+        "under the lintel, in range"
+    );
+    // At head height, the lintel shadows the next two cells, not the rest.
+    assert!(!humanoid.contains(&(4, 2)) && !humanoid.contains(&(5, 2)));
+    assert!(humanoid.contains(&(6, 2)) && humanoid.contains(&(7, 2)));
+    assert!((4..=9).all(|x| !humanoid.contains(&(x, 3))));
+    // Level with the lintel, a giant sees nothing at its own height beyond it,
+    // but still sees the floor under it.
+    assert!((4..=8).all(|x| !giant.contains(&(x, 2))));
+    assert!((4..=5).all(|x| giant.contains(&(x, -1))));
+    assert!((4..=6).all(|x| giant.contains(&(x, 1))));
+    assert!(
+        !giant.contains(&(7, 1)),
+        "a shallower line crosses the lintel"
+    );
+}
+
+#[test]
+fn a_low_lintel_lets_a_rat_through_and_shows_a_humanoid_only_the_floor_beyond() {
+    // A two-cell room with a one-cell opening under the lintel at x = 3.
+    let world = corridor(10, 2, &[(3, 1)]);
+    let rat = seen_plane(&world, (0, 0));
+    let humanoid = seen_plane(&world, (0, 1));
+    assert!((4..=8).all(|x| rat.contains(&(x, 0))));
+    assert!((4..=6).all(|x| humanoid.contains(&(x, 0))));
+    assert!(
+        !humanoid.contains(&(7, 0)),
+        "the lintel cuts the line just in range"
+    );
+    assert!((4..=5).all(|x| !humanoid.contains(&(x, 1))));
+    assert!((4..=9).all(|x| !humanoid.contains(&(x, 2))));
+}
+
+#[test]
+fn a_pit_rim_hides_the_bottom_beneath_it_until_the_observer_reaches_the_edge() {
+    // Floor cells at z = 0 with a pit at x = 4..=6; its bottom is the shell.
+    let floor: Vec<_> = (0..10)
+        .filter(|x| !(4..=6).contains(x))
+        .map(|x| (x, 0))
+        .collect();
+    let world = corridor(10, 3, &floor);
+    let rat_at_edge = seen_plane(&world, (2, 1));
+    let humanoid_at_edge = seen_plane(&world, (2, 2));
+    let humanoid_back = seen_plane(&world, (0, 2));
+    // The near rim is seen by its top face; the pit's air is open.
+    for eye in [&rat_at_edge, &humanoid_at_edge, &humanoid_back] {
+        assert!(eye.contains(&(3, 0)));
+        assert!((4..=6).all(|x| eye.contains(&(x, 0))), "pit air");
+    }
+    // Sight passes the beveled rim to the far bottom, not the cell below it.
+    assert!(!rat_at_edge.contains(&(4, -1)));
+    assert!(rat_at_edge.contains(&(5, -1)) && rat_at_edge.contains(&(6, -1)));
+    assert!((7..=9).all(|x| rat_at_edge.contains(&(x, 0))), "far floor");
+    // Looking steeply down from the edge, a humanoid sees the whole bottom.
+    assert!((4..=6).all(|x| humanoid_at_edge.contains(&(x, -1))));
+    // Two cells back, the rim hides the bottom nearest to it.
+    assert!(!humanoid_back.contains(&(4, -1)));
+    assert!(humanoid_back.contains(&(5, -1)));
+}
+
+#[test]
+fn a_giant_sees_over_a_wall_two_cells_high_that_hides_everything_from_a_humanoid() {
+    // The layout of the `sight-3d-giant` scenario package.
+    let world = corridor(9, 3, &[(3, 0), (3, 1)]);
+    let humanoid = seen_plane(&world, (1, 1));
+    let giant = seen_plane(&world, (1, 2));
+    let beyond = |eye: &BTreeSet<(i32, i32)>| -> Vec<(i32, i32)> {
+        eye.iter()
+            .copied()
+            .filter(|&(x, z)| x > 3 && z <= 1)
+            .collect()
+    };
+    assert_eq!(beyond(&humanoid), vec![]);
+    // Waist-height air from x = 5; the cell in the wall's lee and the floor
+    // beyond stay hidden.
+    assert_eq!(beyond(&giant), vec![(5, 1), (6, 1), (7, 1), (8, 1)]);
+    assert!((4..=8).all(|x| giant.contains(&(x, 2))));
+}
+
+#[test]
+fn blocks_touching_only_along_an_edge_let_sight_pass_between_them() {
+    // Two full-height columns touching along a vertical edge.
+    let mut world = chamber(5, 5, 2);
+    for z in 0..2 {
+        world.set_wall(at(1, 2, 1, z), true).unwrap();
+        world.set_wall(at(1, 1, 2, z), true).unwrap();
+    }
+    for z in 0..2 {
+        assert_matches_reference(&world, at(1, 1, 1, z), 0, 8, "columns");
+        assert!(seen(&world, at(1, 1, 1, z)).contains(&(2, 2, z)));
+        assert!(seen(&world, at(1, 2, 2, z)).contains(&(1, 1, z)));
+    }
+    // Two blocks touching along a horizontal edge, in a vertical plane.
+    let world = corridor(5, 3, &[(1, 0), (2, 1)]);
+    assert!(seen_plane(&world, (1, 1)).contains(&(2, 0)));
+    assert!(seen_plane(&world, (2, 0)).contains(&(1, 1)));
+}
