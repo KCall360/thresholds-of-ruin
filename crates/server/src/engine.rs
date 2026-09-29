@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 12;
+pub(crate) const ARCHIVE_VERSION: u32 = 13;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -101,6 +101,9 @@ pub struct Scenario {
     pub regions: u64,
     pub workload_version: Option<u32>,
     pub package: Option<Arc<crate::scenario_package::Package>>,
+    /// Region streaming for package games; `None` keeps every region
+    /// active, as diagnostic fixtures do.
+    pub streaming: Option<crate::regions::Streaming>,
 }
 
 impl Scenario {
@@ -119,6 +122,7 @@ impl Scenario {
             regions: 2,
             workload_version: None,
             package: None,
+            streaming: None,
         }
     }
 
@@ -132,6 +136,7 @@ impl Scenario {
             regions,
             workload_version: Some(fixture.version),
             package: None,
+            streaming: None,
             actors: fixture
                 .geometry
                 .actors
@@ -238,6 +243,20 @@ pub(crate) struct Archive {
     pub(crate) records: Vec<Record>,
 }
 
+/// How many of a streaming game's regions are in each state, and how its
+/// region records are kept.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct RegionCounts {
+    pub active: usize,
+    pub frozen: usize,
+    pub detached: usize,
+    pub unbuilt: usize,
+    /// Records held in memory.
+    pub resident_records: usize,
+    /// Records read back from disk.
+    pub records_read: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandResult {
     pub entry: HistoryEntry,
@@ -329,6 +348,11 @@ struct Candidate {
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     revisions: BTreeMap<ActorId, u64>,
+    /// Region records this command's transition made.
+    made: Vec<(
+        tor_simulation::RecordId,
+        tor_world::Shared<tor_simulation::RegionRecord>,
+    )>,
 }
 
 impl Candidate {
@@ -338,13 +362,15 @@ impl Candidate {
             boundaries: engine.boundaries.clone(),
             game: engine.game.clone(),
             revisions: engine.revisions.clone(),
+            made: Vec::new(),
         }
     }
     fn branch(&self) -> &BranchId {
         &self.current_branch
     }
+    /// Actors in loaded regions; revisions also cover the rest.
     fn actors(&self) -> Vec<ActorId> {
-        self.revisions.keys().copied().collect()
+        loaded_actors(&self.game, &self.revisions)
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
@@ -354,7 +380,84 @@ impl Candidate {
         engine.boundaries = self.boundaries;
         engine.game = self.game;
         engine.revisions = self.revisions;
+        if let Some(regions) = &mut engine.regions {
+            regions.publish(self.made);
+        }
     }
+
+    /// Move to the regions the reference points ask for. When anything
+    /// changed, every revision moves on, so clients refresh.
+    fn transition(&mut self, regions: Option<&mut crate::regions::Regions>) -> Result<(), Failure> {
+        self.transition_with(regions, std::collections::BTreeSet::new())
+    }
+
+    /// Load and activate the regions a wizard operation acts on first, so it
+    /// can reach places nobody has needed yet.
+    fn load_for_wizard(
+        &mut self,
+        regions: Option<&mut crate::regions::Regions>,
+        operation: &WizardOperation,
+    ) -> Result<(), Failure> {
+        let at = |p: &Position| tor_world::RegionId(p.region);
+        let actor = |id: &ActorId| self.game.known_actor_region(SimActor(id.0));
+        let targets: std::collections::BTreeSet<_> = match operation {
+            WizardOperation::SetGravity { region, .. } => vec![Some(tor_world::RegionId(*region))],
+            WizardOperation::SetCellGravity { position, .. }
+            | WizardOperation::PlaceDoor { position, .. }
+            | WizardOperation::SetPlaceHint { position, .. }
+            | WizardOperation::SetWall { position, .. }
+            | WizardOperation::PlaceItem { position, .. }
+            | WizardOperation::SpawnActor { position, .. } => vec![Some(at(position))],
+            WizardOperation::ConnectPortal { from, to, .. }
+            | WizardOperation::ConnectArea { from, to, .. }
+            | WizardOperation::Connect { from, to, .. } => vec![Some(at(from)), Some(at(to))],
+            WizardOperation::Teleport {
+                actor: id,
+                position,
+            } => vec![actor(id), Some(at(position))],
+            WizardOperation::SetBody { actor: id, .. }
+            | WizardOperation::SetVelocity { actor: id, .. }
+            | WizardOperation::IdentifyItem { actor: id, .. } => vec![actor(id)],
+            WizardOperation::PlaceChamber { .. }
+            | WizardOperation::PlaceRoom { .. }
+            | WizardOperation::Rewind { .. } => vec![],
+        }
+        .into_iter()
+        .flatten()
+        .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        self.transition_with(regions, targets)
+    }
+
+    fn transition_with(
+        &mut self,
+        regions: Option<&mut crate::regions::Regions>,
+        extra: std::collections::BTreeSet<tor_world::RegionId>,
+    ) -> Result<(), Failure> {
+        let Some(regions) = regions else {
+            return Ok(());
+        };
+        let report = regions.transition_with(&mut self.game, &mut self.made, extra)?;
+        if !report.is_empty() {
+            for revision in self.revisions.values_mut() {
+                *revision = revision
+                    .checked_add(1)
+                    .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Actors with revisions that are in loaded regions.
+fn loaded_actors(game: &Game, revisions: &BTreeMap<ActorId, u64>) -> Vec<ActorId> {
+    revisions
+        .keys()
+        .copied()
+        .filter(|id| game.has_actor(SimActor(id.0)))
+        .collect()
 }
 
 type RevisionView = (tor_simulation::Observation, Vec<tor_world::SightCell>, bool);
@@ -379,6 +482,8 @@ pub struct Engine {
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
     store: Option<crate::storage::Store>,
+    /// Region records, for games that stream.
+    regions: Option<crate::regions::Regions>,
 }
 
 impl Engine {
@@ -400,13 +505,18 @@ impl Engine {
         if !(1..=256).contains(&scenario.regions) {
             return Err(invalid_archive());
         }
-        let mut game = match scenario.workload_version {
-            None => match &scenario.package {
+        let mut regions = streaming_regions(&scenario)?;
+        let mut game = match (scenario.workload_version, &mut regions) {
+            (None, Some(regions)) => {
+                let package = scenario.package.as_ref().ok_or_else(invalid_archive)?;
+                start_streaming(package, scenario.seed, regions)?
+            }
+            (None, None) => match &scenario.package {
                 Some(package) => package.build(scenario.seed, true)?,
                 None => scenario_game(&scenario),
             },
-            Some(1) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
-            Some(_) => return Err(invalid_archive()),
+            (Some(1), None) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
+            _ => return Err(invalid_archive()),
         };
         let mut revisions: BTreeMap<_, _> = game
             .checkpoint_actor_ids()
@@ -440,6 +550,7 @@ impl Engine {
             path: None,
             lock: None,
             store: None,
+            regions,
             archive: Archive {
                 view_salt: Uuid::new_v4().to_string(),
                 wizard_game: false,
@@ -478,7 +589,7 @@ impl Engine {
                 .map(|c| c.record_count)
                 .unwrap_or(0)
                 .min(records_loaded);
-        let mut engine = Self::replay(archive, checkpoint)?;
+        let mut engine = Self::replay(archive, checkpoint, Some(&store))?;
         engine.recovery = RecoveryProfile {
             total: started.elapsed(),
             records_loaded,
@@ -501,6 +612,27 @@ impl Engine {
         &self.recovery
     }
 
+    /// Region streaming counts, for games that stream.
+    pub fn region_counts(&self) -> Option<RegionCounts> {
+        let regions = self.regions.as_ref()?;
+        let package = self.archive.scenario.package.as_ref()?;
+        let mut counts = RegionCounts {
+            resident_records: regions.resident_count(),
+            records_read: regions.reads,
+            ..RegionCounts::default()
+        };
+        for region in &package.regions {
+            match self.game.region_state(tor_world::RegionId(region.id)) {
+                Some(tor_simulation::RegionState::Active) => counts.active += 1,
+                Some(tor_simulation::RegionState::Frozen) => counts.frozen += 1,
+                Some(tor_simulation::RegionState::Detached) => counts.detached += 1,
+                Some(tor_simulation::RegionState::Unbuilt) => counts.unbuilt += 1,
+                None => {}
+            }
+        }
+        Some(counts)
+    }
+
     pub fn save_status(&self) -> crate::SaveStatus {
         self.store
             .as_ref()
@@ -517,7 +649,11 @@ impl Engine {
         self.store.clone()
     }
 
-    fn replay(mut archive: Archive, checkpoint: Option<DiskCheckpoint>) -> Result<Self, Failure> {
+    fn replay(
+        mut archive: Archive,
+        checkpoint: Option<DiskCheckpoint>,
+        store: Option<&crate::storage::Store>,
+    ) -> Result<Self, Failure> {
         if let Some(package) = &archive.scenario.package {
             package.check_identity()?;
         }
@@ -542,6 +678,10 @@ impl Engine {
             (engine, records)
         };
         engine.wizard_enabled = engine.archive.wizard_game;
+        // Replay may reattach regions whose records are only on disk.
+        if let (Some(regions), Some(store)) = (&mut engine.regions, store) {
+            regions.attach_disk(store.clone());
+        }
         for record in records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
                 || engine
@@ -604,8 +744,10 @@ impl Engine {
     pub fn wizard_enabled(&self) -> bool {
         self.wizard_enabled
     }
+    /// Actors in loaded regions. Revisions also cover actors in regions that
+    /// are detached or not built yet.
     pub fn actors(&self) -> Vec<ActorId> {
-        self.revisions.keys().copied().collect()
+        loaded_actors(&self.game, &self.revisions)
     }
     pub fn is_ai(&self, actor: ActorId) -> bool {
         self.game.is_ai(SimActor(actor.0))
@@ -1049,6 +1191,11 @@ impl Engine {
             ));
         }
         let revision = self.revision(receipt.actor)?;
+        if let (Some(regions), Some(store)) = (&mut self.regions, &self.store) {
+            if let Some((on_disk, watermark)) = store.take_written() {
+                regions.written(on_disk, watermark);
+            }
+        }
         let started = Instant::now();
         let mut candidate = Candidate::capture(self);
         if let Some(profile) = profile.as_deref_mut() {
@@ -1179,6 +1326,7 @@ impl Engine {
                         "Refresh before a wizard operation",
                     ));
                 }
+                candidate.load_for_wizard(self.regions.as_mut(), operation)?;
                 let result =
                     candidate.apply_wizard(receipt, operation, &entry_id, &self.archive.records)?;
                 tick = candidate.game.tick();
@@ -1327,6 +1475,7 @@ impl Engine {
                 )
             }
         };
+        candidate.transition(self.regions.as_mut())?;
         let started = Instant::now();
         if matches!(receipt.command, Command::Wizard { .. }) {
             candidate.game.refresh_navigation();
@@ -1493,6 +1642,7 @@ impl Engine {
             path: self.path.clone(),
             lock: self.lock.clone(),
             store: self.store.clone(),
+            regions: self.regions.clone(),
         }
     }
 
@@ -1508,11 +1658,14 @@ impl Engine {
             let mut captures = 0;
             store.enqueue(record, || {
                 let capture_started = Instant::now();
-                let checkpoint = Checkpoint::capture_candidate(
+                let mut checkpoint = Checkpoint::capture_candidate(
                     candidate,
                     self.archive.records.len() + 1,
                     self.archive.wizard_game,
                 );
+                if let Some(regions) = &self.regions {
+                    checkpoint.add_records(regions, &candidate.made);
+                }
                 capture_time = capture_started.elapsed();
                 captures = 1;
                 checkpoint
@@ -1526,6 +1679,47 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+/// The region store for a scenario that streams.
+pub(crate) fn streaming_regions(
+    scenario: &Scenario,
+) -> Result<Option<crate::regions::Regions>, Failure> {
+    match (&scenario.package, scenario.streaming) {
+        (Some(package), Some(streaming)) if scenario.workload_version.is_none() => Ok(Some(
+            crate::regions::Regions::new(package.clone(), scenario.seed, streaming)?,
+        )),
+        (_, None) => Ok(None),
+        _ => Err(invalid_archive()),
+    }
+}
+
+/// A package game with no region built, given default reference points and
+/// moved to the regions they need.
+fn start_streaming(
+    package: &crate::scenario_package::Package,
+    seed: u64,
+    regions: &mut crate::regions::Regions,
+) -> Result<Game, Failure> {
+    let mut game = package.start(seed)?;
+    // Characters get points by default. A package without combat has no run
+    // characters, so its selected character gets one instead.
+    let points = game
+        .add_default_reference_points()
+        .map_err(|_| invalid_archive())?;
+    if points.is_empty() && game.reference_points().next().is_none() {
+        game.add_reference_point(tor_simulation::ReferencePoint {
+            target: tor_simulation::ReferenceTarget::Actor(SimActor(package.selected)),
+            active_radius: None,
+            load_radius: None,
+            observes: true,
+        })
+        .map_err(|_| invalid_archive())?;
+    }
+    let mut made = Vec::new();
+    regions.transition(&mut game, &mut made)?;
+    regions.publish(made);
+    Ok(game)
 }
 
 pub(crate) fn valid_label(value: &str) -> bool {
@@ -1813,7 +2007,10 @@ impl Candidate {
                 if !boundary.revisions.contains_key(&receipt.actor) {
                     return Err(invalid());
                 }
-                self.game = boundary.game.clone();
+                let later = std::mem::replace(&mut self.game, boundary.game.clone());
+                // Records the abandoned future made may still be referred to
+                // by retained boundaries, so their identities stay taken.
+                self.game.continue_record_ids(&later);
                 self.revisions = boundary.revisions.clone();
                 let from_branch = self.current_branch.clone();
                 self.current_branch = BranchId(entry_id.0.clone());

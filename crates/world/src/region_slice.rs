@@ -183,6 +183,12 @@ impl World {
         Ok(())
     }
 
+    /// A loaded, detached or unbuilt region's metadata. Knowledge of a
+    /// region (its name, say) outlives its content being loaded.
+    pub fn known_region(&self, id: RegionId) -> Option<&Region> {
+        self.region(id).or_else(|| self.absent.get(&id))
+    }
+
     /// Loaded regions, in id order.
     pub fn loaded_regions(&self) -> impl Iterator<Item = RegionId> + '_ {
         self.regions.keys().copied()

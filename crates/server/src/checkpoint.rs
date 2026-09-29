@@ -3,6 +3,7 @@
 use super::*;
 use std::collections::BTreeSet;
 use tor_simulation::checkpoint::{SharedState, Snapshot};
+use tor_simulation::RecordId;
 
 #[derive(Debug)]
 pub(crate) struct Checkpoint {
@@ -12,6 +13,11 @@ pub(crate) struct Checkpoint {
     boundaries: VecDeque<Arc<Boundary>>,
     record_count: usize,
     wizard_game: bool,
+    /// Region records this checkpoint refers to that aren't on disk yet;
+    /// the worker writes them in the checkpoint's transaction.
+    pub(crate) records: BTreeMap<RecordId, tor_world::Shared<tor_simulation::RegionRecord>>,
+    /// Records made from here on have identities at least this one.
+    pub(crate) watermark: RecordId,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,7 +66,33 @@ impl Checkpoint {
             boundaries: state.boundaries.clone(),
             record_count,
             wizard_game,
+            records: BTreeMap::new(),
+            watermark: state.game.next_record_id(),
         }
+    }
+
+    /// Every region record the current game and its boundaries refer to.
+    pub(crate) fn referenced(&self) -> BTreeSet<RecordId> {
+        std::iter::once(&self.game)
+            .chain(self.boundaries.iter().map(|b| &b.game))
+            .flat_map(|game| game.detached_records().map(|(_, id)| id))
+            .collect()
+    }
+
+    /// Carry the referenced records that aren't on disk yet: kept ones, and
+    /// those the command being admitted made.
+    pub(super) fn add_records(
+        &mut self,
+        regions: &crate::regions::Regions,
+        made: &[(RecordId, tor_world::Shared<tor_simulation::RegionRecord>)],
+    ) {
+        let referenced = self.referenced();
+        self.records = regions.unwritten(referenced.iter().copied());
+        self.records.extend(
+            made.iter()
+                .filter(|(id, _)| referenced.contains(id))
+                .cloned(),
+        );
     }
 
     pub(crate) fn encode(&self, save_id: &str, sequence: u64) -> DiskCheckpoint {
@@ -133,13 +165,9 @@ impl DiskCheckpoint {
             }
         }
         let game = Game::restore_checkpoint(self.game, &self.shared).ok_or_else(invalid_archive)?;
-        // Saves don't hold region records yet, so no saved game may refer to
-        // one; see docs/region-streaming.md.
         let valid_game = |game: &Game, revisions: &BTreeMap<ActorId, u64>| {
-            game.detached_records().next().is_none()
-                && game
-                    .checkpoint_actor_ids()
-                    .eq(revisions.keys().map(|a| a.0))
+            game.checkpoint_actor_ids()
+                .eq(revisions.keys().map(|a| a.0))
         };
         if !valid_game(&game, &self.revisions) {
             return Err(invalid_archive());
@@ -186,6 +214,20 @@ impl DiskCheckpoint {
         {
             return Err(invalid_archive());
         }
+        let mut regions = crate::engine::streaming_regions(&archive.scenario)?;
+        if let Some(regions) = &mut regions {
+            // Every record the checkpoint refers to was written with it.
+            let on_disk = std::iter::once(&game)
+                .chain(boundaries.iter().map(|b| &b.game))
+                .flat_map(|g| g.detached_records().map(|(_, id)| id))
+                .collect();
+            regions.written(on_disk, game.next_record_id());
+        } else if std::iter::once(&game)
+            .chain(boundaries.iter().map(|b| &b.game))
+            .any(|g| g.detached_records().next().is_some())
+        {
+            return Err(invalid_archive());
+        }
         Ok(Engine {
             recovery: RecoveryProfile::default(),
             current_branch: self.current_branch,
@@ -198,6 +240,7 @@ impl DiskCheckpoint {
             path: None,
             lock: None,
             store: None,
+            regions,
         })
     }
 }

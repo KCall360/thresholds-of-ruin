@@ -1,5 +1,5 @@
 //! Scene reuse must never change results: see docs/sight-3d.md.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tor_world::{
     Direction, Extent, Location, Passage, Position, Region, RegionId, RegionSlice, World,
@@ -216,10 +216,26 @@ fn random_edits(layout: Layout) {
                     } else {
                         rebuilt += 1;
                     }
+                    let uncached = world.eye_scene_uncached(eye, frame, radius);
                     assert_eq!(
                         world.eye_scene(eye, frame, radius),
-                        world.eye_scene_uncached(eye, frame, radius),
+                        uncached,
                         "seed {seed}, step {step}: eye {eye:?}, frame {frame}, radius {radius}"
+                    );
+                    let mut visible: Vec<_> = uncached.iter().map(|c| c.location.region).collect();
+                    visible.sort();
+                    visible.dedup();
+                    assert_eq!(
+                        world.eye_scene_visible_regions(eye, frame, radius),
+                        visible,
+                        "seed {seed}, step {step}"
+                    );
+                    // Reach searches share the cache and its invalidation.
+                    let cells = BTreeSet::from([eye]);
+                    assert_eq!(
+                        world.reach_regions(&cells, 3),
+                        world.reach_regions_uncached(&cells, 3),
+                        "seed {seed}, step {step}: reach from {eye:?}"
                     );
                 }
                 75..=81 if door.is_some() => {

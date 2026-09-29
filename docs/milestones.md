@@ -11,7 +11,7 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **18**, save format **12**, ruleset
+**Current formats:** protocol **18**, save format **13**, ruleset
 **`dungeon-v17`**, scenario validator **`tor-scenario-5`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
@@ -30,7 +30,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Authored scenarios | Complete (4a) | TOML packages, offline validation, pinned inputs |
 | Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
 | Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
-| Region streaming | In progress (4e) | Planning, region lifecycle and never-built regions; not used by the engine yet |
+| Region streaming | In progress (4e) | Package games build regions on demand and keep detached regions on disk |
 | Performance (3p) | Deferred, open | See [performance plan](performance-persistence.md#open-work) |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
@@ -157,8 +157,10 @@ players), pins, frozen time without catch-up, and detaching regions into
 self-contained records that reattach exactly, kept in a record store. A game
 can also start with no region built: a scenario package builds each region
 when it's first loaded, with the same result as building everything at once.
-The engine doesn't use any of this yet. Disk storage of region records,
-engine wiring, generation and palette delivery aren't implemented; see
+Package games now stream: they start with the regions their characters need,
+move to the regions their reference points ask for after every command, and
+keep detached regions on disk (save format 13). Background preloading,
+larger scenarios, generation and palette delivery aren't implemented; see
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only

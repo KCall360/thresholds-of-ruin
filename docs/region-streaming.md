@@ -8,11 +8,12 @@ Milestone 4e is in progress. These parts are implemented:
   self-contained records kept in a record store;
 - [never-built regions](#never-built-regions-and-region-sources): a game can
   start with no region built, and a scenario package builds each region when
-  it's first loaded.
+  it's first loaded;
+- [engine streaming](#engine-streaming): package games start with only the
+  regions their characters need, move to the regions their reference points
+  ask for after every command, and keep detached regions on disk.
 
-The engine doesn't use any of this yet: runtime games still construct and
-activate every authored region. Disk storage of region records, engine
-wiring, generation and client asset-palette delivery are
+Generation, larger scenarios and client asset-palette delivery are
 [later slices](#later-slices).
 
 ## Inspect a horizon
@@ -114,8 +115,8 @@ A known region is in one of four states:
 - **Frozen:** loaded in memory, with time stopped.
 - **Detached:** held as a self-contained region record, with time stopped.
   The game keeps only the record's identity; the record itself is in a
-  [record store](#region-records-and-identity). Today the only store is in
-  memory; a later slice stores records on disk.
+  [record store](#region-records-and-identity): on disk in a save, and in
+  memory until it's written.
 
 The existing planner computes a *load* horizon. The active set is smaller:
 what the reference points and pins below require. Activation only ever uses
@@ -236,9 +237,6 @@ A server test builds every checked-in package region by region, for two
 seeds and three build orders, and checks that the result equals building
 the whole package at once.
 
-The engine still builds everything when a game starts. Building only the
-regions the first transition needs is part of the engine wiring slice.
-
 ### Region records and identity
 
 A detached region's record owns everything located in it:
@@ -296,63 +294,124 @@ References come in two kinds:
   visited regions, and run characters. These are checked against the
   directory and the detached regions' bounds, not against loaded state.
 
-### Persistence in this slice
+### Engine streaming
+
+Package games stream; the diagnostic fixtures (the two-room game and the
+performance fixture) don't, so their measurements stay comparable.
+
+- **Radii.** A scenario's `streaming` setting gives the portal hops kept
+  active and loaded around each reference point that doesn't set its own.
+  Packages default to 1 active and 2 loaded. The setting is saved with the
+  scenario, so replay applies the same transitions. Pins still add whatever
+  the points see and reach, and keep linked regions loaded.
+- **Start.** A new game starts with every region unbuilt, gives each run
+  character an observing point (or, in a package without combat, the
+  selected character), and runs one transition. Only the regions that needs
+  are built, so creating a save and replaying it from the start scale with
+  the horizon, not the world.
+- **Every command** ends with a transition on the candidate game, before its
+  rewind boundary and journal record, so replay, checkpoints and rewind all
+  see it. Records the transition makes stay with the candidate until the
+  command publishes, so a rejected command leaves nothing behind. If the
+  transition changed anything, every revision moves on, so clients refresh.
+- **Revisions** cover every known actor, loaded or not; observation and
+  perception work only with actors in loaded regions.
+- **Rewind** continues the record counter (`Game::continue_record_ids`).
+- **Wizard operations** load and activate the regions they act on first, so
+  a wizard can reach a place nobody has needed yet. A region a wizard adds
+  isn't in the package's catalog, so a reference point there keeps just
+  that region; pins still follow its links.
+- **Validation** of an edited package game checks anchors in loaded regions
+  only; regions that aren't loaded can't have been edited.
+
+### Persistence
 
 Lifecycle state (points, frozen regions, stamps, record identities, the
 record counter and the directory) is saved as an optional `lifecycle` field
-of the checkpoint, and detached region metadata as an optional `absent` field
-of the world. Both are omitted while empty, so games that never stream save
-exactly as before and no format version changed. Identical lifecycle states
-across rewind boundaries are encoded once, the way worlds are.
+of the checkpoint, and region metadata that isn't loaded as an optional
+`absent` field of the world. Both are omitted while empty. Identical
+lifecycle states across rewind boundaries are encoded once, the way worlds
+are.
 
-Saves don't hold records yet. The engine never detaches a region, and
-restoring a checkpoint whose game refers to a record fails, rather than
-producing a game that can't attach its regions.
-
-### Save layout (designed; built in a later slice)
-
-- **Record rows.** Each detached region's record is its own SQLite row keyed
-  by its record identity, holding the record's encoding and a checksum. Rows
-  are written once. Identities come from game state, so a retried checkpoint
-  write produces the same rows byte for byte, as `commit_batch` requires.
-- **Loaded regions** stay inside the checkpoint, as today; the loaded set is
-  bounded by the reference points' horizons.
-- **Checkpoints and boundaries** hold the game-wide state with each detached
-  region's record identity.
-- **Garbage collection.** The transaction that installs a checkpoint deletes
-  rows it doesn't refer to. That's safe because identities are never reused:
-  anything the engine refers to is either in the latest checkpoint (with its
-  boundaries) or newer than it. Rows are written in the same transaction
-  before the checkpoint naming them, so crash rollback is unchanged.
-- **Loading** reads the game-wide state only. Records are read, and checked,
-  when their regions attach.
-- **Format.** One save-format bump covers this layout, never-built regions
-  and the scenario pin below.
+- **Record rows.** Each detached region's record is its own row in the
+  `regions` table, keyed by its record identity. A row uses the journal's
+  frame layout with magic `TORR`, kind 3 and the identity in the sequence
+  field, and is capped at 16 MiB. Rows are written once: identities come
+  from game state, so a retried checkpoint write produces the same rows
+  byte for byte, and a different row under an existing identity fails the
+  save closed.
+- **Loaded regions** stay inside the checkpoint; the loaded set is bounded by
+  the reference points' horizons.
+- **Writing.** A checkpoint capture carries the records it refers to that
+  aren't on disk yet. Its transaction writes them before the checkpoint,
+  then deletes every row the new checkpoint doesn't refer to. That's safe
+  because identities are never reused: anything the engine refers to is
+  either in the latest checkpoint (with its boundaries) or newer than it.
+  Crash rollback is unchanged, and the process-death tests cover the new
+  `after_regions` and `after_gc` stages.
+- **Memory.** Records stay in memory until a committed checkpoint has
+  written them; then only a few durable ones stay cached, and records made
+  before that capture that it doesn't refer to are dropped.
+- **Loading** reads the game-wide state only, and the integrity check covers
+  the journal, history and checkpoint tables. Records are read, their
+  checksums verified and their contents checked, when their regions attach.
+  A record that can't be read fails that command with a storage error.
+- **Format.** Save format 13 adds the `regions` table and the scenario's
+  streaming setting. Saves still embed their package; pinning a package by
+  hash waits for per-region package files.
 
 Per-region in-memory tables, with loaded regions also stored as rows, are
 deferred until measurements show the global tables or re-encoding the loaded
 horizon per boundary matter.
 
+### Performance
+
+Each command's transition costs work proportional to the loaded actors and
+regions, never the whole world:
+
+- the pins computed for a state are reused while settling grows the sets,
+  and a transition that changes nothing isn't applied or checked again;
+- which regions an observer sees comes from the scene cache without copying
+  the scene;
+- an actor's reach (every region within three steps) is cached by position,
+  under the same region version tokens as scenes, and skipped outright when
+  no link or chamber rim is within reach. That shortcut is exact (tests
+  compare it with the search in every cell of every checked-in package), but
+  it needs a region at least 7 cells wide, so today's authored rooms rarely
+  use it.
+
+`cargo run -p tor-server --release --example streaming_profile` walks a
+character through chains of 20x3x1 regions. Release build, this machine,
+480 commands each:
+
+| Regions | Streaming | Startup | Command p50 | Command p95 | Loaded regions |
+| --- | --- | --- | --- | --- | --- |
+| 16 | on | 1.15 ms | 0.205 ms | 0.292 ms | 3 |
+| 16 | off | 0.45 ms | 0.128 ms | 0.225 ms | 16 |
+| 256 | on | 4.89 ms | 0.202 ms | 0.306 ms | 3 |
+| 256 | off | 17.26 ms | 0.131 ms | 0.232 ms | 256 |
+
+Streaming's command time doesn't depend on the world's size. It costs about
+0.07 ms more per command here, mostly the walker's reach search: it moves
+every command, so its reach is never cached. Updating reach incrementally as
+an actor moves is open work. Against the base without streaming,
+`perf_compare` over the combat workload (a one-region package, 3 rounds)
+measured `command_ms` p50 +3 to +6% and p95 +3 to +5%, with one case at
++20% p95 whose round ranges overlap.
+
 ### Later slices
 
-1. **Record rows on disk** (the layout above) and the one save-format bump.
-   The save pins the scenario package by manifest hash instead of embedding
-   it, and copies each region's source into the save when the region is first
-   built, with its neighbours' walls that building reads. A save opened with
-   a different package fails closed.
-2. **Engine wiring:** transitions after every committed command, so replay,
-   checkpoints and rewind see them; default reference points for the actors
-   the engine controls (packages without combat have no run characters, so
-   points can't come only from `combat.characters`); load and active radii;
-   building only the regions the first transition needs, which bounds save
-   creation and startup by the horizon rather than the world.
-3. **Background preloading, reconnect and gap snapshots.**
-4. **Large scenarios and generation:** per-region package files with a
-   manifest, lifting the 256-region limit, and a procedural region source.
-   A generated region's content mustn't depend on the order regions were
-   built in, so each region gets its own random seed; generated identities
-   come from the game-wide allocators, which replay reproduces.
-5. **Asset palettes.**
+1. **Background preloading:** reading rows and building regions ahead of
+   need on another thread. Correctness never depends on it; today a record
+   is read when its region attaches.
+2. **Large scenarios and generation:** per-region package files with a
+   manifest, lifting the 256-region limit; pinning the package by manifest
+   hash instead of embedding it, and copying each region's source into the
+   save when it's first built (another save-format bump); and a procedural
+   region source. A generated region's content mustn't depend on the order
+   regions were built in, so each region gets its own random seed; generated
+   identities come from the game-wide allocators, which replay reproduces.
+3. **Asset palettes.**
 
 ### Lifecycle verification
 
@@ -378,6 +437,15 @@ horizon per boundary matter.
   of world clones between random views and edits, and checks every cached
   scene against an uncached one. Another test checks which scenes a detach or
   attach invalidates.
+- `crates/server/tests/region_streaming.rs` plays a five-region corridor
+  package with radii of zero. It checks the regions built at the start,
+  detaches regions behind the character, restarts from a checkpoint without
+  reading a row, reattaches regions from their rows, and replays the whole
+  history from the start. A wizard rewind past a detach, followed by a
+  different future, checks that new records never reuse an identity, and a
+  wizard teleport reaches a region that was never built.
+- Storage tests write, retry, reject and collect rows in the checkpoint
+  transaction, with failures injected at every stage.
 - A server unit test shrinks every checked-in scenario package to what its
   characters' points require, round-trips the checkpoint, and restores
   everything to an identical game. This covers real joins, rotations, physical

@@ -27,6 +27,18 @@ struct Entry {
     /// Every region the scene read, with its version when the scene was built.
     regions: Vec<(RegionId, u64)>,
     cells: Vec<SightCell>,
+    /// The regions of the visible cells, in order.
+    visible: Vec<RegionId>,
+}
+
+/// Cells a reach search starts from, and how many steps it takes.
+type ReachKey = (Vec<Location>, usize);
+
+struct ReachEntry {
+    topology: u64,
+    /// Every region the search read, with its version then.
+    regions: Vec<(RegionId, u64)>,
+    reached: Vec<RegionId>,
 }
 
 /// Version tokens and the scene cache. Tokens are unique within the process:
@@ -44,6 +56,8 @@ pub(crate) struct SightCache {
     /// `topology` was drawn.
     regions: Shared<BTreeMap<RegionId, u64>>,
     scenes: Arc<Mutex<BTreeMap<Key, Entry>>>,
+    /// Reach searches, which depend on the same geometry as scenes.
+    reaches: Arc<Mutex<BTreeMap<ReachKey, ReachEntry>>>,
 }
 
 impl Default for SightCache {
@@ -52,6 +66,7 @@ impl Default for SightCache {
             topology: fresh(),
             regions: Shared::default(),
             scenes: Arc::default(),
+            reaches: Arc::default(),
         }
     }
 }
@@ -86,11 +101,51 @@ impl SightCache {
     }
 
     fn valid(&self, entry: &Entry) -> bool {
-        entry.topology == self.topology
-            && entry
-                .regions
+        self.current(entry.topology, &entry.regions)
+    }
+
+    fn current(&self, topology: u64, regions: &[(RegionId, u64)]) -> bool {
+        topology == self.topology
+            && regions
                 .iter()
                 .all(|&(region, version)| self.version(region) == version)
+    }
+
+    /// The regions a still-valid cached scene's visible cells are in.
+    pub(crate) fn visible(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<RegionId>> {
+        let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = scenes.get(&(eye, frame, radius))?;
+        self.valid(entry).then(|| entry.visible.clone())
+    }
+
+    /// A still-valid cached reach.
+    pub(crate) fn reach(&self, key: &ReachKey) -> Option<Vec<RegionId>> {
+        let reaches = self.reaches.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = reaches.get(key)?;
+        self.current(entry.topology, &entry.regions)
+            .then(|| entry.reached.clone())
+    }
+
+    /// `read` must name every region whose geometry the search read.
+    pub(crate) fn insert_reach(
+        &self,
+        key: ReachKey,
+        read: impl IntoIterator<Item = RegionId>,
+        reached: Vec<RegionId>,
+    ) {
+        let entry = ReachEntry {
+            topology: self.topology,
+            regions: read
+                .into_iter()
+                .map(|region| (region, self.version(region)))
+                .collect(),
+            reached,
+        };
+        let mut reaches = self.reaches.lock().unwrap_or_else(|e| e.into_inner());
+        if reaches.len() >= CAPACITY && !reaches.contains_key(&key) {
+            reaches.clear();
+        }
+        reaches.insert(key, entry);
     }
 
     pub(crate) fn get(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<SightCell>> {
@@ -123,6 +178,9 @@ impl SightCache {
         regions: impl IntoIterator<Item = RegionId>,
         cells: &[SightCell],
     ) {
+        let mut visible: Vec<_> = cells.iter().map(|c| c.location.region).collect();
+        visible.sort();
+        visible.dedup();
         let entry = Entry {
             topology: self.topology,
             regions: regions
@@ -130,6 +188,7 @@ impl SightCache {
                 .map(|region| (region, self.version(region)))
                 .collect(),
             cells: cells.to_vec(),
+            visible,
         };
         let mut scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
         if scenes.len() >= CAPACITY && !scenes.contains_key(&(eye, frame, radius)) {

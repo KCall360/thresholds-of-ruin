@@ -58,7 +58,9 @@ importer. The filename extension is immaterial. The database uses bundled SQLite
 through `rusqlite`, confined to the server crate. The `journal` table holds the
 immutable replay base at sequence zero and the active tail; `history` holds records
 covered by the selected checkpoint. Global sequence numbers remain contiguous
-across both tables. SQLite transactions commit complete batches. The database uses
+across both tables. `regions` holds the records of detached regions that a
+checkpoint refers to; see [region streaming](region-streaming.md#persistence).
+SQLite transactions commit complete batches. The database uses
 `journal_mode=DELETE`, `synchronous=EXTRA`, application ID `0x544f524a`, and a
 `user_version` equal to the current save format. SQLite's temporary rollback journal is part of transaction
 recovery and must not be manually deleted after a crash.
@@ -69,10 +71,12 @@ Each row contains a 24-byte little-endian frame header:
 
 The frame layout has its own version (6), independent of the save format.
 
-The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the permanent
-wizard marker uses kind 2. CRC32C covers header bytes 4–19 and the payload, with
-the standard Castagnoli polynomial and initial/final complement. Payloads are
-limited to 1 MiB. Loading bounds the row length before allocating its frame.
+The base uses `TORB`, kind 0, sequence 0. Records use `TORJ`, kind 1; the
+permanent wizard marker uses kind 2. Region record rows use `TORR`, kind 3,
+with the record identity in the sequence field. CRC32C covers header bytes
+4–19 and the payload, with the standard Castagnoli polynomial and
+initial/final complement. Payloads are limited to 1 MiB, or 16 MiB for a
+region record. Loading bounds the row length before allocating its frame.
 
 Compact JSON payloads carry a save UUID and generation zero. The base contains
 the current archive metadata, scenario, view salt, root branch, initial wizard

@@ -83,6 +83,13 @@ pub struct TransitionReport {
     pub detached: Vec<RegionId>,
 }
 
+impl TransitionReport {
+    /// Whether the transition changed nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransitionError {
     UnknownRegion(RegionId),
@@ -281,15 +288,17 @@ impl Lifecycle {
     }
 }
 
-/// Axis steps, in every direction a body can move, reach or fall.
-const AXES: [Direction; 6] = [
-    Direction::North,
-    Direction::East,
-    Direction::South,
-    Direction::West,
-    Direction::Up,
-    Direction::Down,
-];
+/// Pins computed for one game state, reused while proposed sets grow.
+#[derive(Default)]
+struct PinCache {
+    points: Option<RegionTransition>,
+    live: BTreeMap<ActorId, BTreeSet<RegionId>>,
+    /// An active actor's reach and the regions its view reads.
+    reach: BTreeMap<ActorId, (BTreeSet<RegionId>, Vec<RegionId>)>,
+    linked: BTreeMap<RegionId, BTreeSet<RegionId>>,
+    /// Levels where a region's vertical links start.
+    vertical: BTreeMap<RegionId, Vec<i32>>,
+}
 
 /// Axis steps covering movement (a diagonal is two), melee (up to three)
 /// and anything the next action could touch.
@@ -500,6 +509,70 @@ impl Game {
         active: &BTreeSet<RegionId>,
         loaded: &BTreeSet<RegionId>,
     ) -> RegionTransition {
+        self.requirements(active, loaded, &mut PinCache::default())
+    }
+
+    /// [`Game::region_requirements`], reusing what `cache` already holds for
+    /// this state. Each actor's pins are computed at most once however often
+    /// the proposed sets grow.
+    fn requirements(
+        &self,
+        active: &BTreeSet<RegionId>,
+        loaded: &BTreeSet<RegionId>,
+        cache: &mut PinCache,
+    ) -> RegionTransition {
+        let mut need = cache
+            .points
+            .get_or_insert_with(|| self.point_requirements())
+            .clone();
+        for (id, actor) in &self.actors {
+            let region = actor.location.region;
+            let is_active = active.contains(&region);
+            if !is_active && !loaded.contains(&region) {
+                continue;
+            }
+            let live = cache
+                .live
+                .entry(*id)
+                .or_insert_with(|| self.live_regions(*id));
+            if !is_active {
+                need.loaded.extend(live.iter().copied());
+                continue;
+            }
+            need.active.extend(live.iter().copied());
+            if actor.alive() {
+                if !cache.reach.contains_key(id) {
+                    let view = self
+                        .eye(*id)
+                        .and_then(|(eye, frame)| {
+                            self.world.eye_scene_regions(eye, frame, SIGHT_RANGE)
+                        })
+                        .unwrap_or_default();
+                    let reach = self.reach_regions(*id, cache);
+                    cache.reach.insert(*id, (reach, view));
+                }
+                let (reach, view) = &cache.reach[id];
+                need.active.extend(reach.iter().copied());
+                need.loaded.extend(view.iter().copied());
+            }
+        }
+        // Anything in an active region can move one cell at a time into a
+        // linked region, so linked regions stay loaded and it freezes there.
+        let sources: Vec<_> = active.iter().chain(need.active.iter()).copied().collect();
+        for region in sources {
+            let linked = cache
+                .linked
+                .entry(region)
+                .or_insert_with(|| self.world.linked_regions(region));
+            need.loaded.extend(linked.iter().copied());
+        }
+        need.loaded.extend(need.active.iter().copied());
+        need
+    }
+
+    /// Pins that don't depend on the proposed sets: reference points, what
+    /// observing points see, and actors awaiting controller input.
+    fn point_requirements(&self) -> RegionTransition {
         let mut need = RegionTransition::default();
         for point in self.lifecycle.points.values() {
             let Some(region) = self.target_region(point.target) else {
@@ -510,12 +583,11 @@ impl Game {
                 if let Some((eye, frame, stairs)) = self.observer_eye(point.target) {
                     // Everything an observer sees is active; everything its
                     // view reads is loaded, so the view is exact.
-                    need.active.extend(
-                        self.world
-                            .eye_scene(eye, frame, SIGHT_RANGE)
-                            .iter()
-                            .map(|cell| cell.location.region),
-                    );
+                    need.active.extend(self.world.eye_scene_visible_regions(
+                        eye,
+                        frame,
+                        SIGHT_RANGE,
+                    ));
                     need.active.extend(stairs.iter().copied());
                     if let Some(regions) = self.world.eye_scene_regions(eye, frame, SIGHT_RANGE) {
                         need.loaded.extend(regions);
@@ -528,48 +600,25 @@ impl Game {
                 need.active.insert(region);
             }
         }
-        for (id, actor) in &self.actors {
-            let region = actor.location.region;
-            let is_active = active.contains(&region);
-            if !is_active && !loaded.contains(&region) {
-                continue;
-            }
-            // Live references: the body and any attack in progress.
-            let mut live = self.body_regions(*id);
-            let target = actor
-                .combat
-                .as_ref()
-                .and_then(|c| c.pending.as_ref())
-                .map(|p| p.target);
-            if let Some(target) = target {
-                if self.actors.contains_key(&target) {
-                    live.extend(self.body_regions(target));
-                } else if let Some(region) = self.actor_region(target) {
-                    live.insert(region);
-                }
-            }
-            if is_active {
-                need.active.extend(live);
-                if actor.alive() {
-                    need.active.extend(self.reach_regions(*id));
-                    if let Some((eye, frame)) = self.eye(*id) {
-                        if let Some(regions) = self.world.eye_scene_regions(eye, frame, SIGHT_RANGE)
-                        {
-                            need.loaded.extend(regions);
-                        }
-                    }
-                }
-            } else {
-                need.loaded.extend(live);
-            }
-        }
-        // Anything in an active region can move one cell at a time into a
-        // linked region, so linked regions stay loaded and it freezes there.
-        for region in active.iter().chain(need.active.iter()) {
-            need.loaded.extend(self.world.linked_regions(*region));
-        }
-        need.loaded.extend(need.active.iter().copied());
         need
+    }
+
+    /// A loaded actor's live references: its body and any attack in progress.
+    fn live_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
+        let mut live = self.body_regions(id);
+        let target = self.actors[&id]
+            .combat
+            .as_ref()
+            .and_then(|c| c.pending.as_ref())
+            .map(|p| p.target);
+        if let Some(target) = target {
+            if self.actors.contains_key(&target) {
+                live.extend(self.body_regions(target));
+            } else if let Some(region) = self.actor_region(target) {
+                live.insert(region);
+            }
+        }
+        live
     }
 
     /// Where an observing point's view starts, with any stair landings it
@@ -613,45 +662,119 @@ impl Game {
     /// Regions within [`REACH_STEPS`] axis steps of an actor's body, by any
     /// movement, physics or sight step. The next action can't touch anything
     /// farther.
-    fn reach_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
+    fn reach_regions(&self, id: ActorId, cache: &mut PinCache) -> BTreeSet<RegionId> {
         let actor = &self.actors[&id];
-        let mut frontier: BTreeSet<Location> =
+        let frontier: BTreeSet<Location> =
             match self.body_cells(actor.location, actor.orientation, &actor.body) {
                 Some(cells) => cells.into_iter().map(|(at, _)| at).collect(),
                 None => BTreeSet::from([actor.location]),
             };
-        let mut seen = frontier.clone();
-        for _ in 0..REACH_STEPS {
-            let mut next = BTreeSet::new();
-            for at in &frontier {
-                for direction in AXES {
-                    let steps = [
-                        self.world
-                            .physics_neighbor(*at, direction)
-                            .map(|(to, _)| to),
-                        self.world
-                            .movement_neighbor(*at, direction)
-                            .map(|(to, _)| to),
-                        self.world.adjacent(*at, direction),
-                    ];
-                    for to in steps.into_iter().flatten() {
-                        if seen.insert(to) {
-                            next.insert(to);
+        let home = actor.location.region;
+        if self.reach_stays_home(home, &frontier, cache) {
+            return BTreeSet::from([home]);
+        }
+        self.world.reach_regions(&frontier, REACH_STEPS)
+    }
+
+    /// Every region a breadth-first search of [`REACH_STEPS`] steps from
+    /// `frontier` enters, without the shortcut or reuse, for tests.
+    fn search_reach(&self, frontier: BTreeSet<Location>) -> BTreeSet<RegionId> {
+        self.world.reach_regions_uncached(&frontier, REACH_STEPS)
+    }
+
+    /// Whether no step within [`REACH_STEPS`] of `cells` can leave `home`,
+    /// so the reach search would find only `home`. A step leaves a region
+    /// only through a link from the cell it starts at, or out of the
+    /// region's bounds: horizontal links start only on the boundary of a
+    /// region (a chamber's interior), on its x and y faces, and a chamber
+    /// projects across its rim only from a cell on a link's plane. So it's
+    /// enough that every cell within reach horizontally is inside that
+    /// boundary and no vertical link starts within two levels of a cell. Checking this
+    /// costs a few comparisons per body cell; the search it replaces visits
+    /// every cell within reach.
+    fn reach_stays_home(
+        &self,
+        home: RegionId,
+        cells: &BTreeSet<Location>,
+        cache: &mut PinCache,
+    ) -> bool {
+        // A chamber projects across its rim on its interior's faces, so the
+        // interior, not the stone shell around it, is what must contain the
+        // reach.
+        let Some(bounds) = self.world.interior(home) else {
+            return false;
+        };
+        let levels = cache.vertical.entry(home).or_insert_with(|| {
+            self.world
+                .exits(home)
+                .filter(|p| matches!(p.direction, Direction::Up | Direction::Down))
+                .map(|p| p.from.position.z)
+                .collect()
+        });
+        let reach = REACH_STEPS as i32;
+        cells.iter().all(|at| {
+            let p = at.position;
+            // Only horizontal distance matters: a step up or down out of the
+            // bounds leads nowhere without a vertical link, and those are
+            // checked by level below.
+            let corner = |d: i32| {
+                Some(tor_world::Position {
+                    x: p.x.checked_add(d)?,
+                    y: p.y.checked_add(d)?,
+                    z: p.z,
+                })
+            };
+            at.region == home
+                && corner(-reach).is_some_and(|c| bounds.contains(c))
+                && corner(reach).is_some_and(|c| bounds.contains(c))
+                && levels
+                    .iter()
+                    .all(|z| (i64::from(*z) - i64::from(p.z)).abs() > reach as i64 - 1)
+        })
+    }
+
+    /// Check the reach shortcut against the search from every cell of every
+    /// loaded region, for tests over real scenarios. Returns how many cells
+    /// took the shortcut, or the first cell where the two disagree.
+    pub fn check_reach_shortcut(&self) -> Result<usize, Location> {
+        let mut cache = PinCache::default();
+        let mut shortcut = 0;
+        for region in self.world.loaded_regions() {
+            let bounds = self.world.region(region).expect("loaded region").bounds;
+            let (dx, dy, dz) = bounds.dimensions();
+            let origin = bounds.origin();
+            for x in 0..dx {
+                for y in 0..dy {
+                    for z in 0..dz {
+                        let cell = Location {
+                            region,
+                            position: tor_world::Position {
+                                x: origin.x + x,
+                                y: origin.y + y,
+                                z: origin.z + z,
+                            },
+                        };
+                        let cells = BTreeSet::from([cell]);
+                        if self.reach_stays_home(region, &cells, &mut cache) {
+                            if self.search_reach(cells) != BTreeSet::from([region]) {
+                                return Err(cell);
+                            }
+                            shortcut += 1;
                         }
                     }
                 }
             }
-            frontier = next;
         }
-        seen.into_iter().map(|at| at.region).collect()
+        Ok(shortcut)
     }
 
     /// Grow proposed sets until every pin that loaded state reveals holds.
     pub fn settle_region_transition(&self, proposed: &RegionTransition) -> RegionTransition {
         let mut t = proposed.clone();
         t.loaded.extend(t.active.iter().copied());
+        let mut cache = PinCache::default();
         loop {
-            let need = self.region_requirements(&t.active, &t.loaded);
+            let need = self.requirements(&t.active, &t.loaded, &mut cache);
             let before = (t.active.len(), t.loaded.len());
             t.active.extend(need.active);
             t.loaded.extend(need.loaded);
@@ -670,6 +793,11 @@ impl Game {
         records: &mut dyn RecordStore,
     ) -> Result<(RegionTransition, TransitionReport), TransitionError> {
         let mut t = self.settle_region_transition(proposed);
+        // Settling proved every pin holds for these sets in this state, so
+        // if they're the current sets there's nothing to apply or check.
+        if self.current_regions() == t {
+            return Ok((t, TransitionReport::default()));
+        }
         loop {
             match self.apply_region_transition(&t, records) {
                 Ok(report) => return Ok((t, report)),
@@ -780,6 +908,41 @@ impl Game {
     pub fn continue_record_ids(&mut self, from: &Game) {
         let next = &mut self.lifecycle.next_record;
         *next = (*next).max(from.lifecycle.next_record);
+    }
+
+    /// The region an actor is in, loaded or not.
+    pub fn known_actor_region(&self, id: ActorId) -> Option<RegionId> {
+        self.actor_region(id)
+    }
+
+    /// Every actor the game knows: loaded, detached or not built yet, in
+    /// identity order.
+    pub fn known_actor_ids(&self) -> BTreeSet<ActorId> {
+        self.actors
+            .keys()
+            .chain(self.lifecycle.directory.actors.keys())
+            .copied()
+            .collect()
+    }
+
+    /// Every record identity this game will make is at least this one.
+    /// Rewinds continue identities ([`Game::continue_record_ids`]), so along
+    /// one engine's history records made later have larger identities.
+    pub fn next_record_id(&self) -> RecordId {
+        RecordId(self.lifecycle.next_record)
+    }
+
+    /// The regions active and loaded now.
+    fn current_regions(&self) -> RegionTransition {
+        let loaded: BTreeSet<_> = self.world.loaded_regions().collect();
+        RegionTransition {
+            active: loaded
+                .iter()
+                .filter(|r| !self.lifecycle.frozen.contains(r))
+                .copied()
+                .collect(),
+            loaded,
+        }
     }
 
     /// Each detached region with its record's identity, in region order.
@@ -1365,5 +1528,137 @@ mod tests {
         let before = game.clone();
         assert!(game.add_unbuilt_region(region, false, identities).is_err());
         assert_eq!(game, before);
+    }
+
+    /// The reach shortcut must never disagree with the search: wherever it
+    /// says a reach stays home, searching from there finds only home. The
+    /// world has a tall chamber with a stair in its middle, joins across two of
+    /// its faces to other chambers (rim projection), and walls
+    /// near the faces.
+    #[test]
+    fn the_reach_shortcut_agrees_with_the_search_everywhere() {
+        use tor_world::{Extent, Passage, World};
+        let at = |region, x, y, z| Location {
+            region: RegionId(region),
+            position: Position { x, y, z },
+        };
+        let mut game = Game::new(World::new(vec![], vec![]).unwrap(), 1);
+        for (id, [x, y, z]) in [
+            (1, [12, 12, 8]),
+            (2, [9, 9, 3]),
+            (3, [7, 7, 3]),
+            (4, [5, 5, 2]),
+        ] {
+            game.add_chamber(Region {
+                id: RegionId(id),
+                name: String::new(),
+                bounds: Extent::new(x, y, z).unwrap(),
+            })
+            .unwrap();
+        }
+        let join = |game: &mut Game, from, direction, to, turns, width, height| {
+            game.connect_area(
+                Passage {
+                    from,
+                    direction,
+                    to,
+                },
+                turns,
+                width,
+                height,
+            )
+            .unwrap_or_else(|e| panic!("join {from:?} {direction:?}: {e:?}"));
+        };
+        join(
+            &mut game,
+            at(1, 11, 3, 0),
+            Direction::East,
+            at(2, 0, 3, 0),
+            0,
+            3,
+            2,
+        );
+        join(
+            &mut game,
+            at(2, 0, 3, 0),
+            Direction::West,
+            at(1, 11, 3, 0),
+            0,
+            3,
+            2,
+        );
+        join(
+            &mut game,
+            at(1, 4, 0, 0),
+            Direction::North,
+            at(3, 2, 6, 0),
+            0,
+            2,
+            2,
+        );
+        join(
+            &mut game,
+            at(3, 2, 6, 0),
+            Direction::South,
+            at(1, 4, 0, 0),
+            0,
+            2,
+            2,
+        );
+        for (from, direction, to) in [
+            (at(1, 6, 6, 0), Direction::Up, at(4, 2, 2, 0)),
+            (at(4, 2, 2, 0), Direction::Down, at(1, 6, 6, 0)),
+        ] {
+            game.connect(
+                Passage {
+                    from,
+                    direction,
+                    to,
+                },
+                0,
+            )
+            .unwrap();
+        }
+        for wall in [
+            at(1, 10, 1, 0),
+            at(1, 11, 7, 1),
+            at(1, 1, 10, 0),
+            at(2, 1, 6, 0),
+            at(3, 5, 1, 1),
+        ] {
+            let _ = game.set_wall(wall, true);
+        }
+        let mut cache = PinCache::default();
+        let (mut shortcut, mut searched) = (0, 0);
+        for id in 1..=4 {
+            let region = RegionId(id);
+            let bounds = game.world.region(region).unwrap().bounds;
+            let (dx, dy, dz) = bounds.dimensions();
+            for x in -1..dx + 1 {
+                for y in -1..dy + 1 {
+                    for z in -1..dz + 1 {
+                        let cell = at(id, x, y, z);
+                        if !bounds.contains(cell.position) {
+                            continue;
+                        }
+                        let cells = BTreeSet::from([cell]);
+                        if game.reach_stays_home(region, &cells, &mut cache) {
+                            shortcut += 1;
+                            assert_eq!(
+                                game.search_reach(cells),
+                                BTreeSet::from([region]),
+                                "{cell:?}"
+                            );
+                        } else {
+                            searched += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            shortcut > 50 && searched > 50,
+            "{shortcut} shortcut, {searched} searched"
+        );
     }
 }

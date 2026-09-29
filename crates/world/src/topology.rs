@@ -482,6 +482,15 @@ impl World {
         }))
     }
 
+    /// Where a region's links can start: a chamber's carved interior (its
+    /// shell is stone), otherwise its bounds.
+    pub fn interior(&self, region: RegionId) -> Option<Extent> {
+        self.chambers
+            .get(&region)
+            .copied()
+            .or_else(|| self.region(region).map(|r| r.bounds))
+    }
+
     pub fn is_chamber(&self, region: RegionId) -> bool {
         self.chambers.contains_key(&region)
     }

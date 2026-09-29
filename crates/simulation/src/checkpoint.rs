@@ -191,8 +191,15 @@ impl Game {
         Some(game)
     }
 
+    /// Every actor a checkpoint's revisions cover: loaded, detached or not
+    /// built yet.
     pub fn checkpoint_actor_ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.actors.keys().map(|id| id.0)
+        self.known_actor_ids().into_iter().map(|id| id.0)
+    }
+
+    /// Whether an actor is in a loaded region.
+    pub fn has_actor(&self, id: ActorId) -> bool {
+        self.actors.contains_key(&id)
     }
 }
 

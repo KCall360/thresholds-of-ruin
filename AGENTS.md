@@ -127,23 +127,20 @@ order on `main`):
   need them. This replaces the doc's save-wide version counter.
 - Never-needed regions are **never built**. A region source (the package now,
   a generator later) builds one region just before it's loaded, independent
-  of build order. The save pins the package by manifest hash and copies each
-  region's source into the save when it's first built.
-- Phases:
+  of build order. Pinning the package by manifest hash (instead of embedding
+  it) waits for per-region package files, with its own format bump
+  (maintainer's decision, 2026-09-29).
+- Phases (the maintainer asked to keep going without opening PRs yet):
   0. range-based detach/attach, per-region sight invalidation, and record
      validation at attach (done, branch `design/region-streaming-prep`);
-  1. record IDs and a record-store interface (done, branch
+  1. record IDs and a record-store interface (done,
      `design/region-record-store`);
-  2. unbuilt regions and region sources (done, branch
-     `design/region-sources`); the maintainer asked to keep going without
-     opening PRs yet;
-  3. disk rows and the one format bump (12 → 13), which also replaces the
-     stale `user_version=11` in `storage.rs`;
-  4. engine wiring and bounded startup; default points must come from the
-     actors the engine controls, since packages without combat have no run
-     characters;
-  5. background preloading, reconnect and gap snapshots;
-  6. large per-region packages and generation.
+  2. unbuilt regions and region sources (done, `design/region-sources`);
+  3. disk rows, save format 13 and engine wiring, merged into one slice at
+     the maintainer's request (done, `design/region-streaming-engine`):
+     package games stream after every command; fixtures don't;
+  4. background preloading;
+  5. large per-region packages, the package pin, and generation.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

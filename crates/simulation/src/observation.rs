@@ -278,8 +278,8 @@ impl Game {
                     id,
                     name: self
                         .world
-                        .region(id)
-                        .expect("visited region exists")
+                        .known_region(id)
+                        .expect("visited region is known")
                         .name
                         .clone(),
                 })

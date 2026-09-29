@@ -274,7 +274,7 @@ fn read(root: &Path, relative: &str) -> Result<String, Failure> {
 fn parse<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T, Failure> {
     toml::from_str(text).map_err(|e| fail(format!("{name}: {e}")))
 }
-fn read_package(root: &Path) -> Result<Package, Failure> {
+pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
     let text = read(root, "scenario.toml")?;
     let manifest: Manifest = parse(&text, "scenario.toml")?;
     require(manifest.format == 1, "Unsupported scenario format")?;
@@ -365,6 +365,7 @@ pub fn load(
         regions: package.regions.len() as u64,
         workload_version: None,
         package: Some(Arc::new(package)),
+        streaming: Some(crate::regions::Streaming::default()),
     })
 }
 
@@ -687,10 +688,6 @@ impl Package {
     /// A game with every region known but none built: each is built from
     /// this package when it's first loaded (see [`Package::build_region`]).
     /// Building every region gives exactly [`Package::build`]'s game.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the engine wiring slice starts games this way")
-    )]
     pub(crate) fn start(&self, seed: u64) -> Result<Game, Failure> {
         self.check()?;
         self.supported()?;
@@ -738,10 +735,6 @@ impl Package {
     /// its neighbours' geometry, so its links and entities are checked
     /// exactly as [`Package::build`] checks them. Reads nothing else, so the
     /// result doesn't depend on which regions were built before.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the engine wiring slice starts games this way")
-    )]
     pub(crate) fn build_region(
         &self,
         seed: u64,
@@ -930,10 +923,6 @@ impl Package {
     }
 
     /// Items carried by an omitted character are omitted with it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the engine wiring slice starts games this way")
-    )]
     fn omitted_carrier(&self, i: &Item) -> bool {
         i.carried_by.is_some_and(|id| {
             id != self.selected
@@ -1209,11 +1198,22 @@ impl Package {
     }
     /// Only structural edits that invalidate an authored anchor break validation.
     /// World mutation APIs independently enforce topology/entity consistency.
+    /// Regions that aren't loaded can't have been edited, so only loaded
+    /// anchors are checked.
     pub(crate) fn state_valid(&self, game: &Game) -> bool {
+        let loaded = |at: &Location| {
+            matches!(
+                game.region_state(at.region),
+                Some(tor_simulation::RegionState::Active | tor_simulation::RegionState::Frozen)
+            )
+        };
         game.authored_links_clear()
-            && self
-                .anchors()
-                .is_ok_and(|anchors| anchors.values().all(|p| game.authored_cell_valid(*p)))
+            && self.anchors().is_ok_and(|anchors| {
+                anchors
+                    .values()
+                    .filter(|p| loaded(p))
+                    .all(|p| game.authored_cell_valid(*p))
+            })
     }
 }
 
@@ -1221,7 +1221,7 @@ impl Package {
 /// memory, and unbuilt regions built from the package on first load.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "the engine wiring slice starts games this way")
+    expect(dead_code, reason = "tests build package games without an engine")
 )]
 pub(crate) struct PackageRecords {
     package: Arc<Package>,
@@ -1232,7 +1232,7 @@ pub(crate) struct PackageRecords {
 impl PackageRecords {
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "the engine wiring slice starts games this way")
+        expect(dead_code, reason = "tests build package games without an engine")
     )]
     pub(crate) fn new(package: Arc<Package>, seed: u64) -> Self {
         Self {
@@ -1373,6 +1373,21 @@ mod region_lifecycle_tests {
                     assert_eq!(game, whole, "{context}");
                 }
             }
+        }
+    }
+
+    /// The pin computation skips the reach search where no step can leave
+    /// an actor's region; that must agree with the search in every cell of
+    /// every checked-in package (rotated and physical portals, stairs,
+    /// chambers and their rims).
+    #[test]
+    fn the_reach_shortcut_agrees_with_the_search_in_every_package() {
+        // Few authored rooms are wide enough for the shortcut; the
+        // simulation's own test covers cells that take it.
+        for path in packages() {
+            let game = read_package(&path).unwrap().build(0, true).unwrap();
+            game.check_reach_shortcut()
+                .unwrap_or_else(|cell| panic!("{}: {cell:?}", path.display()));
         }
     }
 
