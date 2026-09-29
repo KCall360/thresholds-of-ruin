@@ -118,9 +118,31 @@ implemented in the simulation. Decisions, agreed with the maintainer:
   the next slice, with **one save-format bump the maintainer has agreed to**.
 
 Next: wait for CI on its PR and **merge only with the maintainer's approval**.
-Then the per-region storage and record-store slice, then
-engine wiring, where default points must come from the actors the engine
-controls, since packages without combat have no run characters.
+
+**Disk streaming plan** (agreed 2026-09-29; one PR per phase, stacked on
+`design/region-lifecycle` until it merges):
+
+- Only *detached* regions get disk rows, keyed by a record ID the game
+  allocates, so replay and checkpoint retries reproduce them byte for byte.
+  Loaded regions stay inside the checkpoint, and the in-memory world keeps its
+  global tables. Per-region memory tables come last, and only if measurements
+  need them. This replaces the doc's save-wide version counter.
+- Never-needed regions are **never built**. A region source (the package now,
+  a generator later) builds one region just before it's loaded, independent
+  of build order. The save pins the package by manifest hash and copies each
+  region's source into the save when it's first built.
+- Phases:
+  0. range-based detach/attach, per-region sight invalidation, and record
+     validation at attach (branch `design/region-streaming-prep`);
+  1. record IDs and a record-store interface;
+  2. unbuilt regions and region sources;
+  3. disk rows and the one format bump (12 → 13), which also replaces the
+     stale `user_version=11` in `storage.rs`;
+  4. engine wiring and bounded startup; default points must come from the
+     actors the engine controls, since packages without combat have no run
+     characters;
+  5. background preloading, reconnect and gap snapshots;
+  6. large per-region packages and generation.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

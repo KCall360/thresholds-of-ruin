@@ -117,6 +117,49 @@ pub(crate) struct RegionRecord {
     impacts: Vec<Impact>,
 }
 
+impl RegionRecord {
+    /// Invariants of the record alone, as the record of `region` detached no
+    /// later than `tick`.
+    fn valid_contents(&self, region: RegionId, tick: u64) -> bool {
+        self.world.id() == region
+            && self.world.valid()
+            && self
+                .actors
+                .values()
+                .all(|a| a.location.region == region && a.body.valid() && a.motion.valid())
+            && self.stamps.keys().eq(self.actors.keys())
+            && self.stamps.values().all(|stamp| *stamp <= tick)
+            && self.ai.keys().all(|id| self.actors.contains_key(id))
+            && self
+                .navigation
+                .keys()
+                .all(|id| self.actors.contains_key(id))
+            && self.displaced.iter().all(|id| self.actors.contains_key(id))
+            && self.items.values().all(|item| match item.location {
+                ItemLocation::Ground(at) => at.region == region,
+                ItemLocation::Carried(carrier) => self.actors.contains_key(&carrier),
+            })
+            && self.impacts.iter().all(|impact| match impact.entity {
+                PhysicsEntity::Actor(id) => self.actors.contains_key(&id),
+                PhysicsEntity::Item(id) => self.items.contains_key(&id),
+            })
+    }
+
+    /// Whether the record holds exactly the identities `directory` places in
+    /// `region`.
+    fn matches_directory(&self, region: RegionId, directory: &Directory) -> bool {
+        fn listed<K: Copy + Ord>(map: &BTreeMap<K, RegionId>, region: RegionId) -> BTreeSet<K> {
+            map.iter()
+                .filter(|(_, r)| **r == region)
+                .map(|(id, _)| *id)
+                .collect()
+        }
+        listed(&directory.actors, region) == self.actors.keys().copied().collect()
+            && listed(&directory.items, region) == self.items.keys().copied().collect()
+            && listed(&directory.doors, region) == self.world.door_ids().collect()
+    }
+}
+
 /// Game-wide lifecycle state. Empty in games that never stream, and then
 /// omitted from saves.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -696,6 +739,13 @@ impl Game {
     fn attach_record(&mut self, region: RegionId) -> Result<(), TransitionError> {
         let invalid = TransitionError::InvalidRecord(region);
         let record = self.lifecycle.detached.remove(&region).ok_or(invalid)?;
+        // Checked here, not only on restore, because the record may come
+        // from storage that restore never read.
+        if !record.valid_contents(region, self.tick)
+            || !record.matches_directory(region, &self.lifecycle.directory)
+        {
+            return Err(invalid);
+        }
         let RegionRecord {
             world,
             actors,
@@ -747,40 +797,36 @@ impl Game {
 
     /// Lifecycle invariants for checkpoint restoration.
     pub(crate) fn lifecycle_valid(&self) -> bool {
+        self.lifecycle_state_valid() && self.records_valid()
+    }
+
+    /// Every detached record is valid, and together they hold exactly the
+    /// directory's identities. Reads every record.
+    fn records_valid(&self) -> bool {
         let l = &self.lifecycle;
         let mut expected = Directory::default();
-        let records_valid = l.detached.iter().all(|(region, record)| {
-            let r = &**record;
+        l.detached.iter().all(|(region, record)| {
             expected
                 .doors
-                .extend(r.world.door_ids().map(|door| (door, *region)));
+                .extend(record.world.door_ids().map(|door| (door, *region)));
             expected
                 .actors
-                .extend(r.actors.keys().map(|id| (*id, *region)));
+                .extend(record.actors.keys().map(|id| (*id, *region)));
             expected
                 .items
-                .extend(r.items.keys().map(|id| (*id, *region)));
-            r.world.id() == *region
-                && r.world.valid()
-                && r.actors
-                    .values()
-                    .all(|a| a.location.region == *region && a.body.valid() && a.motion.valid())
-                && r.stamps.keys().eq(r.actors.keys())
-                && r.stamps.values().all(|stamp| *stamp <= self.tick)
-                && r.ai.keys().all(|id| r.actors.contains_key(id))
-                && r.navigation.keys().all(|id| r.actors.contains_key(id))
-                && r.displaced.iter().all(|id| r.actors.contains_key(id))
-                && r.items.values().all(|item| match item.location {
-                    ItemLocation::Ground(at) => at.region == *region,
-                    ItemLocation::Carried(carrier) => r.actors.contains_key(&carrier),
-                })
-                && r.impacts.iter().all(|impact| match impact.entity {
-                    PhysicsEntity::Actor(id) => r.actors.contains_key(&id),
-                    PhysicsEntity::Item(id) => r.items.contains_key(&id),
-                })
-        });
-        records_valid
-            && expected == l.directory
+                .extend(record.items.keys().map(|id| (*id, *region)));
+            record.valid_contents(*region, self.tick)
+        }) && expected == l.directory
+    }
+
+    /// Game-wide lifecycle invariants. Doesn't read record contents, so it
+    /// holds while records are stored elsewhere.
+    fn lifecycle_state_valid(&self) -> bool {
+        let l = &self.lifecycle;
+        let detached = |region: &RegionId| l.detached.contains_key(region);
+        l.directory.actors.values().all(detached)
+            && l.directory.items.values().all(detached)
+            && l.directory.doors.values().all(detached)
             && l.directory
                 .actors
                 .keys()
@@ -861,5 +907,56 @@ mod tests {
         .unwrap();
         let (_, _, seen) = game.combat.ai[&watcher].target.unwrap();
         assert_eq!(seen, 400);
+    }
+
+    #[test]
+    fn attach_rejects_a_record_that_does_not_match_the_directory() {
+        let at = |region, x| Location {
+            region: RegionId(region),
+            position: Position { x, y: 1, z: 0 },
+        };
+        let mut game = Game::region_corridor(1, 4);
+        let player = game
+            .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let other = game
+            .spawn_actor(at(3, 5), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_run(player, BTreeSet::from([player]), None, BTreeMap::new())
+            .unwrap();
+        game.add_default_reference_points().unwrap();
+        let only = |ids: &[u64]| ids.iter().map(|id| RegionId(*id)).collect::<BTreeSet<_>>();
+        game.transition_regions(&RegionTransition {
+            active: only(&[1]),
+            loaded: only(&[1]),
+        })
+        .unwrap();
+        assert_eq!(game.region_state(RegionId(3)), Some(RegionState::Detached));
+        assert!(game.lifecycle_valid());
+
+        // A record that's valid on its own but lost an actor the directory
+        // still places in its region, as a damaged store might return.
+        let three = RegionId(3);
+        let mut record = (*game.lifecycle.detached[&three]).clone();
+        assert!(record.actors.remove(&other).is_some());
+        record.stamps.remove(&other);
+        record.ai.remove(&other);
+        record.navigation.remove(&other);
+        record.displaced.remove(&other);
+        assert!(record.valid_contents(three, game.tick()));
+        assert!(!record.matches_directory(three, &game.lifecycle.directory));
+        game.lifecycle.detached.insert(three, Shared::new(record));
+        assert!(game.lifecycle_state_valid(), "needs no record contents");
+        assert!(!game.records_valid());
+
+        let before = game.clone();
+        let error = game
+            .transition_regions(&RegionTransition {
+                active: only(&[1, 2, 3, 4]),
+                loaded: only(&[1, 2, 3, 4]),
+            })
+            .unwrap_err();
+        assert_eq!(error, TransitionError::InvalidRecord(three));
+        assert_eq!(game, before);
     }
 }

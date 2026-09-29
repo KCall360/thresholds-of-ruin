@@ -37,10 +37,11 @@ struct Entry {
 #[derive(Clone)]
 pub(crate) struct SightCache {
     /// Replaced by any change to regions, passages, rotations, physical
-    /// portals or chambers.
+    /// portals or chambers, except detaching or attaching a whole region.
     topology: u64,
-    /// Replaced for a region by terrain and door edits in it. A region absent
-    /// here is unchanged since `topology` was drawn.
+    /// Replaced for a region by terrain and door edits in it, and when it's
+    /// detached or attached. A region absent here is unchanged since
+    /// `topology` was drawn.
     regions: Shared<BTreeMap<RegionId, u64>>,
     scenes: Arc<Mutex<BTreeMap<Key, Entry>>>,
 }

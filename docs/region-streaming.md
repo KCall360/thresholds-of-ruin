@@ -210,8 +210,21 @@ checkable. Every piece of `World` state is destructured exhaustively when a
 region detaches, so new world state can't be added without deciding whether
 a record owns it.
 
+World tables sort by region first, so detaching or attaching a region visits
+only that region's entries. Detaching one region of a 256-region world with
+dense terrain and reattaching it took 0.20 ms at p50 (0.24 ms p95), against
+1.71 ms (2.67 ms) when every table was scanned; at 8 regions the costs are
+0.17 ms and 0.21 ms. (Release build, this machine, 2,000 samples each:
+`cargo run -p tor-world --release --example region-detach-profile`.) Only
+sight scenes that list the region are invalidated. That's exact, because a
+scene lists every region it entered and every region linked from them.
+
 An **identity directory** maps every detached actor, item and door to its
 region. Id allocators stay game-wide, so identities are never reused.
+Every directory entry names a detached region, and that check needs no record
+contents. Attaching a record checks the record itself, and that its actors,
+items and doors are exactly the directory's entries for its region, because
+a record may come from storage that restoring the game never read.
 
 References come in two kinds:
 
@@ -283,8 +296,13 @@ The record encoding in this slice is the encoding those rows will hold.
     as only freezing, including through a save round trip while detached;
   - checkpoint round trips while frozen and detached, and ordinary saves
     without lifecycle fields.
-- A unit test in `streaming.rs` checks that AI memory can't expire while
-  frozen.
+- Unit tests in `streaming.rs` check that AI memory can't expire while
+  frozen, and that attaching a record that disagrees with the directory is
+  rejected with the game unchanged.
+- `crates/world/tests/sight_cache.rs` detaches and reattaches random regions
+  of world clones between random views and edits, and checks every cached
+  scene against an uncached one. Another test checks which scenes a detach or
+  attach invalidates.
 - A server unit test shrinks every checked-in scenario package to what its
   characters' points require, round-trips the checkpoint, and restores
   everything to an identical game. This covers real joins, rotations, physical

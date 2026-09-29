@@ -1,5 +1,9 @@
 //! Scene reuse must never change results: see docs/sight-3d.md.
-use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
+use std::collections::BTreeMap;
+
+use tor_world::{
+    Direction, Extent, Location, Passage, Position, Region, RegionId, RegionSlice, World,
+};
 
 fn at(region: u64, x: i32, y: i32, z: i32) -> Location {
     Location {
@@ -171,7 +175,8 @@ struct Layout {
     radii: &'static [u8],
 }
 
-/// Random views of clones of a world under random wall and door edits.
+/// Random views of clones of a world under random wall and door edits, with
+/// whole regions detached and attached again.
 fn random_edits(layout: Layout) {
     let Layout {
         world,
@@ -197,6 +202,8 @@ fn random_edits(layout: Layout) {
         // Clones stand in for checkpoints, rewinds and branches: they share
         // the cache but diverge through their own edits.
         let mut worlds = vec![world.clone()];
+        // Each clone's detached regions.
+        let mut held = vec![BTreeMap::<RegionId, RegionSlice>::new()];
         let (mut reused, mut rebuilt) = (0, 0);
         for step in 0..800 {
             let i = rng.below(worlds.len() as u64) as usize;
@@ -218,17 +225,35 @@ fn random_edits(layout: Layout) {
                 75..=81 if door.is_some() => {
                     let [x, y, z] = door.unwrap();
                     let region = 1 + rng.below(regions);
-                    worlds[i].set_door(at(region, x, y, z), rng.below(2) == 0);
+                    let open = rng.below(2) == 0;
+                    if !held[i].contains_key(&RegionId(region)) {
+                        worlds[i].set_door(at(region, x, y, z), open);
+                    }
                 }
                 75..=89 => {
-                    // Door cells can't become walls; that edit is refused.
+                    // Door cells can't become walls, and detached regions
+                    // can't be edited; those edits are refused.
                     let target = cell(&mut rng);
                     let _ = worlds[i].set_wall(target, rng.below(3) == 0);
                 }
-                90..=94 if worlds.len() < 6 => worlds.push(worlds[i].clone()),
+                90..=93 if worlds.len() < 6 => {
+                    worlds.push(worlds[i].clone());
+                    held.push(held[i].clone());
+                }
+                94..=96 => {
+                    let region = RegionId(1 + rng.below(regions));
+                    match held[i].remove(&region) {
+                        Some(slice) => worlds[i].attach_region(slice).unwrap(),
+                        None => {
+                            let slice = worlds[i].detach_region(region).unwrap();
+                            held[i].insert(region, slice);
+                        }
+                    }
+                }
                 _ => {
                     let j = rng.below(worlds.len() as u64) as usize;
                     worlds[i] = worlds[j].clone();
+                    held[i] = held[j].clone();
                 }
             }
         }
@@ -329,6 +354,50 @@ fn an_edit_invalidates_only_scenes_that_read_its_region() {
         })
         .unwrap();
     check(&world, false, "any topology change");
+}
+
+#[test]
+fn detaching_invalidates_only_scenes_that_list_the_region() {
+    let mut world = fixture(6);
+    let view = (at(1, 6, 4, 0), 0, 8);
+    let check = |world: &World, cached: bool, context: &str| {
+        let (eye, frame, radius) = view;
+        assert_eq!(
+            world.eye_scene_cached(eye, frame, radius),
+            cached,
+            "{context}"
+        );
+        assert_eq!(
+            world.eye_scene(eye, frame, radius),
+            world.eye_scene_uncached(eye, frame, radius),
+            "{context}"
+        );
+    };
+    // The view enters regions 1 and 2, so it lists them and region 3, which
+    // region 2 links to. Regions 5 and 6 are out of range.
+    check(&world, false, "first view");
+    let five = world.detach_region(RegionId(5)).unwrap();
+    let six = world.detach_region(RegionId(6)).unwrap();
+    check(&world, true, "detaching unlisted regions");
+    world.attach_region(six).unwrap();
+    check(&world, true, "attaching an unlisted region");
+
+    let three = world.detach_region(RegionId(3)).unwrap();
+    check(
+        &world,
+        false,
+        "detaching a region linked from one the view entered",
+    );
+    world.attach_region(three).unwrap();
+    check(&world, false, "attaching it again");
+
+    let two = world.detach_region(RegionId(2)).unwrap();
+    check(&world, false, "detaching a region the view entered");
+    check(&world, true, "the rebuilt scene without it");
+    world.attach_region(two).unwrap();
+    check(&world, false, "attaching it again");
+    world.attach_region(five).unwrap();
+    check(&world, true, "attaching the last unlisted region");
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

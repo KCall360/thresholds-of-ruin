@@ -71,17 +71,58 @@ impl RegionSlice {
     }
 }
 
-/// Every key of `map` in `region`, removed and returned in order.
-fn take_region<K: Ord + Clone, V: Clone>(
+/// A world-table key that sorts by region first, so one region's keys are a
+/// contiguous range starting at [`RegionKey::first`].
+trait RegionKey: Ord + Clone {
+    fn region(&self) -> RegionId;
+    /// The smallest key in `region`.
+    fn first(region: RegionId) -> Self;
+}
+
+impl RegionKey for Location {
+    fn region(&self) -> RegionId {
+        self.region
+    }
+    fn first(region: RegionId) -> Self {
+        Location {
+            region,
+            position: Position {
+                x: i32::MIN,
+                y: i32::MIN,
+                z: i32::MIN,
+            },
+        }
+    }
+}
+
+impl RegionKey for (Location, Direction) {
+    fn region(&self) -> RegionId {
+        self.0.region
+    }
+    fn first(region: RegionId) -> Self {
+        (Location::first(region), Direction::North)
+    }
+}
+
+/// `region`'s keys in a sorted collection's key order, found without visiting
+/// other regions.
+fn region_keys<'a, K: RegionKey + 'a>(
+    range: impl Iterator<Item = &'a K>,
+    region: RegionId,
+) -> Vec<K> {
+    range
+        .take_while(|key| key.region() == region)
+        .cloned()
+        .collect()
+}
+
+/// Every key of `map` in `region`, removed and returned in order. Costs a
+/// lookup per key, and copies nothing when the region has no keys.
+fn take_region<K: RegionKey, V: Clone>(
     map: &mut Shared<BTreeMap<K, V>>,
     region: RegionId,
-    key_region: impl Fn(&K) -> RegionId,
 ) -> BTreeMap<K, V> {
-    let keys: Vec<K> = map
-        .keys()
-        .filter(|key| key_region(key) == region)
-        .cloned()
-        .collect();
+    let keys = region_keys(map.range(K::first(region)..).map(|(k, _)| k), region);
     if keys.is_empty() {
         return BTreeMap::new();
     }
@@ -93,20 +134,14 @@ fn take_region<K: Ord + Clone, V: Clone>(
         .collect()
 }
 
-fn take_set<K: Ord + Clone>(
-    set: &mut Shared<BTreeSet<K>>,
-    region: RegionId,
-    key_region: impl Fn(&K) -> RegionId,
-) -> BTreeSet<K> {
-    let keys: BTreeSet<K> = set
-        .iter()
-        .filter(|key| key_region(key) == region)
-        .cloned()
-        .collect();
+fn take_set<K: RegionKey>(set: &mut Shared<BTreeSet<K>>, region: RegionId) -> BTreeSet<K> {
+    let keys = region_keys(set.range(K::first(region)..), region);
     if !keys.is_empty() {
-        set.retain(|key| !keys.contains(key));
+        for key in &keys {
+            set.remove(key);
+        }
     }
-    keys
+    keys.into_iter().collect()
 }
 
 impl World {
@@ -146,6 +181,10 @@ impl World {
     /// Remove a loaded region's content, keeping its metadata so references
     /// into it stay checkable. Links into it from other regions stay, and
     /// lead nowhere until it's attached again.
+    ///
+    /// Only sight scenes that list this region are invalidated. That's exact:
+    /// a scene lists every region it entered and every region linked from
+    /// them, and links into this region stay with their source regions.
     pub fn detach_region(&mut self, id: RegionId) -> Result<RegionSlice, WorldError> {
         let region = self
             .regions
@@ -168,13 +207,12 @@ impl World {
             absent,
             sight,
         } = self;
-        let by_location = |at: &Location| at.region;
-        let links = take_region(passages, id, |key| key.0.region);
-        let mut turns = take_region(rotations, id, |key| key.0.region);
+        let links = take_region(passages, id);
+        let mut turns = take_region(rotations, id);
         let slice = RegionSlice {
             chamber: chambers.get(&id).copied(),
             gravity: region_gravity.get(&id).copied(),
-            doors: take_region(doors, id, by_location),
+            doors: take_region(doors, id),
             passages: links
                 .into_iter()
                 .map(|(key, passage)| {
@@ -182,10 +220,10 @@ impl World {
                     (key, (passage, rotation))
                 })
                 .collect(),
-            physical_vertical: take_set(physical_vertical, id, |key| key.0.region),
-            cell_gravity: take_region(cell_gravity, id, by_location),
-            terrain: take_region(terrain, id, by_location),
-            place_hints: take_set(place_hints, id, by_location),
+            physical_vertical: take_set(physical_vertical, id),
+            cell_gravity: take_region(cell_gravity, id),
+            terrain: take_region(terrain, id),
+            place_hints: take_set(place_hints, id),
             region,
         };
         if slice.chamber.is_some() {
@@ -196,7 +234,7 @@ impl World {
         }
         regions.remove(&id);
         absent.insert(id, slice.region.clone());
-        sight.topology_changed();
+        sight.region_changed(id);
         Ok(slice)
     }
 
@@ -254,7 +292,7 @@ impl World {
         if !place_hints.is_empty() {
             self.place_hints.extend(place_hints);
         }
-        self.sight.topology_changed();
+        self.sight.region_changed(id);
         Ok(())
     }
 }
