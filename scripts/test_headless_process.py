@@ -21,13 +21,14 @@ class HeadlessProcesses(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.save = Path(directory.name) / "game.json"
 
-    def server(self, wizard=False, scenario=None):
+    def server(self, wizard=False, scenario=None, character=None):
         env = {"TOR_SPECTATOR_TOKEN": support.SPECTATOR_TOKEN}
         if wizard:
             env["TOR_WIZARD_TOKEN"] = WIZARD_TOKEN
         server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42",
                               "--save", self.save, *(["--wizard"] if wizard else []),
-                              *(["--scenario", Path(__file__).resolve().parents[1] / "scenarios/tests" / scenario] if scenario else [])], extra_env=env)
+                              *(["--scenario", Path(__file__).resolve().parents[1] / "scenarios/tests" / scenario] if scenario else []),
+                              *(["--character", str(character)] if character else [])], extra_env=env)
         self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
         return server
 

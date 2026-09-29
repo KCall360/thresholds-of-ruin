@@ -1,0 +1,12 @@
+# One stone hall, three cells high, with no gravity so the creature can hover.
+# A wall two cells high spans the hall two cells east of the start. The creature
+# hovers at waist height three cells beyond it.
+[[regions]]
+id = 1
+name = "Giant hall"
+size = [9, 3, 3]
+chamber = true
+zone = "hall"
+walls = [[3, 0, 0], [3, 0, 1], [3, 1, 0], [3, 1, 1], [3, 2, 0], [3, 2, 1]]
+anchors = { "start" = [1, 1, 0] }
+actors = [{ "id" = 3, "at" = [6, 1, 1], "turn_ticks" = 100 }]

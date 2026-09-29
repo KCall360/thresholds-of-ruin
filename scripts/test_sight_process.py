@@ -3,7 +3,8 @@
 The `sight-3d-setup` package's character is two cells tall and sees from its
 head. It looks over a waist-high wall, sees a creature hovering at head height,
 and can't see past a closed door that fills its two-cell doorway until it opens
-the door. See docs/sight-3d.md.
+the door. The `sight-3d-giant` package compares a three-cell giant with a
+two-cell humanoid at the same start. See docs/sight-3d.md.
 """
 import unittest
 import test_text_process as support
@@ -75,6 +76,35 @@ class SightProcesses(unittest.TestCase):
         self.server(scenario="sight-3d-setup")
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], opened["state"])
+
+    def test_three_cell_giant_sees_over_a_wall_a_humanoid_cannot(self):
+        # The `sight-3d-giant` package, once per character: the same start,
+        # hall and creature; only the selected character's body differs.
+        creature = {"x": 5, "y": 0, "z": 1}
+        for character, giant in ((1, True), (2, False)):
+            self.save = self.save.with_name(f"game-{character}.json")
+            server = self.server(scenario="sight-3d-giant", character=character)
+            client = self.launch("tor-client-headless", ["--connect", self.address, "--actor", str(character)])
+            state = self.frame(client, lambda f: f["type"] == "ready")["state"]
+            view = state["observation"]
+            # The top of the wall two cells high, and the stone ceiling.
+            self.assertTrue(self.cell(view, 2, 0, 1)["wall"])
+            self.assertTrue(self.cell(view, 0, 0, 3)["wall"])
+            # Waist height beyond the wall: the giant sees down over it past
+            # the cell in its lee; the humanoid sees nothing there.
+            beyond = [c["position"]["x"] for c in view["visible_cells"]
+                      if c["position"]["y"] == 0 and c["position"]["z"] <= 1 and c["position"]["x"] > 2]
+            self.assertEqual(sorted(beyond), [4, 5, 6, 7] if giant else [])
+            positions = [a["position"] for a in view["visible_actors"]]
+            self.assertEqual(creature in positions, giant)
+            if giant:
+                window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
+                                     token=support.SPECTATOR_TOKEN)
+                native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
+                self.assertEqual(native["state"], state)
+                self.key(window, "escape")
+                self.assertEqual(window.child.wait(timeout=10), 0)
+            client.stop(); server.stop()
 
 
 if __name__ == "__main__":
