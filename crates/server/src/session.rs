@@ -21,6 +21,8 @@ struct Client {
     actor: Option<ActorId>,
     sequence: u64,
     observation_tick: u64,
+    /// Last full state disclosed on this stream; the base for the next delta.
+    last_state: Option<StateView>,
     messages: mpsc::Sender<ServerMessage>,
     close: watch::Sender<bool>,
 }
@@ -124,6 +126,7 @@ impl Service {
                 actor: None,
                 sequence: 0,
                 observation_tick: 0,
+                last_state: None,
                 messages,
                 close,
             },
@@ -749,10 +752,9 @@ impl Service {
                 .engine
                 .history(actor, &client.user, None, MAX_HISTORY_PAGE)?,
         };
-        self.clients
-            .get_mut(&id)
-            .expect("connected client")
-            .observation_tick = snapshot.state.observation.tick;
+        let client = self.clients.get_mut(&id).expect("connected client");
+        client.observation_tick = snapshot.state.observation.tick;
+        client.last_state = Some(snapshot.state.clone());
         self.send(
             id,
             ServerMessage::Snapshot {
@@ -818,7 +820,7 @@ impl Service {
         }
     }
 
-    fn update(&mut self, id: u64, body: UpdateBody) {
+    fn update(&mut self, id: u64, mut body: UpdateBody) {
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
@@ -831,8 +833,20 @@ impl Service {
         // Disconnecting a slow controller can publish control changes in the
         // middle of an action broadcast. Keep those changes at each recipient's
         // last disclosed tick until its new observation has been queued.
-        if let UpdateBody::Observation { state, .. } = &body {
+        if let UpdateBody::Observation { state, event } = body {
             client.observation_tick = state.observation.tick;
+            let delta = client
+                .last_state
+                .as_ref()
+                .and_then(|base| StateDelta::between(base, &state));
+            client.last_state = Some((*state).clone());
+            body = match delta {
+                Some(delta) => UpdateBody::ObservationDelta {
+                    state: Box::new(delta),
+                    event,
+                },
+                None => UpdateBody::Observation { state, event },
+            };
         }
         let tick = client.observation_tick;
         self.send(
@@ -1058,7 +1072,10 @@ mod tests {
         let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
             panic!("observation update")
         };
-        assert!(matches!(update.body, UpdateBody::Observation { .. }));
+        assert!(matches!(
+            update.body,
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+        ));
         assert_eq!(update.cursor.tick, 100);
     }
 

@@ -140,7 +140,7 @@ fn present(connection: &Connection, message: &ServerMessage) {
     match message {
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Travel { .. } => {}
-            UpdateBody::Observation { event, .. } => {
+            UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
                 if let Some(entry) = event {
                     println!("{}", history(entry));
                 }

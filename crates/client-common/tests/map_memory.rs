@@ -200,3 +200,49 @@ fn chart_size_and_extreme_translations_are_bounded() {
     advance(&mut client, snapshot(&[("anchor", i32::MAX, 0)], 1));
     assert_eq!(client.map_memory().count(), 1);
 }
+
+fn cells(row: &[(String, i32, i32)]) -> Vec<(&str, i32, i32)> {
+    row.iter().map(|(k, x, y)| (k.as_str(), *x, *y)).collect()
+}
+
+fn delta_update(client: &ClientState, delta: StateDelta) -> StreamUpdate {
+    StreamUpdate {
+        actor: ActorId(1),
+        branch: client.branch().clone(),
+        cursor: StreamCursor {
+            sequence: client.cursor().sequence + 1,
+            tick: delta.tick,
+        },
+        body: UpdateBody::ObservationDelta {
+            state: Box::new(delta),
+            event: None,
+        },
+    }
+}
+
+#[test]
+fn deltas_rebuild_the_full_view_and_reject_another_base_atomically() {
+    let row = |ox: i32| -> Vec<(String, i32, i32)> {
+        (0..8).map(|x| (format!("{x}"), x - ox, 0)).collect()
+    };
+    let first = row(0);
+    let mut client = ClientState::from_snapshot(snapshot(&cells(&first), 0)).unwrap();
+    // One step east: every retained cell moves one place west.
+    let mut next = snapshot(&cells(&row(1)[1..]), 1).state;
+    next.observation.visible_cells[0].wall = true;
+    let delta = StateDelta::between(client.state(), &next).unwrap();
+    assert_eq!(delta.cells.shift, Position { x: -1, y: 0, z: 0 });
+    client.apply(delta_update(&client, delta)).unwrap();
+    assert_eq!(client.state(), &next);
+
+    let unchanged = client.clone();
+    let stale = StateDelta::between(&snapshot(&cells(&first), 0).state, &next);
+    let mut stale = stale.unwrap();
+    stale.revision = 2;
+    stale.tick = 2;
+    assert_eq!(
+        client.apply(delta_update(&client, stale)),
+        Err(tor_client_common::StreamError::InconsistentState)
+    );
+    assert_eq!(client, unchanged);
+}

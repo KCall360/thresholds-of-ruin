@@ -1,6 +1,8 @@
 //! Public observation types. Never expose internal world state through this crate.
 
+mod delta;
 mod wire;
+pub use delta::*;
 use serde::{Deserialize, Serialize};
 pub use wire::*;
 

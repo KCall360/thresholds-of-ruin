@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":17,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":18,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -132,6 +132,7 @@ Clients receive `update` messages without polling:
 | Update body | Meaning |
 | --- | --- |
 | `observation` | New disclosed state, its revision, and an optional actor action/event entry |
+| `observation_delta` | The same as `observation`, with visible cells sent as changes to the previous state on this stream |
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
 | `control` | This connection gained or lost control |
@@ -141,6 +142,27 @@ simulation tick. Multiple updates can share a tick. The stream sequence incremen
 for every delivered update; the action revision increments only when that actor's
 disclosed observation changes. A private note neither advances another user's
 sequence nor invalidates anyone's pending action revision.
+
+### View deltas
+
+Most observation updates are `observation_delta`s. A delta carries every
+observation field in full except `visible_cells`, which it replaces with
+`cells`:
+
+- `shift` is added to the position of every cell in the previous state. Cell
+  positions are observer-relative, so a step moves every retained cell.
+- `removed` lists positions, after the shift, of cells no longer in view.
+- `changed` lists complete cells that entered view or differ from the shifted
+  cell at the same position.
+
+A delta names the revision of its base in `base_revision` and applies only to
+the state most recently disclosed on the same stream, whether by a snapshot or
+by an update. Applying it yields a full observation with cells sorted by
+position. `tor-client-common` applies deltas and treats one that does not fit
+its base as an invalid stream, like a sequence gap: the client rebuilds from a
+new snapshot. The server sends a full `observation` instead when a delta would
+not be smaller, for example after a teleport. Snapshots are always complete, and
+reconnects and rewinds always start from one, so a delta never skips a state.
 
 Readiness is part of that disclosed state. A same-tick turn handoff advances the
 revisions of the actors whose readiness changes, even when their geometry and

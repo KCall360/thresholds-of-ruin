@@ -11,7 +11,7 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **17**, save format **12**, ruleset
+**Current formats:** protocol **18**, save format **12**, ruleset
 **`dungeon-v17`**, scenario validator **`tor-scenario-5`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
@@ -185,7 +185,8 @@ barriers and consistent crash rollback.
 A separate effort from 4e, in progress. Gameplay now uses 3D sight from each
 body's declared eye cell; the protocol, save format, ruleset and validator were
 bumped for it. The separate floor and ceiling facts are gone; clients derive
-them from seen solid cells. View deltas and the remaining client changes remain. It
+them from seen solid cells. Observation updates are view deltas (protocol 18).
+The remaining client changes remain. It
 replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
 with a single 3D rule for every observer. Sight lines start at a declared eye
 cell. Floors, ceilings and walls are ordinary seen solid cells, and only their
