@@ -190,6 +190,40 @@ fn loose_items_fall_and_other_actors_keep_their_turns() {
 }
 
 #[test]
+fn every_actor_falls_and_lands_not_only_the_one_acting() {
+    let (mut game, id) = game();
+    // Another creature, standing in for a monster; the player only waits.
+    let other = game
+        .spawn_actor(at(5, 12), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.set_body(
+        other,
+        BodySpec {
+            cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
+            mass: 80,
+        },
+    )
+    .unwrap();
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let mut heights = Vec::new();
+    for _ in 0..12 {
+        let next = game.next_actor().unwrap();
+        game.act(next, Action::Wait).unwrap();
+        heights.push(game.observe(other).unwrap().location.position.z);
+    }
+    // Both start at tick 0, so the first decisions pass no time.
+    assert!(
+        heights.iter().any(|z| *z < 12),
+        "the other actor falls: {heights:?}"
+    );
+    assert!(heights.windows(2).all(|w| w[1] <= w[0]), "it never rises");
+    assert_eq!(game.observe(other).unwrap().location, at(5, 0));
+    assert_eq!(game.actor_motion(other).unwrap().velocity, [0; 3]);
+    assert_eq!(game.observe(id).unwrap().location, at(2, 0));
+}
+
+#[test]
 fn gravity_does_not_use_stair_links() {
     let (mut game, id) = game();
     game.connect(

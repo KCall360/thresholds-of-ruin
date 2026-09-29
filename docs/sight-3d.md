@@ -275,6 +275,26 @@ not make those items worse.
 - **Accelerated layers:** randomized comparisons against the reference
   implementation, including portals and door edits for cache invalidation.
 
+**Coverage so far.**
+
+- *World:* `crates/world/tests/sight3d.rs` covers:
+  - open-room floors and ceilings at one-, two- and three-cell eye heights
+  - the waist wall, head-height air, and one-way sight
+  - reciprocity, and equivalence with 2D shadowcasting
+  - all 24 join rotations, the narrow rotated doorway, the vertical portal shaft,
+    frame rotation, and stairs
+  - door heights, and the accelerated builder matching the reference
+- *Game:* `crates/simulation/tests/sight.rs` checks that sight starts at the
+  declared eye cell, with offsets kept at the feet, for an upright humanoid and
+  for a body lying sideways after a rotated portal.
+- *End to end:* `scripts/test_sight_process.py` drives the real server with
+  headless, text and ASCII clients through a two-cell character's view over a
+  waist wall, a hovering creature, a two-cell door, and save and resume.
+- *Server:* repeated occurrences through a portal loop stay disclosed through
+  the server (`crates/server/tests/place_hints.rs`).
+- *Not yet covered:* lintels and pit rims, three-cell observers outside the
+  open-room world test, and a three-cell scenario package.
+
 ## Decisions
 
 1. **Wall-cell differences are expected to be accepted.** The equivalence tests
