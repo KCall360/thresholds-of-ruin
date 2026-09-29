@@ -41,39 +41,6 @@ fn chambers_are_voids_inside_finite_stone_including_floor_and_ceiling() {
 }
 
 #[test]
-fn vertical_surfaces_stop_at_material_doors_range_and_unallocated_space() {
-    let mut world = World::new(vec![], vec![]).unwrap();
-    world
-        .add_chamber(Region {
-            id: RegionId(1),
-            name: "tall".into(),
-            bounds: Extent::new(3, 3, 4).unwrap(),
-        })
-        .unwrap();
-    assert_eq!(
-        world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 3),
-        None
-    );
-    assert_eq!(
-        world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 4),
-        Some((Material::Stone, 4))
-    );
-    world.place_door(at(1, 1, 1, 1), 1, false).unwrap();
-    assert_eq!(
-        world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 8),
-        None
-    );
-    world.set_door(at(1, 1, 1, 1), true);
-    world.set_wall(at(1, 1, 1, 4), false).unwrap();
-    assert_eq!(
-        world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 8),
-        None
-    );
-    assert_eq!(world.terrain(at(1, 1, 1, 4)), Some(Terrain::Empty));
-    assert_eq!(world.terrain(at(1, 1, 1, 5)), None);
-}
-
-#[test]
 fn joined_chambers_have_no_material_wall_at_the_storage_seam() {
     let mut world = World::new(vec![], vec![]).unwrap();
     for id in [1, 2] {
@@ -214,7 +181,7 @@ fn check_narrow_doorway(turns: u8) {
                 world.set_wall(at(1, 5, y, z), true).unwrap();
             }
         }
-        world.place_door(at(1, 5, 1, 0), 1, true).unwrap();
+        world.place_door(at(1, 5, 1, 0), 1, true, 2).unwrap();
     }
     split
         .add_chamber(Region {

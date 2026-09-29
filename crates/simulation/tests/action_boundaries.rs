@@ -43,7 +43,9 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
             };
             let item = game.place_item(origin, "token".into()).unwrap();
             let door_cell = cell(origin.position.x + 1, 1);
-            let door = game.place_door(door_cell, false).unwrap();
+            let door = game
+                .place_door(door_cell, false, game.door_clearance(door_cell))
+                .unwrap();
             let action = [
                 Action::Wait,
                 Action::Take {
@@ -120,7 +122,9 @@ fn recovery_overflow_rejects_each_action_before_applying_its_effect() {
         let (mut game, actor) = fixture(u64::MAX);
         game.act(actor, Action::Wait).unwrap();
         let item = game.place_item(cell(1, 1), "token".into()).unwrap();
-        let door = game.place_door(cell(2, 1), false).unwrap();
+        let door = game
+            .place_door(cell(2, 1), false, game.door_clearance(cell(2, 1)))
+            .unwrap();
         let action = [
             Action::Wait,
             Action::Take {

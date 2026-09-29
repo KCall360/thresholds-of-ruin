@@ -195,14 +195,32 @@ pub struct World {
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: Shared<BTreeMap<RegionId, Extent>>,
     place_hints: Shared<BTreeSet<Location>>,
+    /// Derived: never saved, and ignored by equality.
+    #[serde(skip)]
+    pub(crate) sight: crate::sight_cache::SightCache,
 }
 
-/// A cell-sized barrier entity, unrelated to portal identity.
+/// A barrier entity, unrelated to portal identity. It is stored at its base
+/// cell and occupies `height` cells straight up from it, filling its opening.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Door {
     pub id: u64,
     pub open: bool,
+    pub height: u8,
+}
+
+/// Doors are at most this many cells tall.
+pub const MAX_DOOR_HEIGHT: u8 = 8;
+
+fn raised(location: Location, cells: i32) -> Option<Location> {
+    Some(Location {
+        position: Position {
+            z: location.position.z.checked_add(cells)?,
+            ..location.position
+        },
+        ..location
+    })
 }
 
 impl World {
@@ -238,7 +256,16 @@ impl World {
                 x > 0 && y > 0 && z > 0
             }
         }) && self.doors.iter().all(|(location, door)| {
-            self.contains(*location) && door.id > 0 && door.id < next_door_id && ids.insert(door.id)
+            (1..=MAX_DOOR_HEIGHT).contains(&door.height)
+                && door.id > 0
+                && door.id < next_door_id
+                && ids.insert(door.id)
+                && self.door_cells(*location).all(|cell| {
+                    // Every cell exists and belongs to this door alone.
+                    self.contains(cell)
+                        && self.door_entry(cell).map(|(base, _)| base) == Some(*location)
+                })
+                && self.door_cells(*location).count() == usize::from(door.height)
         }) && self.terrain.keys().all(|location| self.contains(*location))
             && self
                 .place_hints
@@ -257,31 +284,106 @@ impl World {
                 .all(|(key, rotation)| *rotation < 24 && self.passages.contains_key(key))
     }
 
-    pub fn door(&self, location: Location) -> Option<Door> {
-        self.doors.get(&location).copied()
+    /// The base cell and door occupying `location`, if any. Door cells differ
+    /// only in z, the last key component, so one short range query finds it.
+    fn door_entry(&self, location: Location) -> Option<(Location, Door)> {
+        let lowest = raised(location, -i32::from(MAX_DOOR_HEIGHT - 1)).unwrap_or(Location {
+            position: Position {
+                z: i32::MIN,
+                ..location.position
+            },
+            ..location
+        });
+        self.doors
+            .range(lowest..=location)
+            .next_back()
+            .filter(|(base, door)| {
+                i64::from(location.position.z) - i64::from(base.position.z) < i64::from(door.height)
+            })
+            .map(|(base, door)| (*base, *door))
     }
+    /// The door occupying `location`, whichever of its cells that is.
+    pub fn door(&self, location: Location) -> Option<Door> {
+        self.door_entry(location).map(|(_, door)| door)
+    }
+    /// A door's base cell.
     pub fn door_location(&self, id: u64) -> Option<Location> {
         self.doors
             .iter()
             .find_map(|(location, door)| (door.id == id).then_some(*location))
     }
+    /// The cells of the door based at `base`, from the bottom up.
+    pub fn door_cells(&self, base: Location) -> impl Iterator<Item = Location> + '_ {
+        let height = self.doors.get(&base).map_or(0, |door| door.height);
+        (0..i32::from(height)).filter_map(move |cells| raised(base, cells))
+    }
+    fn door_free(&self, cell: Location) -> bool {
+        self.contains(cell) && !self.is_wall(cell) && self.door(cell).is_none()
+    }
+    /// How tall a door based at `location` could be: the run of contained,
+    /// non-solid, door-free cells straight up from it, at most
+    /// [`MAX_DOOR_HEIGHT`].
+    pub fn door_clearance(&self, location: Location) -> u8 {
+        (0..MAX_DOOR_HEIGHT)
+            .take_while(|&cells| {
+                raised(location, i32::from(cells)).is_some_and(|cell| self.door_free(cell))
+            })
+            .count() as u8
+    }
+    /// Whether a door based at `base`, `height` cells tall, leaves its doorway
+    /// open above it: the cell above its top is open and, like its top cell,
+    /// walled on both sides along the same horizontal axis. Anything can then
+    /// be seen over the door. A door in a low wall under open space isn't
+    /// flagged, and a doorway at a region join, which has no walls beside it
+    /// in the room, can't be judged this way.
+    pub fn doorway_open_above(&self, base: Location, height: u8) -> bool {
+        let walled = |cell: Location, dx: i32, dy: i32| {
+            [-1, 1].into_iter().all(|sign| {
+                let side = Location {
+                    position: Position {
+                        x: cell.position.x.saturating_add(sign * dx),
+                        y: cell.position.y.saturating_add(sign * dy),
+                        ..cell.position
+                    },
+                    ..cell
+                };
+                !self.contains(side) || self.is_wall(side)
+            })
+        };
+        let (Some(top), Some(above)) = (
+            raised(base, i32::from(height) - 1),
+            raised(base, i32::from(height)),
+        ) else {
+            return false;
+        };
+        self.door_free(above)
+            && [(1, 0), (0, 1)]
+                .into_iter()
+                .any(|(dx, dy)| walled(top, dx, dy) && walled(above, dx, dy))
+    }
+    /// Place a door `height` cells tall, whose cells must all be free.
     pub fn place_door(
         &mut self,
         location: Location,
         id: u64,
         open: bool,
+        height: u8,
     ) -> Result<(), WorldError> {
-        if !self.walkable(location)
-            || self.doors.contains_key(&location)
+        if !(1..=MAX_DOOR_HEIGHT).contains(&height)
+            || self.door_clearance(location) < height
             || self.door_location(id).is_some()
         {
             return Err(WorldError::InvalidEndpoint);
         }
-        self.doors.insert(location, Door { id, open });
+        self.doors.insert(location, Door { id, open, height });
+        self.sight.region_changed(location.region);
         Ok(())
     }
+    /// Open or close the door occupying `location`.
     pub fn set_door(&mut self, location: Location, open: bool) {
-        self.doors.get_mut(&location).expect("validated door").open = open;
+        let (base, _) = self.door_entry(location).expect("validated door");
+        self.doors.get_mut(&base).expect("validated door").open = open;
+        self.sight.region_changed(base.region);
     }
     pub fn opaque(&self, location: Location) -> bool {
         self.is_wall(location) || self.door(location).is_some_and(|d| !d.open)
@@ -308,6 +410,7 @@ impl World {
             terrain: Shared::new(BTreeMap::new()),
             chambers: Shared::new(BTreeMap::new()),
             place_hints: Shared::new(BTreeSet::new()),
+            sight: Default::default(),
         };
         for region in regions {
             if world.regions.insert(region.id, region).is_some() {
@@ -325,6 +428,7 @@ impl World {
             return Err(WorldError::DuplicateRegion);
         }
         self.regions.insert(region.id, region);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -336,6 +440,7 @@ impl World {
         let id = region.id;
         self.add_region(region)?;
         self.chambers.insert(id, interior);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -358,44 +463,6 @@ impl World {
 
     pub fn is_chamber(&self, region: RegionId) -> bool {
         self.chambers.contains_key(&region)
-    }
-
-    /// Conservative vertical surface probe in allocated space. It follows no
-    /// stair teleport, stops at the first obstruction, and never invents a shell.
-    pub fn vertical_surface(
-        &self,
-        from: Location,
-        direction: Direction,
-        range: u32,
-    ) -> Option<(Material, u32)> {
-        if !matches!(direction, Direction::Up | Direction::Down) {
-            return None;
-        }
-        self.axis_surface(from, direction, range)
-    }
-    /// A finite material probe along an observer axis, without stair traversal.
-    pub fn axis_surface(
-        &self,
-        from: Location,
-        direction: Direction,
-        range: u32,
-    ) -> Option<(Material, u32)> {
-        if direction.components().is_some() || !self.walkable(from) {
-            return None;
-        }
-        let mut location = from;
-        let mut direction = direction;
-        for distance in 1..=range.min(16) {
-            let (next, rotation) = self.physics_neighbor(location, direction)?;
-            location = next;
-            direction = direction.rotated(rotation);
-            match self.terrain(location)? {
-                Terrain::Solid(material) => return Some((material, distance)),
-                Terrain::Empty if self.opaque(location) => return None,
-                Terrain::Empty => {}
-            }
-        }
-        None
     }
 
     pub(crate) fn within_aperture_bounds(&self, location: Location) -> bool {
@@ -436,6 +503,7 @@ impl World {
         }
         self.passages.insert(key, passage);
         self.rotations.insert(key, quarter_turns);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -534,6 +602,7 @@ impl World {
                     at.position.x += u;
                     at.position.y += v;
                     candidate.physical_vertical.insert((at, anchor.direction));
+                    candidate.sight.topology_changed();
                 }
             }
         }
@@ -568,7 +637,7 @@ impl World {
     }
 
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), WorldError> {
-        if !self.contains(location) || (wall && self.doors.contains_key(&location)) {
+        if !self.contains(location) || (wall && self.door(location).is_some()) {
             return Err(WorldError::InvalidEndpoint);
         }
         self.terrain.insert(
@@ -579,6 +648,7 @@ impl World {
                 Terrain::Empty
             },
         );
+        self.sight.region_changed(location.region);
         Ok(())
     }
 
@@ -815,7 +885,7 @@ mod sharing_tests {
             region: RegionId(1),
             position: Position { x: 2, y: 2, z: 0 },
         };
-        world.place_door(at, 1, false).unwrap();
+        world.place_door(at, 1, false, 2).unwrap();
         let original = world.clone();
         world.set_door(at, true);
         assert!(!original.door(at).unwrap().open);

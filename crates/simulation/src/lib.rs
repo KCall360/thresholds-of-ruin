@@ -26,7 +26,7 @@ pub use observation::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 
-use tor_world::{Direction, Location, Passage, Region, RegionId, Shared, World};
+use tor_world::{Direction, Location, Passage, Position, Region, RegionId, Shared, World};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -139,7 +139,6 @@ struct Item {
 pub struct Game {
     combat: combat::CombatWorld,
     physics: physics::Physics,
-    material_surfaces: bool,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     world: Shared<World>,
     seed: u64,
@@ -166,9 +165,6 @@ fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
 
 impl Game {
     /// Package construction helpers keep authored identities stable across edits.
-    pub fn set_material_surfaces(&mut self, enabled: bool) {
-        self.material_surfaces = enabled;
-    }
     pub fn authored_cell_valid(&self, at: Location) -> bool {
         self.world.contains(at) && !self.world.is_wall(at)
     }
@@ -225,13 +221,14 @@ impl Game {
         id: u64,
         at: Location,
         open: bool,
+        height: u8,
     ) -> Result<u64, GameError> {
         if id == 0 || id == u64::MAX || self.world.door_location(id).is_some() {
             return Err(GameError::IdentityExhausted);
         }
         let next = self.next_door_id;
         self.next_door_id = id;
-        let result = self.place_door(at, open);
+        let result = self.place_door(at, open, height);
         self.next_door_id = if result.is_ok() {
             self.next_door_id.max(next)
         } else {
@@ -254,7 +251,6 @@ impl Game {
         Self {
             combat: combat::CombatWorld::new(seed),
             physics: physics::Physics::default(),
-            material_surfaces: false,
             navigation: BTreeMap::new(),
             world: Shared::new(world),
             seed,
@@ -327,9 +323,25 @@ impl Game {
         Ok(id)
     }
 
-    /// Author a door; a closed door cannot cover an actor or ground object.
-    pub fn place_door(&mut self, location: Location, open: bool) -> Result<u64, GameError> {
-        if !open && self.door_obstructed(location) {
+    /// How tall a door based at `at` could be.
+    pub fn door_clearance(&self, at: Location) -> u8 {
+        self.world.door_clearance(at)
+    }
+
+    /// Whether a door this tall at `at` would leave its doorway open above it.
+    pub fn doorway_open_above(&self, at: Location, height: u8) -> bool {
+        self.world.doorway_open_above(at, height)
+    }
+
+    /// Author a door `height` cells tall; a closed door cannot cover an actor
+    /// or ground object in any of its cells.
+    pub fn place_door(
+        &mut self,
+        location: Location,
+        open: bool,
+        height: u8,
+    ) -> Result<u64, GameError> {
+        if !open && self.door_obstructed(location, height) {
             return Err(GameError::InvalidLocation);
         }
         let next = self
@@ -338,17 +350,28 @@ impl Game {
             .ok_or(GameError::IdentityExhausted)?;
         let id = self.next_door_id;
         self.world
-            .place_door(location, id, open)
+            .place_door(location, id, open, height)
             .map_err(|_| GameError::InvalidLocation)?;
         self.next_door_id = next;
         Ok(id)
     }
-    fn door_obstructed(&self, location: Location) -> bool {
-        self.occupied(location)
-            || self
-                .items
-                .values()
-                .any(|i| i.location == ItemLocation::Ground(location))
+    /// Whether an actor or ground object is in any cell of a door based at
+    /// `base` and `height` cells tall.
+    fn door_obstructed(&self, base: Location, height: u8) -> bool {
+        (0..i32::from(height)).any(|cells| {
+            let Some(z) = base.position.z.checked_add(cells) else {
+                return false;
+            };
+            let cell = Location {
+                position: Position { z, ..base.position },
+                ..base
+            };
+            self.occupied(cell)
+                || self
+                    .items
+                    .values()
+                    .any(|i| i.location == ItemLocation::Ground(cell))
+        })
     }
     pub fn door_reachable_from(&self, from: Location, door: Location) -> bool {
         Direction::HORIZONTAL.into_iter().any(|direction| {

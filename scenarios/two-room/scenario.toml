@@ -2,10 +2,10 @@
 format = 1
 id = "two-room"
 version = "1.1"
-ruleset = "dungeon-v16"
+ruleset = "dungeon-v17"
 files = ["regions.toml"]
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }
 archetypes = { "token" = { "name" = "copper token" }, "tablet" = { "name" = "stone tablet" } }
-characters = [{ "id" = 1, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0],[0,0,1]], mass = 80 } }]
+characters = [{ "id" = 1, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0],[0,0,1]], eye = [0,0,1], mass = 80 } }]

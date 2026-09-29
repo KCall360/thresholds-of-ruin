@@ -102,6 +102,7 @@ fn privileged_physics_edits_are_journaled_and_invalid_bodies_are_atomic() {
                 operation: WizardOperation::SetBody {
                     actor,
                     cells: vec![[0, 0, 0], [0, 0, 8]],
+                    eye: [0, 0, 0],
                     mass: 80
                 }
             }

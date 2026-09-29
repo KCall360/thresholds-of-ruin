@@ -21,6 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .flat_map(|x| (0..2).flat_map(move |y| (0..2).map(move |z| [x, y, z])))
                             .collect()
                     },
+                    // Humanoid eye, or the top of the 2x2x2 block.
+                    eye: [0, 0, 1],
                     mass: 80,
                 };
                 package.manifest.characters[0].body = Some(body.clone());

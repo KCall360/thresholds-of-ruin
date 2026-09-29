@@ -12,7 +12,9 @@ pub use material::{Material, Terrain};
 pub const CELL_SIZE_FEET: u32 = 5;
 
 pub use topology::checkpoint as checkpoint_worlds;
-pub use topology::{Direction, Door, Location, Passage, Region, RegionId, World, WorldError};
+pub use topology::{
+    Direction, Door, Location, Passage, Region, RegionId, World, WorldError, MAX_DOOR_HEIGHT,
+};
 
 /// Integer position in a region's local coordinate system.
 #[derive(
@@ -96,4 +98,7 @@ pub use shared::Shared;
 mod rotation;
 pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};
 
+mod sight3d;
+mod sight3d_fast;
+mod sight_cache;
 mod volume_scene;

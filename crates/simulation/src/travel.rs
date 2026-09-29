@@ -39,6 +39,28 @@ pub struct TravelStep {
     pub destination: Location,
 }
 
+/// Where the far end of a link from `cell` must appear in the actor's scene for
+/// the link to count as seen: the adjacent offset, or, for the abstract stair
+/// the actor stands on, the landing occurrence beyond physical sight.
+fn linked_offset(
+    world: &tor_world::World,
+    body: &crate::BodySpec,
+    cell: &tor_world::SightCell,
+    direction: Direction,
+    local: Direction,
+) -> Position {
+    let origin = Position { x: 0, y: 0, z: 0 };
+    if cell.offset == origin && world.is_stair(cell.location, local) {
+        return crate::observation::stair_landing_offset(body, local);
+    }
+    let (dx, dy, dz) = direction.delta();
+    Position {
+        x: cell.offset.x + dx,
+        y: cell.offset.y + dy,
+        z: cell.offset.z + dz,
+    }
+}
+
 impl Game {
     /// Capture only connections whose two ends appear adjacent in the perceived
     /// scene. Merely knowing two cells never reveals an unseen link between them.
@@ -74,11 +96,22 @@ impl Game {
                 }
             }
         }
+        // Travel only ever uses known walkable cells, so a cell is remembered
+        // once it has been seen walkable. It is then kept, marked opaque if it
+        // closes, so places and links stay valid. Floors, ceilings and walls
+        // that were never walkable aren't stored; routing treats them exactly
+        // like unknown cells.
         let mut cells = BTreeMap::new();
         for cell in scene {
             let opaque = self.world.opaque(cell.location);
-            if knowledge.cells.get(&cell.location) != Some(&opaque) {
-                cells.insert(cell.location, opaque);
+            match knowledge.cells.get(&cell.location) {
+                Some(&known) if known != opaque => {
+                    cells.insert(cell.location, opaque);
+                }
+                None if !opaque => {
+                    cells.insert(cell.location, false);
+                }
+                _ => {}
             }
             if opaque {
                 continue;
@@ -94,17 +127,16 @@ impl Game {
                     continue;
                 };
                 let turns = self.world.crossing_rotation(cell.location, local);
-                let (dx, dy, dz) = direction.delta();
-                let offset = Position {
-                    x: cell.offset.x + dx,
-                    y: cell.offset.y + dy,
-                    z: cell.offset.z + dz,
-                };
-                if projected.contains(&(
-                    to,
-                    offset,
-                    tor_world::compose_rotation(cell.rotation, turns),
-                )) {
+                let offset =
+                    linked_offset(&self.world, &self.actors[&id].body, cell, direction, local);
+                // Both ends of a remembered link must be remembered cells.
+                if (!self.world.opaque(to) || knowledge.cells.contains_key(&to))
+                    && projected.contains(&(
+                        to,
+                        offset,
+                        tor_world::compose_rotation(cell.rotation, turns),
+                    ))
+                {
                     edges.insert((cell.location, local), Some((to, turns)));
                 }
             }
@@ -223,8 +255,11 @@ impl Game {
             let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
             edges.retain(|(from, _), (to, _)| !(visible.contains(from) && visible.contains(to)));
             for cell in &scene {
-                cells.insert(cell.location, self.world.opaque(cell.location));
-                if self.world.opaque(cell.location) {
+                let opaque = self.world.opaque(cell.location);
+                if !opaque || cells.contains_key(&cell.location) {
+                    cells.insert(cell.location, opaque);
+                }
+                if opaque {
                     continue;
                 }
                 for direction in DIRECTIONS {
@@ -238,18 +273,17 @@ impl Game {
                         continue;
                     };
                     let turns = self.world.crossing_rotation(cell.location, local);
-                    let (dx, dy, dz) = direction.delta();
-                    let offset = Position {
-                        x: cell.offset.x + dx,
-                        y: cell.offset.y + dy,
-                        z: cell.offset.z + dz,
-                    };
-                    if scene.iter().any(|other| {
-                        other.location == to
-                            && !other.wall
-                            && other.offset == offset
-                            && other.rotation == tor_world::compose_rotation(cell.rotation, turns)
-                    }) {
+                    let offset =
+                        linked_offset(&self.world, &self.actors[&id].body, cell, direction, local);
+                    if (!self.world.opaque(to) || cells.contains_key(&to))
+                        && scene.iter().any(|other| {
+                            other.location == to
+                                && !other.wall
+                                && other.offset == offset
+                                && other.rotation
+                                    == tor_world::compose_rotation(cell.rotation, turns)
+                        })
+                    {
                         edges.insert((cell.location, local), (to, turns));
                     }
                 }

@@ -13,12 +13,17 @@ pub const TERMINAL: i64 = 8_192;
 #[serde(deny_unknown_fields)]
 pub struct BodySpec {
     pub cells: Vec<[i32; 3]>,
+    /// The body cell whose centre every sight line starts from. Required in
+    /// every declaration; see `docs/sight-3d.md`.
+    pub eye: [i32; 3],
     pub mass: u32,
 }
 impl Default for BodySpec {
+    /// The implicit single-cell body of an actor that declares none.
     fn default() -> Self {
         Self {
             cells: vec![[0; 3]],
+            eye: [0; 3],
             mass: 80,
         }
     }
@@ -29,6 +34,7 @@ impl BodySpec {
             && self.cells.len() <= 64
             && self.mass > 0
             && self.cells.contains(&[0; 3])
+            && self.cells.contains(&self.eye)
             && self
                 .cells
                 .iter()
@@ -479,6 +485,7 @@ impl Game {
                 };
                 let body = BodySpec {
                     cells: vec![[0; 3]],
+                    eye: [0; 3],
                     mass: 1,
                 };
                 if !self.needs_integration(
@@ -497,6 +504,7 @@ impl Game {
                     i.orientation,
                     &BodySpec {
                         cells: vec![[0; 3]],
+                        eye: [0; 3],
                         mass: 1,
                     },
                     i.motion.clone(),

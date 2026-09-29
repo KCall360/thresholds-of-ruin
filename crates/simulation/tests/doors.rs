@@ -24,7 +24,9 @@ fn interior_door_blocks_sight_and_movement_and_actions_are_atomic() {
     let actor = game
         .spawn_actor(cell(1), NonZeroU64::new(100).unwrap())
         .unwrap();
-    let door = game.place_door(cell(2), false).unwrap();
+    let door = game
+        .place_door(cell(2), false, game.door_clearance(cell(2)))
+        .unwrap();
     game.place_item(cell(4), "stone tablet".into()).unwrap();
     assert!(game.observe(actor).unwrap().ground_items.is_empty());
     assert!(
@@ -73,7 +75,9 @@ fn interior_door_blocks_sight_and_movement_and_actions_are_atomic() {
         .unwrap();
     assert_eq!(game.tick(), 400);
     assert!(game.set_wall(cell(2), true).is_err());
-    assert!(game.place_door(cell(2), true).is_err());
+    assert!(game
+        .place_door(cell(2), true, game.door_clearance(cell(2)))
+        .is_err());
 }
 
 #[test]
@@ -86,7 +90,9 @@ fn ground_items_prevent_closing_and_distant_doors_cannot_be_manipulated() {
     let actor = game
         .spawn_actor(location(1), NonZeroU64::new(100).unwrap())
         .unwrap();
-    let door = game.place_door(location(3), true).unwrap();
+    let door = game
+        .place_door(location(3), true, game.door_clearance(location(3)))
+        .unwrap();
     let before = game.clone();
     assert!(game
         .act(actor, Action::SetDoor { door, open: false })
@@ -138,7 +144,9 @@ fn a_rotated_join_door_is_reachable_without_crossing() {
     let actor = game
         .spawn_actor(at(1, 1, 0, 0), NonZeroU64::new(100).unwrap())
         .unwrap();
-    let door = game.place_door(at(2, 0, 0, 0), false).unwrap();
+    let door = game
+        .place_door(at(2, 0, 0, 0), false, game.door_clearance(at(2, 0, 0, 0)))
+        .unwrap();
     game.place_item(at(2, 0, 2, 0), "tablet".into()).unwrap();
     assert!(game.observe(actor).unwrap().ground_items.is_empty());
     game.act(actor, Action::SetDoor { door, open: true })

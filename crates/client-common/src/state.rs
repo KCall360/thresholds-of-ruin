@@ -7,8 +7,6 @@ use tor_protocol::*;
 /// observation of this exact cell can replace its remembered contents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RememberedCell {
-    pub floor: Option<SurfaceView>,
-    pub ceiling: Option<SurfaceView>,
     pub door: Option<DoorView>,
     pub material: String,
     pub key: String,
@@ -94,8 +92,6 @@ impl ClientState {
             self.memory.insert(
                 cell.key.clone(),
                 RememberedCell {
-                    floor: cell.floor.clone(),
-                    ceiling: cell.ceiling.clone(),
                     door: cell.door.clone(),
                     material: cell.material.clone(),
                     key: cell.key.clone(),

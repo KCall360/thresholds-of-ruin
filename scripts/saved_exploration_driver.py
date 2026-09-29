@@ -30,7 +30,7 @@ def validate(result):
         assert 0 <= sample["request_to_presentation_ms"] < float("inf")
         validate_presentation_profile(sample["profile"])
         assert sample["profile"]["network_events"] <= 16
-    assert result["disclosed_cells"] == {8:620, 256:20956}[result["regions"]]
+    assert result["disclosed_cells"] == {8:1243, 256:41419}[result["regions"]]
     assert result["checkpoint_bytes"] < 16 * 1024 * 1024
     assert 0 < result["checkpoint_sequence"] <= result["actions"]
     assert result["tail_records"] == result["actions"] - result["checkpoint_sequence"]

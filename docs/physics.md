@@ -8,10 +8,12 @@ posture. Its cell-offset representation leaves room for later posture changes.
 ## Bodies and coordinates
 
 Actor `body` declarations contain `cells` (distinct integer offsets including
-`[0,0,0]`) and positive `mass`. Limits are 64 cells and offsets from -8 through 8
+`[0,0,0]`), a required `eye` (one of those cells, where every sight line
+starts), and positive `mass`. Limits are 64 cells and offsets from -8 through 8
 on each axis. Mass uses game units; inventory weight does not contribute yet.
-The default playable character occupies `[0,0,0]` and `[0,0,1]`, with mass 80.
-Omitted bodies in diagnostic packages are single cells. Loose item stacks occupy
+The default playable character occupies `[0,0,0]` and `[0,0,1]` and sees from
+`eye = [0,0,1]`, with mass 80. Omitted bodies in diagnostic packages are single
+cells that see from that cell. See [three-dimensional sight](sight-3d.md). Loose item stacks occupy
 one cell and have mass equal to quantity; carried items follow their carrier.
 Items remain nonblocking and can share cells, preserving pickup/drop semantics.
 
@@ -101,13 +103,13 @@ All these packages use the ordinary offline validator and normal startup path.
 Wizard commands include `gravity <region> <gx> <gy> <gz>`,
 `cell-gravity <region> <x> <y> <z> <gx> <gy> <gz>`, and
 `velocity <actor> <vx> <vy> <vz>`. Structured wizard JSON additionally supports
-`set_body` and `connect_portal`. These remain privileged, journaled operations;
+`set_body` (with `cells`, `eye` and `mass`) and `connect_portal`. These remain privileged, journaled operations;
 they permanently mark wizard lineage and participate in rewind.
 
-Gravity/body scenes preserve symmetric shadowcasting on the observer main plane.
-Height slices use bounded three-dimensional integer voxel rays with conservative
-opaque-corner handling. Static diagnostic scenes retain their established sight. The backend resolves rotated occurrences and height
-slices; clients never reconstruct topology. Abstract stair landings occupy
+Every observer uses [three-dimensional sight](sight-3d.md) from its eye cell.
+The body frame carries the eye's axes across any portal the body straddles.
+The backend resolves rotated occurrences and height slices; clients never
+reconstruct topology. Abstract stair landings occupy
 separate panels beyond physical sight slices. Only visible occupied actor cells
 are disclosed, possibly with the same actor ID at several positions. Current
 own-body motion and collision sensations are disclosed without gravity maps,

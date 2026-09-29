@@ -31,6 +31,7 @@ fn bodies_fall_land_and_resume_identically() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -59,6 +60,7 @@ fn equal_opposing_fields_cancel_without_erasing_drift() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -90,6 +92,7 @@ fn whole_body_blocks_low_passages_and_wizard_terrain_edits() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -119,6 +122,7 @@ fn sideways_portal_rotates_body_and_velocity_without_changing_speed() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -186,6 +190,40 @@ fn loose_items_fall_and_other_actors_keep_their_turns() {
 }
 
 #[test]
+fn every_actor_falls_and_lands_not_only_the_one_acting() {
+    let (mut game, id) = game();
+    // Another creature, standing in for a monster; the player only waits.
+    let other = game
+        .spawn_actor(at(5, 12), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.set_body(
+        other,
+        BodySpec {
+            cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
+            mass: 80,
+        },
+    )
+    .unwrap();
+    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+    let mut heights = Vec::new();
+    for _ in 0..12 {
+        let next = game.next_actor().unwrap();
+        game.act(next, Action::Wait).unwrap();
+        heights.push(game.observe(other).unwrap().location.position.z);
+    }
+    // Both start at tick 0, so the first decisions pass no time.
+    assert!(
+        heights.iter().any(|z| *z < 12),
+        "the other actor falls: {heights:?}"
+    );
+    assert!(heights.windows(2).all(|w| w[1] <= w[0]), "it never rises");
+    assert_eq!(game.observe(other).unwrap().location, at(5, 0));
+    assert_eq!(game.actor_motion(other).unwrap().velocity, [0; 3]);
+    assert_eq!(game.observe(id).unwrap().location, at(2, 0));
+}
+
+#[test]
 fn gravity_does_not_use_stair_links() {
     let (mut game, id) = game();
     game.connect(
@@ -233,6 +271,7 @@ fn straddling_body_averages_fields_in_both_regions() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [1, 0, 0]],
+            eye: [0, 0, 0],
             mass: 80,
         },
     )

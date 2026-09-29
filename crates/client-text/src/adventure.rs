@@ -1,6 +1,7 @@
 //! Adventure presentation and intentions, using only the disclosed observer scene.
 use std::collections::{BTreeMap, BTreeSet};
 
+use tor_client_common::surfaces;
 use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
@@ -191,20 +192,23 @@ impl Dialogue {
         {
             let walls = noun.contains("wall");
             let ceiling = noun.contains("ceiling");
-            let materials: BTreeSet<_> = state
-                .observation
-                .visible_cells
-                .iter()
-                .filter_map(|c| {
-                    if walls {
-                        c.wall.then(|| surface(c))
-                    } else if ceiling {
-                        c.ceiling.as_ref().map(|s| s.material.as_str())
-                    } else {
-                        floor_material(c)
-                    }
-                })
-                .collect();
+            let cells = &state.observation.visible_cells;
+            let roles = surfaces::roles(cells);
+            let materials = if walls {
+                roles.walls
+            } else if ceiling {
+                roles.ceilings
+            } else if roles.floors.is_empty() {
+                // Raw diagnostic regions have no solid floor; their open cells
+                // carry a cosmetic material instead.
+                cells
+                    .iter()
+                    .filter(|c| !c.wall && !c.material.is_empty())
+                    .map(|c| c.material.as_str())
+                    .collect()
+            } else {
+                roles.floors
+            };
             return Intent::Say(if materials.is_empty() {
                 "You cannot see that here.".into()
             } else {
@@ -547,21 +551,11 @@ fn destinations(state: &StateView, direction: Direction) -> Vec<Destination> {
     vec![]
 }
 
-fn surface(cell: &CellView) -> &str {
-    if cell.material.is_empty() {
-        "unremarkable material"
-    } else {
-        &cell.material
-    }
-}
-
-fn floor_material(cell: &CellView) -> Option<&str> {
-    if cell.wall {
-        return None;
-    }
-    cell.floor
-        .as_ref()
-        .map(|s| s.material.as_str())
+/// The floor under an open cell: the seen solid cell below it, or, in raw
+/// diagnostic regions without one, the open cell's cosmetic material.
+fn floor_material<'a>(cells: &'a [CellView], cell: &'a CellView) -> Option<&'a str> {
+    surfaces::floor_below(cells, cell.position)
+        .map(surfaces::material)
         .or_else(|| (!cell.material.is_empty()).then_some(cell.material.as_str()))
 }
 
@@ -591,17 +585,16 @@ pub fn describe(state: &StateView) -> String {
     lines.push(floor.map_or_else(
         || "Your surroundings".into(),
         |c| {
-            floor_material(c).map_or_else(
+            floor_material(&o.visible_cells, c).map_or_else(
                 || "You stand in an open space.".into(),
                 |m| format!("You stand in a space with a {} floor.", safe(m)),
             )
         },
     ));
-    let walls: BTreeSet<_> = o
-        .visible_cells
-        .iter()
-        .filter(|c| c.wall)
-        .map(|c| safe(surface(c)))
+    let walls: BTreeSet<_> = surfaces::roles(&o.visible_cells)
+        .walls
+        .into_iter()
+        .map(safe)
         .collect();
     if !walls.is_empty() {
         lines.push(format!(

@@ -21,7 +21,7 @@ fn sees(world: &World, from: Location, to: Location) -> bool {
 #[test]
 fn closed_door_allows_corner_vision_but_blocks_straight_ahead() {
     let mut world = World::new(vec![room(1, 7, 7)], vec![]).unwrap();
-    world.place_door(at(3, 3), 1, false).unwrap();
+    world.place_door(at(3, 3), 1, false, 1).unwrap();
     assert!(sees(&world, at(2, 3), at(3, 2)));
     assert!(sees(&world, at(2, 3), at(3, 3)));
     assert!(!sees(&world, at(2, 3), at(4, 3)));
@@ -139,8 +139,8 @@ fn check_rotated_join(enclosed: bool) {
         whole.set_wall(at(x, y), true).unwrap();
         split.set_wall(remote(x, y), true).unwrap();
     }
-    whole.place_door(at(5, 2), 1, false).unwrap();
-    split.place_door(remote(5, 2), 1, false).unwrap();
+    whole.place_door(at(5, 2), 1, false, 1).unwrap();
+    split.place_door(remote(5, 2), 1, false, 1).unwrap();
     for open in [false, true] {
         whole.set_door(at(5, 2), open);
         split.set_door(remote(5, 2), open);
@@ -193,7 +193,7 @@ fn cycles_keep_distinct_occurrences_with_bounded_work() {
 #[test]
 fn rotation_does_not_change_physical_visibility_and_range_is_exact() {
     let mut world = World::new(vec![room(1, 9, 9)], vec![]).unwrap();
-    world.place_door(at(5, 4), 1, false).unwrap();
+    world.place_door(at(5, 4), 1, false, 1).unwrap();
     world.set_wall(at(2, 3), true).unwrap();
     for radius in 0..=8 {
         let locations = |turns| {

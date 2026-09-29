@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v16";
-const VALIDATOR: &str = "tor-scenario-4";
+pub const RULESET: &str = "dungeon-v17";
+const VALIDATOR: &str = "tor-scenario-5";
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 fn fail(message: impl AsRef<str>) -> Failure {
@@ -170,12 +170,18 @@ fn unit_quantity() -> u64 {
 fn one() -> u16 {
     1
 }
+fn one_cell() -> u8 {
+    1
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Door {
     pub id: u64,
     pub at: [i32; 3],
     pub open: bool,
+    /// Cells tall; a door must exactly fill its opening.
+    #[serde(default = "one_cell")]
+    pub height: u8,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -661,7 +667,6 @@ impl Package {
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        game.set_material_surfaces(true);
         for r in &self.regions {
             let region = Region {
                 id: RegionId(r.id),
@@ -810,6 +815,9 @@ impl Package {
                         .map_err(|_| fail("AI requires combat attributes"))?;
                 }
                 if let Some(body) = &c.body {
+                    if !body.cells.contains(&body.eye) {
+                        return Err(fail("Character body eye must be one of its cells"));
+                    }
                     game.set_body(tor_simulation::ActorId(c.id), body.clone())
                         .map_err(|_| fail("Character body does not fit"))?;
                 }
@@ -842,6 +850,9 @@ impl Package {
                     .as_ref()
                     .or(self.archetype(&a.archetype)?.body.as_ref())
                 {
+                    if !body.cells.contains(&body.eye) {
+                        return Err(fail("Actor body eye must be one of its cells"));
+                    }
                     game.set_body(tor_simulation::ActorId(a.id), body.clone())
                         .map_err(|_| fail("Actor body does not fit"))?;
                 }
@@ -950,7 +961,22 @@ impl Package {
             .collect();
         doors.sort_by_key(|(_, d)| d.id);
         for (region, d) in doors {
-            game.place_authored_door(d.id, loc(region, d.at), d.open)
+            let at = loc(region, d.at);
+            let clearance = game.door_clearance(at);
+            if d.height > clearance {
+                return Err(fail(format!(
+                    "Door {} doesn't fit: at most {} cells tall here",
+                    d.id, clearance
+                )));
+            }
+            // A door shorter than its walled doorway can be seen over.
+            if game.doorway_open_above(at, d.height) {
+                return Err(fail(format!(
+                    "Door {} is shorter than its doorway, which continues above it",
+                    d.id
+                )));
+            }
+            game.place_authored_door(d.id, at, d.open, d.height)
                 .map_err(|e| fail(format!("Door {}: {e:?}", d.id)))?;
         }
         if self.manifest.characters.iter().any(|c| c.combat.is_some())
@@ -1015,6 +1041,7 @@ mod tests {
                     actor,
                     tor_simulation::BodySpec {
                         cells: vec![[0, 0, 0], [0, 0, 1]],
+                        eye: [0, 0, 1],
                         mass: 80,
                     },
                 )

@@ -62,16 +62,19 @@ fn chamber_setup_is_atomic_retryable_rewindable_and_durable() {
     let expected = engine.state(ActorId(1)).unwrap();
     assert!(wizard(&mut engine, "floor", "teleport 1 3 1 1 -1").is_err());
     assert!(wizard(&mut engine, "ceiling", "teleport 1 3 1 1 2").is_err());
+    // The ceiling is the seen solid cell straight above; cutting a hole in it
+    // leaves none, since the space beyond the chamber's shell is never shown.
+    let ceiling_seen = |engine: &Engine| {
+        engine
+            .observation(ActorId(1))
+            .unwrap()
+            .visible_cells
+            .iter()
+            .any(|c| c.position.x == 0 && c.position.y == 0 && c.position.z > 0 && c.wall)
+    };
+    assert!(ceiling_seen(&engine));
     wizard(&mut engine, "hole", "wall 3 1 1 2 open").unwrap();
-    assert!(engine
-        .observation(ActorId(1))
-        .unwrap()
-        .visible_cells
-        .iter()
-        .find(|c| c.position.x == 0 && c.position.y == 0)
-        .unwrap()
-        .ceiling
-        .is_none());
+    assert!(!ceiling_seen(&engine));
     wizard(
         &mut engine,
         "rewind",

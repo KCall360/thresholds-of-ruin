@@ -4,6 +4,7 @@ mod connection;
 mod map_memory;
 pub mod narration;
 mod state;
+pub mod surfaces;
 pub use connection::Connection;
 pub use state::{ClientState, RememberedCell};
 

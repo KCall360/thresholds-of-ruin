@@ -56,7 +56,7 @@ Supported commands are:
 
 | Command | Behavior |
 | --- | --- |
-| `wizard door 1 0 0 0 closed` | Place a closed door; use ordinary open/close to interact |
+| `wizard door 1 0 0 0 closed 2` | Place a closed door two cells tall (height defaults to 1); use ordinary open/close to interact |
 | `wizard item token 1 1 1 0` | Place a copper token on the ground |
 | `wizard item tablet 1 1 1 0` | Place a stone tablet on the ground |
 | `wizard actor 75 1 2 1 0` | Spawn an ordinary actor with base recovery 75 ticks |

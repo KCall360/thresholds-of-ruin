@@ -179,12 +179,20 @@ fn new_fixture_places_its_only_door_in_an_unhinted_one_cell_hall() {
         .unwrap();
     assert_eq!(door.position, Position { x: 4, y: 0, z: 0 });
     assert!(!door.place_hint);
+    // One door, reaching the two-cell-high hall's ceiling: both of its cells
+    // show the same door.
+    let cells: Vec<_> = view
+        .visible_cells
+        .iter()
+        .filter_map(|c| c.door.as_ref().map(|d| (c.position, d.id)))
+        .collect();
+    let id = door.door.as_ref().unwrap().id;
     assert_eq!(
-        view.visible_cells
-            .iter()
-            .filter(|c| c.door.is_some())
-            .count(),
-        1
+        cells,
+        vec![
+            (Position { x: 4, y: 0, z: 0 }, id),
+            (Position { x: 4, y: 0, z: 1 }, id)
+        ]
     );
     for y in [-1, 1] {
         assert!(view

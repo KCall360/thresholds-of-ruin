@@ -104,7 +104,8 @@ pub(crate) fn game(seed: u64, regions: u64) -> Result<Game, Failure> {
     let mut game = Game::new(world, seed);
     for region in 1..=regions {
         for &door in &g.doors {
-            game.place_door(at(region, door), false)
+            // The fixture's door sits in a one-cell-high wall under open space.
+            game.place_door(at(region, door), false, 1)
                 .expect("fixture door");
         }
         for item in &g.items {

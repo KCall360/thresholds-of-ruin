@@ -1,7 +1,10 @@
 # Symmetric shadowcasting
 
-Horizontal sight uses symmetric shadowcasting inside finite stone enclosures.
-Floor and ceiling surfaces are described in [material volumes](material-volumes.md).
+This guide describes the 2D symmetric shadowcasting builder, `World::shadow_scene`.
+Gameplay no longer uses it: every observer now uses
+[three-dimensional sight](sight-3d.md), which keeps this builder's results for
+open cells on single-level maps except for exact bevel-tip grazes. It remains the
+comparison baseline for those tests and for `fov_bench`.
 
 ## Geometry and behavior
 
@@ -58,6 +61,8 @@ These tests are included in Windows/Linux CI discovery for debug and release.
 
 Run `cargo run -p tor-world --release --example fov_bench` to measure current
 scene construction, including topology and sorting. The benchmark covers open
-rooms, pillars, a broad rotated join, and a cycle at radii 8 and 16. Timings are
+rooms, pillars, a broad rotated join, and a cycle at radii 8 and 16, plus
+dungeon-style chambers. It compares 2D shadowcasting, the voxel height-slice
+builder, and the reference [3D sight](sight-3d.md) builder. Timings are
 diagnostic, not pass/fail thresholds. Historical ray implementations and their
 comparison benchmark have been removed.

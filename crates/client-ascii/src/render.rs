@@ -50,8 +50,6 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
             place_hint: cell.place_hint,
             door: cell.door.clone(),
             material: cell.material.clone(),
-            floor: cell.floor.clone(),
-            ceiling: cell.ceiling.clone(),
         });
         view.ground_items.extend(cell.ground_items.iter().cloned());
     }
@@ -607,31 +605,31 @@ impl Canvas {
     }
 }
 
+/// Floor and ceiling of the player's own cell, derived from seen solid cells.
 fn enclosure_label(app: &App) -> String {
-    let cell = app.state.as_ref().and_then(|s| {
-        s.state()
-            .observation
-            .visible_cells
-            .iter()
-            .find(|c| c.position == tor_protocol::Position { x: 0, y: 0, z: 0 })
-    });
-    match cell {
-        Some(c) if c.floor.is_some() || c.ceiling.is_some() => format!(
-            "FLOOR: {} / CEILING: {}",
-            c.floor
-                .as_ref()
-                .map_or_else(|| "not visible".into(), |s| s.material.clone()),
-            c.ceiling.as_ref().map_or_else(
-                || "not visible".into(),
-                |s| format!(
-                    "{} ({} ft above feet)",
-                    s.material,
-                    u64::from(s.distance) * 5
-                )
-            )
-        ),
-        _ => "ASCII / EXPEDITION".into(),
+    use tor_client_common::surfaces;
+    let Some(state) = &app.state else {
+        return "ASCII / EXPEDITION".into();
+    };
+    let cells = &state.state().observation.visible_cells;
+    let feet = tor_protocol::Position { x: 0, y: 0, z: 0 };
+    let floor = surfaces::floor_below(cells, feet);
+    let ceiling = surfaces::ceiling_above(cells, feet);
+    if floor.is_none() && ceiling.is_none() {
+        return "ASCII / EXPEDITION".into();
     }
+    format!(
+        "FLOOR: {} / CEILING: {}",
+        floor.map_or("not visible", surfaces::material),
+        ceiling.map_or_else(
+            || "not visible".into(),
+            |(cell, distance)| format!(
+                "{} ({} ft above feet)",
+                surfaces::material(cell),
+                u64::from(distance) * 5
+            )
+        )
+    )
 }
 
 struct MapPanel {

@@ -25,8 +25,12 @@ class MaterialProcesses(unittest.TestCase):
     say = adventure_support.AdventureProcesses.say
 
     def here(self, frame):
-        return next(c for c in frame["state"]["observation"]["visible_cells"]
-                    if c["position"] == {"x": 0, "y": 0, "z": 0})
+        return self.column(frame, 0)
+
+    def column(self, frame, z):
+        """The seen cell z cells above the player's feet, or None if unseen."""
+        return next((c for c in frame["state"]["observation"]["visible_cells"]
+                     if c["position"] == {"x": 0, "y": 0, "z": z}), None)
 
     def test_normal_enclosure_surfaces_movement_and_resume(self):
         server = self.server()
@@ -34,15 +38,18 @@ class MaterialProcesses(unittest.TestCase):
         self.assertIn("walls of stone", welcome)
         self.assertIn("stone", self.say(player, "examine ceiling"))
         observer, initial = self.client(support.SPECTATOR_TOKEN)
-        self.assertEqual(self.here(initial)["floor"], {"material": "stone", "distance": 1})
-        self.assertEqual(self.here(initial)["ceiling"], {"material": "stone", "distance": 2})
+        # Floors and ceilings are seen solid cells: stone underfoot, open
+        # headroom, and a stone ceiling two cells up.
+        self.assertEqual((self.column(initial, -1)["wall"], self.column(initial, -1)["material"]), (True, "stone"))
+        self.assertFalse(self.column(initial, 1)["wall"])
+        self.assertEqual((self.column(initial, 2)["wall"], self.column(initial, 2)["material"]), (True, "stone"))
         for direction in ("up", "down"):
             self.say(player, "step " + direction)
             self.assertEqual(self.request(observer, {"type": "snapshot"})["state"], initial["state"])
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v16")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
         self.server()
         _, resumed = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)
@@ -100,19 +107,25 @@ class MaterialProcesses(unittest.TestCase):
         self.assertNotIn("Server error", wizard.command("wizard teleport 1 1 1 1 0"))
         away = self.request(observer, {"type": "snapshot"})
         key = self.here(initial)["key"]
-        self.assertEqual(next(c for c in away["memory"] if c["key"] == key)["ceiling"]["distance"], 2)
+        # The ceiling is its own seen cell, remembered like any other.
+        ceiling = self.column(initial, 2)["key"]
+        remembered = lambda view: next(c for c in view["memory"] if c["key"] == ceiling)
+        self.assertTrue(remembered(away)["wall"])
         self.assertNotIn("Server error", wizard.command(fixture["remove_ceiling"]))
         stale = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(next(c for c in stale["memory"] if c["key"] == key)["ceiling"]["distance"], 2)
+        self.assertTrue(remembered(stale)["wall"])
         self.assertNotIn("Server error", wizard.command("wizard teleport 1 3 1 1 0"))
         refreshed = self.request(observer, {"type": "snapshot"})
-        self.assertIsNone(self.here(refreshed)["ceiling"])
+        # The hole is open, and nothing past the chamber's storage is shown.
+        self.assertFalse(self.column(refreshed, 2)["wall"])
+        self.assertIsNone(self.column(refreshed, 3))
+        self.assertFalse(remembered(refreshed)["wall"])
         native = self.ascii_frame(window, lambda f: f["state"] == refreshed["state"])
         self.assertEqual(native["state"], refreshed["state"])
         self.assertIn("stone", self.say(text, "examine ceiling")) # Other ceiling cells remain visible.
         self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
         rewound = self.request(observer, {"type": "snapshot"})
-        self.assertEqual(self.here(rewound)["ceiling"]["distance"], 2)
+        self.assertTrue(self.column(rewound, 2)["wall"])
         self.assertIn(key, [c["key"] for c in rewound["memory"]])
         self.ascii_frame(window, lambda f: f["state"] == rewound["state"])
         self.key(window, "escape")

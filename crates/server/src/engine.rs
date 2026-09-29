@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-const ARCHIVE_VERSION: u32 = 11;
+const ARCHIVE_VERSION: u32 = 12;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -1616,12 +1616,18 @@ impl Candidate {
                     .map_err(|_| invalid())?;
                 WizardResult::PhysicsSet
             }
-            WizardOperation::SetBody { actor, cells, mass } => {
+            WizardOperation::SetBody {
+                actor,
+                cells,
+                eye,
+                mass,
+            } => {
                 self.game
                     .set_body(
                         SimActor(actor.0),
                         tor_simulation::BodySpec {
                             cells: cells.clone(),
+                            eye: *eye,
                             mass: *mass,
                         },
                     )
@@ -1657,13 +1663,21 @@ impl Candidate {
                 WizardResult::Connected
             }
 
-            WizardOperation::PlaceDoor { position, open } => {
-                let door = self
-                    .game
-                    .place_door(adapt::location(*position), *open)
-                    .map_err(|_| {
-                        Failure::new(ErrorCode::InvalidAction, "Invalid door placement")
-                    })?;
+            WizardOperation::PlaceDoor {
+                position,
+                open,
+                height,
+            } => {
+                let at = adapt::location(*position);
+                let clearance = self.game.door_clearance(at);
+                let door = self.game.place_door(at, *open, *height).map_err(|_| {
+                    let message = if clearance > 0 && clearance < *height {
+                        format!("Invalid door placement: at most {clearance} cells tall here")
+                    } else {
+                        "Invalid door placement".into()
+                    };
+                    Failure::new(ErrorCode::InvalidAction, &message)
+                })?;
                 WizardResult::DoorPlaced { door }
             }
             WizardOperation::ConnectArea {

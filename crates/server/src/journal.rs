@@ -229,6 +229,7 @@ pub enum WizardOperation {
     SetBody {
         actor: ActorId,
         cells: Vec<[i32; 3]>,
+        eye: [i32; 3],
         mass: u32,
     },
     SetVelocity {
@@ -253,6 +254,8 @@ pub enum WizardOperation {
     PlaceDoor {
         position: Position,
         open: bool,
+        /// Cells tall; a door must exactly fill its opening.
+        height: u8,
     },
     ConnectArea {
         from: Position,
