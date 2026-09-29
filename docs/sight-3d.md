@@ -352,5 +352,22 @@ tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
   The accelerated scene is about twice as fast as the voxel builder the dungeon
   uses today. It's still slower than 2D shadowcasting, which sees far less.
   Profiling showed that routes across joins dominated until plain steps
-  skipped the topology lookups. Gameplay-level timings come from
-  `scripts/perf_compare.py` once 3D sight is wired in.
+  skipped the topology lookups.
+- **Gameplay comparison against `main`.** Release `perf_compare.py`, three
+  interleaved rounds, p95 of the command or authoritative total:
+
+  | Case | Before | After | Against the 8 ms target |
+  | --- | --- | --- | --- |
+  | `r8-a1-h100-memory` | 0.93 ms | 3.34 ms | still under |
+  | `r64-a8-h100-memory` | 3.39 ms | 13.24 ms | **now over** |
+  | `combat:a8-h1000` | 11.30 ms | 6.08 ms | now under |
+  | `physics` dense falling (8 actors, 128 items) | 21.5 ms | 16.4 ms | still over, improved |
+
+  Restart replay of the 64-region case went from 2.0 s to 7.4 s. Operation
+  counts are identical, including scene calls, so the cost per scene changed.
+  Observers with bodies or gravity (the dungeon, combat, physics) previously used
+  the voxel builder and got faster. The latency fixture's single-cell,
+  gravity-free observers previously used 2D shadowcasting, which is far cheaper,
+  so they got slower. **This regression blocks merging** until the 64-region case
+  is back under the 8 ms target; the next step is to profile the fixture's plain
+  rooms (low walls, rotated joins, stairs, doors) and add the scene cache.

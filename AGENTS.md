@@ -121,9 +121,25 @@ passing, along with its performance requirements.
 [three-dimensional sight](docs/sight-3d.md). Done on the `design/3d-sight`
 branch: the exact reference and accelerated builders, gameplay sight from
 declared body eye cells, authored door heights, and floors and ceilings as seen
-solid cells derived by clients. Next: view-delta observation updates, then the
-remaining client changes. A NetHack-style ASCII client redesign is deferred
-until after 3s.
+solid cells derived by clients. It's open as PR #40 but **must not merge yet**:
+`perf_compare.py` against `main` shows `r64-a8-h100-memory` p95 rising from
+3.4 ms to 13.2 ms, over the 8 ms target (see the comparison under
+[reference implementation findings](docs/sight-3d.md#reference-implementation-findings)).
+Next, on the same branch:
+
+1. Profile `World::eye_scene` on the latency fixture's plain rooms (low walls,
+   rotated joins, stairs, doors), not just the dungeon's chambers.
+2. Add the scene cache from the design: reuse a scene while the eye's location,
+   frame and nearby world are unchanged. It must never change results; prove
+   that against the uncached builder. Idle actors and replay should mostly hit
+   it.
+3. Re-run `perf_compare.py origin/main --case r8-a1-h100-memory --case
+   r64-a8-h100-memory`, plus `combat:a8-h1000` and `physics`, until the 64-region
+   case is under 8 ms. Then update the PR description and merge with the
+   maintainer's approval.
+
+After that: view-delta observation updates, then the remaining client changes.
+A NetHack-style ASCII client redesign is deferred until after 3s.
 
 On this machine, rustc can run out of memory when other applications use most
 of it. If a build fails with "memory allocation failed", lower
