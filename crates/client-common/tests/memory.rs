@@ -75,32 +75,21 @@ fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
 }
 
 #[test]
-fn surface_memory_is_stale_until_refreshed_and_clears_on_rewind() {
+fn solid_cell_memory_is_stale_until_refreshed_and_clears_on_rewind() {
+    // Floors and ceilings are ordinary solid cells, remembered like any other.
     let mut first = snapshot(1, 0, 0);
-    first.state.observation.visible_cells[0].ceiling = Some(SurfaceView {
-        material: "stone".into(),
-        distance: 2,
-    });
+    let ceiling = &mut first.state.observation.visible_cells[0];
+    ceiling.wall = true;
+    ceiling.material = "granite".into();
     let mut client = ClientState::from_snapshot(first).unwrap();
     client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
-    assert_eq!(
-        client
-            .memory()
-            .find(|c| c.key == "1")
-            .unwrap()
-            .ceiling
-            .as_ref()
-            .unwrap()
-            .distance,
-        2
-    );
+    let remembered = client.memory().find(|c| c.key == "1").unwrap();
+    assert!(remembered.wall);
+    assert_eq!(remembered.material, "granite");
     client.replace_snapshot(snapshot(1, 100, 1)).unwrap();
-    assert!(client
-        .memory()
-        .find(|c| c.key == "1")
-        .unwrap()
-        .ceiling
-        .is_none());
+    let refreshed = client.memory().find(|c| c.key == "1").unwrap();
+    assert!(!refreshed.wall);
+    assert_ne!(refreshed.material, "granite");
     let mut rewind = snapshot(2, 0, 0);
     rewind.branch = BranchId("rewound".into());
     client.replace_snapshot(rewind).unwrap();
@@ -226,8 +215,6 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     let mut first = snapshot(1, 0, 0);
     let distant = Position { x: 4, y: 1, z: 0 };
     first.state.observation.visible_cells.push(CellView {
-        floor: None,
-        ceiling: None,
         door: None,
         material: "stone".into(),
         key: "distant".into(),
@@ -259,8 +246,6 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     assert_eq!(memory.ground_items.len(), 1);
     let mut revisit = snapshot(1, 200, 2);
     revisit.state.observation.visible_cells.push(CellView {
-        floor: None,
-        ceiling: None,
         door: None,
         material: "stone".into(),
         key: "distant".into(),

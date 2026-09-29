@@ -139,7 +139,6 @@ struct Item {
 pub struct Game {
     combat: combat::CombatWorld,
     physics: physics::Physics,
-    material_surfaces: bool,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     world: Shared<World>,
     seed: u64,
@@ -166,9 +165,6 @@ fn movement_cost(base: u64, direction: Direction) -> Result<u64, GameError> {
 
 impl Game {
     /// Package construction helpers keep authored identities stable across edits.
-    pub fn set_material_surfaces(&mut self, enabled: bool) {
-        self.material_surfaces = enabled;
-    }
     pub fn authored_cell_valid(&self, at: Location) -> bool {
         self.world.contains(at) && !self.world.is_wall(at)
     }
@@ -255,7 +251,6 @@ impl Game {
         Self {
             combat: combat::CombatWorld::new(seed),
             physics: physics::Physics::default(),
-            material_surfaces: false,
             navigation: BTreeMap::new(),
             world: Shared::new(world),
             seed,

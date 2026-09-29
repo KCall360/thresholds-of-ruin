@@ -46,7 +46,18 @@ fn physical_vertical_apertures_do_not_disclose_a_false_ceiling() {
             1,
         )
         .unwrap();
-    assert_eq!(world.axis_surface(at(1, 0), Direction::Up, 8).unwrap().1, 4);
+    // Straight up through the portal: open space where region 1's shell would
+    // be, and the real ceiling at the top of region 2.
+    let above = |z: i32| {
+        world
+            .eye_scene(at(1, 0), 0, 8)
+            .into_iter()
+            .find(|c| c.offset == Position { x: 0, y: 0, z })
+            .map(|c| (c.location, c.wall))
+    };
+    assert_eq!(above(2), Some((at(2, 0), false)));
+    assert_eq!(above(3), Some((at(2, 1), false)));
+    assert_eq!(above(4).map(|(_, wall)| wall), Some(true));
 }
 
 #[test]

@@ -165,8 +165,9 @@ checks as pickup. `go to door` approaches without manipulating it. Travel never
 automatically opens a door.
 
 [Material volumes](material-volumes.md) add real stone enclosure and
-`examine ceiling`. Surface descriptions use backend-disclosed floor and ceiling
-facts; missing enclosure is not inferred from a storage boundary.
+`examine ceiling`. Surface descriptions use the solid cells currently seen as
+floors, ceilings and walls; missing enclosure is not inferred from a storage
+boundary.
 
 ## Item quantities and knowledge
 

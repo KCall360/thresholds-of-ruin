@@ -13,13 +13,25 @@ fn real_surfaces_are_disclosed_and_empty_headroom_does_not_allow_flying() {
         .spawn_actor(location, NonZeroU64::new(100).unwrap())
         .unwrap();
     let before = game.observe(actor).unwrap();
-    let here = before
-        .visible_cells
-        .iter()
-        .find(|c| c.location == location)
-        .unwrap();
-    assert_eq!(here.floor, Some(("stone", 1)));
-    assert_eq!(here.ceiling, Some(("stone", 2)));
+    // Floors and ceilings are seen solid cells in the player's column.
+    let column = |view: &tor_simulation::Observation, z: i32| {
+        view.visible_cells
+            .iter()
+            .find(|c| {
+                c.location
+                    == Location {
+                        position: Position {
+                            z,
+                            ..location.position
+                        },
+                        ..location
+                    }
+            })
+            .map(|c| (c.wall, c.material))
+    };
+    assert_eq!(column(&before, -1), Some((true, "stone")));
+    assert_eq!(column(&before, 1), Some((false, "")));
+    assert_eq!(column(&before, 2), Some((true, "stone")));
     assert!(before
         .visible_cells
         .iter()
@@ -35,14 +47,9 @@ fn real_surfaces_are_disclosed_and_empty_headroom_does_not_allow_flying() {
         false,
     )
     .unwrap();
+    // With a hole in the ceiling, the column above is open and nothing past
+    // the chamber's storage is shown.
     let after = game.observe(actor).unwrap();
-    assert_eq!(
-        after
-            .visible_cells
-            .iter()
-            .find(|c| c.location == location)
-            .unwrap()
-            .ceiling,
-        None
-    );
+    assert_eq!(column(&after, 2), Some((false, "")));
+    assert_eq!(column(&after, 3), None);
 }

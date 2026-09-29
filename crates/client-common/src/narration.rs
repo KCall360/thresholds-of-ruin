@@ -234,7 +234,7 @@ mod tests {
         before.visible_cells.push(
             serde_json::from_value(serde_json::json!({
                 "key":"seen","position":{"x":1,"y":0,"z":0},"wall":false,
-                "floor":null,"ceiling":null,"material":"stone","place_hint":false,
+                "material":"stone","place_hint":false,
                 "stairs_up":false,"stairs_down":false,
                 "door":{"id":3,"name":"iron gate","description":"","open":false,
                     "reachable":true,"approaches":[]}

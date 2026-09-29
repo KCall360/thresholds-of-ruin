@@ -158,10 +158,9 @@ pub struct CombatActorView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellView {
-    pub floor: Option<SurfaceView>,
-    pub ceiling: Option<SurfaceView>,
     pub door: Option<DoorView>,
-    /// Cosmetic surface material, not a physical interaction rule.
+    /// Cosmetic material of a solid cell, not a physical interaction rule.
+    /// Floors and ceilings are ordinary seen solid cells; clients derive them.
     #[serde(default)]
     pub material: String,
     /// Stable opaque identity for remembering a disclosed cell.
@@ -172,14 +171,6 @@ pub struct CellView {
     pub wall: bool,
     /// Unnamed anchor hint, disclosed only with this cell; no area membership.
     pub place_hint: bool,
-}
-
-/// Perceived solid surface along a vertical column, not a movement affordance.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SurfaceView {
-    pub material: String,
-    /// Offset from this empty cell to the solid cell, in five-foot cubes.
-    pub distance: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

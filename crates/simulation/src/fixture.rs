@@ -112,7 +112,6 @@ impl Game {
                 .expect("valid fixture topology");
         }
         let mut game = Self::new(world, seed);
-        game.material_surfaces = enclosed;
         if doorway {
             // The hall shares storage with the entry room; its only floor is
             // (5,1). The flanking walls separate the rooms at every other row.

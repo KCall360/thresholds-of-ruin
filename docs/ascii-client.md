@@ -162,7 +162,7 @@ or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;
 text uses them as described in [the adventure interface](text-adventure.md).
 
 [Material volumes](material-volumes.md) add visible stone enclosure and a header
-with perceived floor material and ceiling height.
+with the floor material and ceiling height derived from seen solid cells.
 
 ## Responsiveness and diagnostic timing
 

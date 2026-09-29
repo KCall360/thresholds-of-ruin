@@ -667,7 +667,6 @@ impl Package {
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        game.set_material_surfaces(true);
         for r in &self.regions {
             let region = Region {
                 id: RegionId(r.id),

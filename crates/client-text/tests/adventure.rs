@@ -93,25 +93,33 @@ fn enclosure_prose_uses_disclosed_surfaces_and_does_not_invent_missing_ones() {
     for c in &mut s.observation.visible_cells {
         c.material.clear();
     }
-    let here = &mut s.observation.visible_cells[0];
-    here.floor = Some(SurfaceView {
-        material: "stone".into(),
-        distance: 1,
-    });
-    here.ceiling = Some(SurfaceView {
-        material: "stone".into(),
-        distance: 2,
-    });
+    // Floors and ceilings are seen solid cells: stone below the player, open
+    // headroom, then a stone ceiling two cells up.
+    let here = s.observation.visible_cells[0].clone();
+    let column = |dz: i32, wall: bool| CellView {
+        wall,
+        material: if wall { "stone".into() } else { String::new() },
+        key: format!("column{dz}"),
+        position: Position {
+            z: here.position.z + dz,
+            ..here.position
+        },
+        door: None,
+        ..here.clone()
+    };
+    s.observation
+        .visible_cells
+        .extend([column(-1, true), column(1, false), column(2, true)]);
     assert!(describe(&s).contains("stone floor"));
     let mut dialogue = Dialogue::default();
     assert!(
         matches!(dialogue.interpret("examine ceiling", &s), Intent::Say(text) if text.contains("stone"))
     );
-    s.observation.visible_cells[0].ceiling = None;
+    s.observation.visible_cells.retain(|c| c.key != "column2");
     assert!(
         matches!(dialogue.interpret("examine ceiling", &s), Intent::Say(text) if text == "You cannot see that here.")
     );
-    s.observation.visible_cells[0].floor = None;
+    s.observation.visible_cells.retain(|c| c.key != "column-1");
     assert!(!describe(&s).contains("floor."));
 }
 

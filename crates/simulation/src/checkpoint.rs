@@ -11,7 +11,6 @@ pub struct Snapshot {
     combat: crate::combat::CombatWorld,
     physics: crate::physics::Physics,
     world: usize,
-    material_surfaces: bool,
     navigation: BTreeMap<ActorId, usize>,
     seed: u64,
     tick: u64,
@@ -52,7 +51,6 @@ impl Game {
             combat: self.combat.clone(),
             physics: self.physics.clone(),
             world,
-            material_surfaces: self.material_surfaces,
             navigation: self
                 .navigation
                 .iter()
@@ -90,7 +88,6 @@ impl Game {
             combat: snapshot.combat,
             physics: snapshot.physics,
             world: Shared::new(shared.worlds.get(snapshot.world)?.clone()),
-            material_surfaces: snapshot.material_surfaces,
             navigation: snapshot
                 .navigation
                 .into_iter()

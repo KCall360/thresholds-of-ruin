@@ -117,10 +117,18 @@ objective references, with deterministic reactivation. Keep the 4d dungeon,
 checkpoint, retry, rewind, disclosure, and native-client acceptance tests
 passing, along with its performance requirements.
 
-**3s — three-dimensional sight (next, separate from 4e).** The design is accepted;
-see [three-dimensional sight](docs/sight-3d.md). Start with an exact reference
-implementation and its equivalence and reciprocity tests before any
-acceleration. A NetHack-style ASCII client redesign is deferred until after 3s.
+**3s — three-dimensional sight (in progress, separate from 4e).** See
+[three-dimensional sight](docs/sight-3d.md). Done on the `design/3d-sight`
+branch: the exact reference and accelerated builders, gameplay sight from
+declared body eye cells, authored door heights, and floors and ceilings as seen
+solid cells derived by clients. Next: view-delta observation updates, then the
+remaining client changes. A NetHack-style ASCII client redesign is deferred
+until after 3s.
+
+On this machine, rustc can run out of memory when other applications use most
+of it. If a build fails with "memory allocation failed", lower
+`CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
+build or test suite is running.
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the

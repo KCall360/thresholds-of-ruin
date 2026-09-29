@@ -70,8 +70,8 @@ initial control request and is not an access restriction.
 The protocol requires a backend-resolved observer-relative scene. Positions
 are x/y/z offsets, with the actor at the origin. Each `visible_cells` entry has an
 opaque `key`, `position`, `wall`, `stairs_up`, `stairs_down`, and `place_hint`, plus nullable `door` facts.
-Cells also carry terrain `material` (empty for carved voids) and nullable
-`floor`/`ceiling` surfaces; items include `description` and a
+Cells also carry terrain `material` (empty for carved voids). Floors and
+ceilings are ordinary seen solid cells, not separate facts; items include `description` and a
 `reachable` flag, and actors carry perceived `name` and `description`. These
 appearances are described in [the text adventure slice](text-adventure.md). The client receives no region IDs, bounds, names, portal links,
 transforms, or visited-region list. Move events report the chosen direction.
@@ -321,8 +321,8 @@ are private to their author so normal spectators do not receive hidden setup fac
 See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
 [travel](travel.md) for start/cancel requests and durable receipts, and
 [doors](doors.md) for observations, actions, events, and privileged placement.
-[Material volumes](material-volumes.md) describe nullable `floor` and `ceiling`
-surface facts and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
+[Material volumes](material-volumes.md) describe how clients derive floors and
+ceilings from seen solid cells, and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)
 describes the four diagonal directions and door reach.
 Only the current protocol, save format, and ruleset are supported; there are no
 historical rules implementations or save importers.

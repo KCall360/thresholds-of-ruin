@@ -68,8 +68,6 @@ pub struct ExitView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CellView {
     pub frame: u8,
-    pub floor: Option<(&'static str, u32)>,
-    pub ceiling: Option<(&'static str, u32)>,
     pub door: Option<tor_world::Door>,
     pub door_reachable: bool,
     pub door_approaches: Vec<Location>,
@@ -138,29 +136,10 @@ impl Game {
                 .door(location)
                 .is_some_and(|door| self.world.door_location(door.id) == Some(location))
         };
-        // A location can occur in several frames and at several distances.
-        // Index its best disclosed range once instead of rescanning the scene
-        // for every floor and ceiling probe.
-        let mut ranges = std::collections::BTreeMap::new();
-        for cell in scene {
-            let range = 8u32.saturating_sub(
-                cell.offset.x.unsigned_abs()
-                    + cell.offset.y.unsigned_abs()
-                    + cell.offset.z.unsigned_abs(),
-            );
-            ranges
-                .entry((cell.location, cell.rotation))
-                .and_modify(|old: &mut u32| *old = (*old).max(range))
-                .or_insert(range);
-        }
-        let surface = |location, direction: Direction, frame, range| {
-            if !self.material_surfaces {
-                return None;
-            }
-            self.world
-                .axis_surface(location, direction.rotated(frame), range)
-                .map(|(m, d)| (m.name(), d))
-        };
+        // A location can occur in several frames and at several distances;
+        // each (location, frame) pair is disclosed once. Floors and ceilings
+        // are ordinary seen solid cells, derived by clients.
+        let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
         for (&item_id, item) in self.items.iter() {
@@ -217,12 +196,10 @@ impl Game {
                 .expect("validated actor location")
                 .clone(),
             ground_items,
-            visible_cells: ranges
+            visible_cells: occurrences
                 .iter()
-                .map(|(&(location, frame), &range)| CellView {
+                .map(|&(location, frame)| CellView {
                     frame,
-                    floor: surface(location, Direction::Down, frame, range),
-                    ceiling: surface(location, Direction::Up, frame, range),
                     door: self.world.door(location),
                     // A tall door is one door: only its base cell is offered
                     // for interaction, so it isn't reachable twice.

@@ -22,7 +22,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
-| Perception | In progress (3s) | Three-dimensional sight from declared eye cells, disclosed surfaces and entities, opaque cell keys, stale client memory |
+| Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, background journal, checkpoints, replay, history and annotations |
 | Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
@@ -184,7 +184,8 @@ barriers and consistent crash rollback.
 
 A separate effort from 4e, in progress. Gameplay now uses 3D sight from each
 body's declared eye cell; the protocol, save format, ruleset and validator were
-bumped for it. Removing the surface facts, view deltas and client changes remain. It
+bumped for it. The separate floor and ceiling facts are gone; clients derive
+them from seen solid cells. View deltas and the remaining client changes remain. It
 replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
 with a single 3D rule for every observer. Sight lines start at a declared eye
 cell. Floors, ceilings and walls are ordinary seen solid cells, and only their

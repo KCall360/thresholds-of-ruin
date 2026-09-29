@@ -108,23 +108,18 @@ pub fn observation(
     let mut visible_cells = Vec::new();
     let mut ground_items = Vec::new();
     let mut visible_actors = Vec::new();
+    // 3D scenes hold about a thousand cells; index them once instead of
+    // scanning every visible cell for each scene cell.
+    let disclosed: std::collections::BTreeMap<_, _> = view
+        .visible_cells
+        .iter()
+        .map(|visible| ((visible.location, visible.frame), visible))
+        .collect();
     for cell in scene {
-        let Some(visible) = view
-            .visible_cells
-            .iter()
-            .find(|visible| visible.location == cell.location && visible.frame == cell.rotation)
-        else {
+        let Some(&visible) = disclosed.get(&(cell.location, cell.rotation)) else {
             continue;
         };
         visible_cells.push(p::CellView {
-            floor: visible.floor.map(|(material, distance)| p::SurfaceView {
-                material: material.into(),
-                distance,
-            }),
-            ceiling: visible.ceiling.map(|(material, distance)| p::SurfaceView {
-                material: material.into(),
-                distance,
-            }),
             door: visible.door.map(|door| p::DoorView {
                 id: door.id,
                 name: "wooden door".into(),

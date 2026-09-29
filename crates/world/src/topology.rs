@@ -457,44 +457,6 @@ impl World {
         self.chambers.contains_key(&region)
     }
 
-    /// Conservative vertical surface probe in allocated space. It follows no
-    /// stair teleport, stops at the first obstruction, and never invents a shell.
-    pub fn vertical_surface(
-        &self,
-        from: Location,
-        direction: Direction,
-        range: u32,
-    ) -> Option<(Material, u32)> {
-        if !matches!(direction, Direction::Up | Direction::Down) {
-            return None;
-        }
-        self.axis_surface(from, direction, range)
-    }
-    /// A finite material probe along an observer axis, without stair traversal.
-    pub fn axis_surface(
-        &self,
-        from: Location,
-        direction: Direction,
-        range: u32,
-    ) -> Option<(Material, u32)> {
-        if direction.components().is_some() || !self.walkable(from) {
-            return None;
-        }
-        let mut location = from;
-        let mut direction = direction;
-        for distance in 1..=range.min(16) {
-            let (next, rotation) = self.physics_neighbor(location, direction)?;
-            location = next;
-            direction = direction.rotated(rotation);
-            match self.terrain(location)? {
-                Terrain::Solid(material) => return Some((material, distance)),
-                Terrain::Empty if self.opaque(location) => return None,
-                Terrain::Empty => {}
-            }
-        }
-        None
-    }
-
     pub(crate) fn within_aperture_bounds(&self, location: Location) -> bool {
         self.chambers
             .get(&location.region)

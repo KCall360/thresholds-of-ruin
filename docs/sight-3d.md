@@ -3,10 +3,11 @@
 **Status: in progress.** This is its own effort,
 [3s](milestones.md#3s--three-dimensional-sight), separate from 4e. The maintainer
 has authorized the protocol and save-format break it requires. Every observer
-now sees with the model below, from the eye cell its body declares. Still to
-come: removing the separate `floor` and `ceiling` facts (see
-[material volumes](material-volumes.md)), view-delta updates, and client
-changes. When 3s is complete, this note becomes the sight guide.
+now sees with the model below, from the eye cell its body declares. Floors and
+ceilings are seen solid cells that clients classify (see
+[material volumes](material-volumes.md)). Still to come: view-delta updates and
+the remaining client changes. When 3s is complete, this note becomes the sight
+guide.
 
 ## Why the current model falls short
 

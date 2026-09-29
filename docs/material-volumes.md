@@ -36,26 +36,22 @@ independent, cell-sized barriers; this slice does not add multi-cell door bodies
 
 ## Perception and clients
 
-Sight is [three-dimensional](sight-3d.md). Disclosed cells carry nullable
-`floor` and `ceiling` facts, each with a material name and a
-positive `distance` in cells to the solid cell. A standard floor is at distance 1
-downward; its top face is at the actor's feet. A standard ceiling is at distance 2
-upward, placing its underside 10 feet above the actor's feet.
+Sight is [three-dimensional](sight-3d.md). Floors, ceilings and walls are
+ordinary seen solid cells, each with its `material`; the server sends no separate
+surface facts. Clients classify a seen solid cell by the open cells seen next to
+it: an open cell above makes it a floor, one below a ceiling, and one beside it a
+wall (`tor_client_common::surfaces`). A standard floor is the solid cell just below
+the actor's feet. A standard ceiling is two cells up, placing its underside 10
+feet above the actor's feet. A ceiling is only reported when every cell between
+it and the actor was seen open.
 
-These facts use bounded vertical column probes from disclosed empty cells, with
-the remaining eight-cell sight budget. Probes stop at the first solid material,
-closed barrier, range limit, or missing storage. They do not follow stair links or
-disclose hidden contents of upper cells. This is a surface-perception foundation,
-not a full three-dimensional field of view or an eye-height/body model. Repeated
-occurrences of a cell share its disclosed surface facts.
-
-Text describes the stone floor and walls and supports `examine floor`,
-`examine walls`, and `examine ceiling`. Examination reports the surfaces currently
-disclosed; seeing some ceiling does not imply a complete roof. ASCII displays
-walls around the map and floor/ceiling information above it, including the ceiling
-height above the actor's feet. All clients retain last-seen surfaces separately
-from current observations; headless output exposes that potentially stale memory.
-Revisiting refreshes surfaces, and rewind clears abandoned-future memory.
+Text describes the floor underfoot and the seen walls, and supports
+`examine floor`, `examine walls`, and `examine ceiling`. Examination reports the
+surfaces currently seen; seeing some ceiling does not imply a complete roof. ASCII
+displays walls around the map and floor/ceiling information above it, including
+the ceiling height above the actor's feet. All clients remember seen solid cells
+like any other cell, so remembered surfaces can be stale; headless output exposes
+that memory. Revisiting refreshes them, and rewind clears abandoned-future memory.
 
 The older `material` cell field now describes solid terrain in chambers; empty
 chamber cells have an empty string. Floors and ceilings use their own fields.
@@ -95,9 +91,10 @@ Ordinary vertical movement still requires an explicit stair or link; empty
 headroom doesn't grant upward movement. Start a new game after a format or rules
 update.
 
-World tests cover finite shells, unallocated space, vertical probe limits and
-barriers, and split/unsplit equivalence across ordinary and rotated joins.
-Simulation tests verify surfaces and free rejected vertical movement. Server tests
+World tests cover finite shells, unallocated space, seeing floors and ceilings
+through physical portals, and split/unsplit equivalence across ordinary and
+rotated joins. Simulation tests verify seen floor and ceiling cells and free
+rejected vertical movement. Server tests
 cover current rules, atomic setup, duplicate receipts, solid-cell rejection,
 rewind, and restart. Client tests cover surface prose and stale memory.
 `scripts/scenarios/material-volumes.json` and `scripts/test_material_process.py`
