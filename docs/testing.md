@@ -103,9 +103,14 @@ When you find or fix a bug:
 
 ## Cross-platform requirements
 
-- **CI:** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs every
-  check on `windows-latest` and `ubuntu-latest`. Both must pass before a PR is
-  merged.
+- **CI:** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the
+  build and test checks on `windows-latest` and `ubuntu-latest`, and the
+  platform-independent tooling and dependency checks once on `ubuntu-latest`.
+  All of them must pass before a PR is merged, except the dependency-advisory
+  check, which only warns on PRs so a newly published advisory doesn't block
+  unrelated work. CI also runs weekly on `main`,
+  so new advisories and stable-toolchain changes surface without waiting for
+  an unrelated PR.
 - **Graphical tests require a display.** Linux CI installs X11 libraries,
   Xvfb, xauth, and xdotool and runs the Python suites under
   `xvfb-run -a -s "-screen 0 1280x1024x24"`. Windows uses its native desktop.
@@ -143,7 +148,18 @@ PowerShell). To run the process tests against optimized binaries, set
 `TOR_TEST_PROFILE=release` and run `python -m unittest discover -s scripts -p "test_*process.py" -v`.
 Python is used only for development checks.
 
-What CI runs, on both platforms:
+The tooling and dependency checks use tools that aren't part of the Rust
+toolchain. Install the pinned versions from
+[`.github/requirements-lint.txt`](../.github/requirements-lint.txt), and
+`cargo-deny` with `cargo install cargo-deny --locked`, then run:
+
+```sh
+actionlint
+ruff check scripts
+cargo deny check
+```
+
+What CI runs on both platforms:
 
 | Step | Command |
 | --- | --- |
@@ -155,6 +171,15 @@ What CI runs, on both platforms:
 | Rust tests (debug) | `cargo test --workspace --locked` |
 | Rust tests (release) | `cargo test --workspace --release --locked` |
 | Release process tests | `TOR_TEST_PROFILE=release`, `test_*process.py` discovery |
+
+What CI runs once, on Linux:
+
+| Step | Command |
+| --- | --- |
+| Workflow lint | `actionlint` |
+| Python lint | `ruff check scripts` (bug-focused rules in [`ruff.toml`](../ruff.toml)) |
+| Dependency advisories | `cargo deny check advisories` (advisory-only on PRs; fails on `main` and the weekly run) |
+| Dependency policy | `cargo deny check bans licenses sources` (policy in [`deny.toml`](../deny.toml)) |
 
 If any check can't run locally, say so in the PR and explain why. CI is still
 required on the final commit before merging.

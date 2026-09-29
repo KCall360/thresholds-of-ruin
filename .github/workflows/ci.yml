@@ -5,15 +5,56 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly run on main catches new advisories and stable-toolchain changes
+  # without waiting for an unrelated pull request.
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  tooling:
+    name: Repository tooling lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned lint tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lint"
+          "$RUNNER_TEMP/lint/bin/pip" install --disable-pip-version-check -r .github/requirements-lint.txt
+          echo "$RUNNER_TEMP/lint/bin" >> "$GITHUB_PATH"
+      - name: Lint workflows
+        run: actionlint
+      - name: Lint Python tooling
+        run: ruff check scripts
+
+  dependencies:
+    name: Dependencies (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        checks: [advisories, bans licenses sources]
+    # A newly published advisory shouldn't block unrelated pull requests; it
+    # still fails pushes to main and the weekly scheduled run.
+    continue-on-error: ${{ matrix.checks == 'advisories' && github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check ${{ matrix.checks }}
+
   check:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -28,6 +69,11 @@ jobs:
           persist-credentials: false
       - name: Install stable Rust with formatting and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Only main writes the cache, so pull requests can't evict it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Configure Linux graphical test display
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev

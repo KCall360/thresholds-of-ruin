@@ -1,4 +1,3 @@
-from test_text_process import flush_save
 """Real native-window tests. Linux requires DISPLAY (use xvfb-run).
 
 Automation injects UI input events, not OS keystrokes. Frames are reported only
@@ -10,7 +9,7 @@ import subprocess
 import unittest
 
 import test_text_process as text_support
-from test_text_process import TOKEN, SPECTATOR_TOKEN
+from test_text_process import TOKEN, SPECTATOR_TOKEN, flush_save
 
 
 class AsciiProcesses(unittest.TestCase):

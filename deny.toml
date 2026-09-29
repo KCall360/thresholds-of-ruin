@@ -1,0 +1,41 @@
+# cargo-deny policy, checked in CI (see docs/testing.md).
+# Run locally with `cargo deny check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerable and unsound crates are always errors. Yanked releases too.
+yanked = "deny"
+ignore = [
+    # `instant` is unmaintained (not vulnerable). It comes only through
+    # `minifb` 0.28, the latest release, used by the native ASCII client.
+    # Remove this once minifb drops it.
+    { id = "RUSTSEC-2024-0384", reason = "unmaintained transitive dependency of minifb; no maintained release avoids it" },
+]
+
+[licenses]
+# Every license here must be compatible with this project's GPL-3.0-only
+# license. Crates offering a choice (for example `MIT OR Unlicense`) pass when
+# any alternative is allowed, so only licenses some dependency needs are listed.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+# Duplicate versions are reported but not fatal; they usually wait on upstream.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
