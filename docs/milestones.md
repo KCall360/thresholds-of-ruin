@@ -30,7 +30,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Authored scenarios | Complete (4a) | TOML packages, offline validation, pinned inputs |
 | Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
 | Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
-| Region streaming | In progress (4e) | Structural catalog and preload-horizon planning only |
+| Region streaming | In progress (4e) | Planning, region lifecycle and never-built regions; not used by the engine yet |
 | Performance (3p) | Deferred, open | See [performance plan](performance-persistence.md#open-work) |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
@@ -154,9 +154,12 @@ preload-horizon queries, and a read-only authoring command. The second defines
 the [region lifecycle contract](region-streaming.md#region-lifecycle-contract)
 and implements it in the simulation: reference points (not hardcoded to
 players), pins, frozen time without catch-up, and detaching regions into
-self-contained records that reattach exactly. The engine doesn't use either
-yet. Disk storage of region records, engine wiring, generation and palette
-delivery aren't implemented; see [later slices](region-streaming.md#later-slices).
+self-contained records that reattach exactly, kept in a record store. A game
+can also start with no region built: a scenario package builds each region
+when it's first loaded, with the same result as building everything at once.
+The engine doesn't use any of this yet. Disk storage of region records,
+engine wiring, generation and palette delivery aren't implemented; see
+[later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only
 through fixed structural metadata. Activation within the preload horizon

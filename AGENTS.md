@@ -99,7 +99,7 @@ preload-horizon planning, the `tor-scenario horizon` command, and the
 `horizon-profile` example. See [region streaming foundations](docs/region-streaming.md).
 Ordinary games still activate every region, and no format bump was needed.
 
-In review on the `design/region-lifecycle` branch: the
+Merged (PR #44): the
 [region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract),
 implemented in the simulation. Decisions, agreed with the maintainer:
 
@@ -117,10 +117,8 @@ implemented in the simulation. Decisions, agreed with the maintainer:
   unchanged. The on-disk save layout is designed in the doc; building it is
   the next slice, with **one save-format bump the maintainer has agreed to**.
 
-Next: wait for CI on its PR and **merge only with the maintainer's approval**.
-
-**Disk streaming plan** (agreed 2026-09-29; one PR per phase, stacked on
-`design/region-lifecycle` until it merges):
+**Disk streaming plan** (agreed 2026-09-29; one PR per phase, stacked in
+order on `main`):
 
 - Only *detached* regions get disk rows, keyed by a record ID the game
   allocates, so replay and checkpoint retries reproduce them byte for byte.
@@ -133,9 +131,12 @@ Next: wait for CI on its PR and **merge only with the maintainer's approval**.
   region's source into the save when it's first built.
 - Phases:
   0. range-based detach/attach, per-region sight invalidation, and record
-     validation at attach (branch `design/region-streaming-prep`);
-  1. record IDs and a record-store interface;
-  2. unbuilt regions and region sources;
+     validation at attach (done, branch `design/region-streaming-prep`);
+  1. record IDs and a record-store interface (done, branch
+     `design/region-record-store`);
+  2. unbuilt regions and region sources (done, branch
+     `design/region-sources`); the maintainer asked to keep going without
+     opening PRs yet;
   3. disk rows and the one format bump (12 → 13), which also replaces the
      stale `user_version=11` in `storage.rs`;
   4. engine wiring and bounded startup; default points must come from the

@@ -1,15 +1,18 @@
 # Region streaming foundations
 
-Milestone 4e is in progress. Two slices are implemented:
+Milestone 4e is in progress. These parts are implemented:
 
-- a backend structural catalog and preload-horizon planner (below), and
+- a backend structural catalog and preload-horizon planner (below);
 - the [region lifecycle](#region-lifecycle-contract) in `tor-simulation`:
   reference points, frozen time, pins, and detaching regions into
-  self-contained records.
+  self-contained records kept in a record store;
+- [never-built regions](#never-built-regions-and-region-sources): a game can
+  start with no region built, and a scenario package builds each region when
+  it's first loaded.
 
-The engine doesn't use either yet: runtime games still construct and activate
-every authored region. Disk storage of region records, engine wiring,
-on-demand generation and client asset-palette delivery are
+The engine doesn't use any of this yet: runtime games still construct and
+activate every authored region. Disk storage of region records, engine
+wiring, generation and client asset-palette delivery are
 [later slices](#later-slices).
 
 ## Inspect a horizon
@@ -103,8 +106,10 @@ freezes, and saves are byte-identical.
 
 ### Region states
 
-A known region is in one of three states:
+A known region is in one of four states:
 
+- **Unbuilt:** known from its metadata only, because nothing has needed it
+  yet. See [never-built regions](#never-built-regions-and-region-sources).
 - **Active:** simulated.
 - **Frozen:** loaded in memory, with time stopped.
 - **Detached:** held as a self-contained region record, with time stopped.
@@ -194,6 +199,45 @@ deterministic; it isn't required to match an unstreamed game exactly.
   no observer can see it.
 - Checkpoint validation measures a frozen actor against its stamp rather than
   the current tick.
+
+### Never-built regions and region sources
+
+A game can start knowing every region without building any. An unbuilt
+region has metadata (name and bounds) and the identities it will hold, and
+nothing else. Loading it for the first time builds it:
+
+- `Game::add_unbuilt_region` declares a region with the actors, items and
+  doors it will hold. Those identities go into the identity directory, so
+  references to them (the objective's item, a character) are checkable, and
+  the id allocators move past them.
+- A transition that loads an unbuilt region asks its record store to build
+  the region's starting record (`RecordStore::build`), then attaches it like
+  a detached record, frozen. Attaching checks that the record holds exactly
+  the declared identities. `TransitionReport::built` lists the regions built.
+- A starting record's actors carry freeze stamps of zero, so a region's time
+  starts when it's first active; nothing catches up.
+- After building regions, a transition checks the objective, since a
+  character may start where it's met, as it would if everything had been
+  built at once.
+- Run characters and actors awaiting input may be unbuilt or detached; pins
+  make an actor awaiting input active before it acts.
+
+For scenario packages, `Package::start` declares every region unbuilt and
+configures the run; `Package::build_region` builds one region's record. It
+builds the region in a scratch game that holds the region and its
+neighbours' geometry, so links and entities are checked exactly as building
+the whole package checks them, then takes the record with
+`Game::into_region_record`. It reads only that region's definition and its
+neighbours' walls, so the result doesn't depend on which regions were built
+before. Authored identities are fixed by the package, so building lazily
+doesn't renumber anything.
+
+A server test builds every checked-in package region by region, for two
+seeds and three build orders, and checks that the result equals building
+the whole package at once.
+
+The engine still builds everything when a game starts. Building only the
+regions the first transition needs is part of the engine wiring slice.
 
 ### Region records and identity
 
@@ -291,26 +335,24 @@ horizon per boundary matter.
 
 ### Later slices
 
-1. **Never-built regions and region sources.** A region that has never been
-   needed has no state at all: the world knows it from structural metadata
-   only. A region source (the scenario package now, a generator later) builds
-   one region's starting record just before it's loaded. A region's content
-   mustn't depend on the order regions were built in, so each region gets its
-   own random seed.
-2. **Record rows on disk** (the layout above) and the one save-format bump.
+1. **Record rows on disk** (the layout above) and the one save-format bump.
    The save pins the scenario package by manifest hash instead of embedding
    it, and copies each region's source into the save when the region is first
-   built. A save opened with a different package fails closed.
-3. **Engine wiring:** transitions after every committed command, so replay,
+   built, with its neighbours' walls that building reads. A save opened with
+   a different package fails closed.
+2. **Engine wiring:** transitions after every committed command, so replay,
    checkpoints and rewind see them; default reference points for the actors
    the engine controls (packages without combat have no run characters, so
    points can't come only from `combat.characters`); load and active radii;
    building only the regions the first transition needs, which bounds save
    creation and startup by the horizon rather than the world.
-4. **Background preloading, reconnect and gap snapshots.**
-5. **Large scenarios and generation:** per-region package files with a
+3. **Background preloading, reconnect and gap snapshots.**
+4. **Large scenarios and generation:** per-region package files with a
    manifest, lifting the 256-region limit, and a procedural region source.
-6. **Asset palettes.**
+   A generated region's content mustn't depend on the order regions were
+   built in, so each region gets its own random seed; generated identities
+   come from the game-wide allocators, which replay reproduces.
+5. **Asset palettes.**
 
 ### Lifecycle verification
 
@@ -326,8 +368,12 @@ horizon per boundary matter.
   - checkpoint round trips while frozen and detached, and ordinary saves
     without lifecycle fields.
 - Unit tests in `streaming.rs` check that AI memory can't expire while
-  frozen, and that attaching a record that disagrees with the directory is
-  rejected with the game unchanged.
+  frozen; that attaching a record that disagrees with the directory, or a
+  record the store can't provide, is rejected with the game unchanged; that
+  records reach the store only when a transition succeeds; that record
+  identities stay unique across a rewind; and that unbuilt regions build
+  from their source, reject a source that loses a declared identity, and
+  can't declare an identity already in use.
 - `crates/world/tests/sight_cache.rs` detaches and reattaches random regions
   of world clones between random views and edits, and checks every cached
   scene against an uncached one. Another test checks which scenes a detach or

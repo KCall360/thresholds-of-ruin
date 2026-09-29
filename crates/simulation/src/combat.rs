@@ -114,20 +114,16 @@ impl CombatWorld {
 
 impl Game {
     pub(crate) fn combat_valid(&self) -> bool {
-        if self
-            .combat
-            .input_boundaries
-            .iter()
-            .any(|id| !self.actors.contains_key(id))
-        {
-            return false;
-        }
-        // Characters may be detached like anyone else; reference points, not
-        // these checks, decide what stays loaded.
+        // Characters may be detached, or not built yet, like anyone else;
+        // reference points and pins, not these checks, decide what's loaded.
+        // (A pin keeps every actor awaiting input active once a transition
+        // has run.)
         let known = |id: &ActorId| self.actors.contains_key(id) || self.detached_actor(*id);
-        self.combat
-            .selected
-            .is_none_or(|id| known(&id) && self.combat.characters.contains(&id))
+        self.combat.input_boundaries.iter().all(known)
+            && self
+                .combat
+                .selected
+                .is_none_or(|id| known(&id) && self.combat.characters.contains(&id))
             && self.combat.characters.iter().all(known)
             && self.combat.objective.as_ref().is_none_or(|o| {
                 self.world.knows(o.anchor)
@@ -301,10 +297,9 @@ impl Game {
         objective: Option<Objective>,
         hostility: BTreeMap<String, BTreeSet<String>>,
     ) -> Result<(), GameError> {
-        if !self.actors.contains_key(&selected)
-            || !characters.contains(&selected)
-            || characters.iter().any(|id| !self.actors.contains_key(id))
-        {
+        // Characters may be in regions that are detached or not built yet.
+        let known = |id: &ActorId| self.actors.contains_key(id) || self.detached_actor(*id);
+        if !known(&selected) || !characters.contains(&selected) || !characters.iter().all(known) {
             return Err(GameError::UnknownActor);
         }
         self.combat.selected = Some(selected);

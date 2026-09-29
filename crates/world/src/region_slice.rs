@@ -161,6 +161,28 @@ impl World {
                 .is_some_and(|region| region.bounds.contains(location.position))
     }
 
+    /// Know a region that hasn't been built: like a detached region, its
+    /// metadata is here and its content arrives later as a [`RegionSlice`].
+    /// A chamber's stored bounds include its stone shell, as
+    /// [`World::add_chamber`] makes them.
+    pub fn add_unbuilt_region(
+        &mut self,
+        mut region: Region,
+        chamber: bool,
+    ) -> Result<(), WorldError> {
+        if self.knows_region(region.id) {
+            return Err(WorldError::DuplicateRegion);
+        }
+        if chamber {
+            region.bounds = region
+                .bounds
+                .with_shell()
+                .ok_or(WorldError::InvalidEndpoint)?;
+        }
+        self.absent.insert(region.id, region);
+        Ok(())
+    }
+
     /// Loaded regions, in id order.
     pub fn loaded_regions(&self) -> impl Iterator<Item = RegionId> + '_ {
         self.regions.keys().copied()

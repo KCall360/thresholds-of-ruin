@@ -9,7 +9,7 @@ use crate::travel::Navigation;
 use crate::{Actor, ActorId, Game, GameError, Impact, Item, ItemId, ItemLocation, PhysicsEntity};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use tor_world::{Direction, Location, RegionId, RegionSlice, Shared};
+use tor_world::{Direction, Location, Region, RegionId, RegionSlice, Shared};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -59,6 +59,9 @@ pub enum RegionState {
     Frozen,
     /// Held as a record, with time stopped.
     Detached,
+    /// Known from its metadata only: never needed, so never built. A
+    /// [`RecordStore`] builds its starting record when it's first loaded.
+    Unbuilt,
 }
 
 /// Region sets after a transition. `active` must be a subset of `loaded`;
@@ -73,6 +76,8 @@ pub struct RegionTransition {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransitionReport {
     pub attached: Vec<RegionId>,
+    /// The attached regions that were unbuilt, built from their source.
+    pub built: Vec<RegionId>,
     pub frozen: Vec<RegionId>,
     pub thawed: Vec<RegionId>,
     pub detached: Vec<RegionId>,
@@ -109,6 +114,24 @@ pub trait RecordStore {
     fn put(&mut self, id: RecordId, record: Shared<RegionRecord>);
     /// The record kept under `id`, or `None` if it can't be provided.
     fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>>;
+    /// The starting record of an unbuilt region, from its source (a
+    /// scenario package, say). It must depend only on the source, never on
+    /// which regions were built before, and its actors must carry freeze
+    /// stamps of zero, so the region's time starts when it's first active;
+    /// see [`Game::into_region_record`]. `None` if this store has no source.
+    fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
+        let _ = region;
+        None
+    }
+}
+
+/// The identities an unbuilt region will hold once built, declared by its
+/// source in advance so references to them stay checkable.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegionIdentities {
+    pub actors: BTreeSet<ActorId>,
+    pub items: BTreeSet<ItemId>,
+    pub doors: BTreeSet<u64>,
 }
 
 /// Records kept in memory.
@@ -230,7 +253,10 @@ pub(crate) struct Lifecycle {
     /// Each detached region's record, kept in a [`RecordStore`].
     detached: BTreeMap<RegionId, RecordId>,
     next_record: u64,
-    /// Shared, so cloning a game doesn't copy every detached identity.
+    /// Regions known from metadata only, never built.
+    unbuilt: BTreeSet<RegionId>,
+    /// Identities in detached and unbuilt regions. Shared, so cloning a game
+    /// doesn't copy them.
     directory: Shared<Directory>,
 }
 
@@ -243,6 +269,7 @@ impl Default for Lifecycle {
             stamps: BTreeMap::new(),
             detached: BTreeMap::new(),
             next_record: 1,
+            unbuilt: BTreeSet::new(),
             directory: Shared::default(),
         }
     }
@@ -348,7 +375,9 @@ impl Game {
     }
 
     pub fn region_state(&self, region: RegionId) -> Option<RegionState> {
-        if self.lifecycle.detached.contains_key(&region) {
+        if self.lifecycle.unbuilt.contains(&region) {
+            Some(RegionState::Unbuilt)
+        } else if self.lifecycle.detached.contains_key(&region) {
             Some(RegionState::Detached)
         } else if self.world.region(region).is_none() {
             None
@@ -682,10 +711,15 @@ impl Game {
         let attach: Vec<_> = t
             .loaded
             .iter()
-            .filter(|r| next.lifecycle.detached.contains_key(r))
+            .filter(|r| {
+                next.lifecycle.detached.contains_key(r) || next.lifecycle.unbuilt.contains(r)
+            })
             .copied()
             .collect();
         for region in attach {
+            if next.lifecycle.unbuilt.contains(&region) {
+                report.built.push(region);
+            }
             next.attach_record(region, records)?;
             report.attached.push(region);
         }
@@ -720,6 +754,11 @@ impl Game {
         if let Some(region) = need.loaded.difference(&t.loaded).next() {
             return Err(TransitionError::MustBeLoaded(*region));
         }
+        if !report.built.is_empty() {
+            // A character may start where the objective is met, as it would
+            // have if everything had been built at once.
+            next.check_objective();
+        }
         if !report.frozen.is_empty() {
             next.advance_to_next_decision();
         }
@@ -746,6 +785,84 @@ impl Game {
     /// Each detached region with its record's identity, in region order.
     pub fn detached_records(&self) -> impl Iterator<Item = (RegionId, RecordId)> + '_ {
         self.lifecycle.detached.iter().map(|(r, id)| (*r, *id))
+    }
+
+    /// Know a region that isn't built yet, with the identities it will hold.
+    /// Scenario setup only: the region is built from its source when it's
+    /// first loaded, and those identities stay reserved until then, so
+    /// references to them (an objective item, a character) are checkable.
+    pub fn add_unbuilt_region(
+        &mut self,
+        region: Region,
+        chamber: bool,
+        identities: RegionIdentities,
+    ) -> Result<(), GameError> {
+        let id = region.id;
+        let directory = &self.lifecycle.directory;
+        let taken = identities
+            .actors
+            .iter()
+            .any(|a| a.0 == 0 || self.actors.contains_key(a) || directory.actors.contains_key(a))
+            || identities
+                .items
+                .iter()
+                .any(|i| i.0 == 0 || self.items.contains_key(i) || directory.items.contains_key(i))
+            || identities.doors.iter().any(|d| {
+                *d == 0 || self.world.door_location(*d).is_some() || directory.doors.contains_key(d)
+            });
+        let next = |ids: &mut dyn Iterator<Item = u64>, current: u64| {
+            ids.max().map_or(Some(current), |max| {
+                max.checked_add(1).map(|n| n.max(current))
+            })
+        };
+        let (Some(next_actor), Some(next_item), Some(next_door)) = (
+            next(
+                &mut identities.actors.iter().map(|a| a.0),
+                self.next_actor_id,
+            ),
+            next(&mut identities.items.iter().map(|i| i.0), self.next_item_id),
+            next(&mut identities.doors.iter().copied(), self.next_door_id),
+        ) else {
+            return Err(GameError::IdentityExhausted);
+        };
+        if taken {
+            return Err(GameError::IdentityExhausted);
+        }
+        let mut world = (*self.world).clone();
+        world
+            .add_unbuilt_region(region, chamber)
+            .map_err(|_| GameError::InvalidLocation)?;
+        self.world = Shared::new(world);
+        let directory = &mut self.lifecycle.directory;
+        directory
+            .actors
+            .extend(identities.actors.iter().map(|a| (*a, id)));
+        directory
+            .items
+            .extend(identities.items.iter().map(|i| (*i, id)));
+        directory
+            .doors
+            .extend(identities.doors.iter().map(|d| (*d, id)));
+        self.lifecycle.unbuilt.insert(id);
+        (self.next_actor_id, self.next_item_id, self.next_door_id) =
+            (next_actor, next_item, next_door);
+        Ok(())
+    }
+
+    /// Turn a loaded region of this game into a starting record for
+    /// [`RecordStore::build`]. A region source builds the region in a
+    /// scratch game (with its neighbours' geometry, so its links check) at
+    /// tick zero, then takes its record here: the region freezes at tick
+    /// zero, so its time starts when it's first active.
+    pub fn into_region_record(mut self, region: RegionId) -> Result<RegionRecord, GameError> {
+        if self.world.region(region).is_none() || self.tick != 0 {
+            return Err(GameError::InvalidLocation);
+        }
+        self.freeze_region(region);
+        let (_, record) = self
+            .detach_record(region)
+            .map_err(|_| GameError::InvalidLocation)?;
+        Ok((*record).clone())
     }
 
     /// Detach a loaded region, returning its new record for the store.
@@ -829,12 +946,16 @@ impl Game {
         records: &mut dyn RecordStore,
     ) -> Result<(), TransitionError> {
         let invalid = TransitionError::InvalidRecord(region);
-        let id = self.lifecycle.detached.remove(&region).ok_or(invalid)?;
-        let record = records
-            .get(id)
-            .ok_or(TransitionError::RecordUnavailable(region))?;
+        let unavailable = TransitionError::RecordUnavailable(region);
+        let record = if self.lifecycle.unbuilt.remove(&region) {
+            Shared::new(records.build(region).ok_or(unavailable)?)
+        } else {
+            let id = self.lifecycle.detached.remove(&region).ok_or(invalid)?;
+            records.get(id).ok_or(unavailable)?
+        };
         // Checked here, not only on restore, because restore never reads
-        // records.
+        // records, and a built record must hold exactly the identities its
+        // source declared.
         if !record.valid_contents(region, self.tick)
             || !record.matches_directory(region, &self.lifecycle.directory)
         {
@@ -909,16 +1030,26 @@ impl Game {
                 .items
                 .extend(record.items.keys().map(|id| (*id, *region)));
             record.valid_contents(*region, self.tick)
-        }) && expected == *l.directory
+        }) && {
+            // Unbuilt regions' identities are declared, not recorded.
+            let recorded = |r: &RegionId| !l.unbuilt.contains(r);
+            let mut directory = (*l.directory).clone();
+            directory.actors.retain(|_, r| recorded(r));
+            directory.items.retain(|_, r| recorded(r));
+            directory.doors.retain(|_, r| recorded(r));
+            expected == directory
+        }
     }
 
     /// Game-wide lifecycle invariants, checked when a game is restored.
     /// Doesn't read records, which may be stored elsewhere.
     pub(crate) fn lifecycle_state_valid(&self) -> bool {
         let l = &self.lifecycle;
-        let detached = |region: &RegionId| l.detached.contains_key(region);
+        let detached =
+            |region: &RegionId| l.detached.contains_key(region) || l.unbuilt.contains(region);
         let mut ids = BTreeSet::new();
         l.next_record > 0
+            && l.unbuilt.iter().all(|r| !l.detached.contains_key(r))
             && l.detached
                 .values()
                 .all(|id| id.0 > 0 && id.0 < l.next_record && ids.insert(*id))
@@ -936,7 +1067,12 @@ impl Game {
             && l.directory.doors.keys().all(|door| {
                 self.world.door_location(*door).is_none() && *door > 0 && *door < self.next_door_id
             })
-            && l.detached.keys().copied().eq(self.world.detached_regions())
+            && self.world.detached_regions().eq(l
+                .detached
+                .keys()
+                .chain(&l.unbuilt)
+                .copied()
+                .collect::<BTreeSet<_>>())
             && l.frozen.iter().all(|r| self.world.region(*r).is_some())
             && l.next_point > 0
             && l.points.keys().all(|id| id.0 > 0 && id.0 < l.next_point)
@@ -1122,5 +1258,112 @@ mod tests {
             .detached_records()
             .all(|(_, id)| !later.contains(&id)));
         assert!(rewound.lifecycle_state_valid());
+    }
+
+    /// Builds regions from a fully built template game, as a scenario
+    /// package would.
+    struct TemplateSource {
+        template: Game,
+        records: MemoryRecords,
+        /// Drop this actor from built records, as a faulty source might.
+        lose: Option<ActorId>,
+    }
+
+    impl RecordStore for TemplateSource {
+        fn put(&mut self, id: RecordId, record: Shared<RegionRecord>) {
+            self.records.put(id, record);
+        }
+        fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
+            self.records.get(id)
+        }
+        fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
+            let mut record = self.template.clone().into_region_record(region).ok()?;
+            if let Some(lost) = self.lose {
+                record.actors.remove(&lost);
+                record.stamps.remove(&lost);
+            }
+            Some(record)
+        }
+    }
+
+    /// A four-region corridor with an actor in region 3, and the same game
+    /// with every region unbuilt.
+    fn unbuilt_corridor() -> (Game, Game, ActorId) {
+        let mut template = Game::region_corridor(1, 4);
+        let far = template
+            .spawn_actor(
+                Location {
+                    region: RegionId(3),
+                    position: Position { x: 5, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let mut game = Game::new(tor_world::World::new(vec![], vec![]).unwrap(), 1);
+        for id in 1..=4 {
+            let region = template.world.region(RegionId(id)).unwrap().clone();
+            let mut identities = RegionIdentities::default();
+            if id == 3 {
+                identities.actors.insert(far);
+            }
+            game.add_unbuilt_region(region, false, identities).unwrap();
+        }
+        (template, game, far)
+    }
+
+    #[test]
+    fn unbuilt_regions_build_from_their_source() {
+        let (template, mut game, far) = unbuilt_corridor();
+        assert_eq!(game.region_state(RegionId(3)), Some(RegionState::Unbuilt));
+        assert!(game.lifecycle_state_valid());
+        assert!(game.detached_actor(far), "declared identities are reserved");
+        let mut source = TemplateSource {
+            template: template.clone(),
+            records: MemoryRecords::default(),
+            lose: None,
+        };
+        let (_, report) = game
+            .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut source)
+            .unwrap();
+        assert_eq!(report.built, report.attached);
+        assert_eq!(report.built.len(), 4);
+        assert_eq!(game, template);
+    }
+
+    #[test]
+    fn building_needs_a_source_that_keeps_its_declared_identities() {
+        let (template, game, far) = unbuilt_corridor();
+        let all = sets(&[1, 2, 3, 4], &[1, 2, 3, 4]);
+
+        let mut nothing = MemoryRecords::default();
+        let mut unchanged = game.clone();
+        let error = unchanged
+            .transition_regions(&all, &mut nothing)
+            .unwrap_err();
+        assert_eq!(error, TransitionError::RecordUnavailable(RegionId(1)));
+        assert_eq!(unchanged, game);
+
+        let mut faulty = TemplateSource {
+            template,
+            records: MemoryRecords::default(),
+            lose: Some(far),
+        };
+        let error = unchanged.transition_regions(&all, &mut faulty).unwrap_err();
+        assert_eq!(error, TransitionError::InvalidRecord(RegionId(3)));
+        assert_eq!(unchanged, game);
+    }
+
+    #[test]
+    fn an_unbuilt_region_cannot_declare_an_identity_in_use() {
+        let (template, mut game, far) = unbuilt_corridor();
+        let mut region = template.world.region(RegionId(1)).unwrap().clone();
+        region.id = RegionId(5);
+        let identities = RegionIdentities {
+            actors: BTreeSet::from([far]),
+            ..Default::default()
+        };
+        let before = game.clone();
+        assert!(game.add_unbuilt_region(region, false, identities).is_err());
+        assert_eq!(game, before);
     }
 }
