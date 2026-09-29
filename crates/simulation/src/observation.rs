@@ -292,13 +292,45 @@ impl Game {
         scene: &[tor_world::SightCell],
         door: Location,
     ) -> Vec<Location> {
+        self.door_approaches_among(scene, door, true)
+    }
+
+    /// With `filtered`, only cells beside an occurrence of the door are
+    /// considered. Tests compare that against considering every cell.
+    fn door_approaches_among(
+        &self,
+        scene: &[tor_world::SightCell],
+        door: Location,
+        filtered: bool,
+    ) -> Vec<Location> {
         let mut approaches = BTreeSet::new();
+        // An approach needs the door seen one horizontal step away, so only
+        // cells beside one of its occurrences can qualify. Checking that first
+        // skips only candidates the final test below would reject.
+        let doors: Vec<Position> = scene
+            .iter()
+            .filter(|cell| cell.location == door)
+            .map(|cell| cell.offset)
+            .collect();
         for from in scene {
-            if !self.world.walkable(from.location) {
+            let beside = |x: i32, y: i32| {
+                let target = Position {
+                    x: from.offset.x + x,
+                    y: from.offset.y + y,
+                    z: from.offset.z,
+                };
+                doors.contains(&target)
+            };
+            if filtered && !(-1..=1).any(|x| (-1..=1).any(|y| (x, y) != (0, 0) && beside(x, y)))
+                || !self.world.walkable(from.location)
+            {
                 continue;
             }
             for direction in Direction::HORIZONTAL {
                 let (dx, dy, _) = direction.delta();
+                if filtered && !beside(dx, dy) {
+                    continue;
+                }
                 let local = direction.rotated(from.rotation);
                 let reach = if let Some((a, b)) = direction.components() {
                     self.world.diagonal_reach(from.location, local, |side| {
@@ -416,4 +448,114 @@ fn item_description(name: &str) -> String {
         _ => "You notice no further distinguishing details.",
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::num::NonZeroU64;
+    use tor_world::{Extent, Passage, World};
+
+    fn at(region: u64, x: i32, y: i32) -> Location {
+        Location {
+            region: RegionId(region),
+            position: Position { x, y, z: 0 },
+        }
+    }
+
+    #[test]
+    fn door_approaches_ignore_only_cells_away_from_the_door() {
+        let (mut compared, mut found) = (0, 0);
+        for seed in 1..=24u64 {
+            let mut state = 0x9E37_79B9_7F4A_7C15 ^ seed;
+            let mut below = |n: u64| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state % n
+            };
+            let rooms = (1..=2)
+                .map(|id| Region {
+                    id: RegionId(id),
+                    name: String::new(),
+                    bounds: Extent::new(7, 7, 1).unwrap(),
+                })
+                .collect();
+            let mut world = World::new(rooms, vec![]).unwrap();
+            // A straight join and a rotated one, as in the latency fixture.
+            for (from, direction, to, back, turns) in [
+                (
+                    at(1, 6, 3),
+                    Direction::East,
+                    at(2, 0, 3),
+                    Direction::West,
+                    0,
+                ),
+                (
+                    at(1, 3, 0),
+                    Direction::North,
+                    at(2, 0, 5),
+                    Direction::West,
+                    1,
+                ),
+            ] {
+                world
+                    .connect(
+                        Passage {
+                            from,
+                            direction,
+                            to,
+                        },
+                        turns,
+                    )
+                    .unwrap();
+                world
+                    .connect(
+                        Passage {
+                            from: to,
+                            direction: back,
+                            to: from,
+                        },
+                        (4 - turns) % 4,
+                    )
+                    .unwrap();
+            }
+            let cell = |below: &mut dyn FnMut(u64) -> u64| {
+                at(1 + below(2), below(7) as i32, below(7) as i32)
+            };
+            for _ in 0..12 {
+                let _ = world.set_wall(cell(&mut below), true);
+            }
+            let mut game = Game::new(world, seed);
+            for _ in 0..8 {
+                let _ = game.place_door(cell(&mut below), below(2) == 0, 1);
+            }
+            for _ in 0..4 {
+                let _ = game.spawn_actor(cell(&mut below), NonZeroU64::new(100).unwrap());
+            }
+            for _ in 0..16 {
+                let eye = cell(&mut below);
+                let scene = game.world.eye_scene(eye, below(4) as u8, SIGHT_RANGE);
+                let doors: BTreeSet<_> = scene
+                    .iter()
+                    .map(|c| c.location)
+                    .filter(|&at| game.world.door(at).is_some())
+                    .collect();
+                for door in doors {
+                    let approaches = game.door_approaches_among(&scene, door, true);
+                    assert_eq!(
+                        approaches,
+                        game.door_approaches_among(&scene, door, false),
+                        "seed {seed}: eye {eye:?}, door {door:?}"
+                    );
+                    compared += 1;
+                    found += approaches.len();
+                }
+            }
+        }
+        assert!(
+            compared > 200 && found > 200,
+            "{compared} doors, {found} approaches"
+        );
+    }
 }

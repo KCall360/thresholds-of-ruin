@@ -611,7 +611,7 @@ fn abstract_stair_links_are_not_seen_through() {
 
 fn assert_matches_reference(world: &World, eye: Location, frame: u8, radius: u8, context: &str) {
     assert_eq!(
-        world.eye_scene(eye, frame, radius),
+        world.eye_scene_uncached(eye, frame, radius),
         world.eye_scene_reference(eye, frame, radius),
         "{context}: eye {eye:?}, frame {frame}, radius {radius}"
     );

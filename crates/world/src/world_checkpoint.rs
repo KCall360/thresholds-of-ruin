@@ -31,6 +31,7 @@ fn same_geometry(a: &World, b: &World) -> bool {
         terrain,
         chambers,
         place_hints,
+        sight: _,
     } = a;
     regions == &b.regions
         && passages == &b.passages
@@ -57,6 +58,7 @@ pub fn serialize<S: Serializer>(worlds: &[World], serializer: S) -> Result<S::Ok
                 .unwrap_or_else(|| {
                     let mut base = world.clone();
                     base.doors.clear();
+                    base.sight.topology_changed();
                     geometry.push(base);
                     geometry.len() - 1
                 });
@@ -94,7 +96,10 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Wor
                 .get(instance.geometry)
                 .cloned()
                 .ok_or_else(|| serde::de::Error::custom("unknown checkpoint geometry"))?;
+            // Instances of one geometry differ in their doors, so each needs
+            // its own sight versions.
             world.doors = Shared::new(instance.doors);
+            world.sight.topology_changed();
             Ok(world)
         })
         .collect()

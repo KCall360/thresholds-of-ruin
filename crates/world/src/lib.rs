@@ -100,4 +100,5 @@ pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};
 
 mod sight3d;
 mod sight3d_fast;
+mod sight_cache;
 mod volume_scene;

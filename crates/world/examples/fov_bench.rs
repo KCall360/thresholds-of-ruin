@@ -1,6 +1,7 @@
 //! Run with cargo run -p tor-world --release --example fov_bench.
 //! Measures complete scene construction, including topology and sorting, for the
-//! 2D shadowcasting, voxel height-slice, and reference 3D sight builders.
+//! 2D shadowcasting, voxel height-slice, and reference and accelerated 3D sight
+//! builders. `eye_reused` times a scene served from the cache.
 use std::{hint::black_box, time::Instant};
 use tor_world::{
     Direction, Extent, Location, Passage, Position, Region, RegionId, SightCell, World,
@@ -107,6 +108,7 @@ fn main() {
                 .unwrap();
         }
     }
+    let fixture = latency_fixture(5);
     println!("scenario,radius,builder,mean_us");
     let planar = [
         ("open", open, at(1, 32, 32)),
@@ -119,7 +121,9 @@ fn main() {
             report(name, radius, "shadow", || {
                 world.shadow_scene(*origin, 0, radius)
             });
-            report(name, radius, "eye", || world.eye_scene(*origin, 0, radius));
+            report(name, radius, "eye", || {
+                world.eye_scene_uncached(*origin, 0, radius)
+            });
         }
     }
     for (name, world, feet, eye) in [
@@ -140,11 +144,92 @@ fn main() {
     ] {
         report(name, 8, "shadow", || world.shadow_scene(feet, 0, 8));
         report(name, 8, "volume", || world.volume_scene(feet, 0, 8));
-        report(name, 8, "eye", || world.eye_scene(eye, 0, 8));
+        report(name, 8, "eye", || world.eye_scene_uncached(eye, 0, 8));
         report(name, 8, "eye_reference", || {
             world.eye_scene_reference(eye, 0, 8)
         });
     }
+    // The latency fixture's plain rooms, seen from a middle region: a low wall
+    // with a door, a stair, a straight join and a rotated join. Single-cell
+    // observers stand at the fixture's actor cells.
+    for (name, x, y, z) in [
+        ("fixture_stair", 2, 4, 0),
+        ("fixture_east", 6, 1, 0),
+        ("fixture_corner", 0, 0, 0),
+        ("fixture_upper", 4, 4, 1),
+    ] {
+        let eye = lift(at(3, x, y), z);
+        report(name, 8, "shadow", || fixture.shadow_scene(eye, 0, 8));
+        report(name, 8, "eye", || fixture.eye_scene_uncached(eye, 0, 8));
+        report(name, 8, "eye_reused", || fixture.eye_scene(eye, 0, 8));
+    }
+}
+
+/// `crates/server/fixtures/performance-v1.json`, as built by the server's
+/// performance fixture: 9x9x2 rooms in a chain.
+fn latency_fixture(regions: u64) -> World {
+    let cell = |region, [x, y, z]: [i32; 3]| lift(at(region, x, y), z);
+    let rooms = (1..=regions)
+        .map(|id| Region {
+            id: RegionId(id),
+            name: String::new(),
+            bounds: Extent::new(9, 9, 2).unwrap(),
+        })
+        .collect();
+    let mut world = World::new(rooms, vec![]).unwrap();
+    for region in 1..=regions {
+        for y in [0, 1, 2, 3, 5, 6, 7, 8] {
+            world.set_wall(cell(region, [4, y, 0]), true).unwrap();
+        }
+        world.set_wall(cell(region, [2, 2, 0]), true).unwrap();
+        for (from, direction, to) in [
+            ([2, 4, 0], Direction::Up, [2, 4, 1]),
+            ([2, 4, 1], Direction::Down, [2, 4, 0]),
+        ] {
+            world
+                .connect(
+                    Passage {
+                        from: cell(region, from),
+                        direction,
+                        to: cell(region, to),
+                    },
+                    0,
+                )
+                .unwrap();
+        }
+        world
+            .place_door(cell(region, [4, 4, 0]), region, false, 1)
+            .unwrap();
+        if region < regions {
+            for (from, direction, to, back, turns) in [
+                ([8, 4, 0], Direction::East, [0, 4, 0], Direction::West, 0),
+                ([4, 0, 1], Direction::North, [0, 4, 1], Direction::West, 1),
+            ] {
+                let (from, to) = (cell(region, from), cell(region + 1, to));
+                world
+                    .connect(
+                        Passage {
+                            from,
+                            direction,
+                            to,
+                        },
+                        turns,
+                    )
+                    .unwrap();
+                world
+                    .connect(
+                        Passage {
+                            from: to,
+                            direction: back,
+                            to: from,
+                        },
+                        (4 - turns) % 4,
+                    )
+                    .unwrap();
+            }
+        }
+    }
+    world
 }
 
 fn lift(mut location: Location, z: i32) -> Location {

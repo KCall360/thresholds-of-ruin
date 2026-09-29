@@ -195,6 +195,9 @@ pub struct World {
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: Shared<BTreeMap<RegionId, Extent>>,
     place_hints: Shared<BTreeSet<Location>>,
+    /// Derived: never saved, and ignored by equality.
+    #[serde(skip)]
+    pub(crate) sight: crate::sight_cache::SightCache,
 }
 
 /// A barrier entity, unrelated to portal identity. It is stored at its base
@@ -373,12 +376,14 @@ impl World {
             return Err(WorldError::InvalidEndpoint);
         }
         self.doors.insert(location, Door { id, open, height });
+        self.sight.region_changed(location.region);
         Ok(())
     }
     /// Open or close the door occupying `location`.
     pub fn set_door(&mut self, location: Location, open: bool) {
         let (base, _) = self.door_entry(location).expect("validated door");
         self.doors.get_mut(&base).expect("validated door").open = open;
+        self.sight.region_changed(base.region);
     }
     pub fn opaque(&self, location: Location) -> bool {
         self.is_wall(location) || self.door(location).is_some_and(|d| !d.open)
@@ -405,6 +410,7 @@ impl World {
             terrain: Shared::new(BTreeMap::new()),
             chambers: Shared::new(BTreeMap::new()),
             place_hints: Shared::new(BTreeSet::new()),
+            sight: Default::default(),
         };
         for region in regions {
             if world.regions.insert(region.id, region).is_some() {
@@ -422,6 +428,7 @@ impl World {
             return Err(WorldError::DuplicateRegion);
         }
         self.regions.insert(region.id, region);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -433,6 +440,7 @@ impl World {
         let id = region.id;
         self.add_region(region)?;
         self.chambers.insert(id, interior);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -495,6 +503,7 @@ impl World {
         }
         self.passages.insert(key, passage);
         self.rotations.insert(key, quarter_turns);
+        self.sight.topology_changed();
         Ok(())
     }
 
@@ -593,6 +602,7 @@ impl World {
                     at.position.x += u;
                     at.position.y += v;
                     candidate.physical_vertical.insert((at, anchor.direction));
+                    candidate.sight.topology_changed();
                 }
             }
         }
@@ -638,6 +648,7 @@ impl World {
                 Terrain::Empty
             },
         );
+        self.sight.region_changed(location.region);
         Ok(())
     }
 

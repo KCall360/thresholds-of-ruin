@@ -231,11 +231,31 @@ exactly the same results as the layer below.
    cube. Lines running exactly along seams between pieces make this delicate.
    Layer 2 already beats the current builder, so this layer is deferred unless
    measurements call for it.
-4. **Scene cache, if needed.** Scenes are keyed by eye location and frame. Each world chunk
-   has a change counter, increased by door changes and terrain edits. A cached
-   scene is valid while every chunk within range plus one cell is unchanged. The
-   extra cell is needed because bevels depend on neighbours. The cache is
-   per-region, dropped when a region unloads, rebuilt on demand, and never saved.
+4. **Scene cache** (`World::eye_scene`; the builder alone is
+   `World::eye_scene_uncached`). Scenes are keyed by eye location, frame and
+   radius. Validity is tracked per region rather than per chunk:
+   - **Versions.** Door and terrain edits give their region a new version. Any
+     change to regions, passages, rotations, physical portals or chambers gives
+     the world a new topology version, which invalidates every scene.
+   - **Dependencies.** A scene records every region a route stepped through,
+     plus every region those regions' exits lead to. Routes can end in a
+     neighbouring region without stepping through it, and a blocker's bevels
+     can read cells there. Rim projection also reads walls on the far side of
+     an exit even when the step doesn't cross. A scene is reused only while
+     the topology version and all of its regions' versions are unchanged.
+   - **Clones share the cache.** Games are cloned for every command's rollback
+     capture and for rewind boundaries, so a cache that started empty in each
+     clone would rarely be hit. Versions come from a process-wide counter, so
+     two worlds that hold the same version for a region hold the same content
+     there, however they diverged. Restoring a checkpoint clones one geometry
+     per instance and then replaces its doors, so each restored world draws a
+     new topology version.
+   - **Not world content.** The cache is ignored by equality and never saved,
+     and a loaded world starts empty. It keeps at most 512 scenes, then
+     empties and refills on demand.
+
+   Region streaming doesn't unload regions yet. When it does, unloading a
+   region is a topology change.
 
 Only the layers the measurements justify are added. Measure with an extended
 `fov_bench` that covers `volume_scene` and the new builder, and compare release
@@ -273,7 +293,8 @@ not make those items worse.
 - **Acceptance:** the 4d dungeon, checkpoint, retry, rewind, disclosure and
   native-client tests, with their performance requirements.
 - **Accelerated layers:** randomized comparisons against the reference
-  implementation, including portals and door edits for cache invalidation.
+  implementation, including portals, and of cached scenes against the
+  uncached builder under door and terrain edits, clones and rewinds.
 
 **Coverage so far.**
 
@@ -284,6 +305,13 @@ not make those items worse.
   - all 24 join rotations, the narrow rotated doorway, the vertical portal shaft,
     frame rotation, and stairs
   - door heights, and the accelerated builder matching the reference
+- *Scene cache:* `crates/world/tests/sight_cache.rs` compares cached scenes
+  with the uncached builder under random wall and door edits, clones and
+  rewinds, in the latency fixture, the first dungeon's chambers (rim
+  projection), and a chain of small rooms whose views end just past a join.
+  It also checks that edits invalidate only scenes that read their region, and
+  that checkpoint worlds differing only in doors don't share scenes. Each of
+  these tests fails if the matching invalidation is removed.
 - *Game:* `crates/simulation/tests/sight.rs` checks that sight starts at the
   declared eye cell, with offsets kept at the feet, for an upright humanoid and
   for a body lying sideways after a rotated portal.
@@ -312,13 +340,15 @@ not make those items worse.
    open above it. An automatic "fill the opening" rule was tried and dropped: it
    gave tall doors in low walls under open space; see [doors](doors.md).
 
-Still open: the delta encoding, and whether the accelerated layers are needed.
-Both are settled by measurement.
+Still open: the delta encoding, settled by measurement. The accelerated
+builder and the scene cache (layers 2 and 4) proved necessary; precomputed
+occlusion masks (layer 3) haven't been needed.
 
 ## Reference implementation findings
 
-The reference is `World::eye_scene`, in `crates/world/src/sight3d.rs`, with
-tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
+The reference is `World::eye_scene_reference`, in `crates/world/src/sight3d.rs`,
+with tests in `crates/world/tests/sight3d.rs`. Gameplay uses the accelerated,
+cached `World::eye_scene`.
 
 - **Portals and rotations.** A room split across a join looks identical to the
   unsplit room from both sides under all 24 cube rotations, including sideways
@@ -368,6 +398,57 @@ tests in `crates/world/tests/sight3d.rs`. It isn't wired into gameplay yet.
   Observers with bodies or gravity (the dungeon, combat, physics) previously used
   the voxel builder and got faster. The latency fixture's single-cell,
   gravity-free observers previously used 2D shadowcasting, which is far cheaper,
-  so they got slower. **This regression blocks merging** until the 64-region case
-  is back under the 8 ms target; the next step is to profile the fixture's plain
-  rooms (low walls, rotated joins, stairs, doors) and add the scene cache.
+  so they got slower.
+- **Profile of the latency fixture.** A moving command in the 64-region case
+  builds 16 scenes (two per actor), about 12 ms of perception in all. Timing
+  the perception phases over a whole run showed that scenes weren't the main
+  cost:
+
+  | Phase | Total over the run |
+  | --- | --- |
+  | `eye_scene` | 4.3 s |
+  | observation from the scene | 9.6 s |
+  | of which, door approaches | 8.9 s |
+
+  Door approaches checked every scene cell against every other cell for each
+  visible door, so their cost grew with the square of the scene's size. 3D
+  scenes are several times larger than the 2D ones, which made this the main
+  regression. Only cells beside one of the door's occurrences can be
+  approaches, so the rest are now skipped before the check. A unit test
+  compares that with checking every cell over random rooms with doors, actors
+  and a rotated join.
+
+  In the fixture's rooms a scene costs 200 to 300 µs, about as much as in the
+  dungeon, and doesn't grow with the number of regions. About two thirds of
+  it is resolving routes: views reach across the straight join, the rotated
+  join and the stair, so about half the cells need a walked route.
+  `fov_bench` now includes these rooms:
+
+  | Fixture eye | 2D shadowcasting | 3D accelerated |
+  | --- | --- | --- |
+  | On the stair | 12 µs | 295 µs |
+  | East half | 8 µs | 266 µs |
+  | Corner | 5 µs | 197 µs |
+  | Upper level | 20 µs | 291 µs |
+
+  Of each command's 16 scenes, the 14 for actors that didn't move can be
+  reused from the scene cache (layer 4).
+- **Comparison against `main` after both fixes.** Release `perf_compare.py`,
+  three interleaved rounds (run `20260929T061841Z-1f0fa24f-3759d859`), p95 of
+  the command or authoritative total:
+
+  | Case | `main` | Branch before | Branch now | Against the 8 ms target |
+  | --- | --- | --- | --- | --- |
+  | `r8-a1-h100-memory` | 0.92 ms | 3.34 ms | 0.78 ms | under |
+  | `r64-a8-h100-memory` | 3.32 ms | 13.24 ms | 2.59 ms | under |
+  | `combat:a8-h1000` | 11.17 ms | 6.08 ms | 3.53 ms | under |
+  | `physics` dense falling (8 actors, 128 items) | 21.2 ms | 16.4 ms | 12.2 ms | still over, improved |
+
+  Operation and scene counts match `main` in every case. Restart replay of
+  the 64-region case takes 1.6 s, against 1.9 s on `main`. Two static physics
+  cases each had one slow save (p95 over nine saves of 0.72 and 0.76 s, against
+  0.15 and 0.19 s on `main`). Every other save in those cases was normal. The
+  cause is unexplained and hasn't been investigated yet; saves write no sight
+  data, and this machine saves to an HDD. The dense-falling overrun was
+  already open on `main`; see
+  [open work](performance-persistence.md#open-work).

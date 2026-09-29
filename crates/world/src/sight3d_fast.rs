@@ -27,6 +27,9 @@ struct RegionInfo {
     hi: [i64; 3],
     /// Axis, sign, and plane coordinate of each exit.
     exits: Vec<(usize, i64, i64)>,
+    /// Where the exits lead. Rim projection reads terrain there even when the
+    /// step stays in this region, so a scene depends on these regions too.
+    neighbours: Vec<RegionId>,
 }
 
 impl RegionInfo {
@@ -34,6 +37,9 @@ impl RegionInfo {
         let bounds = world.region(id)?.bounds;
         let (w, d, h) = bounds.dimensions();
         let lo = [bounds.origin.x, bounds.origin.y, bounds.origin.z].map(i64::from);
+        let mut neighbours: Vec<_> = world.exits(id).map(|p| p.to.region).collect();
+        neighbours.sort();
+        neighbours.dedup();
         Some(Self {
             id,
             lo,
@@ -50,6 +56,7 @@ impl RegionInfo {
                     Some((axis, sign, i64::from([from.x, from.y, from.z][axis])))
                 })
                 .collect(),
+            neighbours,
         })
     }
 
@@ -383,16 +390,46 @@ impl World {
     /// Exact 3D sight from the centre of `eye`, with offsets relative to the eye
     /// cell in the observer's `frame`. Stair landings are not included; abstract
     /// stair links are traversal, not geometry. Identical to
-    /// [`World::eye_scene_reference`], only faster.
+    /// [`World::eye_scene_reference`], only faster. A scene is reused while
+    /// the regions it read are unchanged, so it's also identical to
+    /// [`World::eye_scene_uncached`].
     pub fn eye_scene(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
+        if let Some(cells) = self.sight.get(eye, frame, radius) {
+            return cells;
+        }
+        let (cells, regions) = self.build_eye_scene(eye, frame, radius);
+        if let Some(regions) = regions {
+            self.sight.insert(eye, frame, radius, regions, &cells);
+        }
+        cells
+    }
+
+    /// [`World::eye_scene`] without reuse, for tests and measurements.
+    pub fn eye_scene_uncached(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
+        self.build_eye_scene(eye, frame, radius).0
+    }
+
+    /// Whether [`World::eye_scene`] would reuse a scene. Diagnostic only.
+    pub fn eye_scene_cached(&self, eye: Location, frame: u8, radius: u8) -> bool {
+        self.sight.contains(eye, frame, radius)
+    }
+
+    /// The scene, and every region whose terrain or doors it read. There are
+    /// no regions to report when the eye's region is missing.
+    fn build_eye_scene(
+        &self,
+        eye: Location,
+        frame: u8,
+        radius: u8,
+    ) -> (Vec<SightCell>, Option<Vec<RegionId>>) {
         if !self.walkable(eye) {
-            return vec![];
+            return (vec![], Some(vec![eye.region]));
         }
         let radius = i32::from(radius.min(16));
         let reach = radius + 2;
         let side = (2 * reach + 1) as usize;
         let Some(eye_region) = RegionInfo::new(self, eye.region) else {
-            return vec![];
+            return (vec![], None);
         };
         let p = eye.position;
         let mut scene = Scene {
@@ -447,6 +484,15 @@ impl World {
         }
         // Offsets are generated in (z, y, x) order; SightCell sorts by offset.
         cells.sort_by_key(|c| c.offset);
-        cells
+        // Every step starts in a region in `regions` and ends in it or in one
+        // of its neighbours, so these cover every cell the scene resolved.
+        let mut regions: Vec<_> = scene
+            .regions
+            .iter()
+            .flat_map(|r| std::iter::once(r.id).chain(r.neighbours.iter().copied()))
+            .collect();
+        regions.sort();
+        regions.dedup();
+        (cells, Some(regions))
     }
 }
