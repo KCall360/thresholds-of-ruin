@@ -355,8 +355,8 @@ not make those items worse.
    open above it. An automatic "fill the opening" rule was tried and dropped: it
    gave tall doors in low walls under open space; see [doors](doors.md).
 
-Still open: the delta encoding, settled by measurement. The accelerated
-builder and the scene cache (layers 2 and 4) proved necessary; precomputed
+The delta encoding was settled by measurement; see
+[view deltas](protocol.md#view-deltas). The accelerated builder and the scene cache (layers 2 and 4) proved necessary; precomputed
 occlusion masks (layer 3) haven't been needed.
 
 ## Reference implementation findings
