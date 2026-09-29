@@ -2,7 +2,6 @@
 import json
 import os
 import shutil
-from pathlib import Path
 import unittest
 import test_text_process as support
 import test_headless_process as headless
