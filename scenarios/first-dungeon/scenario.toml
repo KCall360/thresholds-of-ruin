@@ -1,7 +1,7 @@
 format = 1
 id = "first-dungeon"
 version = "1.0"
-ruleset = "dungeon-v16"
+ruleset = "dungeon-v17"
 files = ["regions.toml"]
 default_character = 1
 themes = ["ruined-stone", "scavengers"]
@@ -13,14 +13,14 @@ objective = { anchor = "1/exit", item = 100, disclosed = true, continue_play = f
 id = 1
 anchor = "1/exit"
 turn_ticks = 100
-body = { cells = [[0,0,0], [0,0,1]], mass = 80 }
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 80 }
 combat = { name = "delver", max_hp = 50, defense = 12, faction = "delvers", attack = { bonus = 5, wind_up = 60, recovery = 40, damage = { keen = 7 } } }
 
 [archetypes.scout]
-body = { cells = [[0,0,0], [0,0,1]], mass = 60 }
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 60 }
 combat = { name = "ruin scout", max_hp = 10, defense = 9, faction = "ruin", attack = { bonus = 1, wind_up = 80, recovery = 50, damage = { keen = 2 } } }
 [archetypes.guardian]
-body = { cells = [[0,0,0], [0,0,1]], mass = 120 }
+body = { cells = [[0,0,0], [0,0,1]], eye = [0,0,1], mass = 120 }
 combat = { name = "stone guardian", max_hp = 18, defense = 12, faction = "ruin", reductions = { impact = 2 }, attack = { bonus = 3, wind_up = 130, recovery = 70, damage = { impact = 4 } } }
 [archetypes.wisp]
 combat = { name = "ember wisp", max_hp = 8, defense = 10, faction = "ruin", immunities = ["energy"], attack = { bonus = 2, wind_up = 70, recovery = 80, damage = { energy = 3 } } }

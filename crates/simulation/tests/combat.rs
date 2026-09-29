@@ -234,6 +234,7 @@ fn rotated_vertical_portal_reaches_a_targets_occupied_head_cell() {
         target,
         tor_simulation::BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )

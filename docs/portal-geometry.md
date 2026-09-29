@@ -9,10 +9,8 @@ into that scene; text describes visible contents at relative offsets.
 
 ## Joins and visibility
 
-Body/gravity scenes preserve [symmetric shadowcasting](shadowcasting.md) on the
-main plane and use conservative 3D voxel rays for height slices. Static diagnostic
-scenes retain their established sight.
-See [physics](physics.md). Both use eight Manhattan steps. Topology is resolved separately from opacity;
+Every observer uses [three-dimensional sight](sight-3d.md) from its body's eye
+cell, with a range of eight Manhattan steps. See [physics](physics.md). Topology is resolved separately from opacity;
 all 24 proper cube rotations and translation map observer offsets across
 joins. Crossing consumes distance, including self-links and cycles. A physical
 cell may have multiple visible occurrences in non-Euclidean geometry. The scene

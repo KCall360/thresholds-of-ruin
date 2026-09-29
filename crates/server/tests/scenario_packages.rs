@@ -94,7 +94,7 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
             "version = \"latest\"",
             "major.minor",
         ),
-        ("scenario.toml", "dungeon-v16", "missing-v1", "dependency"),
+        ("scenario.toml", "dungeon-v17", "missing-v1", "dependency"),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         (
             "regions.toml",
@@ -108,6 +108,27 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
             "\"archetype\" = \"tablet\"",
             "\"archetype\" = \"missing\"",
             "archetype",
+        ),
+        // Every declared body names its eye cell, and it must be a body cell.
+        ("scenario.toml", "eye = [0,0,1], ", "", "eye"),
+        (
+            "scenario.toml",
+            "eye = [0,0,1]",
+            "eye = [0,0,2]",
+            "eye must be one of its cells",
+        ),
+        // Doors fit their space and don't leave a walled doorway open above.
+        (
+            "regions.toml",
+            "\"open\" = true, \"height\" = 2",
+            "\"open\" = true, \"height\" = 3",
+            "at most 2 cells tall",
+        ),
+        (
+            "regions.toml",
+            "\"open\" = true, \"height\" = 2",
+            "\"open\" = true, \"height\" = 1",
+            "shorter than its doorway",
         ),
     ] {
         let temp = copied_package();

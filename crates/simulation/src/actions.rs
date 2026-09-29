@@ -74,14 +74,15 @@ impl Game {
                     .door_location(door)
                     .ok_or(GameError::DoorUnavailable)?;
                 let current = self.world.door(location).expect("existing door");
+                let cells: Vec<_> = self.world.door_cells(location).collect();
                 if current.open == open
                     || !self.door_reachable_from(actor.location, location)
                     || !self
                         .observe(id)?
                         .visible_cells
                         .iter()
-                        .any(|c| c.location == location)
-                    || (!open && self.door_obstructed(location))
+                        .any(|c| cells.contains(&c.location))
+                    || (!open && self.door_obstructed(location, current.height))
                 {
                     return Err(GameError::DoorUnavailable);
                 }

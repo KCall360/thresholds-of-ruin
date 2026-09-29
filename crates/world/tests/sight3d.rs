@@ -451,7 +451,7 @@ fn a_narrow_rotated_doorway_looks_unsplit_with_the_door_open_or_closed() {
                     world.set_wall(at(1, 5, y, z), true).unwrap();
                 }
             }
-            world.place_door(at(1, 5, 1, 0), 1, true).unwrap();
+            world.place_door(at(1, 5, 1, 0), 1, true, 2).unwrap();
         }
         let far = if turns % 2 == 0 { (5, 3, 2) } else { (3, 5, 2) };
         stone_room(&mut split, 2, far);
@@ -623,7 +623,7 @@ fn accelerated_scene_matches_the_reference_in_random_rooms_with_doors() {
         let mut rng = Rng(0xA076_1D64_78BD_642F ^ seed);
         let (w, d, h) = (7, 6, 3);
         let mut world = chamber(w, d, h);
-        let mut door_id = 1;
+        let mut doors = Vec::new();
         for z in 0..h {
             for y in 0..d {
                 for x in 0..w {
@@ -631,12 +631,16 @@ fn accelerated_scene_matches_the_reference_in_random_rooms_with_doors() {
                     if roll < 20 {
                         world.set_wall(at(1, x, y, z), true).unwrap();
                     } else if roll < 26 {
-                        world
-                            .place_door(at(1, x, y, z), door_id, roll < 23)
-                            .unwrap();
-                        door_id += 1;
+                        doors.push((at(1, x, y, z), roll < 23));
                     }
                 }
+            }
+        }
+        // Each door fills its opening; cells a lower door already fills are skipped.
+        for (door_id, (location, open)) in (1..).zip(doors) {
+            let height = world.door_clearance(location);
+            if height > 0 {
+                world.place_door(location, door_id, open, height).unwrap();
             }
         }
         for _ in 0..6 {
@@ -736,7 +740,7 @@ fn accelerated_scene_matches_the_reference_in_the_first_dungeon_layout() {
                 .unwrap();
         }
     }
-    world.place_door(at(2, 6, 2, 0), 1, false).unwrap();
+    world.place_door(at(2, 6, 2, 0), 1, false, 2).unwrap();
     for open in [false, true] {
         world.set_door(at(2, 6, 2, 0), open);
         for region in 1..=3 {
@@ -752,4 +756,89 @@ fn accelerated_scene_matches_the_reference_in_the_first_dungeon_layout() {
             }
         }
     }
+}
+
+/// Two 5x3x2 rooms joined by a one-wide, two-high doorway at (4, 1).
+fn doorway_rooms() -> World {
+    let mut world = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut world, 1, (5, 3, 2));
+    stone_room(&mut world, 2, (5, 3, 2));
+    for (from, direction, to) in [
+        (at(1, 4, 1, 0), Direction::East, at(2, 0, 1, 0)),
+        (at(2, 0, 1, 0), Direction::West, at(1, 4, 1, 0)),
+    ] {
+        world
+            .connect_area(
+                Passage {
+                    from,
+                    direction,
+                    to,
+                },
+                0,
+                1,
+                2,
+            )
+            .unwrap();
+    }
+    // Wall in the doorway's sides, so it is a one-wide, two-high gap.
+    for y in [0, 2] {
+        for z in 0..2 {
+            world.set_wall(at(1, 4, y, z), true).unwrap();
+        }
+    }
+    world
+}
+
+#[test]
+fn a_closed_door_filling_its_doorway_hides_the_far_room_from_every_eye_height() {
+    let mut world = doorway_rooms();
+    let base = at(1, 4, 1, 0);
+    assert_eq!(world.door_clearance(base), 2);
+    assert!(
+        world.place_door(base, 1, false, 3).is_err(),
+        "taller than the doorway"
+    );
+    // A one-cell door leaves the walled doorway open above it: a humanoid
+    // sees over it. Package validation rejects that.
+    assert!(world.doorway_open_above(base, 1));
+    assert!(!world.doorway_open_above(base, 2));
+    let mut low = world.clone();
+    low.place_door(base, 1, false, 1).unwrap();
+    assert!(low
+        .eye_scene(at(1, 1, 1, 1), 0, 8)
+        .iter()
+        .any(|c| c.location.region == RegionId(2)));
+    world.place_door(base, 1, false, 2).unwrap();
+    for eye_z in 0..2 {
+        let scene = world.eye_scene(at(1, 1, 1, eye_z), 0, 8);
+        assert!(
+            scene.iter().all(|c| c.location.region == RegionId(1)),
+            "eye height {eye_z} sees past the closed door"
+        );
+        // Both door cells are seen, as the same door.
+        for z in 0..2 {
+            let door = scene.iter().find(|c| c.location == at(1, 4, 1, z)).unwrap();
+            assert_eq!(world.door(door.location).map(|d| d.id), Some(1));
+        }
+    }
+    // Opening it from its upper cell opens the whole door.
+    world.set_door(at(1, 4, 1, 1), true);
+    assert!(!world.opaque(at(1, 4, 1, 0)));
+    let scene = world.eye_scene(at(1, 1, 1, 1), 0, 8);
+    assert!(scene.iter().any(|c| c.location.region == RegionId(2)));
+}
+
+#[test]
+fn door_cells_cannot_become_walls_or_hold_a_second_door() {
+    let mut world = doorway_rooms();
+    world.place_door(at(1, 4, 1, 0), 7, true, 2).unwrap();
+    assert_eq!(world.door_location(7), Some(at(1, 4, 1, 0)));
+    assert_eq!(
+        world.door_cells(at(1, 4, 1, 0)).collect::<Vec<_>>(),
+        vec![at(1, 4, 1, 0), at(1, 4, 1, 1)]
+    );
+    assert!(world.set_wall(at(1, 4, 1, 1), true).is_err());
+    assert_eq!(world.door_clearance(at(1, 4, 1, 1)), 0);
+    assert!(world.place_door(at(1, 4, 1, 1), 8, true, 1).is_err());
+    assert!(world.checkpoint_valid(8));
 }

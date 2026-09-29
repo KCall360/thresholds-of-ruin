@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **16**, save format **11**, ruleset
-**`dungeon-v16`**, scenario validator **`tor-scenario-4`**. The server rejects
+**Current formats:** protocol **17**, save format **12**, ruleset
+**`dungeon-v17`**, scenario validator **`tor-scenario-5`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -22,7 +22,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
-| Perception | Complete for current scope | Symmetric shadowcasting, disclosed surfaces and entities, opaque cell keys, stale client memory |
+| Perception | In progress (3s) | Three-dimensional sight from declared eye cells, disclosed surfaces and entities, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, background journal, checkpoints, replay, history and annotations |
 | Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
@@ -182,7 +182,9 @@ barriers and consistent crash rollback.
 
 ### 3s — Three-dimensional sight
 
-A separate effort from 4e: design accepted, implementation not started. It
+A separate effort from 4e, in progress. Gameplay now uses 3D sight from each
+body's declared eye cell; the protocol, save format, ruleset and validator were
+bumped for it. Removing the surface facts, view deltas and client changes remain. It
 replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
 with a single 3D rule for every observer. Sight lines start at a declared eye
 cell. Floors, ceilings and walls are ordinary seen solid cells, and only their

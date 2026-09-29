@@ -36,7 +36,7 @@ independent, cell-sized barriers; this slice does not add multi-cell door bodies
 
 ## Perception and clients
 
-Horizontal sight retains symmetric shadowcasting. Disclosed cells carry nullable
+Sight is [three-dimensional](sight-3d.md). Disclosed cells carry nullable
 `floor` and `ceiling` facts, each with a material name and a
 positive `distance` in cells to the solid cell. A standard floor is at distance 1
 downward; its top face is at the actor's feet. A standard ceiling is at distance 2

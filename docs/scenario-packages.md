@@ -59,7 +59,9 @@ Outgoing portals specify `at`, cardinal/vertical `direction`, destination anchor
 are explicit. The validator constructs every region before checking connections.
 
 Actors, items, and doors have positive numeric IDs, unique within their entity
-kind. Array order does not assign identities. Doors specify `at` and `open`.
+kind. Array order does not assign identities. Doors specify `at`, `open`, and `height` (default 1). Validation rejects a door
+that doesn't fit, or that leaves its walled doorway open above it; see
+[doors](doors.md).
 Items specify `at`, `name` or an `archetype`, and optional `carried_by`. Archetype
 names and actor `turn_ticks` are overridden by instance fields. `seed_names` is
 an explicit deterministic name pool selected by `seed % length`, used to preserve

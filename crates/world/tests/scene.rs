@@ -114,8 +114,8 @@ fn a_door_on_a_wide_join_matches_an_interior_door_without_becoming_a_wall() {
             1,
         )
         .unwrap();
-    whole.place_door(at(1, 5, 2, 0), 1, false).unwrap();
-    split.place_door(at(2, 0, 2, 0), 1, false).unwrap();
+    whole.place_door(at(1, 5, 2, 0), 1, false, 1).unwrap();
+    split.place_door(at(2, 0, 2, 0), 1, false, 1).unwrap();
     let projection = |world: &World| {
         world
             .shadow_scene(at(1, 3, 2, 0), 0, 8)

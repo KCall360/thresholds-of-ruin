@@ -23,14 +23,14 @@ impl Game {
     fn doorway_fixture(seed: u64, enclosed: bool) -> Self {
         let mut game = Self::two_room_layout(seed, true, enclosed);
         game.add_room_hints();
-        game.place_door(
-            Location {
-                region: RegionId(1),
-                position: Position { x: 5, y: 1, z: 0 },
-            },
-            true,
-        )
-        .expect("valid hallway door");
+        let doorway = Location {
+            region: RegionId(1),
+            position: Position { x: 5, y: 1, z: 0 },
+        };
+        // The door reaches the ceiling, however tall this layout makes it.
+        let height = game.world.door_clearance(doorway);
+        game.place_door(doorway, true, height)
+            .expect("valid hallway door");
         game
     }
 

@@ -106,6 +106,7 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
                     z: 0,
                 },
                 open: false,
+                height: 1,
             },
             WizardOperation::SetPlaceHint {
                 position: Position {

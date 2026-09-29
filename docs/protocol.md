@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":16,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":17,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

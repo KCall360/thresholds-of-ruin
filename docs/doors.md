@@ -10,9 +10,20 @@ place hint; each room retains its own interior anchor for text navigation.
 .....#.....
 ```
 
-Here `/` is the open door and `#` the walls flanking its one-cell hall. Doors
-remain independent, cell-sized world entities: interior doors and doors on join
-endpoints obey the same rules. Opening or closing does not change topology.
+Here `/` is the open door and `#` the walls flanking its one-cell hall. The
+hall is two cells high, and so is the door.
+
+A door is an independent world entity with an authored `height`: it occupies
+its base cell and the `height - 1` cells straight above it, which must all be
+free. It opens, closes and blocks as one door from any of its cells. Interior
+doors and doors on join endpoints obey the same rules. Opening or closing does
+not change topology.
+
+A door should fill its doorway, or a taller creature looks over it. Package
+validation rejects a door whose doorway continues above it: the cell above
+the door's top is open and, like the top cell, walled on both sides. A door in
+a low wall under open space isn't flagged. A doorway at a region join has no
+walls beside it inside the room, so its height is the author's responsibility.
 
 ## Playing
 
@@ -48,9 +59,9 @@ without approaching. Headless clients submit ordinary actions:
   corner rule as movement. The backend resolves rotated joins. Standing in a doorway is not standing beside it.
 - Closed doors block movement and sight but are not walls. The door itself is
   visible; cells, objects, and actors beyond it are disclosed only if another
-  unobstructed sightline exists. New games use [symmetric shadowcasting](shadowcasting.md),
-  with beveled corners for sight. Open doors do not obstruct either.
-- Closing is unavailable while an actor or ground item occupies the door cell.
+  unobstructed sightline exists. New games use [three-dimensional sight](sight-3d.md),
+  with beveled convex corners. Open doors do not obstruct either.
+- Closing is unavailable while an actor or ground item occupies any door cell.
   Placement and wall edits cannot create overlapping walls and doors.
 - Unknown, hidden, out-of-reach, obstructed, and already-in-that-state requests
   are rejected without action time or mutation. Examining and clarifying are free.
@@ -60,7 +71,8 @@ without approaching. Headless clients submit ordinary actions:
 
 Each perceived cell has a nullable `door`: stable identity, perceived name and
 appearance, open state, current reach, and opaque keys for currently perceived
-approach cells. Approach connections must occur in the resolved scene; they do
+approach cells. Every cell of a tall door reports the same door, but only its
+base cell reports reach and approach cells, so the door is offered once. Approach connections must occur in the resolved scene; they do
 not reveal internal regions, transforms, hidden cells, or a planned route. Text
 chooses the nearest displayed approach candidate; the backend validates routing.
 This conservative heuristic can reject an approach when that candidate has no
@@ -74,8 +86,13 @@ semantic event narration remains future perception work.
 An authorized wizard can place a door, consuming no ordinary action time:
 
 ```text
-wizard door <region> <x> <y> <z> <open|closed>
+wizard door <region> <x> <y> <z> <open|closed> [height]
 ```
+
+`height` defaults to 1. A door taller than the free space above its base is
+rejected, and the error names the most that fits. Structured wizard JSON
+`place_door` takes a required `height`. Wizard placement doesn't apply the
+package check for doorways left open above a door.
 
 Use ordinary open/close actions to test interactions. Placement follows the
 existing authorization, atomic validation, revision, receipt, restart and rewind
@@ -84,8 +101,8 @@ rejected. Door identity and state rewind with the world. Privileged coordinates
 remain backend-only; ordinary history contains sanitized wizard summaries.
 
 Only the current rules are supported; older saves aren't migrated.
-Locks, keys, containers, destruction, transparent doors, and multi-cell door
-entities remain future work. A wide join can have individual door cells.
+Locks, keys, containers, destruction, transparent doors, and doors wider than
+one cell remain future work. A wide join can have individual door cells.
 
 ## Verification
 

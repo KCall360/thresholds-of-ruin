@@ -3,6 +3,26 @@ use tor_world::{Direction, Location, Position, Region, RegionId};
 
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 
+/// Manhattan sight range in cells, measured from the eye cell.
+const SIGHT_RANGE: u8 = 8;
+
+/// Where the scene places the landing of the abstract stair the actor stands
+/// on: straight up or down, just beyond any physically visible offset, so it
+/// never collides with a real cell. Travel learns stair links from it.
+pub(crate) fn stair_landing_offset(body: &crate::BodySpec, direction: Direction) -> Position {
+    let [x, y, z] = body.eye;
+    let beyond = i32::from(SIGHT_RANGE) + x.abs() + y.abs() + z.abs() + 1;
+    Position {
+        x: 0,
+        y: 0,
+        z: if direction == Direction::Down {
+            -beyond
+        } else {
+            beyond
+        },
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemView {
     pub description: String,
@@ -113,6 +133,11 @@ impl Game {
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
+        let door_base = |location: Location| {
+            self.world
+                .door(location)
+                .is_some_and(|door| self.world.door_location(door.id) == Some(location))
+        };
         // A location can occur in several frames and at several distances.
         // Index its best disclosed range once instead of rescanning the scene
         // for every floor and ceiling probe.
@@ -199,9 +224,11 @@ impl Game {
                     floor: surface(location, Direction::Down, frame, range),
                     ceiling: surface(location, Direction::Up, frame, range),
                     door: self.world.door(location),
-                    door_reachable: self.world.door(location).is_some()
+                    // A tall door is one door: only its base cell is offered
+                    // for interaction, so it isn't reachable twice.
+                    door_reachable: door_base(location)
                         && self.door_reachable_from(actor.location, location),
-                    door_approaches: if self.world.door(location).is_some() {
+                    door_approaches: if door_base(location) {
                         self.disclosed_door_approaches(scene, location)
                     } else {
                         vec![]
@@ -348,20 +375,57 @@ impl Game {
         approaches.into_iter().collect()
     }
 
-    /// Backend-resolved view occurrences. A location may be seen at several offsets.
+    /// Backend-resolved view occurrences. A location may be seen at several
+    /// offsets. Sight starts at the centre of the body's eye cell; offsets are
+    /// relative to the actor's reference cell in its body frame.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
             return Ok(Vec::new());
         }
         crate::diagnostics::scene();
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        Ok(if self.motion_view_active(id) || actor.orientation >= 4 {
-            self.world
-                .volume_scene(actor.location, actor.orientation, 8)
-        } else {
-            self.world
-                .shadow_scene(actor.location, actor.orientation, 8)
-        })
+        let body = &actor.body;
+        let eye_index = body
+            .cells
+            .iter()
+            .position(|cell| *cell == body.eye)
+            .expect("validated body contains its eye");
+        let Some((eye, eye_frame)) = self
+            .body_cells(actor.location, actor.orientation, body)
+            .map(|cells| cells[eye_index])
+        else {
+            return Ok(Vec::new());
+        };
+        // The body frame is carried across any portal inside the body, so
+        // eye-frame offsets are body-frame offsets from the eye cell.
+        let [ex, ey, ez] = body.eye;
+        let mut scene = self.world.eye_scene(eye, eye_frame, SIGHT_RANGE);
+        for cell in &mut scene {
+            cell.offset.x += ex;
+            cell.offset.y += ey;
+            cell.offset.z += ez;
+        }
+        // Abstract stair links are traversal, not geometry: standing on one
+        // discloses its landing as a separate occurrence beyond physical sight.
+        for direction in [Direction::Up, Direction::Down] {
+            if self.world.is_stair(actor.location, direction) {
+                let passage = self
+                    .world
+                    .passage(actor.location, direction)
+                    .expect("stair link");
+                scene.push(tor_world::SightCell {
+                    location: passage.to,
+                    rotation: tor_world::compose_rotation(
+                        actor.orientation,
+                        self.world.crossing_rotation(actor.location, direction),
+                    ),
+                    offset: stair_landing_offset(body, direction),
+                    wall: self.world.is_wall(passage.to),
+                });
+            }
+        }
+        scene.sort_by_key(|c| c.offset);
+        Ok(scene)
     }
 }
 

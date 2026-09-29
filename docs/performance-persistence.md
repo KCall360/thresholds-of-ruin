@@ -97,6 +97,7 @@ counts are the durable result.
 | D | Removing state copies, scaling observations | Largest saved case p95 fell from 14.2 ms to 2.5 ms; all selected cases met 8 ms / 33 ms. Restart fell to 0.66 s. |
 | E | Client responsiveness | 64 updates on a 20,956-cell remembered map: apply p95 fell from 549 ms to 39 ms and render p95 from 6.6 ms to 3.0 ms. |
 | Format 6 | Region-shared checkpoint navigation | Fully explored 256-region checkpoint fell from 765 MB to 9.9 MB (the cap stays 64 MiB). Full checkpoint-enabled exploration, exact restart, and native input during a blocked save all pass. |
+| 3s | Walkable-only travel cells, compact plain links | 3D sight from head height made actors know about twice as many walkable cells and links, raising that checkpoint to 20.9 MB, over its 16 MiB headroom check. Travel now keeps only cells seen walkable, and plain same-region links are saved as one direction mask per cell. The checkpoint fell to 4.6 MB; links went from 16.9 MB to 0.65 MB. |
 
 The headline cases are recorded in the
 [performance ledger](performance-harness.md#performance-ledger). Full reports,

@@ -2,7 +2,7 @@
 format = 1
 id = "diagonal-rotated"
 version = "1.0"
-ruleset = "dungeon-v16"
+ruleset = "dungeon-v17"
 files = ["regions.toml"]
 default_character = 1
 themes = ["stone"]

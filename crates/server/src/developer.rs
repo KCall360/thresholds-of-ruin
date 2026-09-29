@@ -40,14 +40,21 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
                 z.parse().map_err(|_| usage)?,
             ],
         },
-        ["door", r, x, y, z, state] => WizardOperation::PlaceDoor {
-            position: position(&[r, x, y, z])?,
-            open: match *state {
-                "open" => true,
-                "closed" => false,
-                _ => return Err(usage.into()),
-            },
-        },
+        ["door", r, x, y, z, state, height @ ..] if height.len() <= 1 => {
+            WizardOperation::PlaceDoor {
+                position: position(&[r, x, y, z])?,
+                open: match *state {
+                    "open" => true,
+                    "closed" => false,
+                    _ => return Err(usage.into()),
+                },
+                height: match height {
+                    [] => 1,
+                    [cells] => cells.parse().map_err(|_| usage)?,
+                    _ => unreachable!("at most one height"),
+                },
+            }
+        }
         ["join", r, x, y, z, facing, r2, x2, y2, z2, turns, width, height] => {
             WizardOperation::ConnectArea {
                 from: position(&[r, x, y, z])?,

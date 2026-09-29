@@ -31,6 +31,7 @@ fn bodies_fall_land_and_resume_identically() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -59,6 +60,7 @@ fn equal_opposing_fields_cancel_without_erasing_drift() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -90,6 +92,7 @@ fn whole_body_blocks_low_passages_and_wizard_terrain_edits() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -119,6 +122,7 @@ fn sideways_portal_rotates_body_and_velocity_without_changing_speed() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
             mass: 80,
         },
     )
@@ -233,6 +237,7 @@ fn straddling_body_averages_fields_in_both_regions() {
         id,
         BodySpec {
             cells: vec![[0, 0, 0], [1, 0, 0]],
+            eye: [0, 0, 0],
             mass: 80,
         },
     )

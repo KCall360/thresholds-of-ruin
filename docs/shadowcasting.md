@@ -1,7 +1,10 @@
 # Symmetric shadowcasting
 
-Horizontal sight uses symmetric shadowcasting inside finite stone enclosures.
-Floor and ceiling surfaces are described in [material volumes](material-volumes.md).
+This guide describes the 2D symmetric shadowcasting builder, `World::shadow_scene`.
+Gameplay no longer uses it: every observer now uses
+[three-dimensional sight](sight-3d.md), which keeps this builder's results for
+open cells on single-level maps except for exact bevel-tip grazes. It remains the
+comparison baseline for those tests and for `fov_bench`.
 
 ## Geometry and behavior
 

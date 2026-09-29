@@ -58,7 +58,7 @@ fn vertical_surfaces_stop_at_material_doors_range_and_unallocated_space() {
         world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 4),
         Some((Material::Stone, 4))
     );
-    world.place_door(at(1, 1, 1, 1), 1, false).unwrap();
+    world.place_door(at(1, 1, 1, 1), 1, false, 3).unwrap();
     assert_eq!(
         world.vertical_surface(at(1, 1, 1, 0), Direction::Up, 8),
         None
@@ -214,7 +214,7 @@ fn check_narrow_doorway(turns: u8) {
                 world.set_wall(at(1, 5, y, z), true).unwrap();
             }
         }
-        world.place_door(at(1, 5, 1, 0), 1, true).unwrap();
+        world.place_door(at(1, 5, 1, 0), 1, true, 2).unwrap();
     }
     split
         .add_chamber(Region {

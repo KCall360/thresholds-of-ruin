@@ -1,12 +1,12 @@
-# Three-dimensional sight (design proposal)
+# Three-dimensional sight
 
-**Status: accepted design, not implemented.** This is its own effort,
+**Status: in progress.** This is its own effort,
 [3s](milestones.md#3s--three-dimensional-sight), separate from 4e. The maintainer
-has authorized the protocol and save-format break it requires. The current rules
-are in
-[shadowcasting](shadowcasting.md), [material volumes](material-volumes.md), and
-[bodies, portals, and gravity](physics.md). Once implemented, this note becomes
-the sight guide and replaces the superseded parts of those guides.
+has authorized the protocol and save-format break it requires. Every observer
+now sees with the model below, from the eye cell its body declares. Still to
+come: removing the separate `floor` and `ceiling` facts (see
+[material volumes](material-volumes.md)), view-delta updates, and client
+changes. When 3s is complete, this note becomes the sight guide.
 
 ## Why the current model falls short
 
@@ -284,6 +284,12 @@ not make those items worse.
 4. **The protocol and save-format break is authorized,** and the work is its own
    effort, separate from 4e. The 4e preload horizon must still reach 8 cells
    vertically from the eye as well as horizontally.
+
+5. **Doors have authored heights.** A one-cell door in a two-cell-high doorway
+   let a humanoid, looking from head height, see over it. A door now has a
+   `height`, and package validation rejects one that leaves its walled doorway
+   open above it. An automatic "fill the opening" rule was tried and dropped: it
+   gave tall doors in low walls under open space; see [doors](doors.md).
 
 Still open: the delta encoding, and whether the accelerated layers are needed.
 Both are settled by measurement.

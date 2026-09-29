@@ -59,7 +59,9 @@ fn blocked_corners_and_overflow_are_atomic() {
 #[test]
 fn diagonal_door_reach_uses_normal_cost_and_corner_clearance() {
     let (mut game, actor) = game(100);
-    let door = game.place_door(cell(3, 1), false).unwrap();
+    let door = game
+        .place_door(cell(3, 1), false, game.door_clearance(cell(3, 1)))
+        .unwrap();
     game.set_wall(cell(2, 1), true).unwrap();
     game.act(actor, Action::SetDoor { door, open: true })
         .unwrap();
@@ -87,7 +89,8 @@ fn actors_and_closed_doors_block_sides_but_items_do_not() {
     let (mut game, actor) = game(100);
     game.spawn_actor(cell(2, 1), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.place_door(cell(3, 2), false).unwrap();
+    game.place_door(cell(3, 2), false, game.door_clearance(cell(3, 2)))
+        .unwrap();
     let before = game.clone();
     assert_eq!(
         game.act(actor, Action::Move(Direction::NorthEast)),
@@ -182,7 +185,8 @@ fn door_approaches_do_not_disclose_hidden_corner_clearance() {
     let actor = game
         .spawn_actor(cell(0, 0), NonZeroU64::new(100).unwrap())
         .unwrap();
-    game.place_door(cell(4, 4), false).unwrap();
+    game.place_door(cell(4, 4), false, game.door_clearance(cell(4, 4)))
+        .unwrap();
     game.set_wall(cell(4, 3), true).unwrap();
     let before = game.observe(actor).unwrap();
     assert!(before
