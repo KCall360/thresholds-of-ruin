@@ -18,8 +18,8 @@ mod observation;
 mod places;
 mod streaming;
 pub use streaming::{
-    ReferencePoint, ReferencePointId, ReferenceTarget, RegionRoot, RegionState, RegionTransition,
-    TransitionError, TransitionReport,
+    MemoryRecords, RecordId, RecordStore, ReferencePoint, ReferencePointId, ReferenceTarget,
+    RegionRecord, RegionRoot, RegionState, RegionTransition, TransitionError, TransitionReport,
 };
 mod travel;
 pub use travel::TravelStep;

@@ -1111,26 +1111,37 @@ mod region_lifecycle_tests {
                 })
                 .unwrap();
             }
-            let original = game.clone();
+            let mut original = game.clone();
+            let mut records = tor_simulation::MemoryRecords::default();
             let roots: BTreeSet<_> = game.region_roots().iter().map(|r| r.region).collect();
             let (_, report) = game
-                .transition_regions(&RegionTransition {
-                    active: roots.clone(),
-                    loaded: roots,
-                })
+                .transition_regions(
+                    &RegionTransition {
+                        active: roots.clone(),
+                        loaded: roots,
+                    },
+                    &mut records,
+                )
                 .unwrap_or_else(|e| panic!("{}: {e:?}", path.display()));
+            assert_eq!(records.len(), report.detached.len());
             detached += report.detached.len();
             let mut shared = tor_simulation::checkpoint::SharedState::default();
-            let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
+            let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
                 .unwrap_or_else(|| panic!("{}: {report:?}", path.display()));
             assert_eq!(restored, game, "{}", path.display());
             let all: BTreeSet<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
-            game.transition_regions(&RegionTransition {
+            let everything = RegionTransition {
                 active: all.clone(),
                 loaded: all,
-            })
-            .unwrap();
+            };
+            game.transition_regions(&everything, &mut records).unwrap();
+            restored
+                .transition_regions(&everything, &mut records)
+                .unwrap();
+            // Only the record-identity allocator moved.
+            original.continue_record_ids(&game);
             assert_eq!(game, original, "{}", path.display());
+            assert_eq!(restored, original, "{}", path.display());
         }
         assert!(detached > 0, "some package has a region to detach");
     }

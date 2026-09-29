@@ -108,8 +108,9 @@ A known region is in one of three states:
 - **Active:** simulated.
 - **Frozen:** loaded in memory, with time stopped.
 - **Detached:** held as a self-contained region record, with time stopped.
-  Today records stay in memory, inside the game state; the next slice stores
-  them on disk.
+  The game keeps only the record's identity; the record itself is in a
+  [record store](#region-records-and-identity). Today the only store is in
+  memory; a later slice stores records on disk.
 
 The existing planner computes a *load* horizon. The active set is smaller:
 what the reference points and pins below require. Activation only ever uses
@@ -226,6 +227,22 @@ contents. Attaching a record checks the record itself, and that its actors,
 items and doors are exactly the directory's entries for its region, because
 a record may come from storage that restoring the game never read.
 
+The **record store** holds records outside the game:
+
+- Detaching allocates a **record identity** from a game-wide counter and
+  gives the record to the store. Records never change after they're made, so
+  the identity also names the content. Replay reproduces identities because
+  the counter is game state.
+- A transition reads records only through the store (`RecordStore`), and puts
+  new ones there only once the whole transition has succeeded. A store that
+  can't provide a record fails the transition with the game unchanged.
+- A rewind restores an earlier game whose counter is behind records the
+  abandoned future made, and retained boundaries may still refer to them. The
+  rewound game must continue the counter (`Game::continue_record_ids`) so
+  identities stay unique. The engine wiring slice does this.
+- `MemoryRecords` keeps records in memory, for tests and until records are
+  stored on disk.
+
 References come in two kinds:
 
 - **Live references** (bodies, pending attacks, carriers, reach) must stay
@@ -237,51 +254,63 @@ References come in two kinds:
 
 ### Persistence in this slice
 
-Lifecycle state (points, frozen regions, stamps, records and the directory) is
-saved as an optional `lifecycle` field of the checkpoint, and detached region
-metadata as an optional `absent` field of the world. Both are omitted while
-empty, so games that never stream save exactly as before and no format version
-changed. Records are held as shared values, so rewind boundaries share them in
-memory; in a save each boundary encodes them again, which the storage slice
-replaces.
+Lifecycle state (points, frozen regions, stamps, record identities, the
+record counter and the directory) is saved as an optional `lifecycle` field
+of the checkpoint, and detached region metadata as an optional `absent` field
+of the world. Both are omitted while empty, so games that never stream save
+exactly as before and no format version changed. Identical lifecycle states
+across rewind boundaries are encoded once, the way worlds are.
 
-### Save layout (designed; built in the next slice)
+Saves don't hold records yet. The engine never detaches a region, and
+restoring a checkpoint whose game refers to a record fails, rather than
+producing a game that can't attach its regions.
 
-- **Region rows.** Each region record is its own SQLite row keyed by
-  `(RegionId, version)`, holding the record's encoding and a checksum. Rows are
-  written once and never updated.
-- **Versions.** A region gets a new version from a save-wide counter when it's
-  first encoded after a change. Unchanged regions keep their version across
-  rewind boundaries and checkpoints, so each boundary costs only the regions
-  that changed.
-- **Checkpoints and boundaries** list `region → version`, plus the game-wide
-  state: tick, seed, id allocators, reference points, the identity directory,
-  the combat globals (outcome, objective, hostility, input boundaries,
-  characters, events) and per-connection revisions.
-- **Garbage collection.** A row is deleted in the same transaction that
-  removes the last checkpoint or boundary referring to it. Rows are written
-  before the checkpoint naming them commits, so crash rollback is unchanged.
-- **Loading.** The server reads the game-wide state, then only the rows for the
-  saved load horizon. Other rows are read on demand.
-- **Format.** One save-format bump covers this layout and per-region
-  in-memory storage.
+### Save layout (designed; built in a later slice)
 
-The record encoding in this slice is the encoding those rows will hold.
+- **Record rows.** Each detached region's record is its own SQLite row keyed
+  by its record identity, holding the record's encoding and a checksum. Rows
+  are written once. Identities come from game state, so a retried checkpoint
+  write produces the same rows byte for byte, as `commit_batch` requires.
+- **Loaded regions** stay inside the checkpoint, as today; the loaded set is
+  bounded by the reference points' horizons.
+- **Checkpoints and boundaries** hold the game-wide state with each detached
+  region's record identity.
+- **Garbage collection.** The transaction that installs a checkpoint deletes
+  rows it doesn't refer to. That's safe because identities are never reused:
+  anything the engine refers to is either in the latest checkpoint (with its
+  boundaries) or newer than it. Rows are written in the same transaction
+  before the checkpoint naming them, so crash rollback is unchanged.
+- **Loading** reads the game-wide state only. Records are read, and checked,
+  when their regions attach.
+- **Format.** One save-format bump covers this layout, never-built regions
+  and the scenario pin below.
+
+Per-region in-memory tables, with loaded regions also stored as rows, are
+deferred until measurements show the global tables or re-encoding the loaded
+horizon per boundary matter.
 
 ### Later slices
 
-1. **Per-region storage and the record store,** with one save-format bump:
-   the world and entities stored as one shared value per region, so rewind
-   shares memory per region and the scheduler scans only active actors; the
-   save layout above; horizon-only loading on startup.
-2. **Engine wiring:** transitions after every committed command; default
-   reference points for the actors the engine controls (packages without
-   combat have no run characters, so points can't come only from
-   `combat.characters`); choosing load and active radii; background
-   preloading; reconnect and gap snapshots.
-3. **Deterministic generation** of regions never activated, pinned to
-   scenario, seed and version references.
-4. **Asset palettes.**
+1. **Never-built regions and region sources.** A region that has never been
+   needed has no state at all: the world knows it from structural metadata
+   only. A region source (the scenario package now, a generator later) builds
+   one region's starting record just before it's loaded. A region's content
+   mustn't depend on the order regions were built in, so each region gets its
+   own random seed.
+2. **Record rows on disk** (the layout above) and the one save-format bump.
+   The save pins the scenario package by manifest hash instead of embedding
+   it, and copies each region's source into the save when the region is first
+   built. A save opened with a different package fails closed.
+3. **Engine wiring:** transitions after every committed command, so replay,
+   checkpoints and rewind see them; default reference points for the actors
+   the engine controls (packages without combat have no run characters, so
+   points can't come only from `combat.characters`); load and active radii;
+   building only the regions the first transition needs, which bounds save
+   creation and startup by the horizon rather than the world.
+4. **Background preloading, reconnect and gap snapshots.**
+5. **Large scenarios and generation:** per-region package files with a
+   manifest, lifting the 256-region limit, and a procedural region source.
+6. **Asset palettes.**
 
 ### Lifecycle verification
 

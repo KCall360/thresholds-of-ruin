@@ -133,11 +133,15 @@ impl DiskCheckpoint {
             }
         }
         let game = Game::restore_checkpoint(self.game, &self.shared).ok_or_else(invalid_archive)?;
-        let valid_revisions = |game: &Game, revisions: &BTreeMap<ActorId, u64>| {
-            game.checkpoint_actor_ids()
-                .eq(revisions.keys().map(|a| a.0))
+        // Saves don't hold region records yet, so no saved game may refer to
+        // one; see docs/region-streaming.md.
+        let valid_game = |game: &Game, revisions: &BTreeMap<ActorId, u64>| {
+            game.detached_records().next().is_none()
+                && game
+                    .checkpoint_actor_ids()
+                    .eq(revisions.keys().map(|a| a.0))
         };
-        if !valid_revisions(&game, &self.revisions) {
+        if !valid_game(&game, &self.revisions) {
             return Err(invalid_archive());
         }
         let mut boundaries = VecDeque::new();
@@ -167,7 +171,7 @@ impl DiskCheckpoint {
             }
             let game = Game::restore_checkpoint(boundary.game, &self.shared)
                 .ok_or_else(invalid_archive)?;
-            if !valid_revisions(&game, &boundary.revisions) {
+            if !valid_game(&game, &boundary.revisions) {
                 return Err(invalid_archive());
             }
             boundaries.push_back(Arc::new(Boundary {
@@ -239,6 +243,45 @@ mod tests {
                 Some(original.game.clone())
             );
         }
+    }
+
+    #[test]
+    fn a_saved_game_referring_to_a_region_record_is_rejected() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let before = engine.state(ActorId(1)).unwrap();
+        engine
+            .command(
+                "test",
+                "checkpoint",
+                ActorId(1),
+                "wait",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: before.revision,
+                    action: tor_protocol::Action::Wait,
+                },
+            )
+            .unwrap();
+        let restore = |engine: &Engine| {
+            Checkpoint::capture(engine)
+                .encode("test", 1)
+                .restore(engine.archive.clone())
+        };
+        assert!(restore(&engine).is_ok());
+
+        // Nothing follows the actor, so every region can detach.
+        let mut records = tor_simulation::MemoryRecords::default();
+        let mut game = engine.game.clone();
+        game.transition_regions(&Default::default(), &mut records)
+            .unwrap();
+        assert!(game.detached_records().next().is_some());
+        let last = engine.boundaries.pop_back().unwrap();
+        engine.boundaries.push_back(Arc::new(Boundary {
+            game: game.clone(),
+            ..(*last).clone()
+        }));
+        engine.game = game;
+        assert!(restore(&engine).is_err());
     }
 
     #[test]

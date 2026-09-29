@@ -1,5 +1,6 @@
 //! Backend-only deterministic checkpoint state. Identical worlds and navigation
 //! regions are encoded once across navigation maps and rewind boundaries. This module does not perform storage or I/O.
+use crate::streaming::Lifecycle;
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,10 +20,10 @@ pub struct Snapshot {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
-    /// Region streaming state, omitted while empty so games that never
-    /// stream save exactly as before.
-    #[serde(default, skip_serializing_if = "crate::streaming::Lifecycle::is_empty")]
-    lifecycle: crate::streaming::Lifecycle,
+    /// Region streaming state in [`SharedState`], omitted while empty so
+    /// games that never stream save exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lifecycle: Option<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -33,6 +34,10 @@ pub struct SharedState {
     #[serde(with = "navigation_regions")]
     navigation: Vec<Navigation>,
     items: Vec<BTreeMap<ItemId, Item>>,
+    /// Identical lifecycle states (with their identity directories) across
+    /// rewind boundaries are encoded once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    lifecycles: Vec<Lifecycle>,
 }
 
 impl SharedState {
@@ -84,7 +89,16 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
-            lifecycle: self.lifecycle.clone(),
+            lifecycle: (!self.lifecycle.is_empty()).then(|| {
+                let lifecycles = &mut shared.lifecycles;
+                lifecycles
+                    .iter()
+                    .position(|l| l == &self.lifecycle)
+                    .unwrap_or_else(|| {
+                        lifecycles.push(self.lifecycle.clone());
+                        lifecycles.len() - 1
+                    })
+            }),
         }
     }
 
@@ -107,10 +121,16 @@ impl Game {
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
-            lifecycle: snapshot.lifecycle,
+            lifecycle: match snapshot.lifecycle {
+                None => Lifecycle::default(),
+                // An empty state is always omitted, so encodings stay unique.
+                Some(index) => {
+                    Some(shared.lifecycles.get(index)?.clone()).filter(|l| !l.is_empty())?
+                }
+            },
         };
         let mut occupied = BTreeSet::new();
-        if !game.lifecycle_valid()
+        if !game.lifecycle_state_valid()
             || !game.physics_valid()
             || !game.combat_valid()
             || (game.actors.is_empty() && !game.has_detached_actors())
