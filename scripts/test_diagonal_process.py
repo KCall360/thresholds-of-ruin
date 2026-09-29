@@ -1,8 +1,6 @@
 """Diagonal gameplay through actual native ASCII, text and headless processes."""
 from test_text_process import flush_save, inspect_save
-import json
 import os
-from pathlib import Path
 import unittest
 
 import test_text_process as support

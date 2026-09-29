@@ -1,0 +1,10 @@
+# Lint for the Python test and performance tooling in scripts/.
+# The rule set targets likely bugs (pyflakes, invalid syntax, import and
+# comparison errors), not style, so the scripts keep their compact idiom.
+[lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E701", # one-line compound statements are an accepted style here
+    "E702", # so are semicolon-separated statements
+    "E731", # and named lambdas
+]

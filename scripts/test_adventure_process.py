@@ -1,7 +1,5 @@
 """The ordinary adventure interface through real server and text processes."""
 from test_text_process import flush_save
-import json
-from pathlib import Path
 import unittest
 
 import test_text_process as support
