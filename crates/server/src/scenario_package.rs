@@ -1073,3 +1073,65 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod region_lifecycle_tests {
+    use super::*;
+    use tor_simulation::RegionTransition;
+
+    /// Every checked-in package, shrunk to what its characters' reference
+    /// points require and then fully reactivated, equals the original. This
+    /// covers real joins, rotations, physical portals, doors and bodies.
+    #[test]
+    fn every_package_detaches_and_reattaches_exactly() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+        let mut packages: Vec<_> = std::fs::read_dir(root.join("tests"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .chain([root.join("first-dungeon"), root.join("two-room")])
+            .filter(|path| path.join("scenario.toml").is_file())
+            .collect();
+        packages.sort();
+        let mut detached = 0;
+        for path in packages {
+            let package = read_package(&path).unwrap();
+            let mut game = package.build(0, true).unwrap();
+            // Packages without combat configure no run characters, so follow
+            // the manifest's characters, as the engine will.
+            for character in &package.manifest.characters {
+                let actor = tor_simulation::ActorId(character.id);
+                if game.observe(actor).is_err() {
+                    continue; // Not spawned in this build.
+                }
+                game.add_reference_point(tor_simulation::ReferencePoint {
+                    target: tor_simulation::ReferenceTarget::Actor(actor),
+                    active_radius: None,
+                    load_radius: None,
+                    observes: true,
+                })
+                .unwrap();
+            }
+            let original = game.clone();
+            let roots: BTreeSet<_> = game.region_roots().iter().map(|r| r.region).collect();
+            let (_, report) = game
+                .transition_regions(&RegionTransition {
+                    active: roots.clone(),
+                    loaded: roots,
+                })
+                .unwrap_or_else(|e| panic!("{}: {e:?}", path.display()));
+            detached += report.detached.len();
+            let mut shared = tor_simulation::checkpoint::SharedState::default();
+            let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
+                .unwrap_or_else(|| panic!("{}: {report:?}", path.display()));
+            assert_eq!(restored, game, "{}", path.display());
+            let all: BTreeSet<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
+            game.transition_regions(&RegionTransition {
+                active: all.clone(),
+                loaded: all,
+            })
+            .unwrap();
+            assert_eq!(game, original, "{}", path.display());
+        }
+        assert!(detached > 0, "some package has a region to detach");
+    }
+}

@@ -98,6 +98,14 @@ impl SightCache {
         self.valid(entry).then(|| entry.cells.clone())
     }
 
+    /// The regions a still-valid cached scene read.
+    pub(crate) fn regions(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<RegionId>> {
+        let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = scenes.get(&(eye, frame, radius))?;
+        self.valid(entry)
+            .then(|| entry.regions.iter().map(|&(region, _)| region).collect())
+    }
+
     pub(crate) fn contains(&self, eye: Location, frame: u8, radius: u8) -> bool {
         let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
         scenes

@@ -110,7 +110,8 @@ impl Game {
                     && e.incoming_velocity.unsigned_abs() <= TERMINAL as u64
                     && e.normal.iter().all(|v| (-1..=1).contains(v))
                     && e.normal.iter().map(|v| v.unsigned_abs()).sum::<u64>() == 1
-                    && e.other_actor.is_none_or(|id| self.actors.contains_key(&id))
+                    && e.other_actor
+                        .is_none_or(|id| self.actors.contains_key(&id) || self.detached_actor(id))
                     && match e.entity {
                         PhysicsEntity::Actor(id) => self.actors.contains_key(&id),
                         PhysicsEntity::Item(id) => self.items.contains_key(&id),
@@ -439,7 +440,7 @@ impl Game {
             let ids: Vec<_> = self.actors.keys().copied().collect();
             for id in ids {
                 let a = &self.actors[&id];
-                if !a.alive() {
+                if !a.alive() || self.actor_frozen(id) {
                     continue;
                 }
                 if !self.needs_integration(
@@ -469,6 +470,8 @@ impl Game {
                 a.orientation = frame;
                 a.motion = motion;
                 a.visited.insert(at.region);
+                // Falling into a frozen region freezes the actor there.
+                self.sync_actor_lifecycle(id);
                 if self.combat.outcome.terminal {
                     return tick;
                 }
@@ -483,6 +486,9 @@ impl Game {
                 let ItemLocation::Ground(at) = i.location else {
                     continue;
                 };
+                if self.region_frozen(at.region) {
+                    continue;
+                }
                 let body = BodySpec {
                     cells: vec![[0; 3]],
                     eye: [0; 3],

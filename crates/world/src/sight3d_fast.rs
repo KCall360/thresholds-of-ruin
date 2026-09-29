@@ -404,6 +404,21 @@ impl World {
         cells
     }
 
+    /// Every region [`World::eye_scene`] reads for this eye: the regions it
+    /// entered and every region linked from them. The scene is exact only
+    /// while all of them are loaded. `None` when the eye's region isn't.
+    pub fn eye_scene_regions(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<RegionId>> {
+        if let Some(regions) = self.sight.regions(eye, frame, radius) {
+            return Some(regions);
+        }
+        let (cells, regions) = self.build_eye_scene(eye, frame, radius);
+        if let Some(regions) = &regions {
+            self.sight
+                .insert(eye, frame, radius, regions.iter().copied(), &cells);
+        }
+        regions
+    }
+
     /// [`World::eye_scene`] without reuse, for tests and measurements.
     pub fn eye_scene_uncached(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
         self.build_eye_scene(eye, frame, radius).0

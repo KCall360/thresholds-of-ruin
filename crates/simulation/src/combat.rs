@@ -122,17 +122,17 @@ impl Game {
         {
             return false;
         }
+        // Characters may be detached like anyone else; reference points, not
+        // these checks, decide what stays loaded.
+        let known = |id: &ActorId| self.actors.contains_key(id) || self.detached_actor(*id);
         self.combat
             .selected
-            .is_none_or(|id| self.actors.contains_key(&id) && self.combat.characters.contains(&id))
-            && self
-                .combat
-                .characters
-                .iter()
-                .all(|id| self.actors.contains_key(id))
+            .is_none_or(|id| known(&id) && self.combat.characters.contains(&id))
+            && self.combat.characters.iter().all(known)
             && self.combat.objective.as_ref().is_none_or(|o| {
-                self.world.contains(o.anchor)
-                    && o.item.is_none_or(|id| self.items.contains_key(&id))
+                self.world.knows(o.anchor)
+                    && o.item
+                        .is_none_or(|id| self.items.contains_key(&id) || self.detached_item(id))
             })
             && self
                 .combat
@@ -158,19 +158,20 @@ impl Game {
                                     .checked_add(p.remaining)
                                     .and_then(|t| t.checked_add(c.spec.attack.recovery))
                                     .is_some()
-                                && (!p.active || p.started + p.remaining >= self.tick)
+                                && (!p.active || p.started + p.remaining >= self.actor_clock(*id))
                         })
                 })
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()
                     && ai.profile.valid()
+                    // Memory may refer to detached actors and places.
                     && ai.target.is_none_or(|(target, at, tick)| {
-                        self.actors.contains_key(&target)
-                            && self.world.contains(at)
-                            && tick <= self.tick
+                        (self.actors.contains_key(&target) || self.detached_actor(target))
+                            && self.world.knows(at)
+                            && tick <= self.actor_clock(*id)
                     })
-                    && ai.visits.keys().all(|at| self.world.contains(*at))
+                    && ai.visits.keys().all(|at| self.world.knows(*at))
             })
     }
     pub(crate) fn combat_view(
@@ -586,8 +587,9 @@ impl Game {
 
     pub(crate) fn next_attack_tick(&self) -> Option<u64> {
         self.actors
-            .values()
-            .filter_map(|a| a.combat.as_ref()?.pending.as_ref())
+            .iter()
+            .filter(|(id, _)| !self.actor_frozen(**id))
+            .filter_map(|(_, a)| a.combat.as_ref()?.pending.as_ref())
             .filter(|p| p.active)
             .map(|p| p.started + p.remaining)
             .min()
@@ -598,6 +600,9 @@ impl Game {
         for id in ids {
             if self.combat.outcome.terminal {
                 break;
+            }
+            if self.actor_frozen(id) {
+                continue;
             }
             let Some(p) = self.preparation(id).cloned() else {
                 continue;
