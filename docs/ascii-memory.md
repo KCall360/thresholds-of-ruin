@@ -39,6 +39,23 @@ and eight in z. The window shows up to five nearest elevation panels and crops
 large charts to keep glyphs readable inside the map panel. Cells outside the
 viewport can remain cached; unseen cells are never filled in.
 
+## Known limitations
+
+- **3D views fill the cache sooner.** With
+  [three-dimensional sight](sight-3d.md), a view also discloses floors,
+  ceilings and empty headroom, and the cache keeps all of them. The 4096-cell
+  bound therefore covers less explored area than it did with plane views,
+  especially for tall observers or in tall rooms, so the remembered map may lose
+  distant cells sooner. The rendered window alone spans about 20,800 positions,
+  so the bound, not the window, limits what can be shown. This hasn't been
+  measured. If it matters in play, options include raising the bound or not
+  caching empty headroom, though the elevation panels currently draw headroom
+  as floor, so dropping it would change what they show.
+- **A conflicting view discards the whole chart.** A single disagreeing anchor,
+  such as a cell seen through a rotated portal, resets the chart as described
+  above. 3D sight shows more cells through portals, including vertical ones, so
+  this may happen more often than before.
+
 ## Verification
 
 Shared-client tests cover translation across successive updates, item refresh,
