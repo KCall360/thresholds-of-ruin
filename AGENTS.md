@@ -118,20 +118,21 @@ checkpoint, retry, rewind, disclosure, and native-client acceptance tests
 passing, along with its performance requirements.
 
 **3s — three-dimensional sight (in progress, separate from 4e).** See
-[three-dimensional sight](docs/sight-3d.md). Done on the `design/3d-sight`
-branch: the exact reference and accelerated builders, gameplay sight from
-declared body eye cells, authored door heights, and floors and ceilings as seen
-solid cells derived by clients, and the scene cache. It's open as PR #40. The
-latency regression that blocked it is fixed: profiling showed that door
-approaches, not scenes, were most of the cost, and with that fixed and the
-scene cache added, `r64-a8-h100-memory` p95 is 2.6 ms against 3.3 ms on
-`main` (see
-[reference implementation findings](docs/sight-3d.md#reference-implementation-findings)).
-Next: update the PR description, wait for CI on the final commit, and **merge
-only with the maintainer's approval**.
+[three-dimensional sight](docs/sight-3d.md). 3D sight, authored door heights,
+client-derived floors and ceilings, and the scene cache are merged (PR #40).
 
-After that: view-delta observation updates, then the remaining client changes.
-A NetHack-style ASCII client redesign is deferred until after 3s.
+In progress on the `design/view-deltas` branch: view-delta observation updates
+(protocol 18, authorized by the maintainer). The server sends
+`observation_delta` updates against the last state disclosed on each stream,
+and `tor-client-common` expands them to full states; see
+[view deltas](docs/protocol.md#view-deltas). Messages are 78–87% smaller in
+the headline `latency_bench` cases, with `authoritative_total` unchanged
+against `main`. Next: wait for CI on the PR and **merge only with the
+maintainer's approval**. No ledger line was added; that needs a raw-data
+upload, which the maintainer must approve.
+
+After that: the remaining 3s client changes. A NetHack-style ASCII client
+redesign is deferred until after 3s.
 
 On this machine, rustc can run out of memory when other applications use most
 of it. If a build fails with "memory allocation failed", lower

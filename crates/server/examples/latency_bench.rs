@@ -3,7 +3,9 @@ use serde_json::json;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use tor_client_ascii::{render::Canvas, App};
 use tor_client_common::ClientState;
-use tor_protocol::{ActorId, HistoryPage, Snapshot, StreamCursor, StreamUpdate, UpdateBody};
+use tor_protocol::{
+    ActorId, HistoryPage, Snapshot, StateDelta, StreamCursor, StreamUpdate, UpdateBody,
+};
 use tor_server::{journal::Command, CommandProfile, Engine, Scenario};
 use tor_test_support::performance::{Step, Trace, TraceAction};
 type Distributions = BTreeMap<(String, String), Vec<f64>>;
@@ -54,6 +56,26 @@ struct Runner {
     attempt: usize,
     case: String,
     distributions: Distributions,
+    /// Per observation update: full state bytes, sent update bytes, and
+    /// whether a delta was sent.
+    wire_bytes: Vec<(usize, usize, bool)>,
+}
+/// Observation message sizes, full state against what was sent.
+fn summarize_wire(case: &str, mut samples: Vec<(usize, usize, bool)>) {
+    if samples.is_empty() {
+        return;
+    }
+    let deltas = samples.iter().filter(|s| s.2).count();
+    let (full, sent): (usize, usize) = samples.iter().fold((0, 0), |a, s| (a.0 + s.0, a.1 + s.1));
+    samples.sort_by_key(|s| s.1);
+    let percentile = |p: usize| samples[(samples.len() * p).div_ceil(100).saturating_sub(1)].1;
+    println!(
+        "{}",
+        json!({"kind":"wire","case":case,"n":samples.len(),"deltas":deltas,
+        "full_bytes_total":full,"sent_bytes_total":sent,
+        "sent_p50_bytes":percentile(50),"sent_p95_bytes":percentile(95),
+        "sent_max_bytes":samples.last().unwrap().1})
+    );
 }
 impl Runner {
     fn new(engine: Engine, case: String) -> Self {
@@ -84,6 +106,7 @@ impl Runner {
             attempt: 0,
             case,
             distributions: BTreeMap::new(),
+            wire_bytes: Vec::new(),
         }
     }
     fn perform(&mut self, actor: ActorId, step: &Step, cycle: usize, index: usize) {
@@ -130,18 +153,41 @@ impl Runner {
         }) {
             let state = self.engine.state(ActorId(1)).unwrap();
             self.sequence += 1;
+            let tick = state.observation.tick;
+            let event = (actor == ActorId(1)).then(|| Box::new(entry.disclosed()));
+            // Send what the server sends: a delta against the client's state.
+            let start = Instant::now();
+            let delta = StateDelta::between(self.app.state.as_ref().unwrap().state(), &state);
+            timings.insert(
+                "delta_encoding".into(),
+                start.elapsed().as_secs_f64() * 1000.,
+            );
+            let full_bytes = serde_json::to_vec(&state).unwrap().len();
+            let body = match delta {
+                Some(delta) => UpdateBody::ObservationDelta {
+                    state: Box::new(delta),
+                    event,
+                },
+                None => UpdateBody::Observation {
+                    state: Box::new(state),
+                    event,
+                },
+            };
             let update = StreamUpdate {
                 actor: ActorId(1),
                 branch: self.engine.branch().clone(),
                 cursor: StreamCursor {
                     sequence: self.sequence,
-                    tick: state.observation.tick,
+                    tick,
                 },
-                body: UpdateBody::Observation {
-                    state: Box::new(state),
-                    event: (actor == ActorId(1)).then(|| Box::new(entry.disclosed())),
-                },
+                body,
             };
+            let update_bytes = serde_json::to_vec(&update).unwrap().len();
+            self.wire_bytes.push((
+                full_bytes,
+                update_bytes,
+                matches!(update.body, UpdateBody::ObservationDelta { .. }),
+            ));
             let start = Instant::now();
             self.app.state.as_mut().unwrap().apply(update).unwrap();
             timings.insert(
@@ -325,6 +371,7 @@ fn main() {
                         json!({"kind":"case_end","case":case,"history_end":history_end,"rewind_count":rewind_count,
             "final_save_bytes":final_save_bytes,"final_flush_ms":flush_ms,"save_status":save_status,"restart_replay_ms":restart_replay_ms,"recovery":resumed.recovery_profile()})
                     );
+                    summarize_wire(&case, std::mem::take(&mut runner.wire_bytes));
                     summarize(&case, runner.distributions);
                 }
             }
@@ -397,6 +444,7 @@ fn main() {
             json!({"kind":"traversal_end","case":case,"history_end":runner.engine.profile_counts().0,
             "client_memory":runner.app.state.as_ref().unwrap().memory().count(),"persistence":persistence})
         );
+        summarize_wire(&case, std::mem::take(&mut runner.wire_bytes));
         summarize(&case, runner.distributions);
     }
 }

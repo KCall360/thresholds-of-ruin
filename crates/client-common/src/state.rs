@@ -160,7 +160,18 @@ impl ClientState {
         // checks (including history validation) before publishing any changes.
         let mut stream = self.stream.clone();
         stream.accept(update.actor, update.cursor)?;
-        match update.body {
+        let body = match update.body {
+            UpdateBody::ObservationDelta { state, event } => UpdateBody::Observation {
+                state: Box::new(
+                    state
+                        .apply(&self.snapshot.state)
+                        .map_err(|_| StreamError::InconsistentState)?,
+                ),
+                event,
+            },
+            body => body,
+        };
+        match body {
             UpdateBody::Travel { status, entry } => {
                 if update.cursor.tick != self.snapshot.state.observation.tick {
                     return Err(StreamError::InconsistentState);
@@ -219,6 +230,7 @@ impl ClientState {
                 self.snapshot.state = *state;
                 self.remember_view();
             }
+            UpdateBody::ObservationDelta { .. } => unreachable!("expanded above"),
             UpdateBody::Annotation { entry } => {
                 if update.cursor.tick != self.snapshot.state.observation.tick
                     || !matches!(entry.content, HistoryContent::Annotation { .. })

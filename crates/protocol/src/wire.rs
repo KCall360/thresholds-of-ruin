@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -418,6 +418,11 @@ pub enum UpdateBody {
     },
     Observation {
         state: Box<StateView>,
+        event: Option<Box<HistoryEntry>>,
+    },
+    /// The next observation as changes to the previous one on this stream.
+    ObservationDelta {
+        state: Box<crate::StateDelta>,
         event: Option<Box<HistoryEntry>>,
     },
     Annotation {
