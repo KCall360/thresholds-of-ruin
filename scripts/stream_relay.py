@@ -70,7 +70,7 @@ class StreamRelay:
                 self.gate.wait()
                 if prefix[0] == 0x81 and self.drop_observation.is_set():
                     message = json.loads(payload)
-                    if message.get('type') == 'update' and message['update']['body']['type'] == 'observation':
+                    if message.get('type') == 'update' and message['update']['body']['type'] in ('observation', 'observation_delta'):
                         self.drop_observation.clear()
                         self.dropped.set()
                         continue

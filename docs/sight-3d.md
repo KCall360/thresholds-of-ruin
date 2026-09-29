@@ -5,9 +5,9 @@
 has authorized the protocol and save-format break it requires. Every observer
 now sees with the model below, from the eye cell its body declares. Floors and
 ceilings are seen solid cells that clients classify (see
-[material volumes](material-volumes.md)). Still to come: view-delta updates and
-the remaining client changes. When 3s is complete, this note becomes the sight
-guide.
+[material volumes](material-volumes.md)), and observation updates are view
+deltas. Still to come: the remaining client changes. When 3s is complete, this
+note becomes the sight guide.
 
 ## Why the current model falls short
 
@@ -186,9 +186,15 @@ join must still produce the same scene as the unsplit room, including its bevels
   that entered or left view, or changed, relative to the previous observation on
   the same connection. Snapshots stay complete. The existing sequenced stream
   already has what deltas need: a sequence gap, a reconnect or a rewind forces
-  a fresh snapshot. The delta encoding (for example, add and remove sets keyed by
-  opaque cell key, or run-length spans per column) is chosen by measuring
-  message size and client apply time.
+  a fresh snapshot. The encoding is described under
+  [view deltas](protocol.md#view-deltas). Cells are matched by
+  observer-relative position after one frame shift, not by opaque key: a key
+  can appear more than once in a scene seen through a link, and a step would
+  otherwise change every position. Measured with `latency_bench` (release,
+  three cycles), every observation update was sent as a delta: messages were
+  87% smaller in `r64-a8-h100-memory` (p50 1.9 KB, p95 8.1 KB) and 78% smaller
+  in `r8-a1-h100-memory` (p50 3.5 KB, p95 15.9 KB). Encoding took 0.03 ms at
+  p95, and client application including the delta 0.31 ms at p95.
 - Changing the ASCII layout is out of scope for this note. Until then, the
   existing height panels draw whatever is disclosed.
 

@@ -451,7 +451,7 @@ async fn transact(
 fn present(connection: &Connection, session: &mut Session, message: &ServerMessage) -> bool {
     match message {
         ServerMessage::Update { update } => match &update.body {
-            UpdateBody::Observation { event, .. } => {
+            UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
                 if session.journey.is_none()
                     && !session.summarizing_pickup
                     && connection

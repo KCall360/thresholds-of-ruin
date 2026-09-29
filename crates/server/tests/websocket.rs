@@ -51,6 +51,15 @@ async fn connect(address: &str, token: &str, frontend: &str) -> Client {
     assert_eq!(role, expected);
     client
 }
+/// A pushed observation as a full state, expanding a delta against `base`.
+fn observation(body: UpdateBody, base: &StateView) -> (StateView, Option<Box<HistoryEntry>>) {
+    match body {
+        UpdateBody::Observation { state, event } => (*state, event),
+        UpdateBody::ObservationDelta { state, event } => (state.apply(base).unwrap(), event),
+        other => panic!("{other:?}"),
+    }
+}
+
 async fn attach(client: &mut Client) -> Snapshot {
     request(client, "attach", Request::Attach { actor: ActorId(1) }).await;
     match receive(client).await {
@@ -141,15 +150,13 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
     .await;
     for client in [&mut text, &mut ascii] {
         match receive(client).await {
-            ServerMessage::Update { update } => match update.body {
-                UpdateBody::Observation { state, event } => {
-                    assert_eq!(state.observation.inventory.len(), 1);
-                    assert_eq!(state.observation.tick, 50);
-                    assert_eq!(state.revision, 1);
-                    assert!(event.is_some());
-                }
-                other => panic!("{other:?}"),
-            },
+            ServerMessage::Update { update } => {
+                let (state, event) = observation(update.body, &initial.state);
+                assert_eq!(state.observation.inventory.len(), 1);
+                assert_eq!(state.observation.tick, 50);
+                assert_eq!(state.revision, 1);
+                assert!(event.is_some());
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -492,6 +499,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
         },
     ];
     let mut entries = vec![];
+    let mut state = initial.state.clone();
     for (revision, action) in actions.into_iter().enumerate() {
         let id = format!("action-{revision}");
         let command = Request::Command {
@@ -510,9 +518,8 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             panic!()
         };
         assert_eq!(watched, played);
-        let UpdateBody::Observation { state, event } = watched.body else {
-            panic!()
-        };
+        let event;
+        (state, event) = observation(watched.body, &state);
         assert_eq!(state.revision, revision as u64 + 1);
         let entry = *event.unwrap();
         assert!(
