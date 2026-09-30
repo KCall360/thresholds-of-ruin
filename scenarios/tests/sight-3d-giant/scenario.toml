@@ -3,11 +3,10 @@
 # (the default) looks over a wall two cells high and sees a creature hovering
 # behind it; a two-cell humanoid, selected with --character 2 at the same
 # start, can't.
-format = 1
+format = 2
 id = "sight-3d-giant"
 version = "1.0"
 ruleset = "dungeon-v17"
-files = ["regions.toml"]
 default_character = 1
 themes = ["stone"]
 zones = { "hall" = {  } }

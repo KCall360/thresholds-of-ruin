@@ -1,0 +1,6 @@
+id = 4
+size = [3, 3, 2]
+name = "Upper"
+chamber = true
+anchors = { "portal-0" = [1, 1, 0] }
+portals = [{ "at" = [1, 1, 0], "direction" = "down", "to" = "3/portal-0", "turns" = 0 }]

@@ -12,8 +12,19 @@ use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
 pub const RULESET: &str = "dungeon-v17";
-const VALIDATOR: &str = "tor-scenario-5";
+const VALIDATOR: &str = "tor-scenario-6";
+/// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
+/// The package layout this version reads: `scenario.toml`, one file per
+/// region in `regions/`, and the validator's `index.json`.
+pub const FORMAT: u32 = 2;
+const REGION_DIR: &str = "regions";
+/// Regions a package may have.
+pub const MAX_REGIONS: usize = 65_536;
+/// Each region file is bounded to this.
+const MAX_REGION_BYTES: u64 = 1024 * 1024;
+/// The index is bounded to this, which holds the largest package.
+const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 
 fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
@@ -24,6 +35,17 @@ fn require(ok: bool, message: impl AsRef<str>) -> Result<(), Failure> {
     } else {
         Err(fail(message))
     }
+}
+/// Asset identifiers are dotted lowercase names, like `creature.rat`.
+fn asset_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 80
+        && s.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
 }
 fn label(s: &str) -> bool {
     !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
@@ -40,7 +62,6 @@ pub struct Manifest {
     pub id: String,
     pub version: String,
     pub ruleset: String,
-    pub files: Vec<String>,
     pub default_character: u64,
     #[serde(default)]
     pub themes: Vec<String>,
@@ -52,11 +73,27 @@ pub struct Manifest {
     pub appearance_pools: BTreeMap<String, AppearancePool>,
     pub characters: Vec<Character>,
     pub objective: Option<Objective>,
+    /// The asset identifiers each theme may need: a client near a region
+    /// with that theme gets them in its palette. See
+    /// `docs/protocol.md#asset-palettes`.
+    #[serde(default)]
+    pub assets: BTreeMap<String, Vec<String>>,
+    /// Terrain assets of regions outside any zone, or in a zone without its own.
+    pub terrain: Option<TerrainAssets>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Zone {
     pub themes: Option<Vec<String>>,
+    pub terrain: Option<TerrainAssets>,
+}
+/// Assets for a region's floor, walls and doors.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerrainAssets {
+    pub floor: Option<String>,
+    pub wall: Option<String>,
+    pub door: Option<String>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,6 +101,9 @@ pub struct AppearancePool {
     pub appearances: Vec<String>,
     #[serde(default)]
     pub confounding: bool,
+    /// The asset every concealed item drawing from this pool looks like, so
+    /// it never discloses which identity an item is.
+    pub asset: Option<String>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -78,6 +118,8 @@ pub struct Archetype {
     pub properties: BTreeMap<String, String>,
     pub name: Option<String>,
     pub turn_ticks: Option<u64>,
+    /// The asset clients draw actors and items of this archetype with.
+    pub asset: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,6 +136,7 @@ pub struct Character {
     #[serde(default = "omit")]
     pub unselected: String,
     pub ai: Option<String>,
+    pub asset: Option<String>,
 }
 fn hundred() -> u64 {
     100
@@ -108,11 +151,6 @@ pub struct Objective {
     pub item: Option<u64>,
     pub disclosed: bool,
     pub continue_play: bool,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RegionFile {
-    pub regions: Vec<RegionDef>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,6 +180,10 @@ pub struct RegionDef {
     pub items: Vec<Item>,
     #[serde(default)]
     pub actors: Vec<Actor>,
+    /// A generated region's recipe: the generator fills the region on first
+    /// build. See [`crate::generator`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate: Option<crate::generator::Generate>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -224,20 +266,243 @@ pub struct Certificate {
     pub validator: String,
     pub ruleset: String,
     pub content_hash: String,
+    /// Hashes of the manifest and the index; the index holds each region
+    /// file's hash.
     pub files: BTreeMap<String, String>,
     pub regions: usize,
     pub model_hash: String,
     pub coverage: String,
 }
-/// Immutable package snapshot embedded in the save, never re-read on resume.
+
+/// What a package's regions are without reading them: generated by the
+/// validator as `index.json`, so starting, planning and streaming a game
+/// read one region file only when that region is built.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RegionIndex {
+    /// In region id order.
+    pub regions: Vec<IndexedRegion>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IndexedRegion {
+    pub id: u64,
+    /// The region's file, relative to the package, and its SHA-256.
+    pub file: String,
+    pub hash: String,
+    pub name: String,
+    pub size: [i32; 3],
+    pub chamber: bool,
+    pub zone: Option<String>,
+    pub anchors: BTreeMap<String, [i32; 3]>,
+    /// Each outgoing portal's destination anchor, in authored order.
+    pub portals: Vec<String>,
+    pub actors: Vec<IndexedActor>,
+    pub items: Vec<IndexedItem>,
+    pub doors: Vec<u64>,
+    /// Filled by a generator; its identities aren't known until then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IndexedActor {
+    pub id: u64,
+    pub at: [i32; 3],
+    pub turn_ticks: Option<u64>,
+    pub archetype: Option<String>,
+    /// Controlled by a client, so it gets a reference point.
+    pub external: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IndexedItem {
+    pub id: u64,
+    pub carried_by: Option<u64>,
+}
+
+impl IndexedRegion {
+    fn of(def: &RegionDef, file: String, hash: String) -> Self {
+        Self {
+            id: def.id,
+            file,
+            hash,
+            name: def.name.clone(),
+            size: def.size,
+            chamber: def.chamber,
+            zone: def.zone.clone(),
+            anchors: def.anchors.clone(),
+            portals: def.portals.iter().map(|p| p.to.clone()).collect(),
+            actors: def
+                .actors
+                .iter()
+                .map(|a| IndexedActor {
+                    id: a.id,
+                    at: a.at,
+                    turn_ticks: a.turn_ticks,
+                    archetype: a.archetype.clone(),
+                    external: a.controller == "external",
+                })
+                .collect(),
+            items: def
+                .items
+                .iter()
+                .map(|i| IndexedItem {
+                    id: i.id,
+                    carried_by: i.carried_by,
+                })
+                .collect(),
+            doors: def.doors.iter().map(|d| d.id).collect(),
+            generated: def.generate.is_some(),
+        }
+    }
+}
+
+impl RegionIndex {
+    /// Canonical bytes: what the validator writes as `index.json`, and what
+    /// the certificate hashes.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, Failure> {
+        let mut bytes = serde_json::to_vec(self).map_err(|e| fail(e.to_string()))?;
+        bytes.push(b'\n');
+        Ok(bytes)
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Failure> {
+        let index: Self =
+            serde_json::from_slice(bytes).map_err(|e| fail(format!("index.json: {e}")))?;
+        require(
+            index.regions.windows(2).all(|w| w[0].id < w[1].id),
+            "index.json: regions must be in increasing id order",
+        )?;
+        Ok(index)
+    }
+    pub fn region(&self, id: u64) -> Option<&IndexedRegion> {
+        let at = self.regions.binary_search_by_key(&id, |r| r.id).ok()?;
+        Some(&self.regions[at])
+    }
+}
+
+/// Where a package's region files come from: text already in memory (from
+/// the save's copies, or read while validating), or the package directory.
+/// Every text is checked against the index's hash before it's used. Shared
+/// by copies of the package, and usable from the preloading thread.
+#[derive(Clone, Debug, Default)]
+pub struct RegionSources(Arc<std::sync::Mutex<SourceState>>);
+
+#[derive(Debug, Default)]
+struct SourceState {
+    directory: Option<std::path::PathBuf>,
+    texts: BTreeMap<u64, Arc<str>>,
+    /// Recently parsed regions, so building a region and then its neighbour
+    /// doesn't parse shared neighbours twice.
+    parsed: std::collections::VecDeque<(u64, Arc<RegionDef>)>,
+    /// Region files read from the directory, for scaling contracts.
+    files_read: usize,
+}
+
+/// Parsed regions kept: a region and its neighbours, and a few more.
+const PARSED_REGIONS: usize = 16;
+
+impl RegionSources {
+    fn with(directory: Option<&Path>, texts: BTreeMap<u64, Arc<str>>) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(SourceState {
+            directory: directory.map(Path::to_path_buf),
+            texts,
+            parsed: Default::default(),
+            files_read: 0,
+        })))
+    }
+    /// Region files read from the package directory so far.
+    pub fn files_read(&self) -> usize {
+        self.0.lock().unwrap().files_read
+    }
+    /// Look for region files not in memory in `directory` too.
+    pub(crate) fn set_directory(&self, directory: &Path) {
+        self.0.lock().unwrap().directory = Some(directory.to_path_buf());
+    }
+    pub(crate) fn has_directory(&self) -> bool {
+        self.0.lock().unwrap().directory.is_some()
+    }
+    /// Keep a region's text in memory, as the save's copy.
+    pub(crate) fn insert(&self, region: u64, text: Arc<str>) {
+        self.0.lock().unwrap().texts.insert(region, text);
+    }
+    /// A region file's text, checked against the index.
+    pub(crate) fn text(&self, entry: &IndexedRegion) -> Result<Arc<str>, Failure> {
+        let (text, directory) = {
+            let s = self.0.lock().unwrap();
+            (s.texts.get(&entry.id).cloned(), s.directory.clone())
+        };
+        let text = match (text, directory) {
+            (Some(text), _) => text,
+            (None, Some(directory)) => {
+                let text = read_limited(&directory, &entry.file, MAX_REGION_BYTES)?;
+                self.0.lock().unwrap().files_read += 1;
+                Arc::from(text)
+            }
+            (None, None) => {
+                return Err(fail(format!(
+                    "Region {} isn't in the save and the scenario package isn't available",
+                    entry.id
+                )))
+            }
+        };
+        require(
+            digest(text.as_bytes()) == entry.hash,
+            format!(
+                "{} changed since the package was validated; run tor-scenario validate",
+                entry.file
+            ),
+        )?;
+        Ok(text)
+    }
+    /// A region's definition, parsed from its checked text.
+    fn def(&self, entry: &IndexedRegion) -> Result<Arc<RegionDef>, Failure> {
+        let cached = self
+            .0
+            .lock()
+            .unwrap()
+            .parsed
+            .iter()
+            .find(|(id, _)| *id == entry.id)
+            .map(|(_, def)| def.clone());
+        if let Some(def) = cached {
+            return Ok(def);
+        }
+        let def: Arc<RegionDef> = Arc::new(parse(&self.text(entry)?, &entry.file)?);
+        require(
+            def.id == entry.id,
+            format!("{}: must hold region {}", entry.file, entry.id),
+        )?;
+        let mut s = self.0.lock().unwrap();
+        if s.parsed.len() >= PARSED_REGIONS {
+            s.parsed.pop_front();
+        }
+        s.parsed.push_back((entry.id, def.clone()));
+        Ok(def)
+    }
+}
+
+/// A package: its manifest, its region index, and where its region files
+/// come from. Saves keep the manifest and index, and a copy of each region
+/// file once that region is built; resuming reads other region files from
+/// the package directory, checked against the index. See
+/// `docs/scenario-packages.md`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub manifest: Manifest,
-    pub regions: Vec<RegionDef>,
     pub certificate: Certificate,
     pub validated: bool,
     pub selected: u64,
+    /// Where the package was loaded from, for resuming a save whose region
+    /// files aren't all copied into it yet.
+    pub directory: Option<String>,
+    /// Saved in its own table (see `storage.rs`), since it grows with the
+    /// package.
+    #[serde(skip)]
+    pub index: Arc<RegionIndex>,
+    #[serde(skip)]
+    pub sources: RegionSources,
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -246,7 +511,7 @@ fn digest(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-fn read(root: &Path, relative: &str) -> Result<String, Failure> {
+fn read_limited(root: &Path, relative: &str, limit: u64) -> Result<String, Failure> {
     require(
         !relative.is_empty()
             && Path::new(relative)
@@ -266,18 +531,29 @@ fn read(root: &Path, relative: &str) -> Result<String, Failure> {
         "Package file resolves outside package directory",
     )?;
     require(
-        path.metadata().map_err(|e| fail(e.to_string()))?.len() <= MAX_BYTES,
-        "Package file exceeds 8 MiB",
+        path.metadata().map_err(|e| fail(e.to_string()))?.len() <= limit,
+        format!("{relative} exceeds {} KiB", limit / 1024),
     )?;
     std::fs::read_to_string(path).map_err(|e| fail(format!("{relative}: {e}")))
+}
+fn read(root: &Path, relative: &str) -> Result<String, Failure> {
+    read_limited(root, relative, MAX_BYTES)
 }
 fn parse<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T, Failure> {
     toml::from_str(text).map_err(|e| fail(format!("{name}: {e}")))
 }
-pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
+/// Where region `id`'s file is in a package.
+fn region_file(id: u64) -> String {
+    format!("{REGION_DIR}/{id}.toml")
+}
+
+fn read_manifest(root: &Path) -> Result<(Manifest, String), Failure> {
     let text = read(root, "scenario.toml")?;
     let manifest: Manifest = parse(&text, "scenario.toml")?;
-    require(manifest.format == 1, "Unsupported scenario format")?;
+    require(
+        manifest.format == FORMAT,
+        format!("Unsupported scenario format; expected format = {FORMAT}"),
+    )?;
     require(
         manifest.ruleset == RULESET,
         "Missing exact ruleset dependency",
@@ -291,41 +567,254 @@ pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
             }),
         "Version must be author-controlled major.minor",
     )?;
-    require(
-        !manifest.files.is_empty() && manifest.files.len() <= 256,
-        "Expected 1..256 content files",
-    )?;
-    let mut files = BTreeMap::from([("scenario.toml".into(), digest(text.as_bytes()))]);
-    let mut regions = Vec::new();
-    let mut total = text.len();
-    for file in &manifest.files {
+    Ok((manifest, text))
+}
+
+/// Every region file in the package, read and indexed. Reads the whole
+/// package: validation and unvalidated development use it.
+fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), Failure> {
+    let directory = root.join(REGION_DIR);
+    let entries =
+        std::fs::read_dir(&directory).map_err(|e| fail(format!("{}: {e}", directory.display())))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| fail(e.to_string()))?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| fail("Non-Unicode region file name"))?;
         require(
-            file.ends_with(".toml") && !files.contains_key(file),
-            "Duplicate or non-TOML content file",
+            name.strip_suffix(".toml").is_some_and(|id| {
+                id.parse::<u64>()
+                    .is_ok_and(|n| n > 0 && n.to_string() == id)
+            }),
+            format!("{REGION_DIR}/{name}: region files are named <region id>.toml"),
         )?;
-        let text = read(root, file)?;
-        total += text.len();
-        require(total <= MAX_BYTES as usize, "Package exceeds 8 MiB")?;
-        let content: RegionFile = parse(&text, file)?;
-        regions.extend(content.regions);
-        files.insert(file.clone(), digest(text.as_bytes()));
+        names.push(name);
     }
-    let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
-    let model_hash =
-        digest(&serde_json::to_vec(&(&manifest, &regions)).map_err(|e| fail(e.to_string()))?);
-    let certificate = Certificate { model_hash, validator: VALIDATOR.into(), ruleset: RULESET.into(), content_hash, files, regions: regions.len(), coverage: "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof".into() };
-    Ok(Package {
-        selected: manifest.default_character,
+    require(
+        !names.is_empty() && names.len() <= MAX_REGIONS,
+        format!("Expected 1..{MAX_REGIONS} region files"),
+    )?;
+    let mut regions = Vec::new();
+    let mut texts = BTreeMap::new();
+    for name in names {
+        let file = format!("{REGION_DIR}/{name}");
+        let text = read_limited(root, &file, MAX_REGION_BYTES)?;
+        let def: RegionDef = parse(&text, &file)?;
+        require(
+            file == region_file(def.id),
+            format!(
+                "{file}: holds region {}; name it {}",
+                def.id,
+                region_file(def.id)
+            ),
+        )?;
+        regions.push(IndexedRegion::of(&def, file, digest(text.as_bytes())));
+        texts.insert(def.id, Arc::from(text));
+    }
+    regions.sort_by_key(|r| r.id);
+    Ok((RegionIndex { regions }, texts))
+}
+
+fn model_hash(manifest: &Manifest, index: &RegionIndex) -> Result<String, Failure> {
+    Ok(digest(
+        &serde_json::to_vec(&(manifest, index)).map_err(|e| fail(e.to_string()))?,
+    ))
+}
+
+impl Package {
+    fn assemble(
+        manifest: Manifest,
+        manifest_text: &str,
+        index: RegionIndex,
+        sources: RegionSources,
+        directory: Option<&Path>,
+    ) -> Result<Self, Failure> {
+        let files = BTreeMap::from([
+            ("scenario.toml".into(), digest(manifest_text.as_bytes())),
+            ("index.json".into(), digest(&index.to_bytes()?)),
+        ]);
+        let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
+        let model_hash = model_hash(&manifest, &index)?;
+        let certificate = Certificate {
+            model_hash,
+            validator: VALIDATOR.into(),
+            ruleset: RULESET.into(),
+            content_hash,
+            files,
+            regions: index.regions.len(),
+            coverage: "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof".into(),
+        };
+        Ok(Self {
+            selected: manifest.default_character,
+            manifest,
+            certificate,
+            validated: false,
+            directory: directory
+                .and_then(|d| d.canonicalize().ok())
+                .map(|d| d.display().to_string()),
+            index: Arc::new(index),
+            sources,
+        })
+    }
+
+    /// A package from definitions in memory, for tools and tests. Unvalidated.
+    pub fn from_parts(manifest: Manifest, regions: Vec<RegionDef>) -> Result<Self, Failure> {
+        let manifest_text = toml::to_string(&manifest).map_err(|e| fail(e.to_string()))?;
+        let mut index = Vec::new();
+        let mut texts = BTreeMap::new();
+        for def in &regions {
+            let text = toml::to_string(def).map_err(|e| fail(e.to_string()))?;
+            index.push(IndexedRegion::of(
+                def,
+                region_file(def.id),
+                digest(text.as_bytes()),
+            ));
+            require(
+                texts.insert(def.id, Arc::<str>::from(text)).is_none(),
+                format!("Duplicate region {}", def.id),
+            )?;
+        }
+        index.sort_by_key(|r| r.id);
+        Self::assemble(
+            manifest,
+            &manifest_text,
+            RegionIndex { regions: index },
+            RegionSources::with(None, texts),
+            None,
+        )
+    }
+
+    /// Every region's definition, in id order. Reads the whole package:
+    /// for tools, tests and whole-package builds only.
+    pub fn region_defs(&self) -> Result<Vec<RegionDef>, Failure> {
+        self.index
+            .regions
+            .iter()
+            .map(|entry| Ok((*self.sources.def(entry)?).clone()))
+            .collect()
+    }
+
+    /// One region's definition, checked against the index.
+    pub fn region_def(&self, region: u64) -> Result<Arc<RegionDef>, Failure> {
+        let entry = self
+            .index
+            .region(region)
+            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        self.sources.def(entry)
+    }
+
+    /// A region file's text, checked against the index, for a save to copy.
+    pub(crate) fn region_text(&self, region: u64) -> Result<Arc<str>, Failure> {
+        let entry = self
+            .index
+            .region(region)
+            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        self.sources.text(entry)
+    }
+}
+
+/// A package read from its files, indexing every region file afresh. For
+/// validation and unvalidated development.
+pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
+    let (manifest, manifest_text) = read_manifest(root)?;
+    let (index, texts) = scan_regions(root)?;
+    Package::assemble(
         manifest,
-        regions,
-        certificate,
-        validated: false,
-    })
+        &manifest_text,
+        index,
+        RegionSources::with(Some(root), texts),
+        Some(root),
+    )
+}
+
+/// The directory holding `package`'s region files: the supplied package's,
+/// or the one it was loaded from, when either is still the same package.
+pub(crate) fn locate(package: &Package, supplied: Option<&Package>) -> Option<std::path::PathBuf> {
+    let same = |p: &Package| p.certificate.model_hash == package.certificate.model_hash;
+    if let Some(directory) = supplied
+        .filter(|p| same(p))
+        .and_then(|p| p.directory.as_ref())
+    {
+        return Some(directory.into());
+    }
+    let directory = Path::new(package.directory.as_ref()?);
+    let found = read_indexed(directory)
+        .or_else(|_| read_package(directory))
+        .ok()?;
+    same(&found).then(|| directory.to_path_buf())
+}
+
+/// A validated package: its manifest and generated index, with region
+/// files read only when their regions are built.
+fn read_indexed(root: &Path) -> Result<Package, Failure> {
+    let (manifest, manifest_text) = read_manifest(root)?;
+    let index =
+        RegionIndex::from_bytes(read_limited(root, "index.json", MAX_INDEX_BYTES)?.as_bytes())?;
+    Package::assemble(
+        manifest,
+        &manifest_text,
+        index,
+        RegionSources::with(Some(root), BTreeMap::new()),
+        Some(root),
+    )
+}
+
+/// Write a package's files: the manifest and one file per region. No index
+/// or certificate; validate it, or load it as unvalidated.
+pub fn write_package(
+    out: &Path,
+    manifest: &Manifest,
+    regions: &[RegionDef],
+) -> Result<(), Failure> {
+    let io = |e: std::io::Error| fail(e.to_string());
+    std::fs::create_dir_all(out.join(REGION_DIR)).map_err(io)?;
+    let text = toml::to_string(manifest).map_err(|e| fail(e.to_string()))?;
+    std::fs::write(out.join("scenario.toml"), text).map_err(io)?;
+    for def in regions {
+        let text = toml::to_string(def).map_err(|e| fail(e.to_string()))?;
+        std::fs::write(out.join(region_file(def.id)), text).map_err(io)?;
+    }
+    Ok(())
 }
 
 pub fn validate(root: &Path) -> Result<Certificate, Failure> {
     let mut package = read_package(root)?;
     package.check()?;
+    for def in package.region_defs()? {
+        if let Some(generate) = &def.generate {
+            crate::generator::check(&def, generate)?;
+        }
+        package.check_region(&def)?;
+        // What a region shows must be in its palette.
+        let forecast = package.palette(package.region_themes(def.id).unwrap_or(&[]));
+        for asset in package.region_assets(&def)? {
+            require(
+                forecast.contains(&asset),
+                format!(
+                    "Region {}: asset {asset} isn't among its themes' assets",
+                    def.id
+                ),
+            )?;
+        }
+    }
+    for seed in [0, 1, 42] {
+        let index = package.index(seed)?;
+        for entry in package.index.regions.iter().filter(|r| r.generated) {
+            let region = index.region(&package, entry.id)?;
+            let again = index.region(&package, entry.id)?;
+            let bytes = |r: &RegionDef| serde_json::to_vec(r).map_err(|e| fail(e.to_string()));
+            require(
+                bytes(&region)? == bytes(&again)?,
+                format!("Region {}: nondeterministic generation", entry.id),
+            )?;
+            require(
+                crate::generator::entries_connected(&region),
+                format!("Region {}: generated entries aren't connected", entry.id),
+            )?;
+        }
+    }
     for character in &package.manifest.characters {
         package.selected = character.id;
         for seed in [0, 1, 42] {
@@ -335,6 +824,8 @@ pub fn validate(root: &Path) -> Result<Certificate, Failure> {
             )?;
         }
     }
+    std::fs::write(root.join("index.json"), package.index.to_bytes()?)
+        .map_err(|e| fail(e.to_string()))?;
     let data = serde_json::to_vec_pretty(&package.certificate).map_err(|e| fail(e.to_string()))?;
     std::fs::write(root.join("validation.json"), data).map_err(|e| fail(e.to_string()))?;
     Ok(package.certificate)
@@ -346,23 +837,32 @@ pub fn load(
     selected: Option<u64>,
     allow_unvalidated: bool,
 ) -> Result<Scenario, Failure> {
-    let mut package = read_package(root)?;
-    package.selected = selected.unwrap_or(package.manifest.default_character);
-    package.validated = read(root, "validation.json")
+    let certificate = read(root, "validation.json")
         .ok()
-        .and_then(|s| serde_json::from_str::<Certificate>(&s).ok())
-        .is_some_and(|c| c == package.certificate);
-    require(
-        package.validated || allow_unvalidated,
-        "Scenario is unvalidated or stale; run tor-scenario validate <directory>",
-    )?;
+        .and_then(|s| serde_json::from_str::<Certificate>(&s).ok());
+    // A validated package starts from its index; a region file edited
+    // since is refused when that region is built.
+    let mut package = match read_indexed(root) {
+        Ok(package) if certificate.as_ref() == Some(&package.certificate) => Package {
+            validated: true,
+            ..package
+        },
+        _ => {
+            require(
+                allow_unvalidated,
+                "Scenario is unvalidated or stale; run tor-scenario validate <directory>",
+            )?;
+            read_package(root)?
+        }
+    };
+    package.selected = selected.unwrap_or(package.manifest.default_character);
     // Cheap identity/capability checks; full geometry proof belongs to the utility.
     package.check_identity()?;
     package.supported()?;
     Ok(Scenario {
         seed,
         actors: vec![],
-        regions: package.regions.len() as u64,
+        regions: package.index.regions.len() as u64,
         workload_version: None,
         package: Some(Arc::new(package)),
         streaming: Some(crate::regions::Streaming::default()),
@@ -381,8 +881,34 @@ pub fn streaming_corridor(
     halls: u64,
     seed: u64,
 ) -> Result<Scenario, Failure> {
-    require((2..=256).contains(&halls), "A corridor has 2 to 256 halls")?;
-    let original = read_package(root)?.regions;
+    corridor(root, out, halls, seed, false)
+}
+
+/// [`streaming_corridor`], with every hall after the first generated: each
+/// keeps its bounds and links, and entries on row 0 only, so a straight
+/// corridor along row 0 always crosses it.
+pub fn generated_corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+) -> Result<Scenario, Failure> {
+    corridor(root, out, halls, seed, true)
+}
+
+fn corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+    generated: bool,
+) -> Result<Scenario, Failure> {
+    require(
+        (2..=MAX_REGIONS as u64).contains(&halls),
+        format!("A corridor has 2 to {MAX_REGIONS} halls"),
+    )?;
+    let source = read_package(root)?;
+    let original = source.region_defs()?;
     let template = original
         .iter()
         .find(|r| r.id == 2)
@@ -419,16 +945,32 @@ pub fn streaming_corridor(
                 ..west.clone()
             });
         }
+        if generated && id > 1 {
+            hall.anchors.remove("start");
+            hall.actors.clear();
+            hall.items.clear();
+            hall.generate = Some(crate::generator::Generate {
+                generator: crate::generator::ROOMS.into(),
+                version: crate::generator::ROOMS_VERSION,
+                rooms: [1, 3],
+                actors: None,
+                items: None,
+            });
+        }
         regions.push(hall);
     }
-    std::fs::create_dir_all(out).map_err(|e| fail(format!("{e}")))?;
-    std::fs::copy(root.join("scenario.toml"), out.join("scenario.toml"))
-        .map_err(|e| fail(format!("{e}")))?;
-    let text = toml::to_string(&RegionFile { regions }).map_err(|e| fail(format!("{e}")))?;
-    std::fs::write(out.join("regions.toml"), text).map_err(|e| fail(format!("{e}")))?;
+    write_package(out, &source.manifest, &regions)?;
     load(out, seed, None, true)
 }
 
+fn region_of(id: u64, name: &str, size: [i32; 3]) -> Result<Region, Failure> {
+    Ok(Region {
+        id: RegionId(id),
+        name: name.into(),
+        bounds: Extent::new(size[0], size[1], size[2])
+            .ok_or_else(|| fail("Invalid region extent"))?,
+    })
+}
 fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
     Location {
         region: RegionId(region),
@@ -437,7 +979,7 @@ fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
 }
 impl Package {
     pub fn region_themes(&self, region: u64) -> Option<&[String]> {
-        let region = self.regions.iter().find(|r| r.id == region)?;
+        let region = self.index.region(region)?;
         Some(
             region
                 .zone
@@ -447,6 +989,70 @@ impl Package {
                 .unwrap_or(&self.manifest.themes),
         )
     }
+    /// A region's terrain assets: its zone's, or the world's.
+    pub fn region_terrain(&self, region: u64) -> Option<&TerrainAssets> {
+        let zone = self.index.region(region)?.zone.as_ref();
+        zone.and_then(|z| self.manifest.zones.get(z))
+            .and_then(|z| z.terrain.as_ref())
+            .or(self.manifest.terrain.as_ref())
+    }
+
+    /// Assets clients may need for regions with these themes, and for the
+    /// run's characters, who can be anywhere.
+    pub fn palette<'a>(&self, themes: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+        themes
+            .into_iter()
+            .flat_map(|theme| self.manifest.assets.get(theme).into_iter().flatten())
+            .chain(
+                self.manifest
+                    .characters
+                    .iter()
+                    .filter_map(|c| c.asset.as_ref()),
+            )
+            .cloned()
+            .collect()
+    }
+
+    /// Whether the scenario names assets at all; clients get palettes only then.
+    pub fn has_assets(&self) -> bool {
+        !self.manifest.assets.is_empty()
+    }
+
+    /// Assets a region's content may show: its terrain, and its actors' and
+    /// items' archetypes (a concealed item's pool asset instead). The
+    /// validator requires them in the region's themes' assets, so a
+    /// palette forecasts them.
+    fn region_assets(&self, r: &RegionDef) -> Result<BTreeSet<String>, Failure> {
+        let mut assets = BTreeSet::new();
+        if let Some(t) = self.region_terrain(r.id) {
+            assets.extend([&t.floor, &t.wall, &t.door].into_iter().flatten().cloned());
+        }
+        let generated = r.generate.iter().flat_map(|g| {
+            g.actors
+                .iter()
+                .flat_map(|p| &p.archetypes)
+                .chain(g.items.iter().flat_map(|p| &p.archetypes))
+        });
+        let named = r
+            .actors
+            .iter()
+            .filter_map(|a| a.archetype.as_ref())
+            .chain(r.items.iter().filter_map(|i| i.archetype.as_ref()))
+            .chain(generated);
+        for key in named {
+            assets.extend(self.item_asset(&self.archetype(&Some(key.clone()))?));
+        }
+        Ok(assets)
+    }
+
+    /// The asset an actor or item of this archetype shows.
+    fn item_asset(&self, archetype: &Archetype) -> Option<String> {
+        match &archetype.appearance_pool {
+            Some(pool) => self.manifest.appearance_pools.get(pool)?.asset.clone(),
+            None => archetype.asset.clone(),
+        }
+    }
+
     pub(crate) fn check_identity(&self) -> Result<(), Failure> {
         require(
             self.manifest.ruleset == RULESET
@@ -455,11 +1061,7 @@ impl Package {
             "Missing exact package/validator dependency",
         )?;
         require(
-            self.certificate.model_hash
-                == digest(
-                    &serde_json::to_vec(&(&self.manifest, &self.regions))
-                        .map_err(|e| fail(e.to_string()))?,
-                ),
+            self.certificate.model_hash == model_hash(&self.manifest, &self.index)?,
             "Pinned scenario content hash mismatch",
         )?;
         require(
@@ -494,25 +1096,22 @@ impl Package {
                     .values()
                     .filter_map(|a| a.combat.as_ref()),
             )
-            .chain(
-                self.regions
-                    .iter()
-                    .flat_map(|r| &r.actors)
-                    .filter_map(|a| a.combat.as_ref()),
-            )
         {
-            require(
-                spec.valid()
-                    && (self.manifest.factions.is_empty()
-                        || self.manifest.factions.contains_key(&spec.faction)),
-                "Invalid combat attributes or faction",
-            )?;
+            self.check_combat(spec)?;
         }
         Ok(())
     }
+    fn check_combat(&self, spec: &tor_simulation::combat::CombatSpec) -> Result<(), Failure> {
+        require(
+            spec.valid()
+                && (self.manifest.factions.is_empty()
+                    || self.manifest.factions.contains_key(&spec.faction)),
+            "Invalid combat attributes or faction",
+        )
+    }
     fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
         let mut anchors = BTreeMap::new();
-        for r in &self.regions {
+        for r in &self.index.regions {
             for (name, p) in &r.anchors {
                 require(label(name) && !name.contains('/'), "Invalid anchor ID")?;
                 require(
@@ -528,8 +1127,8 @@ impl Package {
     pub fn check(&self) -> Result<(), Failure> {
         self.check_identity()?;
         require(
-            (1..=256).contains(&self.regions.len()),
-            "Expected 1..256 authored regions; streaming is deferred",
+            (1..=MAX_REGIONS).contains(&self.index.regions.len()),
+            format!("Expected 1..{MAX_REGIONS} authored regions"),
         )?;
         require(
             !self.manifest.characters.is_empty() && self.manifest.characters.len() <= 64,
@@ -543,6 +1142,57 @@ impl Package {
             "Invalid zone/theme identifier",
         )?;
         self.appearance_mapping(0)?;
+        let known_themes: BTreeSet<&String> = self
+            .manifest
+            .themes
+            .iter()
+            .chain(
+                self.manifest
+                    .zones
+                    .values()
+                    .flat_map(|z| z.themes.iter().flatten()),
+            )
+            .collect();
+        let terrain = self
+            .manifest
+            .zones
+            .values()
+            .filter_map(|z| z.terrain.as_ref())
+            .chain(self.manifest.terrain.as_ref())
+            .flat_map(|t| [&t.floor, &t.wall, &t.door].into_iter().flatten());
+        let named = self
+            .manifest
+            .assets
+            .values()
+            .flatten()
+            .chain(terrain)
+            .chain(
+                self.manifest
+                    .archetypes
+                    .values()
+                    .filter_map(|a| a.asset.as_ref()),
+            )
+            .chain(
+                self.manifest
+                    .appearance_pools
+                    .values()
+                    .filter_map(|p| p.asset.as_ref()),
+            )
+            .chain(
+                self.manifest
+                    .characters
+                    .iter()
+                    .filter_map(|c| c.asset.as_ref()),
+            );
+        for asset in named {
+            require(asset_id(asset), format!("Invalid asset identifier {asset}"))?;
+        }
+        for theme in self.manifest.assets.keys() {
+            require(
+                known_themes.contains(theme),
+                format!("Assets for unknown theme {theme}"),
+            )?;
+        }
         let identities: BTreeSet<_> = self
             .manifest
             .archetypes
@@ -572,7 +1222,8 @@ impl Package {
         let mut region_ids = BTreeSet::new();
         let mut item_ids = BTreeSet::new();
         let mut door_ids = BTreeSet::new();
-        for r in &self.regions {
+        let mut starts = BTreeMap::new();
+        for r in &self.index.regions {
             require(
                 r.id > 0
                     && region_ids.insert(r.id)
@@ -593,12 +1244,7 @@ impl Package {
                     a.id > 0 && a.id < u64::MAX && actor_ids.insert(a.id),
                     "Duplicate/invalid actor ID",
                 )?;
-                require(
-                    matches!(a.controller.as_str(), "external" | "ai")
-                        && (a.controller == "ai") == a.ai.is_some()
-                        && a.ai.as_ref().is_none_or(|s| label(s)),
-                    "Invalid actor controller",
-                )?;
+                starts.insert(a.id, r.id);
             }
             for i in &r.items {
                 require(
@@ -608,16 +1254,8 @@ impl Package {
             }
             for d in &r.doors {
                 require(
-                    d.id > 0 && d.id < u64::MAX && door_ids.insert(d.id),
+                    *d > 0 && *d < u64::MAX && door_ids.insert(*d),
                     "Duplicate/invalid door ID",
-                )?;
-            }
-        }
-        for r in &self.regions {
-            for i in &r.items {
-                require(
-                    i.carried_by.is_none_or(|id| actor_ids.contains(&id)),
-                    "Unknown inventory owner",
                 )?;
             }
         }
@@ -635,16 +1273,69 @@ impl Package {
         }
         let anchors = self.anchors()?;
         for c in &self.manifest.characters {
-            require(
-                anchors.contains_key(&c.anchor),
-                format!("Character {}: missing anchor {}", c.id, c.anchor),
-            )?;
+            let at = anchors
+                .get(&c.anchor)
+                .ok_or_else(|| fail(format!("Character {}: missing anchor {}", c.id, c.anchor)))?;
+            starts.insert(c.id, at.region.0);
+        }
+        // A carried item is authored in the region its carrier starts in,
+        // so building a region reads only that region's file.
+        for r in &self.index.regions {
+            for i in &r.items {
+                if let Some(owner) = i.carried_by {
+                    let start = starts
+                        .get(&owner)
+                        .ok_or_else(|| fail("Unknown inventory owner"))?;
+                    require(
+                        *start == r.id,
+                        format!(
+                            "Item {}: author it in region {}, where its carrier starts",
+                            i.id, start
+                        ),
+                    )?;
+                }
+            }
         }
         if let Some(o) = &self.manifest.objective {
             require(
                 anchors.contains_key(&o.anchor) && o.item.is_none_or(|id| item_ids.contains(&id)),
                 "Invalid objective anchor/item reference",
             )?;
+        }
+        Ok(())
+    }
+    /// What only a region's own file can show: its actors' controllers and
+    /// combat. The validator checks every region; building one checks it.
+    fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
+        if let Some(generate) = &r.generate {
+            let archetypes = generate
+                .actors
+                .iter()
+                .flat_map(|p| &p.archetypes)
+                .chain(generate.items.iter().flat_map(|p| &p.archetypes));
+            for archetype in archetypes {
+                require(
+                    self.manifest.archetypes.contains_key(archetype),
+                    format!("Region {}: unknown archetype {archetype}", r.id),
+                )?;
+            }
+            if let Some(pool) = &generate.actors {
+                require(
+                    self.manifest.ai_profiles.contains_key(&pool.ai),
+                    format!("Region {}: unknown AI profile {}", r.id, pool.ai),
+                )?;
+            }
+        }
+        for a in &r.actors {
+            require(
+                matches!(a.controller.as_str(), "external" | "ai")
+                    && (a.controller == "ai") == a.ai.is_some()
+                    && a.ai.as_ref().is_none_or(|s| label(s)),
+                "Invalid actor controller",
+            )?;
+            if let Some(spec) = &a.combat {
+                self.check_combat(spec)?;
+            }
         }
         Ok(())
     }
@@ -728,9 +1419,20 @@ impl Package {
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        let all: Vec<&RegionDef> = self.regions.iter().collect();
+        let defs = self
+            .index
+            .regions
+            .iter()
+            .map(|entry| index.region(self, entry.id))
+            .collect::<Result<Vec<_>, _>>()?;
+        for r in &defs {
+            self.check_region(r)?;
+        }
+        let (actors, items, doors) = index.ceilings;
+        game.reserve_identities(actors, items, doors);
+        let all: Vec<&RegionDef> = defs.iter().map(|d| &**d).collect();
         self.add_geometry(&mut game, &all)?;
-        for r in &self.regions {
+        for r in &all {
             self.add_structure(&mut game, r, &index.anchors)?;
         }
         for (name, position) in &index.anchors {
@@ -764,7 +1466,7 @@ impl Package {
                 spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
-        for r in &self.regions {
+        for r in &self.index.regions {
             for a in &r.actors {
                 let ticks = a
                     .turn_ticks
@@ -785,30 +1487,64 @@ impl Package {
                 .or_default()
                 .push((*id, *at, *ticks));
         }
-        let mut items: BTreeMap<u64, Vec<(u64, usize, usize)>> = BTreeMap::new();
-        for (r_index, r) in self.regions.iter().enumerate() {
-            for (i_index, i) in r.items.iter().enumerate() {
-                items
-                    .entry(self.item_region(r.id, i, &homes))
-                    .or_default()
-                    .push((i.id, r_index, i_index));
-            }
-        }
-        for list in items.values_mut() {
-            list.sort();
+        let ceiling = |ids: &mut dyn Iterator<Item = u64>| {
+            ids.max()
+                .map_or(Some(1), |max| max.checked_add(1))
+                .ok_or_else(|| fail("Authored identity too large"))
+        };
+        let regions = &self.index.regions;
+        // Identities that spawn, as building the whole package allocates them:
+        // omitted characters and what they carry don't.
+        let ceilings = (
+            ceiling(&mut homes.keys().copied())?,
+            ceiling(
+                &mut regions
+                    .iter()
+                    .flat_map(|r| r.items.iter())
+                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .map(|i| i.id),
+            )?,
+            ceiling(&mut regions.iter().flat_map(|r| r.doors.iter().copied()))?,
+        );
+        // Generated regions take identities above every authored one (even
+        // omitted characters', so the ranges don't depend on the selection),
+        // each region in its own range; the ceilings cover them all.
+        let generated_base = (
+            ceiling(
+                &mut self
+                    .manifest
+                    .characters
+                    .iter()
+                    .map(|c| c.id)
+                    .chain(regions.iter().flat_map(|r| r.actors.iter().map(|a| a.id))),
+            )?,
+            ceiling(&mut regions.iter().flat_map(|r| r.items.iter().map(|i| i.id)))?,
+        );
+        // Reserved up to a fixed end, so the ceilings (which every game
+        // state records) don't grow with the package.
+        let mut ceilings = ceilings;
+        if let Some(last) = regions.iter().filter(|r| r.generated).map(|r| r.id).max() {
+            require(
+                last <= MAX_REGIONS as u64,
+                format!("Generated region ids must be at most {MAX_REGIONS}"),
+            )?;
+            let end = |base: u64| {
+                (MAX_REGIONS as u64)
+                    .checked_mul(crate::generator::IDENTITY_STRIDE)
+                    .and_then(|n| n.checked_add(base))
+                    .ok_or_else(|| fail("Authored identity too large"))
+            };
+            ceilings.0 = ceilings.0.max(end(generated_base.0)?);
+            ceilings.1 = ceilings.1.max(end(generated_base.1)?);
         }
         Ok(PackageIndex {
-            regions: self
-                .regions
-                .iter()
-                .enumerate()
-                .map(|(index, r)| (r.id, index))
-                .collect(),
             anchors,
             anchors_by_region,
             homes,
             spawns: spawns_by_region,
-            items,
+            ceilings,
+            seed,
+            generated_base,
             appearances: self.appearance_mapping(seed)?,
             lookups: std::cell::Cell::new(0),
         })
@@ -821,42 +1557,102 @@ impl Package {
         self.check()?;
         self.supported()?;
         let index = self.index(seed)?;
-        let mut identities: BTreeMap<u64, tor_simulation::RegionIdentities> = BTreeMap::new();
-        for (id, home) in &index.homes {
-            identities
-                .entry(home.region.0)
-                .or_default()
-                .actors
-                .insert(tor_simulation::ActorId(*id));
-        }
-        for r in &self.regions {
-            for i in r.items.iter().filter(|i| !self.omitted_carrier(i)) {
-                identities
-                    .entry(self.item_region(r.id, i, &index.homes))
-                    .or_default()
-                    .items
-                    .insert(tor_simulation::ItemId(i.id));
-            }
-            identities
-                .entry(r.id)
-                .or_default()
-                .doors
-                .extend(r.doors.iter().map(|d| d.id));
-        }
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        for r in &self.regions {
-            game.add_unbuilt_region(
-                self.region(r)?,
-                r.chamber,
-                identities.remove(&r.id).unwrap_or_default(),
-            )
-            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+        let (actors, items, doors) = index.ceilings;
+        game.reserve_identities(actors, items, doors);
+        // Only regions the run refers to are declared now: where its
+        // characters and client-controlled actors start, and its objective.
+        // Transitions declare the rest as they're needed.
+        let mut needed = BTreeSet::new();
+        for c in &self.manifest.characters {
+            if let Some(home) = index.homes.get(&c.id) {
+                needed.insert(home.region.0);
+            }
+        }
+        for r in &self.index.regions {
+            if r.actors.iter().any(|a| a.external) {
+                needed.insert(r.id);
+            }
+        }
+        if let Some(o) = &self.manifest.objective {
+            let at = index
+                .anchors
+                .get(&o.anchor)
+                .ok_or_else(|| fail("Missing objective anchor"))?;
+            needed.insert(at.region.0);
+            if let Some(item) = o.item {
+                let holder = self
+                    .index
+                    .regions
+                    .iter()
+                    .find(|r| r.items.iter().any(|i| i.id == item))
+                    .ok_or_else(|| fail("Missing objective item"))?;
+                needed.insert(holder.id);
+            }
+        }
+        for region in needed {
+            let unbuilt = self.unbuilt_region(&index, region)?;
+            game.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
+                .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
         }
         self.configure_run(&mut game, &index.anchors)?;
         Ok(game)
+    }
+
+    /// A region as a game declares it before building it: its metadata and
+    /// the identities it will hold. Reads only the index.
+    pub(crate) fn unbuilt_region(
+        &self,
+        index: &PackageIndex,
+        region: u64,
+    ) -> Result<tor_simulation::UnbuiltRegion, Failure> {
+        let r = self
+            .index
+            .region(region)
+            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        if r.generated {
+            let def = index.region(self, region)?;
+            return Ok(tor_simulation::UnbuiltRegion {
+                region: region_of(r.id, &r.name, r.size)?,
+                chamber: r.chamber,
+                identities: tor_simulation::RegionIdentities {
+                    actors: def
+                        .actors
+                        .iter()
+                        .map(|a| tor_simulation::ActorId(a.id))
+                        .collect(),
+                    items: def
+                        .items
+                        .iter()
+                        .map(|i| tor_simulation::ItemId(i.id))
+                        .collect(),
+                    doors: BTreeSet::new(),
+                },
+            });
+        }
+        Ok(tor_simulation::UnbuiltRegion {
+            region: region_of(r.id, &r.name, r.size)?,
+            chamber: r.chamber,
+            identities: tor_simulation::RegionIdentities {
+                actors: index
+                    .spawns
+                    .get(&region)
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, _, _)| tor_simulation::ActorId(*id))
+                    .collect(),
+                items: r
+                    .items
+                    .iter()
+                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .map(|i| tor_simulation::ItemId(i.id))
+                    .collect(),
+                doors: r.doors.iter().copied().collect(),
+            },
+        })
     }
 
     /// One region's starting record, built in a scratch game holding it and
@@ -871,50 +1667,37 @@ impl Package {
         index: &PackageIndex,
         region: u64,
     ) -> Result<tor_simulation::RegionRecord, Failure> {
-        let r = index
-            .region(self, region)
-            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
-        let mut shell: Vec<&RegionDef> = vec![r];
+        let r = index.region(self, region)?;
+        self.check_region(&r)?;
+        let mut shell: Vec<Arc<RegionDef>> = vec![r.clone()];
         for to in r.portals.iter().filter_map(|p| index.anchors.get(&p.to)) {
             if shell.iter().all(|s| s.id != to.region.0) {
-                shell.push(
-                    index
-                        .region(self, to.region.0)
-                        .ok_or_else(|| fail("Unknown portal region"))?,
-                );
+                shell.push(index.region(self, to.region.0)?);
             }
         }
-        shell.sort_by_key(|s| index.regions[&s.id]);
+        shell.sort_by_key(|s| s.id);
+        let shell: Vec<&RegionDef> = shell.iter().map(|s| &**s).collect();
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
         self.add_geometry(&mut game, &shell)?;
-        self.add_structure(&mut game, r, &index.anchors)?;
+        self.add_structure(&mut game, &r, &index.anchors)?;
         for (name, position) in index.anchors_by_region.get(&region).into_iter().flatten() {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
-        self.add_entities(&mut game, seed, index, &[r])?;
+        self.add_entities(&mut game, seed, index, &[&r])?;
         game.into_region_record(RegionId(region))
             .map_err(|e| fail(format!("Region {region}: {e:?}")))
-    }
-
-    fn region(&self, r: &RegionDef) -> Result<Region, Failure> {
-        Ok(Region {
-            id: RegionId(r.id),
-            name: r.name.clone(),
-            bounds: Extent::new(r.size[0], r.size[1], r.size[2])
-                .ok_or_else(|| fail("Invalid region extent"))?,
-        })
     }
 
     /// These regions, in package order, with their walls and openings.
     fn add_geometry(&self, game: &mut Game, regions: &[&RegionDef]) -> Result<(), Failure> {
         for r in regions {
-            let region = self.region(r)?;
+            let region = region_of(r.id, &r.name, r.size)?;
             (if r.chamber {
                 game.add_chamber(region)
             } else {
@@ -1008,8 +1791,8 @@ impl Package {
     }
 
     /// Items carried by an omitted character are omitted with it.
-    fn omitted_carrier(&self, i: &Item) -> bool {
-        i.carried_by.is_some_and(|id| {
+    fn omitted_carrier(&self, carried_by: Option<u64>) -> bool {
+        carried_by.is_some_and(|id| {
             id != self.selected
                 && self
                     .manifest
@@ -1017,13 +1800,6 @@ impl Package {
                     .iter()
                     .any(|c| c.id == id && c.unselected == "omit")
         })
-    }
-
-    /// The region an item starts in: its carrier's, or where it's authored.
-    fn item_region(&self, authored: u64, i: &Item, homes: &BTreeMap<u64, Location>) -> u64 {
-        i.carried_by
-            .and_then(|id| homes.get(&id))
-            .map_or(authored, |home| home.region.0)
     }
 
     /// Actors, items, identity knowledge and doors in these regions (given in
@@ -1043,6 +1819,16 @@ impl Package {
             .flat_map(|r| index.spawns.get(r).into_iter().flatten())
             .copied()
             .collect();
+        // A generated region's actors come from its materialized definition.
+        for r in regions.iter().filter(|r| r.generate.is_some()) {
+            for a in &r.actors {
+                let ticks = a
+                    .turn_ticks
+                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .unwrap_or(100);
+                spawns.push((a.id, loc(r.id, a.at), ticks));
+            }
+        }
         spawns.sort_by_key(|(id, _, _)| *id);
         for (id, at, ticks) in spawns {
             game.spawn_authored_actor(
@@ -1084,6 +1870,10 @@ impl Package {
                     game.set_actor_velocity(tor_simulation::ActorId(c.id), v)
                         .map_err(|_| fail("Invalid character velocity"))?;
                 }
+                if c.asset.is_some() {
+                    game.set_actor_asset(tor_simulation::ActorId(c.id), c.asset.clone())
+                        .map_err(|_| fail("Unknown character"))?;
+                }
             }
         }
         for r in regions {
@@ -1119,16 +1909,18 @@ impl Package {
                     game.set_actor_velocity(tor_simulation::ActorId(a.id), v)
                         .map_err(|_| fail("Invalid actor velocity"))?;
                 }
+                let asset = self.archetype(&a.archetype)?.asset;
+                if asset.is_some() {
+                    game.set_actor_asset(tor_simulation::ActorId(a.id), asset)
+                        .map_err(|_| fail("Unknown actor"))?;
+                }
             }
         }
         let appearances = &index.appearances;
-        let mut items: Vec<_> = chosen
+        // A carried item is authored where its carrier starts.
+        let mut items: Vec<_> = regions
             .iter()
-            .flat_map(|r| index.items.get(r).into_iter().flatten())
-            .map(|&(_, r_index, i_index)| {
-                let r = &self.regions[r_index];
-                (r.id, &r.items[i_index])
-            })
+            .flat_map(|r| r.items.iter().map(move |i| (r.id, i)))
             .collect();
         items.sort_by_key(|(_, i)| i.id);
         for (region, i) in items {
@@ -1175,6 +1967,7 @@ impl Package {
                 concealed,
                 stackable,
                 properties,
+                asset: self.item_asset(&archetype),
             };
             require(
                 i.quantity > 0 && (stackable || i.quantity == 1),
@@ -1188,15 +1981,7 @@ impl Package {
                 "Invalid item properties",
             )?;
             // Inventory of omitted characters is omitted with its owner.
-            if i.carried_by.is_some_and(|id| {
-                self.manifest.characters.iter().any(|c| c.id == id)
-                    && id != self.selected
-                    && self
-                        .manifest
-                        .characters
-                        .iter()
-                        .any(|c| c.id == id && c.unselected == "omit")
-            }) {
+            if self.omitted_carrier(i.carried_by) {
                 continue;
             }
             // A carried item starts with its carrier, which may be authored
@@ -1310,26 +2095,57 @@ impl Package {
 /// Whole-package facts for building regions (see [`Package::index`]).
 #[derive(Clone, Debug)]
 pub(crate) struct PackageIndex {
-    /// Each region's position in [`Package::regions`].
-    regions: BTreeMap<u64, usize>,
     anchors: BTreeMap<String, Location>,
     anchors_by_region: BTreeMap<u64, Vec<(String, Location)>>,
     /// Where each spawned actor starts.
     homes: BTreeMap<u64, Location>,
     /// Actors by the region they start in: identity, start, turn length.
     spawns: BTreeMap<u64, Vec<(u64, Location, u64)>>,
-    /// Items by the region they start in: identity, then their region's and
-    /// their own position in the package.
-    items: BTreeMap<u64, Vec<(u64, usize, usize)>>,
+    /// One more than the largest actor, item and door identity the package
+    /// can make, generated ones included.
+    ceilings: (u64, u64, u64),
+    /// The game's seed: with a region's id and file, it seeds its generator.
+    seed: u64,
+    /// Where generated actor and item identity ranges start.
+    generated_base: (u64, u64),
     appearances: BTreeMap<String, String>,
     /// Region definitions handed out, for scaling contracts.
     lookups: std::cell::Cell<usize>,
 }
 
 impl PackageIndex {
-    fn region<'a>(&self, package: &'a Package, id: u64) -> Option<&'a RegionDef> {
+    /// A region's definition: authored, or materialized by its generator.
+    fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);
-        package.regions.get(*self.regions.get(&id)?)
+        let def = package.region_def(id)?;
+        let Some(generate) = &def.generate else {
+            return Ok(def);
+        };
+        let first = |base: u64| {
+            (id - 1)
+                .checked_mul(crate::generator::IDENTITY_STRIDE)
+                .and_then(|n| n.checked_add(base))
+                .ok_or_else(|| fail("Generated region id too large"))
+        };
+        Ok(Arc::new(crate::generator::materialize(
+            &def,
+            generate,
+            self.region_seed(id, &package.index.region(id).expect("defined region").hash),
+            first(self.generated_base.0)?,
+            first(self.generated_base.1)?,
+        )?))
+    }
+
+    /// A generated region's seed, from the game's seed and the region's own
+    /// file: its content depends on nothing else in the package, and never on
+    /// which regions were generated before.
+    fn region_seed(&self, region: u64, file_hash: &str) -> u64 {
+        let mut hash = Sha256::new();
+        hash.update(self.seed.to_le_bytes());
+        hash.update(file_hash.as_bytes());
+        hash.update(region.to_le_bytes());
+        let bytes = <[u8; 32]>::from(hash.finalize());
+        u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes"))
     }
 
     /// Region definitions handed out so far.
@@ -1385,6 +2201,9 @@ impl tor_simulation::RecordStore for PackageRecords {
         self.package
             .build_region(self.seed, &self.index, region.0)
             .ok()
+    }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.package.unbuilt_region(&self.index, region.0).ok()
     }
 }
 
@@ -1468,7 +2287,12 @@ mod region_lifecycle_tests {
         use tor_simulation::RegionState;
         for path in packages() {
             let package = Arc::new(read_package(&path).unwrap());
-            let all: Vec<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
+            let all: Vec<_> = package
+                .index
+                .regions
+                .iter()
+                .map(|r| RegionId(r.id))
+                .collect();
             let mut reversed = all.clone();
             reversed.reverse();
             let mut rotated = all.clone();
@@ -1478,9 +2302,12 @@ mod region_lifecycle_tests {
                 for order in [&all, &reversed, &rotated] {
                     let context = format!("{} seed {seed} order {order:?}", path.display());
                     let mut game = package.start(seed).unwrap();
+                    // Regions are declared only when needed, and none is built.
                     assert!(
-                        all.iter()
-                            .all(|r| game.region_state(*r) == Some(RegionState::Unbuilt)),
+                        all.iter().all(|r| matches!(
+                            game.region_state(*r),
+                            Some(RegionState::Unbuilt) | None
+                        )),
                         "{context}"
                     );
                     let mut records = PackageRecords::new(package.clone(), seed);
@@ -1599,7 +2426,12 @@ mod region_lifecycle_tests {
             let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
                 .unwrap_or_else(|| panic!("{}: {report:?}", path.display()));
             assert_eq!(restored, game, "{}", path.display());
-            let all: BTreeSet<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
+            let all: BTreeSet<_> = package
+                .index
+                .regions
+                .iter()
+                .map(|r| RegionId(r.id))
+                .collect();
             let everything = RegionTransition {
                 active: all.clone(),
                 loaded: all,

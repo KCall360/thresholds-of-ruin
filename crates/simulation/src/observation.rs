@@ -31,6 +31,7 @@ pub struct ItemView {
     pub quantity: u64,
     pub appearance: String,
     pub identified: bool,
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +43,7 @@ pub struct GroundItemView {
     pub appearance: String,
     pub identified: bool,
     pub location: Location,
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +58,7 @@ pub struct ActorView {
     pub description: &'static str,
     pub id: ActorId,
     pub location: Location,
+    pub asset: Option<String>,
 }
 
 /// An observable exit, without the unexplored destination's identity or contents.
@@ -161,6 +164,7 @@ impl Game {
                         appearance: item.spec.appearance.clone(),
                         identified,
                         location,
+                        asset: item.spec.asset.clone(),
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
@@ -171,6 +175,7 @@ impl Game {
                         quantity: item.quantity,
                         appearance: item.spec.appearance.clone(),
                         identified,
+                        asset: item.spec.asset.clone(),
                     });
                 }
                 _ => {}
@@ -244,6 +249,7 @@ impl Game {
                             description: "An unremarkable figure is here.",
                             id: other_id,
                             location,
+                            asset: other.asset.clone(),
                         })
                 })
                 .collect(),

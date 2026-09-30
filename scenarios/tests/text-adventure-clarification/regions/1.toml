@@ -1,0 +1,11 @@
+id = 1
+name = "Entry chamber"
+size = [6, 3, 2]
+chamber = true
+zone = "entry"
+walls = [[5, 0, 0], [5, 0, 1], [5, 2, 0], [5, 2, 1], [1, 0, 0]]
+anchors = { "start" = [1, 1, 0], "hall" = [5, 1, 0] }
+places = [[2, 1, 0]]
+portals = [{ "at" = [5, 1, 0], "direction" = "east", "to" = "2/landing", "height" = 2 }]
+doors = [{ "id" = 1, "at" = [5, 1, 0], "open" = true, "height" = 2 }]
+items = [{ "id" = 1, "at" = [1, 1, 0], "seed_names" = ["copper token", "silver token", "iron token"] }, { "id" = 3, "at" = [1, 1, 0], "archetype" = "token" }]

@@ -45,7 +45,7 @@ impl RegionCatalog {
     /// geometry, generate contents, inspect entity placements, or consume RNG.
     pub fn from_package(package: &Package) -> Result<Self, Failure> {
         let mut regions = BTreeMap::new();
-        for region in &package.regions {
+        for region in &package.index.regions {
             let bounds =
                 Extent::new(region.size[0], region.size[1], region.size[2]).ok_or_else(|| {
                     invalid(format!("Region {}: invalid structural bounds", region.id))
@@ -93,10 +93,10 @@ impl RegionCatalog {
             return Err(invalid("Empty region catalog"));
         }
         let mut catalog = Self { regions };
-        for region in &package.regions {
+        for region in &package.index.regions {
             let mut outgoing = BTreeSet::new();
-            for portal in &region.portals {
-                outgoing.insert(catalog.resolve_anchor(&portal.to)?.region);
+            for to in &region.portals {
+                outgoing.insert(catalog.resolve_anchor(to)?.region);
             }
             catalog
                 .regions

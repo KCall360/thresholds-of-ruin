@@ -1,0 +1,7 @@
+id = 2
+name = "sideways shaft"
+size = [6,3,8]
+chamber = true
+gravity = [0,0,-1]
+anchors = { landing = [1,1,7] }
+items = [{ id = 1, at = [1,1,0], name = "landing marker" }]

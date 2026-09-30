@@ -203,14 +203,25 @@ deterministic; it isn't required to match an unstreamed game exactly.
 
 ### Never-built regions and region sources
 
-A game can start knowing every region without building any. An unbuilt
-region has metadata (name and bounds) and the identities it will hold, and
-nothing else. Loading it for the first time builds it:
+A game can start without building any region, and without even knowing
+most of them. An unbuilt region the game knows has metadata (name and
+bounds) and the identities it will hold, and nothing else. Loading it for
+the first time builds it:
 
 - `Game::add_unbuilt_region` declares a region with the actors, items and
   doors it will hold. Those identities go into the identity directory, so
   references to them (the objective's item, a character) are checkable, and
   the id allocators move past them.
+- A game declares a region only when it's needed: when a transition is
+  asked to load a region the game doesn't know, and when a region is built
+  whose links lead to regions the game doesn't know. The declaration comes
+  from the record store's source (`RecordStore::unbuilt`). A store without
+  one fails the transition with `UnknownRegion`, changing nothing. So game
+  state, checkpoints and saves hold the regions played and those next to
+  them, however large the source.
+- `Game::reserve_identities` starts new identities above everything the
+  source authored, so identities allocated later (a wizard's, say) never
+  collide with those in regions the game hasn't declared.
 - A transition that loads an unbuilt region asks its record store to build
   the region's starting record (`RecordStore::build`), then attaches it like
   a detached record, frozen. Attaching checks that the record holds exactly
@@ -223,8 +234,9 @@ nothing else. Loading it for the first time builds it:
 - Run characters and actors awaiting input may be unbuilt or detached; pins
   make an actor awaiting input active before it acts.
 
-For scenario packages, `Package::start` declares every region unbuilt and
-configures the run; `Package::build_region` builds one region's record. It
+For scenario packages, `Package::start` reserves the authored identities,
+declares only the regions where the run's characters and client-controlled
+actors start and where its objective is, and configures the run; `Package::build_region` builds one region's record. It
 builds the region in a scratch game that holds the region and its
 neighbours' geometry, so links and entities are checked exactly as building
 the whole package checks them, then takes the record with
@@ -235,7 +247,11 @@ doesn't renumber anything.
 
 A server test builds every checked-in package region by region, for two
 seeds and three build orders, and checks that the result equals building
-the whole package at once.
+the whole package at once. Another checks that a game's checkpoints encode
+exactly the same bytes, at the start and after the same walk, whether the
+corridor has 16, 256 or 4,096 halls. The engine parks a client's revision for
+an actor only once that actor has left the loaded world; an actor never
+loaded is at revision zero.
 
 ### Region records and identity
 
@@ -333,6 +349,36 @@ performance fixture) don't, so their measurements stay comparable.
 - **Validation** of an edited package game checks anchors in loaded regions
   only; regions that aren't loaded can't have been edited.
 
+### Background preloading
+
+The server builds regions and reads region rows on a `region-preload`
+thread, one portal hop beyond the loaded regions, so the command that loads
+them usually finds them ready:
+
+- After each command publishes, the engine asks for every region one hop
+  beyond the loaded ones (including those pins keep loaded) that isn't
+  loaded: a build for an unbuilt region, a row read for a detached one whose
+  record isn't in memory. Choosing them costs work bounded by the loaded
+  regions; the scaling contract counts it.
+- A transition takes a prepared result instead of building or reading
+  itself. Nothing else changes: a region builds the same way on any thread,
+  and records never change once made, so the result is exactly what the
+  command would have produced. Attaching still checks the record in full.
+- A command never waits for the preloader. Anything not ready yet, or that
+  failed, the command builds or reads itself, as before.
+- Asking again drops prepared results and queued work nobody wants any more,
+  so a rewind or a change of direction needs no special handling. At most 32
+  results are kept.
+- The preloader reads rows on its own connection, so a read that waits for
+  the save worker's commit no longer waits on the command's thread.
+- The server turns it on once the game has loaded; replay and recovery run
+  without it. Tests check that games play identically with it on, off and
+  racing commands, and that every build and read in a walk was prepared.
+
+`CommandProfile.regions_prepared` counts the builds and reads taken ready.
+It depends on timing; `regions_built` and `region_records_read` still count
+every build and read, whichever thread did it, so they don't.
+
 ### Persistence
 
 Lifecycle state (points, frozen regions, stamps, record identities, the
@@ -365,16 +411,18 @@ are.
   the journal, history and checkpoint tables. Records are read when their
   regions attach, on a separate connection. A row read while the save
   worker is writing pages waits for that commit (rollback-journal mode);
-  that only happens when a record has left memory.
+  that only happens when a record has left memory, and the preloader
+  usually reads it first, off the command's thread.
 - **Checks.** An attached record gets the checks restoring a checkpoint gives
   loaded state: its checksum, its own consistency and its identities against
   the directory, then each actor and item (identities, combat, orientation,
   readiness, motion, navigation), bodies against every loaded body, and the
   game-wide combat and physics checks. A record that can't be read or fails
   them fails that command with a storage error and changes nothing.
-- **Format.** Save format 13 adds the `regions` table and the scenario's
-  streaming setting. Saves still embed their package; pinning a package by
-  hash waits for per-region package files.
+- **Package.** Saves pin their package and copy each region file they build
+  from; see [saves and the package](scenario-packages.md#saves-and-the-package).
+  A region's file is read only when the region is built, so starting and
+  resuming a game read the package's index, not its regions.
 
 Per-region in-memory tables, with loaded regions also stored as rows, are
 deferred until measurements show the global tables or re-encoding the loaded
@@ -428,17 +476,8 @@ base to compare them against.
 
 ### Later slices
 
-1. **Background preloading:** reading rows and building regions ahead of
-   need on another thread. Correctness never depends on it; today a record
-   is read when its region attaches.
-2. **Large scenarios and generation:** per-region package files with a
-   manifest, lifting the 256-region limit; pinning the package by manifest
-   hash instead of embedding it, and copying each region's source into the
-   save when it's first built (another save-format bump); and a procedural
-   region source. A generated region's content mustn't depend on the order
-   regions were built in, so each region gets its own random seed; generated
-   identities come from the game-wide allocators, which replay reproduces.
-3. **Asset palettes.**
+1. **Palettes in the clients:** the server sends
+   [asset palettes](protocol.md#asset-palettes); the clients ignore them so far.
 
 ### Lifecycle verification
 

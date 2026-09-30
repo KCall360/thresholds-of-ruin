@@ -178,6 +178,7 @@ fn present(connection: &Connection, message: &ServerMessage) {
                 println!("Older entries: history {}", safe(&before.0));
             }
         }
+        ServerMessage::Palette { .. } => {}
         ServerMessage::Error { code, message, .. } => {
             println!("Server error {code:?}: {}", safe(message))
         }

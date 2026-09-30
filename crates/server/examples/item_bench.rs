@@ -2,10 +2,7 @@
 use std::{path::Path, time::Instant};
 use tor_protocol::{Action, ActorId};
 use tor_server::journal::Command;
-use tor_server::{
-    scenario_package::{self, RegionFile},
-    Engine, SavePolicy, Scenario,
-};
+use tor_server::{scenario_package, Engine, SavePolicy, Scenario};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
@@ -14,8 +11,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let mut package = (**original.package.as_ref().unwrap()).clone();
         package.manifest.characters.truncate(1);
-        package.regions[0].items.clear();
-        let template = original.package.as_ref().unwrap().regions[0].items[0].clone();
+        let mut regions = package.region_defs()?;
+        let template = regions[0].items[0].clone();
+        regions[0].items.clear();
         let archetype = package.manifest.archetypes["healing"].clone();
         for id in 0..identities {
             let key = format!("identity-{id}");
@@ -32,18 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             item.id = id;
             item.quantity = 100;
             item.archetype = Some(format!("identity-{}", id % identities));
-            package.regions[0].items.push(item);
+            regions[0].items.push(item);
         }
-        std::fs::write(
-            directory.path().join("scenario.toml"),
-            toml::to_string(&package.manifest)?,
-        )?;
-        std::fs::write(
-            directory.path().join("regions.toml"),
-            toml::to_string(&RegionFile {
-                regions: package.regions,
-            })?,
-        )?;
+        scenario_package::write_package(directory.path(), &package.manifest, &regions)?;
         scenario_package::validate(directory.path())?;
         for sample in 0..20 {
             let scenario = scenario_package::load(directory.path(), 42, None, false)?;

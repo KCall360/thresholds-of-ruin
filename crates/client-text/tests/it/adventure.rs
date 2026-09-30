@@ -265,6 +265,7 @@ fn multiple_places_ask_before_travel_and_a_missing_referent_is_not_used() {
 fn doors_are_examined_clarified_and_approached_without_entering_the_barrier() {
     let mut s = state();
     s.observation.visible_cells[3].door = Some(DoorView {
+        asset: None,
         id: 7,
         name: "wooden door".into(),
         description: "An iron handle.".into(),
@@ -313,6 +314,7 @@ fn attacks_clarify_visible_names_and_never_select_an_unknown_id() {
     let mut state = state();
     for id in [2, 3] {
         state.observation.visible_actors.push(ActorView {
+            asset: None,
             id: ActorId(id),
             name: "ruin guard".into(),
             description: String::new(),

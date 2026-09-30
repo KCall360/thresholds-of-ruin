@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **18**, save format **13**, ruleset
-**`dungeon-v17`**, scenario validator **`tor-scenario-5`**. The server rejects
+**Current formats:** protocol **19**, save format **14**, ruleset
+**`dungeon-v17`**, scenario validator **`tor-scenario-6`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -159,8 +159,15 @@ can also start with no region built: a scenario package builds each region
 when it's first loaded, with the same result as building everything at once.
 Package games now stream: they start with the regions their characters need,
 move to the regions their reference points ask for after every command, and
-keep detached regions on disk (save format 13). Background preloading,
-larger scenarios, generation and palette delivery aren't implemented; see
+keep detached regions on disk, and the server builds or reads the regions just
+beyond the loaded ones in the background. Packages keep one file per region with
+a generated index, so a game reads a region's file only when it builds it, and
+saves pin their package, copying each region file they build from. Regions can
+be generated between authored ones, the same in any build order; see
+[generated regions](scenario-packages.md#generated-regions). The server names
+each disclosed thing's asset and sends each client an
+[asset palette](protocol.md#asset-palettes); the clients don't draw from
+palettes yet. See
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only
@@ -194,7 +201,7 @@ barriers and consistent crash rollback.
 A separate effort from 4e, in progress. Gameplay now uses 3D sight from each
 body's declared eye cell; the protocol, save format, ruleset and validator were
 bumped for it. The separate floor and ceiling facts are gone; clients derive
-them from seen solid cells. Observation updates are view deltas (protocol 18).
+them from seen solid cells. Observation updates are view deltas.
 The remaining client changes remain. It
 replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
 with a single 3D rule for every observer. Sight lines start at a declared eye

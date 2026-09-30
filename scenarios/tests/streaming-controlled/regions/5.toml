@@ -1,0 +1,6 @@
+id = 5
+name = "Hall 5"
+size = [20, 3, 1]
+anchors = { west = [0, 0, 0], east = [19, 0, 0], start = [2, 1, 0] }
+portals = [{ at = [0, 0, 0], direction = "west", to = "4/east", width = 3 }]
+actors = [{ id = 3, at = [10, 1, 0], turn_ticks = 100 }]

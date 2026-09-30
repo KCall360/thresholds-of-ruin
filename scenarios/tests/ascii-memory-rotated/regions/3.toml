@@ -1,0 +1,7 @@
+id = 3
+size = [2, 1, 1]
+name = "West"
+chamber = false
+anchors = { "portal-0" = [1, 0, 0], "start" = [1, 0, 0] }
+portals = [{ "at" = [1, 0, 0], "direction" = "east", "to" = "4/portal-0", "turns" = 1 }]
+items = [{ "id" = 3, "at" = [0, 0, 0], "archetype" = "token" }]

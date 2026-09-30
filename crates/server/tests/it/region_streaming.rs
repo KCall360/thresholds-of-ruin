@@ -272,7 +272,10 @@ fn transition_work_does_not_grow_with_the_world() {
         let out = directory.path().join(format!("corridor-{halls}"));
         let scenario = scenario_package::streaming_corridor(&root, &out, halls, 5).unwrap();
         let mut engine = Engine::memory(scenario).unwrap();
-        let mut totals = [0usize; 8];
+        // What the preloader is asked for is decided on the command's
+        // thread, so it must scale like the transition does.
+        engine.start_preloading();
+        let mut totals = [0usize; 11];
         let mut step = 0;
         let mut run = |engine: &mut Engine, actor: ActorId, action: Action| {
             let revision = engine.revision(actor).unwrap();
@@ -299,6 +302,9 @@ fn transition_work_does_not_grow_with_the_world() {
                 profile.region_records_read,
                 profile.regions_built,
                 profile.scene_calls,
+                profile.preload_jobs,
+                profile.preload_regions_expanded,
+                profile.preload_links_examined,
             ]) {
                 *total += count;
             }
@@ -314,11 +320,91 @@ fn transition_work_does_not_grow_with_the_world() {
         (totals, counts(&engine).active + counts(&engine).frozen)
     };
     let (small, small_loaded) = work(16);
-    let (large, large_loaded) = work(256);
-    assert_eq!(small, large);
-    assert_eq!(small_loaded, large_loaded);
+    for halls in [256, 4096] {
+        let (large, large_loaded) = work(halls);
+        assert_eq!(small, large, "{halls} halls");
+        assert_eq!(small_loaded, large_loaded, "{halls} halls");
+    }
     // The walk really streamed: regions changed and were built.
     assert!(small[0] > 0 && small[6] > 0, "{small:?}");
+    // The preloader was asked for regions ahead of the walk.
+    assert!(small[8] > 0, "{small:?}");
+}
+
+/// A game declares a region only when it's needed, so what it holds, and
+/// what its checkpoints encode, is the same however large its package is.
+#[test]
+fn a_game_holds_only_the_regions_it_played_however_large_the_package() {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+    let directory = tempfile::tempdir().unwrap();
+    let held = |halls: u64| {
+        let out = directory.path().join(format!("corridor-{halls}"));
+        let scenario = scenario_package::streaming_corridor(&root, &out, halls, 5).unwrap();
+        let mut engine = Engine::memory(scenario).unwrap();
+        let start = engine.profile_checkpoint_encoding().unwrap().0;
+        let mut sequence = 0;
+        walk(&mut engine, Direction::East, TO_HALL_4, &mut sequence);
+        let far = engine.profile_checkpoint_encoding().unwrap().0;
+        walk(&mut engine, Direction::West, TO_HALL_4, &mut sequence);
+        let back = engine.profile_checkpoint_encoding().unwrap().0;
+        (start, far, back)
+    };
+    let small = held(16);
+    assert_eq!(small, held(256));
+    assert_eq!(small, held(4096));
+}
+
+/// Generated halls cost the same to build, and a game holds the same, however
+/// long the corridor of them is.
+#[test]
+fn generated_regions_cost_the_same_however_large_the_package() {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+    let directory = tempfile::tempdir().unwrap();
+    let work = |halls: u64| {
+        let out = directory.path().join(format!("generated-{halls}"));
+        let scenario = scenario_package::generated_corridor(&root, &out, halls, 5).unwrap();
+        let mut engine = Engine::memory(scenario).unwrap();
+        let mut totals = [0usize; 6];
+        let mut step = 0;
+        // Row 0 is open in every generated hall.
+        for direction in
+            std::iter::once(Direction::North).chain(std::iter::repeat_n(Direction::East, TO_HALL_4))
+        {
+            let revision = engine.revision(ActorId(1)).unwrap();
+            step += 1;
+            let (_, profile) = engine
+                .command_profiled(
+                    "bench",
+                    "test",
+                    ActorId(1),
+                    &format!("step-{step}"),
+                    &engine.branch().clone(),
+                    Command::Act {
+                        expected_revision: revision,
+                        action: Action::Move { direction },
+                    },
+                )
+                .unwrap_or_else(|e| panic!("step {step}: {e}"));
+            for (total, count) in totals.iter_mut().zip([
+                profile.region_changes,
+                profile.horizon_regions_expanded,
+                profile.horizon_links_examined,
+                profile.regions_built,
+                profile.region_records_read,
+                profile.scene_calls,
+            ]) {
+                *total += count;
+            }
+        }
+        let bytes = engine.profile_checkpoint_encoding().unwrap().0;
+        (totals, bytes)
+    };
+    let small = work(16);
+    assert!(small.0[3] > 0, "the walk built generated halls: {small:?}");
+    assert_eq!(small, work(256));
+    assert_eq!(small, work(4096));
 }
 
 /// An actor a client controls keeps its own region in play, however far it

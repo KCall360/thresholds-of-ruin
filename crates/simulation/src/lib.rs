@@ -20,7 +20,7 @@ mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
     ReferenceTarget, RegionIdentities, RegionRecord, RegionRoot, RegionState, RegionTransition,
-    TransitionError, TransitionReport,
+    TransitionError, TransitionReport, UnbuiltRegion,
 };
 mod travel;
 pub use travel::TravelStep;
@@ -121,6 +121,9 @@ struct Actor {
     ready_at: u64,
     visited: BTreeSet<RegionId>,
     knowledge: Shared<BTreeSet<String>>,
+    /// The asset clients draw it with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asset: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -302,6 +305,7 @@ impl Game {
                 ready_at: self.tick,
                 visited: BTreeSet::from([location.region]),
                 knowledge: Shared::default(),
+                asset: None,
             },
         );
         self.next_actor_id = next;
@@ -418,6 +422,13 @@ impl Game {
         }
         actor.visited.insert(location.region);
         self.sync_actor_lifecycle(id);
+        Ok(())
+    }
+
+    /// Set the asset clients draw an actor with.
+    pub fn set_actor_asset(&mut self, id: ActorId, asset: Option<String>) -> Result<(), GameError> {
+        let actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        actor.asset = asset;
         Ok(())
     }
 

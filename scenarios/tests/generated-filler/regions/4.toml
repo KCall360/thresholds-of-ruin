@@ -1,0 +1,6 @@
+id = 4
+name = "Far hall"
+zone = "vault"
+size = [12, 5, 1]
+anchors = { west = [0, 2, 0] }
+portals = [{ at = [0, 2, 0], direction = "west", to = "3/east" }]

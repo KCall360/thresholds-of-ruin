@@ -1,0 +1,1 @@
+{"regions":[{"id":1,"file":"regions/1.toml","hash":"671dbfd3899aef6945e98a5a172ec08e4606b8c655dd407212adbcf414b0f89d","name":"Shared vault","size":[7,3,2],"chamber":true,"zone":null,"anchors":{"companion":[2,1,0],"start":[4,1,0]},"portals":[],"actors":[],"items":[{"id":100,"carried_by":1}],"doors":[]}]}

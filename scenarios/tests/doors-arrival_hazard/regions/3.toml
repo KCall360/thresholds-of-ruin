@@ -1,0 +1,8 @@
+id = 3
+size = [12, 2, 1]
+name = "Private hazard"
+chamber = false
+anchors = { "start" = [0, 0, 0] }
+doors = [{ "id" = 2, "at" = [2, 1, 0], "open" = false }]
+walls = [[0, 1, 0]]
+actors = [{ "id" = 2, "at" = [9, 0, 0], "turn_ticks" = 100 }]

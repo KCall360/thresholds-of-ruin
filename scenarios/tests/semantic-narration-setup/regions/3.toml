@@ -1,0 +1,7 @@
+id = 3
+size = [5, 1, 1]
+name = "Narration corridor"
+chamber = false
+anchors = { "start" = [0, 0, 0] }
+doors = [{ "id" = 2, "at" = [1, 0, 0], "open" = false }]
+actors = [{ "id" = 2, "at" = [2, 0, 0], "turn_ticks" = 100 }]

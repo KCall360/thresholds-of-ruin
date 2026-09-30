@@ -25,6 +25,7 @@ fn setup() -> (Game, ActorId) {
                 concealed: true,
                 stackable: true,
                 properties: BTreeMap::new(),
+                asset: None,
             },
         )
         .unwrap();
@@ -195,6 +196,7 @@ fn overflow_ownership_and_distinct_properties_cannot_corrupt_stacks() {
         concealed: false,
         stackable: true,
         properties: BTreeMap::new(),
+        asset: None,
     };
     game.place_item_stack(200, at, Some(actor), u64::MAX, spec.clone())
         .unwrap();

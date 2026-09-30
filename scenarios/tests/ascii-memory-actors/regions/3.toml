@@ -1,0 +1,7 @@
+id = 3
+size = [6, 1, 1]
+name = "Corridor"
+chamber = false
+anchors = { "start" = [0, 0, 0] }
+items = [{ "id" = 3, "at" = [4, 0, 0], "archetype" = "tablet" }]
+actors = [{ "id" = 2, "at" = [4, 0, 0], "turn_ticks" = 100 }]

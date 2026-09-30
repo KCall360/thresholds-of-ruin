@@ -34,6 +34,10 @@ impl RegionSlice {
         &self.region
     }
     /// Identities of the doors in this region.
+    /// Regions this region's links lead to, in id order.
+    pub fn linked_regions(&self) -> BTreeSet<RegionId> {
+        self.passages.values().map(|(p, _)| p.to.region).collect()
+    }
     pub fn door_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.doors.values().map(|door| door.id)
     }

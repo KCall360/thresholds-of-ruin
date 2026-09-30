@@ -26,7 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     mass: 80,
                 };
                 package.manifest.characters[0].body = Some(body.clone());
-                let region = &mut package.regions[0];
+                let mut regions = package.region_defs()?;
+                let region = &mut regions[0];
                 region.size = [32, 8, 8];
                 region.anchors.insert("start".into(), [2, 2, z]);
                 for id in 2..=actors {
@@ -51,16 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         item
                     })
                     .collect();
-                std::fs::write(
-                    directory.path().join("scenario.toml"),
-                    toml::to_string(&package.manifest)?,
-                )?;
-                std::fs::write(
-                    directory.path().join("regions.toml"),
-                    toml::to_string(&scenario_package::RegionFile {
-                        regions: package.regions,
-                    })?,
-                )?;
+                scenario_package::write_package(directory.path(), &package.manifest, &regions)?;
                 scenario_package::validate(directory.path())?;
                 let scenario = scenario_package::load(directory.path(), 42, None, false)?;
                 let path = directory.path().join("game.db");

@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 13;
+pub(crate) const ARCHIVE_VERSION: u32 = 14;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -307,6 +307,14 @@ pub struct CommandProfile {
     pub reach_lookups: usize,
     pub region_records_read: usize,
     pub regions_built: usize,
+    /// Builds and reads the preloader had ready. Depends on timing, unlike
+    /// the other counts.
+    pub regions_prepared: usize,
+    /// Background preloading: what it was asked for after the command, and
+    /// the deterministic work of choosing it.
+    pub preload_jobs: usize,
+    pub preload_regions_expanded: usize,
+    pub preload_links_examined: usize,
 }
 
 /// Startup measurements; retained history is read but only the checkpoint tail is simulated.
@@ -375,20 +383,18 @@ impl Revisions {
                 .loaded_actor_ids()
                 .map(|id| (ActorId(id.0), 0))
                 .collect(),
-            parked: tor_world::Shared::new(
-                game.unloaded_actor_ids()
-                    .map(|id| (ActorId(id.0), 0))
-                    .collect(),
-            ),
+            parked: Default::default(),
         }
     }
 
-    /// Any known actor's revision, loaded or not.
-    fn any(&self, actor: ActorId) -> Option<u64> {
+    /// Any known actor's revision, loaded or not. An actor is parked once it
+    /// leaves the loaded world; one never loaded is at revision zero.
+    fn any(&self, actor: ActorId, game: &Game) -> Option<u64> {
         self.loaded
             .get(&actor)
             .or_else(|| self.parked.get(&actor))
             .copied()
+            .or_else(|| game.known_actor_region(SimActor(actor.0)).map(|_| 0))
     }
 
     /// Follow actors into and out of loaded regions after a transition.
@@ -422,11 +428,10 @@ impl Revisions {
             .keys()
             .map(|a| a.0)
             .eq(game.loaded_actor_ids().map(|a| a.0))
-            && self
-                .parked
-                .keys()
-                .map(|a| a.0)
-                .eq(game.unloaded_actor_ids().map(|a| a.0))
+            && self.parked.keys().all(|a| {
+                let id = SimActor(a.0);
+                !game.has_actor(id) && game.known_actor_region(id).is_some()
+            })
     }
 }
 
@@ -472,14 +477,16 @@ impl Candidate {
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
     }
-    fn publish(self, engine: &mut Engine) {
+    /// Publish, then ask the preloader for what the next transitions are
+    /// likely to need.
+    fn publish(self, engine: &mut Engine) -> Option<crate::regions::PreloadWork> {
         engine.current_branch = self.current_branch;
         engine.boundaries = self.boundaries;
         engine.game = self.game;
         engine.revisions = self.revisions;
-        if let Some(regions) = &mut engine.regions {
-            regions.publish(self.made);
-        }
+        let regions = engine.regions.as_mut()?;
+        regions.publish(self.made);
+        regions.preload(&engine.game)
     }
 
     /// Move to the regions the reference points ask for. When anything
@@ -553,6 +560,7 @@ impl Candidate {
             profile.reach_lookups += work.reach_lookups;
             profile.region_records_read += work.records_read;
             profile.regions_built += report.built.len();
+            profile.regions_prepared += work.prepared;
         }
         if let Some(before) = work.before {
             // Only observers whose view the transition changed move on, so
@@ -619,7 +627,7 @@ impl Engine {
             .map(|p| ActorId(p.selected))
     }
     pub fn memory(scenario: Scenario) -> Result<Self, Failure> {
-        if !(1..=256).contains(&scenario.regions) {
+        if scenario.package.is_none() && !(1..=256).contains(&scenario.regions) {
             return Err(invalid_archive());
         }
         let mut regions = streaming_regions(&scenario)?;
@@ -689,12 +697,29 @@ impl Engine {
         let started = Instant::now();
         policy.validate()?;
         let (path, lock) = lock_save(path.as_ref())?;
-        let (store, archive, checkpoint) = crate::storage::Store::open(
+        let supplied = scenario.package.clone();
+        let (store, archive, checkpoint, saved) = crate::storage::Store::open(
             &path,
-            || Self::memory(scenario).map(|engine| engine.archive),
+            || {
+                let engine = Self::memory(scenario)?;
+                let sources = engine.unsaved_sources()?;
+                Ok((engine.archive, sources))
+            },
             policy,
             lock.clone(),
         )?;
+        // Region files not copied into the save come from the package
+        // directory: the one supplied, or where the save was created, if
+        // it's still the same package.
+        if let Some(package) = &archive.scenario.package {
+            if !package.sources.has_directory() {
+                if let Some(directory) =
+                    crate::scenario_package::locate(package, supplied.as_deref())
+                {
+                    package.sources.set_directory(&directory);
+                }
+            }
+        }
         let records_loaded = archive.records.len();
         let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
         let records_replayed = records_loaded
@@ -704,6 +729,10 @@ impl Engine {
                 .unwrap_or(0)
                 .min(records_loaded);
         let mut engine = Self::replay(archive, checkpoint, Some(&store))?;
+        if let Some(regions) = &mut engine.regions {
+            regions.set_saved(saved);
+        }
+        engine.require_region_sources()?;
         engine.recovery = RecoveryProfile {
             total: started.elapsed(),
             records_loaded,
@@ -714,6 +743,66 @@ impl Engine {
         engine.lock = Some(lock);
         engine.store = Some(store);
         Ok(engine)
+    }
+    /// Region files the save needs and doesn't have yet.
+    fn unsaved_sources(&self) -> Result<Vec<(u64, Arc<str>)>, Failure> {
+        match &self.regions {
+            Some(regions) => regions.unsaved_sources(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// A game with regions still to build needs their files: copied into
+    /// the save, or in the package directory. Refuse to resume without them
+    /// rather than fail when play reaches them.
+    fn require_region_sources(&self) -> Result<(), Failure> {
+        let (Some(package), Some(counts)) = (&self.archive.scenario.package, self.region_counts())
+        else {
+            return Ok(());
+        };
+        let Some(regions) = &self.regions else {
+            return Ok(());
+        };
+        if counts.unbuilt == 0
+            || package.sources.has_directory()
+            || regions.saved_count() == package.index.regions.len()
+        {
+            return Ok(());
+        }
+        Err(Failure::new(
+            tor_protocol::ErrorCode::StorageFailure,
+            &format!(
+                "This save's scenario package isn't available{}; resume with --scenario <directory> naming the same package",
+                package
+                    .directory
+                    .as_ref()
+                    .map(|d| format!(" at {d}"))
+                    .unwrap_or_default()
+            ),
+        ))
+    }
+
+    /// Build regions and read region rows in the background, just beyond
+    /// what the reference points keep loaded. Games play identically with or
+    /// without it; replay and recovery don't use it. Does nothing in a game
+    /// that doesn't stream.
+    pub fn start_preloading(&mut self) {
+        if let Some(regions) = &mut self.regions {
+            regions.start_preloading();
+            regions.preload(&self.game);
+        }
+    }
+    pub fn stop_preloading(&mut self) {
+        if let Some(regions) = &mut self.regions {
+            regions.stop_preloading();
+        }
+    }
+    /// Wait until the preloader has done what it was asked for. For tests
+    /// and benchmarks that measure the prepared path; commands never wait.
+    pub fn settle_preloading(&self) {
+        if let Some(regions) = &self.regions {
+            regions.settle_preloading();
+        }
     }
     /// Wait for the records accepted before this call to become durable.
     pub fn flush(&self) -> Result<(), Failure> {
@@ -735,13 +824,13 @@ impl Engine {
             records_read: regions.reads,
             ..RegionCounts::default()
         };
-        for region in &package.regions {
+        for region in &package.index.regions {
             match self.game.region_state(tor_world::RegionId(region.id)) {
                 Some(tor_simulation::RegionState::Active) => counts.active += 1,
                 Some(tor_simulation::RegionState::Frozen) => counts.frozen += 1,
                 Some(tor_simulation::RegionState::Detached) => counts.detached += 1,
-                Some(tor_simulation::RegionState::Unbuilt) => counts.unbuilt += 1,
-                None => {}
+                // Regions the game hasn't needed yet aren't even declared.
+                Some(tor_simulation::RegionState::Unbuilt) | None => counts.unbuilt += 1,
             }
         }
         Some(counts)
@@ -917,13 +1006,22 @@ impl Engine {
     }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
-            .any(actor)
+            .any(actor, &self.game)
             .ok_or_else(|| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
         self.revision(actor)?;
         let (view, scene, ready) = self.revision_view(actor)?;
-        let mut observation = adapt::observation(view, scene, &self.archive.view_salt, ready);
+        let package = self.archive.scenario.package.as_deref();
+        let terrain = |region: tor_world::RegionId| {
+            package
+                .and_then(|p| p.region_terrain(region.0))
+                .map_or([None, None, None], |t| {
+                    [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                })
+        };
+        let mut observation =
+            adapt::observation(view, scene, &self.archive.view_salt, ready, &terrain);
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -936,6 +1034,21 @@ impl Engine {
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
+    }
+
+    /// The assets an actor's client may soon need: those of the themes of
+    /// every region within one portal hop beyond what's kept loaded around
+    /// it, from the package's structure alone, never from what the regions
+    /// hold. `None` when the scenario names no assets.
+    pub fn palette(&self, actor: ActorId) -> Option<std::collections::BTreeSet<String>> {
+        let package = self
+            .archive
+            .scenario
+            .package
+            .as_deref()
+            .filter(|p| p.has_assets())?;
+        let region = self.game.known_actor_region(SimActor(actor.0))?;
+        Some(self.regions.as_ref()?.palette(package, region))
     }
 
     pub fn travel_route(
@@ -1122,11 +1235,17 @@ impl Engine {
         if path.exists() {
             return Err(storage_failure());
         }
-        let (store, _, _) =
-            crate::storage::Store::open(&path, || Ok(self.archive.clone()), policy, lock.clone())?;
+        let sources = self.unsaved_sources()?;
+        let (store, _, _, saved) = crate::storage::Store::open(
+            &path,
+            || Ok((self.archive.clone(), sources)),
+            policy,
+            lock.clone(),
+        )?;
         // Records evicted once a checkpoint writes them are read back from it.
         if let Some(regions) = &mut self.regions {
             regions.attach_disk(store.clone());
+            regions.set_saved(saved);
         }
         self.path = Some(path);
         self.lock = Some(lock);
@@ -1634,9 +1753,15 @@ impl Engine {
                 profile.rollback_snapshots += 1;
             }
         }
-        self.admit(&record, &candidate, profile.as_deref_mut())?;
+        let copied = self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();
-        candidate.publish(self);
+        let preload = candidate.publish(self);
+        self.mark_saved(copied);
+        if let (Some(profile), Some(preload)) = (profile.as_deref_mut(), preload) {
+            profile.preload_jobs += preload.jobs.len();
+            profile.preload_regions_expanded += preload.regions_expanded;
+            profile.preload_links_examined += preload.links_examined;
+        }
         self.receipts.insert(
             (receipt.user.clone(), receipt.request_id.clone()),
             self.archive.records.len(),
@@ -1697,7 +1822,8 @@ impl Engine {
             entry: entry.clone(),
             receipt: None,
         };
-        self.admit(&record, &Candidate::capture(self), None)?;
+        let copied = self.admit(&record, &Candidate::capture(self), None)?;
+        self.mark_saved(copied);
         self.archive.records.push(record);
         Ok(entry)
     }
@@ -1763,17 +1889,26 @@ impl Engine {
         }
     }
 
+    /// Queue a record, with the region files its command (or earlier ones)
+    /// built regions from that the save doesn't have yet. Returns those
+    /// regions, for the caller to mark saved once the command publishes.
     fn admit(
         &self,
         record: &Record,
         candidate: &Candidate,
         profile: Option<&mut CommandProfile>,
-    ) -> Result<(), Failure> {
+    ) -> Result<Vec<u64>, Failure> {
+        let mut copied = Vec::new();
         if let Some(store) = &self.store {
             let started = Instant::now();
             let mut capture_time = Duration::ZERO;
             let mut captures = 0;
-            store.enqueue(record, || {
+            let sources = match &self.regions {
+                Some(regions) => regions.unsaved_sources()?,
+                None => Vec::new(),
+            };
+            copied = sources.iter().map(|(region, _)| *region).collect();
+            store.enqueue(record, sources, || {
                 let capture_started = Instant::now();
                 let mut checkpoint = Checkpoint::capture_candidate(
                     candidate,
@@ -1794,7 +1929,13 @@ impl Engine {
                 profile.records_serialized += 1;
             }
         }
-        Ok(())
+        Ok(copied)
+    }
+
+    fn mark_saved(&mut self, copied: Vec<u64>) {
+        if let Some(regions) = &mut self.regions {
+            regions.mark_saved(copied);
+        }
     }
 }
 
@@ -1835,8 +1976,8 @@ fn start_streaming(
             .map_err(|_| invalid_archive())?;
     }
     // So do actors that clients control: their players see from them.
-    for actor in package.regions.iter().flat_map(|r| &r.actors) {
-        if actor.controller == "external" {
+    for actor in package.index.regions.iter().flat_map(|r| &r.actors) {
+        if actor.external {
             game.add_reference_point(observe(actor.id))
                 .map_err(|_| invalid_archive())?;
         }
@@ -2129,7 +2270,11 @@ impl Candidate {
                     .find(|b| &b.id == target)
                     .cloned()
                     .ok_or_else(invalid)?;
-                if boundary.revisions.any(receipt.actor).is_none() {
+                if boundary
+                    .revisions
+                    .any(receipt.actor, &boundary.game)
+                    .is_none()
+                {
                     return Err(invalid());
                 }
                 let later = std::mem::replace(&mut self.game, boundary.game.clone());

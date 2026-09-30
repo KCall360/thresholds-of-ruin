@@ -94,11 +94,15 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     }
 }
 
+/// A region's floor, wall and door assets, if its scenario names them.
+pub type Terrain<'a> = &'a dyn Fn(w::RegionId) -> [Option<String>; 3];
+
 pub fn observation(
     view: s::Observation,
     scene: Vec<w::SightCell>,
     salt: &str,
     ready: bool,
+    terrain: Terrain,
 ) -> p::Observation {
     let offset = |position: w::Position| p::Position {
         x: position.x,
@@ -119,7 +123,9 @@ pub fn observation(
         let Some(&visible) = disclosed.get(&(cell.location, cell.rotation)) else {
             continue;
         };
+        let [floor, wall, door_asset] = terrain(cell.location.region);
         visible_cells.push(p::CellView {
+            asset: if cell.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
                 id: door.id,
                 name: "wooden door".into(),
@@ -131,6 +137,7 @@ pub fn observation(
                     .iter()
                     .map(|location| cell_key(salt, view.actor.0, *location))
                     .collect(),
+                asset: door_asset,
             }),
             material: visible.material.into(),
             key: cell_key(salt, view.actor.0, cell.location),
@@ -159,6 +166,7 @@ pub fn observation(
                     description: item.description.clone(),
                     id: item.id.0,
                     name: item.name.clone(),
+                    asset: item.asset.clone(),
                 },
                 position: offset(cell.offset),
                 reachable: item.location == view.location,
@@ -174,6 +182,7 @@ pub fn observation(
                 description: actor.description.into(),
                 id: p::ActorId(actor.id.0),
                 position: offset(cell.offset),
+                asset: actor.asset.clone(),
             });
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
@@ -182,6 +191,7 @@ pub fn observation(
                 description: "You recognize your own appearance from another angle.".into(),
                 id: p::ActorId(view.actor.0),
                 position: offset(cell.offset),
+                asset: None,
             });
         }
     }
@@ -231,6 +241,7 @@ pub fn observation(
                 description: item.description,
                 id: item.id.0,
                 name: item.name,
+                asset: item.asset,
             })
             .collect(),
     }

@@ -16,13 +16,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let original = scenario.package.ok_or("Missing package")?;
     for count in [5, 256, 8192] {
         let mut package = (*original).clone();
-        let mut unrelated = package.regions[4].clone();
+        let mut unrelated = package.index.regions[4].clone();
         unrelated.portals.clear();
         unrelated.items.clear();
         unrelated.actors.clear();
+        let index = &mut std::sync::Arc::make_mut(&mut package.index).regions;
         for id in 6..=count {
             unrelated.id = id;
-            package.regions.push(unrelated.clone());
+            index.push(unrelated.clone());
         }
         let started = Instant::now();
         let catalog = RegionCatalog::from_package(&package)?;

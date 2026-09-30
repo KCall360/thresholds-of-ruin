@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,6 +20,7 @@ impl AccessRole {
                 request,
                 Request::Attach { .. }
                     | Request::Snapshot
+                    | Request::Palette
                     | Request::History { .. }
                     | Request::HistoryBranch { .. }
             )
@@ -82,6 +83,10 @@ pub struct ItemView {
     pub description: String,
     pub id: u64,
     pub name: String,
+    /// The asset a client draws it with, from its palette. Absent when the
+    /// scenario names none; clients then fall back to their own look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +104,10 @@ pub struct ActorView {
     pub description: String,
     pub id: ActorId,
     pub position: Position,
+    /// The asset a client draws it with, from its palette. Absent when the
+    /// scenario names none; clients then fall back to their own look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +180,10 @@ pub struct CellView {
     pub wall: bool,
     /// Unnamed anchor hint, disclosed only with this cell; no area membership.
     pub place_hint: bool,
+    /// The asset a client draws it with, from its palette. Absent when the
+    /// scenario names none; clients then fall back to their own look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +196,10 @@ pub struct DoorView {
     /// Currently perceived standing cells from which this door can be reached.
     /// These disclose no unobserved geometry and are not a planned route.
     pub approaches: Vec<String>,
+    /// The asset a client draws it with, from its palette. Absent when the
+    /// scenario names none; clients then fall back to their own look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +405,8 @@ pub enum Request {
     AcquireControl,
     ReleaseControl,
     Snapshot,
+    /// The whole current palette, as after attaching.
+    Palette,
     Command {
         branch: BranchId,
         command: Command,
@@ -489,6 +508,37 @@ pub enum ServerMessage {
         request_id: Option<String>,
         code: ErrorCode,
         message: String,
+    },
+    /// The assets a client may need soon, revisioned independently of
+    /// observations. `request_id` answers a palette request.
+    Palette {
+        request_id: Option<String>,
+        palette: PaletteUpdate,
+    },
+}
+
+/// Asset identifiers the attached actor may soon see, forecast from the
+/// themes of the regions near it, never from what's in them. Attaching
+/// (and a palette request) sends the whole palette; later changes are
+/// deltas against the previous revision. Nothing is acknowledged, and it's
+/// recomputed after a restart rather than saved.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaletteUpdate {
+    pub revision: u64,
+    pub body: PaletteBody,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PaletteBody {
+    Full {
+        assets: std::collections::BTreeSet<String>,
+    },
+    /// Changes from revision `base`.
+    Delta {
+        base: u64,
+        added: std::collections::BTreeSet<String>,
+        removed: std::collections::BTreeSet<String>,
     },
 }
 

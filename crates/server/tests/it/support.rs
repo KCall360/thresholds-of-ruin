@@ -58,3 +58,32 @@ pub fn write(path: impl AsRef<Path>, mut archive: Value) {
     }
     tx.commit().unwrap();
 }
+
+/// Copy a package: its manifest, region files, index and certificate.
+pub fn copy_package(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to.join("regions")).unwrap();
+    for name in ["scenario.toml", "index.json", "validation.json"] {
+        if from.join(name).exists() {
+            std::fs::copy(from.join(name), to.join(name)).unwrap();
+        }
+    }
+    for entry in std::fs::read_dir(from.join("regions")).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), to.join("regions").join(entry.file_name())).unwrap();
+    }
+}
+
+/// Replace `from` with `to` in the one region file of a package holding it.
+pub fn edit_region(package: &Path, from: &str, to: &str) {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(package.join("regions")).unwrap() {
+        let path = entry.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap();
+        if text.contains(from) {
+            found.push((path, text));
+        }
+    }
+    assert_eq!(found.len(), 1, "Expected one region file holding {from}");
+    let (path, text) = found.pop().unwrap();
+    std::fs::write(path, text.replacen(from, to, 1)).unwrap();
+}

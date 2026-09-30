@@ -1,9 +1,6 @@
 //! Package workload v1: integrity checks, deterministic construction and action cost.
 use std::time::Instant;
-use tor_server::{
-    scenario_package::{self, RegionFile},
-    Engine, Scenario,
-};
+use tor_server::{scenario_package, Engine, Scenario};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
@@ -11,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for count in [2, 256] {
         let directory = tempfile::tempdir()?;
         let source = original.package.as_ref().unwrap();
-        let mut regions = source.regions.clone();
+        let mut regions = source.region_defs()?;
         for id in 3..=count {
             let mut region = regions[1].clone();
             region.id = id;
@@ -20,19 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             region.doors.clear();
             regions.push(region);
         }
-        std::fs::write(
-            directory.path().join("scenario.toml"),
-            toml::to_string(&source.manifest)?,
-        )?;
-        std::fs::write(
-            directory.path().join("regions.toml"),
-            toml::to_string(&RegionFile { regions })?,
-        )?;
+        scenario_package::write_package(directory.path(), &source.manifest, &regions)?;
         let start = Instant::now();
         scenario_package::validate(directory.path())?;
         let validation_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let bytes = std::fs::metadata(directory.path().join("scenario.toml"))?.len()
-            + std::fs::metadata(directory.path().join("regions.toml"))?.len();
+        let mut bytes = std::fs::metadata(directory.path().join("scenario.toml"))?.len();
+        for entry in std::fs::read_dir(directory.path().join("regions"))? {
+            bytes += entry?.metadata()?.len();
+        }
         for sample in 0..20 {
             let start = Instant::now();
             let scenario = scenario_package::load(directory.path(), 42, None, false)?;

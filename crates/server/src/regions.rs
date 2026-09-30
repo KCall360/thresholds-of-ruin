@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tor_simulation::{
-    Game, RecordId, RecordStore, RegionRecord, RegionTransition, TransitionReport,
+    Game, RecordId, RecordStore, RegionRecord, RegionState, RegionTransition, TransitionReport,
 };
 use tor_world::{RegionId, Shared};
 
 use crate::engine::storage_failure;
+use crate::preload::{Job, Preloader};
 use crate::region_streaming::RegionCatalog;
 use crate::scenario_package::Package;
 use crate::Failure;
@@ -44,6 +45,8 @@ pub(crate) struct TransitionWork {
     pub(crate) pinned_actors: usize,
     pub(crate) reach_lookups: usize,
     pub(crate) records_read: usize,
+    /// Builds and reads a preloader had already prepared.
+    pub(crate) prepared: usize,
     /// The game just before the transition, when it changed anything.
     pub(crate) before: Option<Game>,
 }
@@ -65,8 +68,29 @@ pub(crate) struct Regions {
     /// Records known to be on disk; only these may leave memory.
     durable: BTreeSet<RecordId>,
     disk: Option<crate::storage::Store>,
-    /// Records read from disk, for the recovery profile.
+    /// Records read from disk, for the recovery profile. Counts records
+    /// the preloader read too, so it doesn't depend on timing.
     pub(crate) reads: usize,
+    /// Prepares regions just beyond the horizon on another thread. Shared by
+    /// copies of the store; a result is correct for any of them.
+    preload: Option<Arc<Preloader>>,
+    /// Builds and reads taken ready from the preloader.
+    pub(crate) prepared: usize,
+    /// Regions whose files the save holds, and those built regions (or
+    /// their neighbours, whose walls a build reads) need that it doesn't
+    /// yet. Replay rebuilds regions from these copies.
+    saved: BTreeSet<u64>,
+    unsaved: BTreeSet<u64>,
+    /// Why the last build failed, to report instead of a generic failure.
+    failure: Option<Failure>,
+}
+
+/// What the preloader was asked for, and the deterministic work of choosing it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PreloadWork {
+    pub(crate) jobs: Vec<Job>,
+    pub(crate) regions_expanded: usize,
+    pub(crate) links_examined: usize,
 }
 
 impl Regions {
@@ -85,11 +109,128 @@ impl Regions {
             durable: BTreeSet::new(),
             disk: None,
             reads: 0,
+            preload: None,
+            prepared: 0,
+            saved: BTreeSet::new(),
+            unsaved: BTreeSet::new(),
+            failure: None,
         })
     }
 
+    /// The region files the save needs and doesn't hold yet.
+    pub(crate) fn unsaved_sources(&self) -> Result<Vec<(u64, Arc<str>)>, Failure> {
+        self.unsaved
+            .iter()
+            .map(|region| Ok((*region, self.package.region_text(*region)?)))
+            .collect()
+    }
+
+    /// These regions' files are queued with a published command.
+    pub(crate) fn mark_saved(&mut self, copied: Vec<u64>) {
+        for region in copied {
+            self.unsaved.remove(&region);
+            self.saved.insert(region);
+        }
+    }
+
+    /// The regions whose files a save holds, when it's opened.
+    pub(crate) fn set_saved(&mut self, saved: BTreeSet<u64>) {
+        self.unsaved.retain(|region| !saved.contains(region));
+        self.saved = saved;
+    }
+
+    pub(crate) fn saved_count(&self) -> usize {
+        self.saved.len()
+    }
+
     pub(crate) fn attach_disk(&mut self, disk: crate::storage::Store) {
+        if let Some(preload) = &self.preload {
+            preload.attach_disk(disk.clone());
+        }
         self.disk = Some(disk);
+    }
+
+    /// Start preparing regions in the background. Replay and recovery run
+    /// without it; the engine turns it on once a game is ready to play.
+    pub(crate) fn start_preloading(&mut self) {
+        if self.preload.is_some() {
+            return;
+        }
+        let preload = Preloader::start(self.package.clone(), self.index.clone(), self.seed);
+        if let Some(disk) = &self.disk {
+            preload.attach_disk(disk.clone());
+        }
+        self.preload = Some(Arc::new(preload));
+    }
+
+    pub(crate) fn stop_preloading(&mut self) {
+        self.preload = None;
+    }
+
+    /// Wait for the preloader to finish what it was asked for.
+    pub(crate) fn settle_preloading(&self) {
+        if let Some(preload) = &self.preload {
+            preload.settle();
+        }
+    }
+
+    /// The regions one portal hop beyond the loaded ones: those the next
+    /// transitions are likely to need. That's beyond what pins keep loaded
+    /// too, not just the reference points' radii. Work is bounded by the
+    /// loaded regions, never the world.
+    pub(crate) fn preload_jobs(&self, game: &Game) -> PreloadWork {
+        let mut work = PreloadWork::default();
+        // Regions a wizard added aren't in the package; pins still follow
+        // their links.
+        let loaded: BTreeSet<RegionId> = game
+            .loaded_regions()
+            .filter(|r| self.catalog.region(*r).is_some())
+            .collect();
+        let Ok(plan) = self.catalog.plan(&loaded, 1, &loaded) else {
+            return work;
+        };
+        work.regions_expanded = plan.expanded_regions;
+        work.links_examined = plan.examined_links;
+        for region in plan.activate {
+            match game.region_state(region) {
+                Some(RegionState::Unbuilt) => work.jobs.push(Job::Build(region)),
+                Some(RegionState::Detached) => {
+                    if let Some(id) = game.detached_record(region) {
+                        if !self.resident.contains_key(&id) {
+                            work.jobs.push(Job::Read(id));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        work
+    }
+
+    /// The palette around `region`: the assets of the themes of every region
+    /// within one hop beyond the default load radius. Themes come from zones,
+    /// so entering a room never signals what the next one holds.
+    pub(crate) fn palette(&self, package: &Package, region: RegionId) -> BTreeSet<String> {
+        let roots = BTreeSet::from([region]);
+        let hops = self.streaming.load_radius as usize + 1;
+        let near = match self.catalog.plan(&roots, hops, &BTreeSet::new()) {
+            Ok(plan) => plan.required,
+            Err(_) => roots,
+        };
+        let themes: BTreeSet<&String> = near
+            .iter()
+            .filter_map(|r| self.catalog.region(*r))
+            .flat_map(|m| &m.themes)
+            .collect();
+        package.palette(themes)
+    }
+
+    /// Ask the preloader for what the next transitions are likely to need.
+    pub(crate) fn preload(&self, game: &Game) -> Option<PreloadWork> {
+        let preload = self.preload.as_ref()?;
+        let work = self.preload_jobs(game);
+        preload.want(&work.jobs);
+        Some(work)
     }
 
     /// The region sets the game's reference points ask for: each point's
@@ -142,7 +283,7 @@ impl Regions {
         let mut t = self.horizon(game, &mut work);
         let known: Vec<_> = extra
             .into_iter()
-            .filter(|r| game.region_state(*r).is_some())
+            .filter(|r| game.region_state(*r).is_some() || self.catalog.region(*r).is_some())
             .collect();
         t.active.extend(known.iter().copied());
         t.loaded.extend(known);
@@ -156,15 +297,17 @@ impl Regions {
         // which observers' views changed.
         work.before = Some(game.clone());
         let reads = self.reads;
+        let prepared = self.prepared;
         let mut store = Pending {
             regions: self,
             made,
         };
-        let (_, report, _) = game
-            .transition_regions_counted(&settled, &mut store)
-            .map_err(|_| storage_failure())?;
+        let result = game.transition_regions_counted(&settled, &mut store);
+        let failure = self.failure.take();
+        let (_, report, _) = result.map_err(|_| failure.unwrap_or_else(storage_failure))?;
         work.report = report;
         work.records_read = self.reads - reads;
+        work.prepared = self.prepared - prepared;
         Ok(work)
     }
 
@@ -228,14 +371,44 @@ impl RecordStore for Regions {
         if let Some(record) = self.resident.get(&id) {
             return Some(record.clone());
         }
+        if let Some(record) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
+            self.reads += 1;
+            self.prepared += 1;
+            return Some(record);
+        }
         let record = Shared::new(self.disk.as_ref()?.read_region(id).ok()??);
         self.reads += 1;
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
-        self.package
-            .build_region(self.seed, &self.index, region.0)
-            .ok()
+        let record = match self
+            .preload
+            .as_ref()
+            .and_then(|p| p.take(Job::Build(region)))
+        {
+            Some(record) => {
+                self.prepared += 1;
+                record.into_inner()
+            }
+            None => match self.package.build_region(self.seed, &self.index, region.0) {
+                Ok(record) => record,
+                Err(failure) => {
+                    self.failure = Some(failure);
+                    return None;
+                }
+            },
+        };
+        // Replaying this build needs the region's file and its neighbours'.
+        let neighbours = self.catalog.region(region).map(|m| m.outgoing.clone());
+        for needed in std::iter::once(region).chain(neighbours.into_iter().flatten()) {
+            if !self.saved.contains(&needed.0) {
+                self.unsaved.insert(needed.0);
+            }
+        }
+        Some(record)
+    }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.package.unbuilt_region(&self.index, region.0).ok()
     }
 }
 
@@ -258,5 +431,8 @@ impl RecordStore for Pending<'_> {
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
         self.regions.build(region)
+    }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.regions.unbuilt(region)
     }
 }

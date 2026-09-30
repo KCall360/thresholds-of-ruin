@@ -211,6 +211,7 @@ mod tests {
         let before = observation();
         let mut after = before.clone();
         let actor = ActorView {
+            asset: None,
             id: ActorId(2),
             name: "figure".into(),
             description: String::new(),
@@ -274,6 +275,7 @@ mod tests {
             "You pick up the item."
         );
         view.inventory.push(ItemView {
+            asset: None,
             quantity: 1,
             appearance: String::new(),
             identified: true,

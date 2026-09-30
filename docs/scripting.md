@@ -158,7 +158,6 @@ file returns:
 
 ```toml
 # scenario.toml (sketch)
-files = ["regions.toml"]
 scripts = ["scripts/eggs.luau", "scripts/doors.luau"]
 
 [archetypes.egg]

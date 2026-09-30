@@ -1,0 +1,5 @@
+id = 7
+name = "Hall 7"
+size = [20, 3, 1]
+anchors = { west = [0, 0, 0], east = [19, 0, 0], start = [2, 1, 0] }
+portals = [{ at = [0, 0, 0], direction = "west", to = "6/east", width = 3 }]

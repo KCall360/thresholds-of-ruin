@@ -1,0 +1,7 @@
+id = 4
+size = [1, 4, 1]
+name = "Private rotated"
+chamber = false
+anchors = { "portal-0" = [0, 0, 0] }
+doors = [{ "id" = 2, "at" = [0, 0, 0], "open" = false }]
+items = [{ "id" = 3, "at" = [0, 2, 0], "archetype" = "tablet" }]

@@ -1,0 +1,7 @@
+id = 3
+size = [5, 3, 1]
+name = "West space"
+chamber = false
+anchors = { "portal-0" = [4, 0, 0], "start" = [2, 1, 0] }
+portals = [{ "at" = [4, 0, 0], "direction" = "east", "to" = "4/portal-0", "turns" = 0, "width" = 3, "height" = 1 }]
+places = [[2, 1, 0]]

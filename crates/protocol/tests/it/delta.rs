@@ -2,6 +2,7 @@ use tor_protocol::*;
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
+        asset: None,
         door: None,
         material: "stone".into(),
         key: key.into(),
@@ -66,6 +67,7 @@ fn changed_cells_are_resent_in_place() {
     let base = room(15, 15, 1);
     let mut next = room(15, 15, 2);
     next.observation.visible_cells[3].door = Some(DoorView {
+        asset: None,
         id: 1,
         name: "wooden door".into(),
         description: String::new(),

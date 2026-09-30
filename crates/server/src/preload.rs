@@ -1,0 +1,216 @@
+//! Background preloading: building regions and reading region rows on another
+//! thread, just beyond what the reference points keep loaded, so a command
+//! that loads them finds them ready. Correctness never depends on it: a
+//! region builds the same way on any thread, and records never change once
+//! made, so a prepared result is exactly what the command would have
+//! produced itself. A command never waits for the preloader; whatever isn't
+//! ready it builds or reads itself. See `docs/region-streaming.md`.
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
+
+use tor_simulation::{RecordId, RegionRecord};
+use tor_world::{RegionId, Shared};
+
+use crate::scenario_package::{Package, PackageIndex};
+use crate::storage::{RegionReader, Store};
+
+/// One piece of preparation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Job {
+    /// Build an unbuilt region's starting record from the package.
+    Build(RegionId),
+    /// Read a detached region's record from disk.
+    Read(RecordId),
+}
+
+/// Prepared results kept at most, so a preloader can't hold more than a
+/// horizon's worth of records however the reference points move.
+pub(crate) const PREPARED_LIMIT: usize = 32;
+
+#[derive(Debug, Default)]
+struct State {
+    /// Jobs still to do, in request order.
+    queue: Vec<Job>,
+    /// The job the thread is doing now.
+    running: Option<Job>,
+    /// Finished jobs not yet taken.
+    ready: BTreeMap<Job, Shared<RegionRecord>>,
+    /// The save to read rows from, once the game has one.
+    disk: Option<Store>,
+    stop: bool,
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    state: Mutex<State>,
+    wake: Condvar,
+}
+
+/// Owns the preloading thread; dropping the last handle stops and joins it.
+#[derive(Debug)]
+pub(crate) struct Preloader {
+    inner: Arc<Inner>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Preloader {
+    pub(crate) fn start(package: Arc<Package>, index: PackageIndex, seed: u64) -> Self {
+        let inner = Arc::new(Inner::default());
+        let worker = inner.clone();
+        let thread = std::thread::Builder::new()
+            .name("region-preload".into())
+            .spawn(move || run(&worker, &package, &index, seed))
+            .ok();
+        Self { inner, thread }
+    }
+
+    pub(crate) fn attach_disk(&self, disk: Store) {
+        self.inner.state.lock().unwrap().disk = Some(disk);
+    }
+
+    /// Replace the wanted jobs. Prepared results and queued jobs nobody
+    /// wants any more are dropped; jobs already prepared or running aren't
+    /// queued again. At most [`PREPARED_LIMIT`] jobs are kept or queued.
+    pub(crate) fn want(&self, jobs: &[Job]) {
+        let wanted: BTreeSet<Job> = jobs.iter().copied().take(PREPARED_LIMIT).collect();
+        let mut s = self.inner.state.lock().unwrap();
+        s.ready.retain(|job, _| wanted.contains(job));
+        let running = s.running;
+        let queue: Vec<Job> = jobs
+            .iter()
+            .copied()
+            .take(PREPARED_LIMIT)
+            .filter(|job| !s.ready.contains_key(job) && Some(*job) != running)
+            .collect();
+        s.queue = queue;
+        // `settle` waits on the same condition, so wake everyone.
+        self.inner.wake.notify_all();
+    }
+
+    /// A prepared result, taken so it's used once.
+    pub(crate) fn take(&self, job: Job) -> Option<Shared<RegionRecord>> {
+        self.inner.state.lock().unwrap().ready.remove(&job)
+    }
+
+    /// Wait until nothing is queued or running. Tests and benchmarks use it
+    /// to measure the prepared path; commands never wait.
+    pub(crate) fn settle(&self) {
+        let mut s = self.inner.state.lock().unwrap();
+        while !s.queue.is_empty() || s.running.is_some() {
+            s = self.inner.wake.wait(s).unwrap();
+        }
+    }
+}
+
+impl Drop for Preloader {
+    fn drop(&mut self) {
+        self.inner.state.lock().unwrap().stop = true;
+        self.inner.wake.notify_all();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn run(inner: &Inner, package: &Package, index: &PackageIndex, seed: u64) {
+    let mut reader: Option<(Store, RegionReader)> = None;
+    loop {
+        let (job, disk) = {
+            let mut s = inner.state.lock().unwrap();
+            loop {
+                if s.stop {
+                    return;
+                }
+                if !s.queue.is_empty() {
+                    break;
+                }
+                s = inner.wake.wait(s).unwrap();
+            }
+            let job = s.queue.remove(0);
+            s.running = Some(job);
+            (job, s.disk.clone())
+        };
+        let record = match job {
+            Job::Build(region) => package.build_region(seed, index, region.0).ok(),
+            Job::Read(id) => disk.and_then(|disk| {
+                if !reader.as_ref().is_some_and(|(held, _)| held.same(&disk)) {
+                    let fresh = disk.region_reader();
+                    reader = Some((disk, fresh));
+                }
+                reader.as_mut()?.1.read(id).ok().flatten()
+            }),
+        };
+        let mut s = inner.state.lock().unwrap();
+        s.running = None;
+        // A failed job leaves nothing: the command does it itself, and
+        // reports the failure if it recurs.
+        if let Some(record) = record {
+            if s.ready.len() < PREPARED_LIMIT {
+                s.ready.insert(job, Shared::new(record));
+            }
+        }
+        inner.wake.notify_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preloader() -> (Preloader, Arc<Package>, PackageIndex) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        let package = scenario.package.unwrap();
+        let index = package.index(5).unwrap();
+        (
+            Preloader::start(package.clone(), index.clone(), 5),
+            package,
+            index,
+        )
+    }
+
+    #[test]
+    fn a_prepared_build_equals_building_on_demand_and_is_taken_once() {
+        let (preload, package, index) = preloader();
+        preload.want(&[Job::Build(RegionId(3))]);
+        preload.settle();
+        let prepared = preload.take(Job::Build(RegionId(3))).expect("prepared");
+        assert_eq!(*prepared, package.build_region(5, &index, 3).unwrap());
+        assert!(preload.take(Job::Build(RegionId(3))).is_none());
+    }
+
+    #[test]
+    fn results_nobody_wants_any_more_are_dropped() {
+        let (preload, _, _) = preloader();
+        preload.want(&[Job::Build(RegionId(2)), Job::Build(RegionId(3))]);
+        preload.settle();
+        preload.want(&[Job::Build(RegionId(3))]);
+        assert!(preload.take(Job::Build(RegionId(2))).is_none());
+        assert!(preload.take(Job::Build(RegionId(3))).is_some());
+    }
+
+    #[test]
+    fn at_most_the_limit_is_prepared() {
+        let (preload, _, _) = preloader();
+        // Regions the package doesn't have fail to build and leave nothing;
+        // the corridor's seven do, whatever else is asked for.
+        let jobs: Vec<Job> = (1..=PREPARED_LIMIT as u64 + 8)
+            .map(|r| Job::Build(RegionId(r)))
+            .collect();
+        preload.want(&jobs);
+        preload.settle();
+        let ready = preload.inner.state.lock().unwrap().ready.len();
+        assert_eq!(ready, 7);
+        assert!(ready <= PREPARED_LIMIT);
+    }
+
+    #[test]
+    fn a_read_without_a_save_leaves_nothing_for_the_command_to_take() {
+        let (preload, _, _) = preloader();
+        preload.want(&[Job::Read(RecordId(1))]);
+        preload.settle();
+        assert!(preload.take(Job::Read(RecordId(1))).is_none());
+    }
+}
