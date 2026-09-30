@@ -13,6 +13,7 @@ WORKLOAD_IDENTIFIERS = {
     "performance-v1",
     "place-knowledge-v1",
     "structural-horizon-v1",
+    "streaming-v1",
     "durable-place-workload-v1",
     "combat-workload-v1",
 }

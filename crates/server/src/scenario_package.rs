@@ -369,6 +369,66 @@ pub fn load(
     })
 }
 
+/// The streaming corridor package at `root` (`scenarios/tests/streaming-
+/// corridor`), lengthened or shortened to `halls` halls in a row and written
+/// as an ordinary package to `out`, for region streaming workloads and
+/// scaling contracts. Hall 1 keeps its pebble and hall 6 its guard; every
+/// other hall is like hall 2. The written package has no certificate, so
+/// it's loaded as unvalidated.
+pub fn streaming_corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+) -> Result<Scenario, Failure> {
+    require((2..=256).contains(&halls), "A corridor has 2 to 256 halls")?;
+    let original = read_package(root)?.regions;
+    let template = original
+        .iter()
+        .find(|r| r.id == 2)
+        .cloned()
+        .ok_or_else(|| fail("Missing hall 2"))?;
+    let portal = |direction: &str| {
+        template
+            .portals
+            .iter()
+            .find(|p| p.direction == direction)
+            .cloned()
+            .ok_or_else(|| fail("Missing hall portal"))
+    };
+    let (east, west) = (portal("east")?, portal("west")?);
+    let mut regions = Vec::new();
+    for id in 1..=halls {
+        let mut hall = original
+            .iter()
+            .find(|r| r.id == id && (id == 1 || id == 6))
+            .cloned()
+            .unwrap_or_else(|| template.clone());
+        hall.id = id;
+        hall.name = format!("Hall {id}");
+        hall.portals.clear();
+        if id < halls {
+            hall.portals.push(Portal {
+                to: format!("{}/west", id + 1),
+                ..east.clone()
+            });
+        }
+        if id > 1 {
+            hall.portals.push(Portal {
+                to: format!("{}/east", id - 1),
+                ..west.clone()
+            });
+        }
+        regions.push(hall);
+    }
+    std::fs::create_dir_all(out).map_err(|e| fail(format!("{e}")))?;
+    std::fs::copy(root.join("scenario.toml"), out.join("scenario.toml"))
+        .map_err(|e| fail(format!("{e}")))?;
+    let text = toml::to_string(&RegionFile { regions }).map_err(|e| fail(format!("{e}")))?;
+    std::fs::write(out.join("regions.toml"), text).map_err(|e| fail(format!("{e}")))?;
+    load(out, seed, None, true)
+}
+
 fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
     Location {
         region: RegionId(region),
@@ -663,26 +723,95 @@ impl Package {
     pub(crate) fn build(&self, seed: u64, _runtime: bool) -> Result<Game, Failure> {
         self.check()?;
         self.supported()?;
-        let anchors = self.anchors()?;
+        let index = self.index(seed)?;
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        let all = |_: u64| true;
-        self.add_geometry(&mut game, all)?;
+        let all: Vec<&RegionDef> = self.regions.iter().collect();
+        self.add_geometry(&mut game, &all)?;
         for r in &self.regions {
-            self.add_structure(&mut game, r, &anchors)?;
+            self.add_structure(&mut game, r, &index.anchors)?;
         }
-        for (name, position) in &anchors {
+        for (name, position) in &index.anchors {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
-        let homes = self.homes(&anchors)?;
-        self.add_entities(&mut game, seed, &anchors, &homes, all)?;
-        self.configure_run(&mut game, &anchors)?;
+        self.add_entities(&mut game, seed, &index, &all)?;
+        self.configure_run(&mut game, &index.anchors)?;
         Ok(game)
+    }
+
+    /// Whole-package facts that building regions needs, computed once so
+    /// building one region reads only that region and its neighbours.
+    pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
+        let anchors = self.anchors()?;
+        let mut anchors_by_region: BTreeMap<u64, Vec<(String, Location)>> = BTreeMap::new();
+        for (name, at) in &anchors {
+            anchors_by_region
+                .entry(at.region.0)
+                .or_default()
+                .push((name.clone(), *at));
+        }
+        let mut spawns = BTreeMap::new();
+        for c in &self.manifest.characters {
+            if c.id == self.selected || c.unselected == "ai" {
+                let at = *anchors
+                    .get(&c.anchor)
+                    .ok_or_else(|| fail("Missing character anchor"))?;
+                spawns.insert(c.id, (at, c.turn_ticks));
+            }
+        }
+        for r in &self.regions {
+            for a in &r.actors {
+                let ticks = a
+                    .turn_ticks
+                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .unwrap_or(100);
+                require(
+                    spawns.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
+                    "Duplicate actor ID",
+                )?;
+            }
+        }
+        let homes: BTreeMap<u64, Location> =
+            spawns.iter().map(|(id, (at, _))| (*id, *at)).collect();
+        let mut spawns_by_region: BTreeMap<u64, Vec<(u64, Location, u64)>> = BTreeMap::new();
+        for (id, (at, ticks)) in &spawns {
+            spawns_by_region
+                .entry(at.region.0)
+                .or_default()
+                .push((*id, *at, *ticks));
+        }
+        let mut items: BTreeMap<u64, Vec<(u64, usize, usize)>> = BTreeMap::new();
+        for (r_index, r) in self.regions.iter().enumerate() {
+            for (i_index, i) in r.items.iter().enumerate() {
+                items
+                    .entry(self.item_region(r.id, i, &homes))
+                    .or_default()
+                    .push((i.id, r_index, i_index));
+            }
+        }
+        for list in items.values_mut() {
+            list.sort();
+        }
+        Ok(PackageIndex {
+            regions: self
+                .regions
+                .iter()
+                .enumerate()
+                .map(|(index, r)| (r.id, index))
+                .collect(),
+            anchors,
+            anchors_by_region,
+            homes,
+            spawns: spawns_by_region,
+            items,
+            appearances: self.appearance_mapping(seed)?,
+            lookups: std::cell::Cell::new(0),
+        })
     }
 
     /// A game with every region known but none built: each is built from
@@ -691,10 +820,9 @@ impl Package {
     pub(crate) fn start(&self, seed: u64) -> Result<Game, Failure> {
         self.check()?;
         self.supported()?;
-        let anchors = self.anchors()?;
-        let homes = self.homes(&anchors)?;
+        let index = self.index(seed)?;
         let mut identities: BTreeMap<u64, tor_simulation::RegionIdentities> = BTreeMap::new();
-        for (id, home) in &homes {
+        for (id, home) in &index.homes {
             identities
                 .entry(home.region.0)
                 .or_default()
@@ -704,7 +832,7 @@ impl Package {
         for r in &self.regions {
             for i in r.items.iter().filter(|i| !self.omitted_carrier(i)) {
                 identities
-                    .entry(self.item_region(r.id, i, &homes))
+                    .entry(self.item_region(r.id, i, &index.homes))
                     .or_default()
                     .items
                     .insert(tor_simulation::ItemId(i.id));
@@ -727,45 +855,49 @@ impl Package {
             )
             .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
         }
-        self.configure_run(&mut game, &anchors)?;
+        self.configure_run(&mut game, &index.anchors)?;
         Ok(game)
     }
 
     /// One region's starting record, built in a scratch game holding it and
     /// its neighbours' geometry, so its links and entities are checked
-    /// exactly as [`Package::build`] checks them. Reads nothing else, so the
-    /// result doesn't depend on which regions were built before.
+    /// exactly as [`Package::build`] checks them. Reads only that region and
+    /// its neighbours (through `index`), so the result doesn't depend on
+    /// which regions were built before, and the cost doesn't depend on the
+    /// package's size.
     pub(crate) fn build_region(
         &self,
         seed: u64,
+        index: &PackageIndex,
         region: u64,
     ) -> Result<tor_simulation::RegionRecord, Failure> {
-        let anchors = self.anchors()?;
-        let r = self
-            .regions
-            .iter()
-            .find(|r| r.id == region)
+        let r = index
+            .region(self, region)
             .ok_or_else(|| fail(format!("Unknown region {region}")))?;
-        let mut shell: BTreeSet<u64> = r
-            .portals
-            .iter()
-            .filter_map(|p| anchors.get(&p.to).map(|to| to.region.0))
-            .collect();
-        shell.insert(region);
+        let mut shell: Vec<&RegionDef> = vec![r];
+        for to in r.portals.iter().filter_map(|p| index.anchors.get(&p.to)) {
+            if shell.iter().all(|s| s.id != to.region.0) {
+                shell.push(
+                    index
+                        .region(self, to.region.0)
+                        .ok_or_else(|| fail("Unknown portal region"))?,
+                );
+            }
+        }
+        shell.sort_by_key(|s| index.regions[&s.id]);
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        self.add_geometry(&mut game, |id| shell.contains(&id))?;
-        self.add_structure(&mut game, r, &anchors)?;
-        for (name, position) in anchors.iter().filter(|(_, at)| at.region.0 == region) {
+        self.add_geometry(&mut game, &shell)?;
+        self.add_structure(&mut game, r, &index.anchors)?;
+        for (name, position) in index.anchors_by_region.get(&region).into_iter().flatten() {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
-        let homes = self.homes(&anchors)?;
-        self.add_entities(&mut game, seed, &anchors, &homes, |id| id == region)?;
+        self.add_entities(&mut game, seed, index, &[r])?;
         game.into_region_record(RegionId(region))
             .map_err(|e| fail(format!("Region {region}: {e:?}")))
     }
@@ -779,9 +911,9 @@ impl Package {
         })
     }
 
-    /// The kept regions, with their walls and openings.
-    fn add_geometry(&self, game: &mut Game, keep: impl Fn(u64) -> bool) -> Result<(), Failure> {
-        for r in self.regions.iter().filter(|r| keep(r.id)) {
+    /// These regions, in package order, with their walls and openings.
+    fn add_geometry(&self, game: &mut Game, regions: &[&RegionDef]) -> Result<(), Failure> {
+        for r in regions {
             let region = self.region(r)?;
             (if r.chamber {
                 game.add_chamber(region)
@@ -790,7 +922,7 @@ impl Package {
             })
             .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
         }
-        for r in self.regions.iter().filter(|r| keep(r.id)) {
+        for r in regions {
             for p in &r.walls {
                 game.set_wall(loc(r.id, *p), true)
                     .map_err(|e| fail(format!("Region {} wall: {e:?}", r.id)))?;
@@ -875,53 +1007,6 @@ impl Package {
         Ok(())
     }
 
-    /// Where each spawned actor starts: included characters at their
-    /// anchors, and every region's actors.
-    fn homes(
-        &self,
-        anchors: &BTreeMap<String, Location>,
-    ) -> Result<BTreeMap<u64, Location>, Failure> {
-        Ok(self
-            .spawns(anchors)?
-            .into_iter()
-            .map(|(id, (at, _))| (id, at))
-            .collect())
-    }
-
-    /// Every spawned actor's start and turn length, in identity order.
-    fn spawns(
-        &self,
-        anchors: &BTreeMap<String, Location>,
-    ) -> Result<BTreeMap<u64, (Location, u64)>, Failure> {
-        let mut actors = BTreeMap::new();
-        for c in &self.manifest.characters {
-            if c.id == self.selected || c.unselected == "ai" {
-                actors.insert(
-                    c.id,
-                    (
-                        *anchors
-                            .get(&c.anchor)
-                            .ok_or_else(|| fail("Missing character anchor"))?,
-                        c.turn_ticks,
-                    ),
-                );
-            }
-        }
-        for r in &self.regions {
-            for a in &r.actors {
-                let ticks = a
-                    .turn_ticks
-                    .or(self.archetype(&a.archetype)?.turn_ticks)
-                    .unwrap_or(100);
-                require(
-                    actors.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
-                    "Duplicate actor ID",
-                )?;
-            }
-        }
-        Ok(actors)
-    }
-
     /// Items carried by an omitted character are omitted with it.
     fn omitted_carrier(&self, i: &Item) -> bool {
         i.carried_by.is_some_and(|id| {
@@ -941,20 +1026,25 @@ impl Package {
             .map_or(authored, |home| home.region.0)
     }
 
-    /// Actors, items, identity knowledge and doors in the kept regions, in
-    /// the same order whichever regions are kept.
+    /// Actors, items, identity knowledge and doors in these regions (given in
+    /// package order), in the same order whichever regions they are.
     fn add_entities(
         &self,
         game: &mut Game,
         seed: u64,
-        anchors: &BTreeMap<String, Location>,
-        homes: &BTreeMap<u64, Location>,
-        keep: impl Fn(u64) -> bool,
+        index: &PackageIndex,
+        regions: &[&RegionDef],
     ) -> Result<(), Failure> {
-        for (id, (at, ticks)) in self.spawns(anchors)? {
-            if !keep(at.region.0) {
-                continue;
-            }
+        let chosen: BTreeSet<u64> = regions.iter().map(|r| r.id).collect();
+        let keep = |id: u64| chosen.contains(&id);
+        let homes = &index.homes;
+        let mut spawns: Vec<_> = chosen
+            .iter()
+            .flat_map(|r| index.spawns.get(r).into_iter().flatten())
+            .copied()
+            .collect();
+        spawns.sort_by_key(|(id, _, _)| *id);
+        for (id, at, ticks) in spawns {
             game.spawn_authored_actor(
                 id,
                 at,
@@ -996,7 +1086,7 @@ impl Package {
                 }
             }
         }
-        for r in self.regions.iter().filter(|r| keep(r.id)) {
+        for r in regions {
             for a in &r.actors {
                 if let Some(spec) = a
                     .combat
@@ -1031,12 +1121,14 @@ impl Package {
                 }
             }
         }
-        let appearances = self.appearance_mapping(seed)?;
-        let mut items: Vec<_> = self
-            .regions
+        let appearances = &index.appearances;
+        let mut items: Vec<_> = chosen
             .iter()
-            .flat_map(|r| r.items.iter().map(move |i| (r.id, i)))
-            .filter(|(region, i)| keep(self.item_region(*region, i, homes)))
+            .flat_map(|r| index.items.get(r).into_iter().flatten())
+            .map(|&(_, r_index, i_index)| {
+                let r = &self.regions[r_index];
+                (r.id, &r.items[i_index])
+            })
             .collect();
         items.sort_by_key(|(_, i)| i.id);
         for (region, i) in items {
@@ -1132,10 +1224,8 @@ impl Package {
                 }
             }
         }
-        let mut doors: Vec<_> = self
-            .regions
+        let mut doors: Vec<_> = regions
             .iter()
-            .filter(|r| keep(r.id))
             .flat_map(|r| r.doors.iter().map(move |d| (r.id, d)))
             .collect();
         doors.sort_by_key(|(_, d)| d.id);
@@ -1217,6 +1307,38 @@ impl Package {
     }
 }
 
+/// Whole-package facts for building regions (see [`Package::index`]).
+#[derive(Clone, Debug)]
+pub(crate) struct PackageIndex {
+    /// Each region's position in [`Package::regions`].
+    regions: BTreeMap<u64, usize>,
+    anchors: BTreeMap<String, Location>,
+    anchors_by_region: BTreeMap<u64, Vec<(String, Location)>>,
+    /// Where each spawned actor starts.
+    homes: BTreeMap<u64, Location>,
+    /// Actors by the region they start in: identity, start, turn length.
+    spawns: BTreeMap<u64, Vec<(u64, Location, u64)>>,
+    /// Items by the region they start in: identity, then their region's and
+    /// their own position in the package.
+    items: BTreeMap<u64, Vec<(u64, usize, usize)>>,
+    appearances: BTreeMap<String, String>,
+    /// Region definitions handed out, for scaling contracts.
+    lookups: std::cell::Cell<usize>,
+}
+
+impl PackageIndex {
+    fn region<'a>(&self, package: &'a Package, id: u64) -> Option<&'a RegionDef> {
+        self.lookups.set(self.lookups.get() + 1);
+        package.regions.get(*self.regions.get(&id)?)
+    }
+
+    /// Region definitions handed out so far.
+    #[cfg(test)]
+    pub(crate) fn lookups(&self) -> usize {
+        self.lookups.get()
+    }
+}
+
 /// Records for a game started with [`Package::start`]: detached records in
 /// memory, and unbuilt regions built from the package on first load.
 #[cfg_attr(
@@ -1225,6 +1347,7 @@ impl Package {
 )]
 pub(crate) struct PackageRecords {
     package: Arc<Package>,
+    index: PackageIndex,
     seed: u64,
     records: tor_simulation::MemoryRecords,
 }
@@ -1236,6 +1359,7 @@ impl PackageRecords {
     )]
     pub(crate) fn new(package: Arc<Package>, seed: u64) -> Self {
         Self {
+            index: package.index(seed).expect("a valid package"),
             package,
             seed,
             records: Default::default(),
@@ -1258,7 +1382,9 @@ impl tor_simulation::RecordStore for PackageRecords {
         self.records.get(id)
     }
     fn build(&mut self, region: RegionId) -> Option<tor_simulation::RegionRecord> {
-        self.package.build_region(self.seed, region.0).ok()
+        self.package
+            .build_region(self.seed, &self.index, region.0)
+            .ok()
     }
 }
 
@@ -1376,18 +1502,40 @@ mod region_lifecycle_tests {
         }
     }
 
-    /// The pin computation skips the reach search where no step can leave
-    /// an actor's region; that must agree with the search in every cell of
-    /// every checked-in package (rotated and physical portals, stairs,
-    /// chambers and their rims).
+    /// The pins' reach answers (each region's exit field, then a cached
+    /// search) must agree with an uncached search in every cell of every
+    /// checked-in package: rotated and physical portals, stairs, chambers and
+    /// their rims. Most cells are far enough from exits for the field.
     #[test]
-    fn the_reach_shortcut_agrees_with_the_search_in_every_package() {
-        // Few authored rooms are wide enough for the shortcut; the
-        // simulation's own test covers cells that take it.
+    fn reach_answers_agree_with_the_search_in_every_package() {
+        let mut fielded = 0;
         for path in packages() {
             let game = read_package(&path).unwrap().build(0, true).unwrap();
-            game.check_reach_shortcut()
+            fielded += game
+                .check_reach()
                 .unwrap_or_else(|cell| panic!("{}: {cell:?}", path.display()));
+        }
+        assert!(
+            fielded > 1000,
+            "only {fielded} cells were answered by exit fields"
+        );
+    }
+
+    /// Building one region reads only it and its neighbours, however many
+    /// regions the package has.
+    #[test]
+    fn building_a_region_reads_only_it_and_its_neighbours() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let directory = tempfile::tempdir().unwrap();
+        let scenario = streaming_corridor(&root, directory.path(), 256, 5).unwrap();
+        let package = scenario.package.unwrap();
+        let index = package.index(5).unwrap();
+        for region in 1..=256 {
+            let before = index.lookups();
+            package.build_region(5, &index, region).unwrap();
+            let read = index.lookups() - before;
+            assert!(read <= 3, "region {region} read {read} region definitions");
         }
     }
 

@@ -1030,7 +1030,8 @@ mod tests {
         let (bytes, _) = checkpoint_fixture(&path);
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = crate::scenario_package::read_package(&root).unwrap();
-        let record = package.build_region(0, 1).unwrap();
+        let index = package.index(0).unwrap();
+        let record = package.build_region(0, &index, 1).unwrap();
         let row = region_frame(7, &record).unwrap();
         let write = |keep: &[u64], rows: Vec<(u64, Vec<u8>)>| RegionWrite {
             rows,
@@ -1069,7 +1070,7 @@ mod tests {
         assert_eq!(stored(&conn), [(7, row.clone())]);
         // A retry must match the stored row exactly; a row is never rewritten.
         commit(&mut conn, &first, "").unwrap();
-        let other = region_frame(7, &package.build_region(0, 2).unwrap()).unwrap();
+        let other = region_frame(7, &package.build_region(0, &index, 2).unwrap()).unwrap();
         assert!(commit(&mut conn, &write(&[7], vec![(7, other)]), "").is_err());
         assert_eq!(stored(&conn), [(7, row.clone())]);
         // Rows decode to their record, and only under their own identity.
@@ -1147,15 +1148,30 @@ mod tests {
         let stage = std::env::var("TOR_CHECKPOINT_TEST_STAGE").unwrap();
         let path = Path::new(&path);
         let bytes = std::fs::read(path.with_extension("checkpoint")).unwrap();
+        // A streaming fixture also passes its region rows and sequence.
+        let (sequence, regions) = match std::fs::read(path.with_extension("rows")) {
+            Ok(rows) => {
+                type Rows = (u64, Vec<(u64, Vec<u8>)>, BTreeSet<u64>);
+                let (sequence, rows, keep): Rows = serde_json::from_slice(&rows).unwrap();
+                (sequence, Some(RegionWrite { rows, keep }))
+            }
+            Err(_) => (4, None),
+        };
         let mut conn = connection(path).unwrap();
         conn.execute_batch("PRAGMA cache_size=1").unwrap();
-        commit_batch(&mut conn, &[], Some((4, &bytes)), None, |connection, at| {
-            if at == stage {
-                connection.cache_flush().unwrap();
-                std::process::exit(81);
-            }
-            Ok(())
-        })
+        commit_batch(
+            &mut conn,
+            &[],
+            Some((sequence, &bytes)),
+            regions.as_ref(),
+            |connection, at| {
+                if at == stage {
+                    connection.cache_flush().unwrap();
+                    std::process::exit(81);
+                }
+                Ok(())
+            },
+        )
         .unwrap();
         panic!("crash stage was not reached");
     }
@@ -1228,6 +1244,244 @@ mod tests {
             );
         }
     }
+    /// Steps from the corridor's start to the middle of hall 4.
+    const TO_HALL_4: usize = 68;
+
+    fn corridor() -> Scenario {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        scenario
+    }
+
+    fn walk(engine: &mut Engine, direction: tor_protocol::Direction, steps: usize) {
+        for _ in 0..steps {
+            let revision = engine.revision(ActorId(1)).unwrap();
+            let request = format!("walk-{direction:?}-{revision}");
+            engine
+                .command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &request,
+                    &engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: revision,
+                        action: Action::Move { direction },
+                    },
+                )
+                .unwrap();
+        }
+    }
+
+    /// A saved corridor game with halls 1 and 2 detached and no checkpoint
+    /// yet, and the checkpoint (with its two region rows) that would follow.
+    fn streaming_fixture(path: &Path) -> (Vec<u8>, RegionWrite, tor_protocol::StateView) {
+        let mut engine = Engine::open_with_policy(
+            path,
+            corridor(),
+            SavePolicy {
+                checkpoint_interval: 0,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        assert_eq!(engine.region_counts().unwrap().detached, 2);
+        engine.flush().unwrap();
+        let (_, _, save_id, _, _) = load(path).unwrap();
+        let checkpoint = Checkpoint::capture(&engine);
+        let bytes = encode_checkpoint(&checkpoint.encode(&save_id, TO_HALL_4 as u64)).unwrap();
+        let regions = RegionWrite::encode(&checkpoint).unwrap();
+        assert_eq!(regions.rows.len(), 2);
+        (bytes, regions, engine.state(ActorId(1)).unwrap())
+    }
+
+    /// Killing the process at any stage of a checkpoint that writes region
+    /// rows leaves either the checkpoint with its rows or neither, and the
+    /// game continues: detached halls come back from their rows, or from
+    /// records replay makes again.
+    #[test]
+    fn process_death_while_writing_region_rows_recovers_a_complete_prefix() {
+        for stage in [
+            "after_append",
+            "after_regions",
+            "after_checkpoint",
+            "after_history",
+            "after_rotation",
+            "after_gc",
+            "before_commit",
+            "after_commit",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("crash.db");
+            let (bytes, regions, expected) = streaming_fixture(&path);
+            std::fs::write(path.with_extension("checkpoint"), bytes).unwrap();
+            std::fs::write(
+                path.with_extension("rows"),
+                serde_json::to_vec(&(TO_HALL_4 as u64, &regions.rows, &regions.keep)).unwrap(),
+            )
+            .unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::tests::checkpoint_crash_child",
+                    "--nocapture",
+                ])
+                .env("TOR_CHECKPOINT_TEST_PATH", &path)
+                .env("TOR_CHECKPOINT_TEST_STAGE", stage)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(81), "{stage}");
+            let committed = stage == "after_commit";
+            let rows: i64 = connection(&path)
+                .unwrap()
+                .query_row("SELECT count(*) FROM regions", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, if committed { 2 } else { 0 }, "{stage}");
+            let mut recovered = Engine::open(&path, Scenario::two_room(0)).unwrap();
+            assert_eq!(recovered.state(ActorId(1)).unwrap(), expected, "{stage}");
+            assert_eq!(
+                recovered.recovery_profile().records_replayed,
+                if committed { 0 } else { TO_HALL_4 },
+                "{stage}"
+            );
+            walk(&mut recovered, tor_protocol::Direction::West, TO_HALL_4);
+            let counts = recovered.region_counts().unwrap();
+            assert_eq!(counts.detached, 3, "{stage}");
+            assert_eq!(
+                counts.records_read,
+                if committed { 2 } else { 0 },
+                "{stage}"
+            );
+        }
+    }
+
+    /// A damaged or missing region row fails closed: the save still opens
+    /// (rows aren't read then), the command that needs the row is rejected
+    /// without changing the game, its history or the file, and the game can
+    /// still be played up to that point.
+    #[test]
+    fn damaged_and_missing_region_rows_fail_closed_atomically() {
+        for damage in ["flipped", "missing"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("damaged.db");
+            let policy = SavePolicy {
+                checkpoint_interval: 4,
+                ..SavePolicy::default()
+            };
+            let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
+            walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+            engine.flush().unwrap();
+            drop(engine);
+            let conn = connection(&path).unwrap();
+            let (id, mut frame): (i64, Vec<u8>) = conn
+                .query_row(
+                    "SELECT record,frame FROM regions ORDER BY record",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            match damage {
+                "flipped" => {
+                    *frame.last_mut().unwrap() ^= 1;
+                    conn.execute(
+                        "UPDATE regions SET frame=?1 WHERE record=?2",
+                        params![frame, id],
+                    )
+                    .unwrap();
+                }
+                _ => {
+                    conn.execute("DELETE FROM regions WHERE record=?1", [id])
+                        .unwrap();
+                }
+            }
+            drop(conn);
+
+            let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
+            let mut failure = None;
+            for step in 0..TO_HALL_4 {
+                let before = engine.state(ActorId(1)).unwrap();
+                let history = engine.history(ActorId(1), "player", None, 100).unwrap();
+                engine.flush().unwrap();
+                let file = std::fs::read(&path).unwrap();
+                let result = engine.command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &format!("back-{step}"),
+                    &engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: before.revision,
+                        action: Action::Move {
+                            direction: tor_protocol::Direction::West,
+                        },
+                    },
+                );
+                if let Err(error) = result {
+                    assert_eq!(
+                        error.code,
+                        tor_protocol::ErrorCode::StorageFailure,
+                        "{damage}"
+                    );
+                    assert_eq!(engine.state(ActorId(1)).unwrap(), before, "{damage}");
+                    assert_eq!(
+                        engine.history(ActorId(1), "player", None, 100).unwrap(),
+                        history,
+                        "{damage}"
+                    );
+                    engine.flush().unwrap();
+                    assert_eq!(std::fs::read(&path).unwrap(), file, "{damage}");
+                    failure = Some(step);
+                    break;
+                }
+            }
+            assert!(
+                failure.is_some(),
+                "{damage}: the damaged row was never needed"
+            );
+        }
+    }
+
+    /// Reading a region row needs only a shared lock: it succeeds while
+    /// another connection holds a write reservation, as the save worker does
+    /// during a commit, without waiting for it.
+    #[test]
+    fn region_rows_can_be_read_during_another_connections_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reader.db");
+        let mut engine = Engine::open_with_policy(
+            &path,
+            corridor(),
+            SavePolicy {
+                checkpoint_interval: 4,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        engine.flush().unwrap();
+        let id: i64 = connection(&path)
+            .unwrap()
+            .query_row("SELECT min(record) FROM regions", [], |r| r.get(0))
+            .unwrap();
+        let writer = connection(&path).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = Instant::now();
+        let record = engine
+            .flush_handle()
+            .unwrap()
+            .read_region(tor_simulation::RecordId(id as u64));
+        assert!(matches!(record, Ok(Some(_))), "{record:?}");
+        assert!(started.elapsed() < Duration::from_millis(500));
+        writer.execute_batch("ROLLBACK").unwrap();
+    }
+
     #[test]
     fn crc_and_frame_corruption() {
         assert_eq!(crc32c(b"123456789".iter().copied()), 0xe3069283);

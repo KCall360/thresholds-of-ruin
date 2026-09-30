@@ -41,6 +41,19 @@ struct ReachEntry {
     reached: Vec<RegionId>,
 }
 
+/// A region's distances to its exits, for a number of steps.
+type FieldKey = (RegionId, usize);
+
+/// Cells of a region fewer than the key's steps from a cell whose next step
+/// can leave it, with that distance. Absent cells are farther.
+pub(crate) type ExitField = Arc<BTreeMap<Location, u8>>;
+
+struct FieldEntry {
+    topology: u64,
+    regions: Vec<(RegionId, u64)>,
+    field: ExitField,
+}
+
 /// Version tokens and the scene cache. Tokens are unique within the process:
 /// every edit draws a new one, so two worlds holding the same token for a
 /// region (a world and its rewound clone, say) hold the same content there.
@@ -58,6 +71,8 @@ pub(crate) struct SightCache {
     scenes: Arc<Mutex<BTreeMap<Key, Entry>>>,
     /// Reach searches, which depend on the same geometry as scenes.
     reaches: Arc<Mutex<BTreeMap<ReachKey, ReachEntry>>>,
+    /// Exit distance fields, likewise.
+    fields: Arc<Mutex<BTreeMap<FieldKey, FieldEntry>>>,
 }
 
 impl Default for SightCache {
@@ -67,6 +82,7 @@ impl Default for SightCache {
             regions: Shared::default(),
             scenes: Arc::default(),
             reaches: Arc::default(),
+            fields: Arc::default(),
         }
     }
 }
@@ -124,6 +140,37 @@ impl SightCache {
         let entry = reaches.get(key)?;
         self.current(entry.topology, &entry.regions)
             .then(|| entry.reached.clone())
+    }
+
+    /// A still-valid exit distance field.
+    pub(crate) fn field(&self, region: RegionId, steps: usize) -> Option<ExitField> {
+        let fields = self.fields.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = fields.get(&(region, steps))?;
+        self.current(entry.topology, &entry.regions)
+            .then(|| entry.field.clone())
+    }
+
+    /// `read` must name every region whose geometry the field read.
+    pub(crate) fn insert_field(
+        &self,
+        region: RegionId,
+        steps: usize,
+        read: impl IntoIterator<Item = RegionId>,
+        field: ExitField,
+    ) {
+        let entry = FieldEntry {
+            topology: self.topology,
+            regions: read
+                .into_iter()
+                .map(|region| (region, self.version(region)))
+                .collect(),
+            field,
+        };
+        let mut fields = self.fields.lock().unwrap_or_else(|e| e.into_inner());
+        if fields.len() >= CAPACITY && !fields.contains_key(&(region, steps)) {
+            fields.clear();
+        }
+        fields.insert((region, steps), entry);
     }
 
     /// `read` must name every region whose geometry the search read.

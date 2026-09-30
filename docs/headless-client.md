@@ -31,6 +31,7 @@ Send one input object per line, waiting for `ready` before the next command:
 {"type":"act","action":{"type":"take","item":1}}
 {"type":"act","action":{"type":"move","direction":"east"}}
 {"type":"act","action":{"type":"wait"}}
+{"type":"wizard","command":"rewind initial"}
 {"type":"request","request":{"type":"snapshot"}}
 {"type":"request","request":{"type":"history","limit":50,"before":null}}
 {"type":"request","request":{"type":"release_control"}}
@@ -38,10 +39,12 @@ Send one input object per line, waiting for `ready` before the next command:
 ```
 
 Use an item ID from the received observation. `act` supplies the current branch
-and revision and requires control. `request` accepts a structured protocol
-request, including explicitly branch/revision-checked wizard commands when
-authorized. This makes the headless client suitable for driving privileged
-scenario setup directly, without launching the text client. Server validation
+and revision and requires control. `wizard` sends a developer command, in the
+same form as the text client's `wizard` command, and likewise supplies the
+current branch and revision; the server decides whether the account may use it.
+`request` accepts any structured protocol request. This makes the headless
+client suitable for driving privileged scenario setup directly, without
+launching the text client. Server validation
 always applies. Malformed input, denied access,
 and rejected requests yield a `ready` frame with a non-null `error`; the client
 remains available. Fatal transport/startup errors are JSON on stderr.

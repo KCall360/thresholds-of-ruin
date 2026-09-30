@@ -297,6 +297,16 @@ pub struct CommandProfile {
     pub file_flushes: usize,
     pub file_syncs: usize,
     pub file_replacements: usize,
+    /// Region streaming: the transition after the command, and its work.
+    pub region_transition: Duration,
+    /// Transitions that changed which regions are active or loaded.
+    pub region_changes: usize,
+    pub horizon_regions_expanded: usize,
+    pub horizon_links_examined: usize,
+    pub pinned_actors: usize,
+    pub reach_lookups: usize,
+    pub region_records_read: usize,
+    pub regions_built: usize,
 }
 
 /// Startup measurements; retained history is read but only the checkpoint tail is simulated.
@@ -330,6 +340,93 @@ impl CommandProfile {
             + self.journal_sync
             + self.journal_replace
             + self.publication
+            + self.region_transition
+    }
+}
+
+/// Actors' revisions. Loaded actors' are the map itself; the rest are parked
+/// in a shared map, so what every command copies stays bounded by what's
+/// loaded. An actor moves between the two when its region attaches or
+/// detaches, and its revision moves on each time.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Revisions {
+    loaded: BTreeMap<ActorId, u64>,
+    parked: tor_world::Shared<BTreeMap<ActorId, u64>>,
+}
+
+impl std::ops::Deref for Revisions {
+    type Target = BTreeMap<ActorId, u64>;
+    fn deref(&self) -> &Self::Target {
+        &self.loaded
+    }
+}
+
+impl std::ops::DerefMut for Revisions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.loaded
+    }
+}
+
+impl Revisions {
+    fn new(game: &Game) -> Self {
+        Self {
+            loaded: game
+                .loaded_actor_ids()
+                .map(|id| (ActorId(id.0), 0))
+                .collect(),
+            parked: tor_world::Shared::new(
+                game.unloaded_actor_ids()
+                    .map(|id| (ActorId(id.0), 0))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Any known actor's revision, loaded or not.
+    fn any(&self, actor: ActorId) -> Option<u64> {
+        self.loaded
+            .get(&actor)
+            .or_else(|| self.parked.get(&actor))
+            .copied()
+    }
+
+    /// Follow actors into and out of loaded regions after a transition.
+    fn follow(&mut self, game: &Game) -> Result<(), Failure> {
+        let exhausted = || Failure::new(ErrorCode::InvalidAction, "Revision exhausted");
+        let left: Vec<_> = self
+            .loaded
+            .keys()
+            .copied()
+            .filter(|id| !game.has_actor(SimActor(id.0)))
+            .collect();
+        for id in left {
+            let revision = self.loaded.remove(&id).expect("listed actor");
+            self.parked
+                .insert(id, revision.checked_add(1).ok_or_else(exhausted)?);
+        }
+        for id in game.loaded_actor_ids().map(|id| ActorId(id.0)) {
+            if !self.loaded.contains_key(&id) {
+                let revision = self.parked.remove(&id).unwrap_or(0);
+                self.loaded
+                    .insert(id, revision.checked_add(1).ok_or_else(exhausted)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether these revisions cover exactly `game`'s actors, split by
+    /// whether they're loaded.
+    pub(crate) fn valid_for(&self, game: &Game) -> bool {
+        self.loaded
+            .keys()
+            .map(|a| a.0)
+            .eq(game.loaded_actor_ids().map(|a| a.0))
+            && self
+                .parked
+                .keys()
+                .map(|a| a.0)
+                .eq(game.unloaded_actor_ids().map(|a| a.0))
     }
 }
 
@@ -337,7 +434,7 @@ impl CommandProfile {
 struct Boundary {
     id: Option<EntryId>,
     game: Game,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
 }
 
 /// Private mutable decision state. A transaction never owns retained history,
@@ -347,7 +444,7 @@ struct Candidate {
     current_branch: BranchId,
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
     /// Region records this command's transition made.
     made: Vec<(
         tor_simulation::RecordId,
@@ -368,9 +465,9 @@ impl Candidate {
     fn branch(&self) -> &BranchId {
         &self.current_branch
     }
-    /// Actors in loaded regions; revisions also cover the rest.
+    /// Actors in loaded regions.
     fn actors(&self) -> Vec<ActorId> {
-        loaded_actors(&self.game, &self.revisions)
+        self.revisions.keys().copied().collect()
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
@@ -387,8 +484,12 @@ impl Candidate {
 
     /// Move to the regions the reference points ask for. When anything
     /// changed, every revision moves on, so clients refresh.
-    fn transition(&mut self, regions: Option<&mut crate::regions::Regions>) -> Result<(), Failure> {
-        self.transition_with(regions, std::collections::BTreeSet::new())
+    fn transition(
+        &mut self,
+        regions: Option<&mut crate::regions::Regions>,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        self.transition_with(regions, std::collections::BTreeSet::new(), profile)
     }
 
     /// Load and activate the regions a wizard operation acts on first, so it
@@ -428,36 +529,52 @@ impl Candidate {
         if targets.is_empty() {
             return Ok(());
         }
-        self.transition_with(regions, targets)
+        self.transition_with(regions, targets, None)
     }
 
     fn transition_with(
         &mut self,
         regions: Option<&mut crate::regions::Regions>,
         extra: std::collections::BTreeSet<tor_world::RegionId>,
+        profile: Option<&mut CommandProfile>,
     ) -> Result<(), Failure> {
         let Some(regions) = regions else {
             return Ok(());
         };
-        let report = regions.transition_with(&mut self.game, &mut self.made, extra)?;
-        if !report.is_empty() {
-            for revision in self.revisions.values_mut() {
-                *revision = revision
-                    .checked_add(1)
-                    .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
+        let started = Instant::now();
+        let work = regions.transition_with(&mut self.game, &mut self.made, extra)?;
+        let report = &work.report;
+        if let Some(profile) = profile {
+            profile.region_transition += started.elapsed();
+            profile.region_changes += usize::from(!report.is_empty());
+            profile.horizon_regions_expanded += work.horizon_regions_expanded;
+            profile.horizon_links_examined += work.horizon_links_examined;
+            profile.pinned_actors += work.pinned_actors;
+            profile.reach_lookups += work.reach_lookups;
+            profile.region_records_read += work.records_read;
+            profile.regions_built += report.built.len();
+        }
+        if let Some(before) = work.before {
+            // Only observers whose view the transition changed move on, so
+            // an update never discloses a change nobody could see.
+            let stayed: Vec<_> = self
+                .revisions
+                .keys()
+                .copied()
+                .filter(|id| self.game.has_actor(SimActor(id.0)))
+                .collect();
+            for actor in stayed {
+                if revision_view(&before, actor)? != revision_view(&self.game, actor)? {
+                    let revision = self.revisions.get_mut(&actor).expect("loaded actor");
+                    *revision = revision.checked_add(1).ok_or_else(|| {
+                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
+                    })?;
+                }
             }
+            self.revisions.follow(&self.game)?;
         }
         Ok(())
     }
-}
-
-/// Actors with revisions that are in loaded regions.
-fn loaded_actors(game: &Game, revisions: &BTreeMap<ActorId, u64>) -> Vec<ActorId> {
-    revisions
-        .keys()
-        .copied()
-        .filter(|id| game.has_actor(SimActor(id.0)))
-        .collect()
 }
 
 type RevisionView = (tor_simulation::Observation, Vec<tor_world::SightCell>, bool);
@@ -477,7 +594,7 @@ pub struct Engine {
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     archive: Archive,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
@@ -518,10 +635,7 @@ impl Engine {
             (Some(1), None) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
             _ => return Err(invalid_archive()),
         };
-        let mut revisions: BTreeMap<_, _> = game
-            .checkpoint_actor_ids()
-            .map(|id| (ActorId(id), 0))
-            .collect();
+        let mut revisions = Revisions::new(&game);
         if scenario.actors.is_empty() && scenario.package.is_none() {
             return Err(invalid_archive());
         }
@@ -747,7 +861,7 @@ impl Engine {
     /// Actors in loaded regions. Revisions also cover actors in regions that
     /// are detached or not built yet.
     pub fn actors(&self) -> Vec<ActorId> {
-        loaded_actors(&self.game, &self.revisions)
+        self.revisions.keys().copied().collect()
     }
     pub fn is_ai(&self, actor: ActorId) -> bool {
         self.game.is_ai(SimActor(actor.0))
@@ -803,8 +917,7 @@ impl Engine {
     }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
-            .get(&actor)
-            .copied()
+            .any(actor)
             .ok_or_else(|| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
@@ -1011,6 +1124,10 @@ impl Engine {
         }
         let (store, _, _) =
             crate::storage::Store::open(&path, || Ok(self.archive.clone()), policy, lock.clone())?;
+        // Records evicted once a checkpoint writes them are read back from it.
+        if let Some(regions) = &mut self.regions {
+            regions.attach_disk(store.clone());
+        }
         self.path = Some(path);
         self.lock = Some(lock);
         self.store = Some(store);
@@ -1092,7 +1209,7 @@ impl Engine {
             // identical; equivalence tests compare the complete Game and every
             // retained boundary against ordinary commands. Never use this
             // shortcut for measured actions or an engine attached to a save.
-            for (&id, revision) in &mut self.revisions {
+            for (&id, revision) in self.revisions.iter_mut() {
                 if outcome.next_tick != tick
                     || ((id == actor) != (outcome.next_actor == Some(SimActor(id.0))))
                 {
@@ -1389,7 +1506,7 @@ impl Engine {
                 // comparison; new action kinds must make their impact explicit.
                 if !perception_changed {
                     let started = Instant::now();
-                    for (&actor, revision) in &mut candidate.revisions {
+                    for (&actor, revision) in candidate.revisions.iter_mut() {
                         if outcome.next_tick != tick
                             || ((actor == receipt.actor)
                                 != (outcome.next_actor == Some(SimActor(actor.0))))
@@ -1475,7 +1592,7 @@ impl Engine {
                 )
             }
         };
-        candidate.transition(self.regions.as_mut())?;
+        candidate.transition(self.regions.as_mut(), profile.as_deref_mut())?;
         let started = Instant::now();
         if matches!(receipt.command, Command::Wizard { .. }) {
             candidate.game.refresh_navigation();
@@ -1702,19 +1819,27 @@ fn start_streaming(
     regions: &mut crate::regions::Regions,
 ) -> Result<Game, Failure> {
     let mut game = package.start(seed)?;
+    let observe = |id: u64| tor_simulation::ReferencePoint {
+        target: tor_simulation::ReferenceTarget::Actor(SimActor(id)),
+        active_radius: None,
+        load_radius: None,
+        observes: true,
+    };
     // Characters get points by default. A package without combat has no run
     // characters, so its selected character gets one instead.
     let points = game
         .add_default_reference_points()
         .map_err(|_| invalid_archive())?;
     if points.is_empty() && game.reference_points().next().is_none() {
-        game.add_reference_point(tor_simulation::ReferencePoint {
-            target: tor_simulation::ReferenceTarget::Actor(SimActor(package.selected)),
-            active_radius: None,
-            load_radius: None,
-            observes: true,
-        })
-        .map_err(|_| invalid_archive())?;
+        game.add_reference_point(observe(package.selected))
+            .map_err(|_| invalid_archive())?;
+    }
+    // So do actors that clients control: their players see from them.
+    for actor in package.regions.iter().flat_map(|r| &r.actors) {
+        if actor.controller == "external" {
+            game.add_reference_point(observe(actor.id))
+                .map_err(|_| invalid_archive())?;
+        }
     }
     let mut made = Vec::new();
     regions.transition(&mut game, &mut made)?;
@@ -2004,7 +2129,7 @@ impl Candidate {
                     .find(|b| &b.id == target)
                     .cloned()
                     .ok_or_else(invalid)?;
-                if !boundary.revisions.contains_key(&receipt.actor) {
+                if boundary.revisions.any(receipt.actor).is_none() {
                     return Err(invalid());
                 }
                 let later = std::mem::replace(&mut self.game, boundary.game.clone());

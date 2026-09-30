@@ -11,7 +11,8 @@ directory. Wall-clock timings are diagnostic; counts are deterministic.
     python scripts/perf_compare.py HEAD~1 --case combat:a8-h1000 --rounds 4
     python scripts/perf_compare.py main --case r8-a8-h100-durable -- --save-target-ms 10
 
-Cases are latency_bench case names (rN-aN-hN-memory|durable) or WORKLOAD[:GROUP]
+Cases are latency_bench case names (rN-aN-hN-memory|durable, or stream-rN-memory|durable
+for region streaming) or WORKLOAD[:GROUP]
 for combat, physics, items, client, and places. Those workloads always run
 their complete matrix because their validators require it; GROUP only selects
 what is shown. Arguments after `--` are passed to every benchmark invocation.
@@ -36,7 +37,7 @@ import perf_ledger  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / ".local" / "perf-compare"
 EXE = ".exe" if sys.platform == "win32" else ""
-LATENCY_CASE = re.compile(r"r\d+-a\d+-h\d+-(memory|durable)")
+LATENCY_CASE = re.compile(r"(r\d+-a\d+-h\d+|stream-r\d+)-(memory|durable)")
 COMPETING = {"cargo", "rustc", "cargo.exe", "rustc.exe", "link.exe", "clippy-driver", "clippy-driver.exe"}
 
 
@@ -145,15 +146,15 @@ def extract_latency(rows):
     version = None
     for row in rows:
         kind, case = row.get("kind"), row.get("case")
-        if kind in ("case", "traversal"):
-            version = row.get("trace_version", version)
+        if kind in ("case", "traversal", "stream"):
+            version = row.get("trace_version", row.get("workload", version))
         elif kind == "sample":
             if row["expected"] != "blocked":
                 timings[case]["authoritative_total"].append(row["phases_ms"]["authoritative_total"])
             for name, value in (row.get("profile") or {}).items():
                 _add_count(counts[case], f"profile.{name}", value)
             counts[case]["client_memory"] = row["client_memory"]
-        elif kind in ("case_end", "traversal_end"):
+        elif kind in ("case_end", "traversal_end", "stream_end"):
             end = row.get("persistence", row)
             for metric in ("restart_replay_ms", "final_flush_ms"):
                 if metric in end:

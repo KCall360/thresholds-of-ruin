@@ -306,16 +306,25 @@ performance fixture) don't, so their measurements stay comparable.
   the points see and reach, and keep linked regions loaded.
 - **Start.** A new game starts with every region unbuilt, gives each run
   character an observing point (or, in a package without combat, the
-  selected character), and runs one transition. Only the regions that needs
+  selected character), gives one to every actor the package leaves to a
+  client (`controller = "external"`), and runs one transition. Only the regions that needs
   are built, so creating a save and replaying it from the start scale with
   the horizon, not the world.
 - **Every command** ends with a transition on the candidate game, before its
   rewind boundary and journal record, so replay, checkpoints and rewind all
   see it. Records the transition makes stay with the candidate until the
-  command publishes, so a rejected command leaves nothing behind. If the
-  transition changed anything, every revision moves on, so clients refresh.
-- **Revisions** cover every known actor, loaded or not; observation and
-  perception work only with actors in loaded regions.
+  command publishes, so a rejected command leaves nothing behind.
+- **Revisions.** When a transition changes anything, each loaded actor's
+  view is compared before and after, and only actors whose view changed get
+  a new revision. So an update never discloses a change nobody could see,
+  such as a region detaching out of sight. Loaded actors' revisions are
+  copied with every command; the rest are parked in a shared map, and move
+  across (with a new revision) when their region attaches or detaches.
+- **Clients.** A client attached to an actor whose region leaves the loaded
+  world (a spectator watching an AI actor, say) gets an unsolicited
+  `not_attached` error and is disconnected, as after a rewind removes its
+  actor; the command that caused it still succeeds. Actors that clients
+  control keep reference points, so this doesn't happen to them.
 - **Rewind** continues the record counter (`Game::continue_record_ids`).
 - **Wizard operations** load and activate the regions they act on first, so
   a wizard can reach a place nobody has needed yet. A region a wizard adds
@@ -353,9 +362,16 @@ are.
   written them; then only a few durable ones stay cached, and records made
   before that capture that it doesn't refer to are dropped.
 - **Loading** reads the game-wide state only, and the integrity check covers
-  the journal, history and checkpoint tables. Records are read, their
-  checksums verified and their contents checked, when their regions attach.
-  A record that can't be read fails that command with a storage error.
+  the journal, history and checkpoint tables. Records are read when their
+  regions attach, on a separate connection. A row read while the save
+  worker is writing pages waits for that commit (rollback-journal mode);
+  that only happens when a record has left memory.
+- **Checks.** An attached record gets the checks restoring a checkpoint gives
+  loaded state: its checksum, its own consistency and its identities against
+  the directory, then each actor and item (identities, combat, orientation,
+  readiness, motion, navigation), bodies against every loaded body, and the
+  game-wide combat and physics checks. A record that can't be read or fails
+  them fails that command with a storage error and changes nothing.
 - **Format.** Save format 13 adds the `regions` table and the scenario's
   streaming setting. Saves still embed their package; pinning a package by
   hash waits for per-region package files.
@@ -366,38 +382,49 @@ horizon per boundary matter.
 
 ### Performance
 
-Each command's transition costs work proportional to the loaded actors and
+Each command's transition costs work bounded by the loaded actors and
 regions, never the whole world:
 
 - the pins computed for a state are reused while settling grows the sets,
-  and a transition that changes nothing isn't applied or checked again;
+  and a transition that changes nothing isn't applied, copied or checked
+  again;
 - which regions an observer sees comes from the scene cache without copying
   the scene;
-- an actor's reach (every region within three steps) is cached by position,
-  under the same region version tokens as scenes, and skipped outright when
-  no link or chamber rim is within reach. That shortcut is exact (tests
-  compare it with the search in every cell of every checked-in package), but
-  it needs a region at least 7 cells wide, so today's authored rooms rarely
-  use it.
+- an actor's reach (every region within three steps) comes from its
+  region's **exit field**: for each cell near an exit, the steps to the
+  nearest cell whose next step leaves the region. It's built once per region
+  with the search's own steps, so it's exact however links, rims and walls
+  lie, and it's cached under the scene cache's region version tokens. A body
+  at least three steps from every exit reaches only its region, which costs
+  a lookup per body cell even while it moves. Near exits, the search runs,
+  and its result is cached by position;
+- lifecycle state, the identity directory (indexed by region, so attaching
+  touches only that region's identities) and unloaded actors' revisions are
+  shared copy-on-write, so every command's copy of the game stays small;
+- building a region reads only it and its neighbours: the package's
+  whole-package facts are indexed once per game.
 
-`cargo run -p tor-server --release --example streaming_profile` walks a
-character through chains of 20x3x1 regions. Release build, this machine,
-480 commands each:
+`region_streaming::transition_work_does_not_grow_with_the_world` enforces
+this in CI with operation counts: the same walk through 16 and 256 halls
+does identical horizon planning, pin, reach, record and build work.
 
-| Regions | Streaming | Startup | Command p50 | Command p95 | Loaded regions |
+The `latency_bench` streaming cases (`stream-r16-memory`,
+`stream-r16-durable`, `stream-r256-memory`, `stream-r256-durable`; workload
+`streaming-v1`) walk 70 steps east and back through the lengthened streaming
+corridor at the default radii, detaching and rebuilding halls every cycle,
+and are validated by `scripts/performance_report.py`. Release build, this
+machine, 5 cycles (700 commands) each:
+
+| Case | Command p50 | Command p95 | Command max | Transition p50 | Transition p95 |
 | --- | --- | --- | --- | --- | --- |
-| 16 | on | 1.15 ms | 0.205 ms | 0.292 ms | 3 |
-| 16 | off | 0.45 ms | 0.128 ms | 0.225 ms | 16 |
-| 256 | on | 4.89 ms | 0.202 ms | 0.306 ms | 3 |
-| 256 | off | 17.26 ms | 0.131 ms | 0.232 ms | 256 |
+| stream-r16-memory | 0.209 ms | 0.388 ms | 0.562 ms | 0.013 ms | 0.047 ms |
+| stream-r256-memory | 0.209 ms | 0.416 ms | 0.695 ms | 0.013 ms | 0.049 ms |
+| stream-r16-durable | 0.225 ms | 0.389 ms | 0.555 ms | 0.013 ms | 0.046 ms |
+| stream-r256-durable | 0.229 ms | 0.453 ms | 1.362 ms | 0.013 ms | 0.058 ms |
 
-Streaming's command time doesn't depend on the world's size. It costs about
-0.07 ms more per command here, mostly the walker's reach search: it moves
-every command, so its reach is never cached. Updating reach incrementally as
-an actor moves is open work. Against the base without streaming,
-`perf_compare` over the combat workload (a one-region package, 3 rounds)
-measured `command_ms` p50 +3 to +6% and p95 +3 to +5%, with one case at
-+20% p95 whose round ranges overlap.
+The world's size doesn't change the command or transition time; a 256-hall
+game keeps 250 halls unbuilt. These cases are new, so there's no earlier
+base to compare them against.
 
 ### Later slices
 
@@ -437,13 +464,25 @@ measured `command_ms` p50 +3 to +6% and p95 +3 to +5%, with one case at
   of world clones between random views and edits, and checks every cached
   scene against an uncached one. Another test checks which scenes a detach or
   attach invalidates.
-- `crates/server/tests/region_streaming.rs` plays a five-region corridor
-  package with radii of zero. It checks the regions built at the start,
+- `crates/server/tests/region_streaming.rs` plays the checked-in
+  `streaming-corridor` package (seven halls) with radii of zero. It checks the regions built at the start,
   detaches regions behind the character, restarts from a checkpoint without
   reading a row, reattaches regions from their rows, and replays the whole
   history from the start. A wizard rewind past a detach, followed by a
   different future, checks that new records never reuse an identity, and a
-  wizard teleport reaches a region that was never built.
+  wizard teleport reaches a region that was never built. Using
+  `streaming-controlled`, an actor a client controls keeps its region in
+  play, and a transition leaves an unseeing observer's revision alone.
+- `crates/server/tests/streaming_websocket.rs` detaches a spectator whose
+  actor leaves the loaded world, over real connections, while the player's
+  commands keep succeeding.
+- `scripts/test_streaming_process.py` plays across detached halls with real
+  headless and native ASCII clients: spectators, a crash and restart, a
+  reconnect, and a wizard rewind past a detach through the headless client.
+- Storage tests kill a real process at every stage of a checkpoint that
+  writes region rows, and fail closed, atomically, on a damaged or missing
+  row. A save attached to a game that started in memory reads evicted
+  records back.
 - Storage tests write, retry, reject and collect rows in the checkpoint
   transaction, with failures injected at every stage.
 - A server unit test shrinks every checked-in scenario package to what its

@@ -497,7 +497,12 @@ impl Service {
             .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
             .collect();
         for (recipient, observer) in recipients {
-            let state = self.engine.state(observer)?;
+            // Region streaming can unload an actor nobody keeps in play (an
+            // AI actor a spectator watches); its clients must reattach.
+            let Ok(state) = self.engine.state(observer) else {
+                self.detach_unloaded(recipient);
+                continue;
+            };
             if revisions.get(&observer) != Some(&state.revision) {
                 self.update(
                     recipient,
@@ -663,7 +668,10 @@ impl Service {
                 self.stop_travel(actor, TravelPhase::ControlLost);
                 continue;
             }
-            let observation = self.engine.observation(actor).expect("surviving actor");
+            let Ok(observation) = self.engine.observation(actor) else {
+                self.stop_travel(actor, TravelPhase::Failed);
+                continue;
+            };
             let hazard = !potential_hazards(&observation).is_subset(&job.hazards)
                 || job
                     .hp
@@ -881,6 +889,20 @@ impl Service {
             // A slow client must reconnect for a snapshot, never silently miss updates.
             self.disconnect(id);
         }
+    }
+
+    /// Tell a client its actor left the loaded world, then disconnect it.
+    fn detach_unloaded(&mut self, id: u64) {
+        self.send(
+            id,
+            ServerMessage::Error {
+                request_id: None,
+                code: ErrorCode::NotAttached,
+                message: "Your actor left the loaded world; attach again once it's back in play"
+                    .into(),
+            },
+        );
+        self.disconnect(id);
     }
 
     pub(crate) fn disconnect(&mut self, id: u64) {

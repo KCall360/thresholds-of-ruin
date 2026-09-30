@@ -83,6 +83,16 @@ pub struct TransitionReport {
     pub detached: Vec<RegionId>,
 }
 
+/// Deterministic work a transition's settling did, for performance
+/// contracts: none of it may grow with the size of the world.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PinWork {
+    /// Loaded actors whose live references were followed.
+    pub actors: usize,
+    /// Active actors whose reach and view were looked up.
+    pub reaches: usize,
+}
+
 impl TransitionReport {
     /// Whether the transition changed nothing.
     pub fn is_empty(&self) -> bool {
@@ -174,14 +184,93 @@ impl RecordStore for MemoryRecords {
     }
 }
 
-/// Identities in detached regions. Identities stay reserved while detached,
-/// so references to them stay valid and are never reused.
+/// Identities in detached and unbuilt regions. Identities stay reserved
+/// while their region isn't loaded, so references to them stay valid and are
+/// never reused.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "DirectoryData", into = "DirectoryData")]
 struct Directory {
     actors: BTreeMap<ActorId, RegionId>,
     items: BTreeMap<ItemId, RegionId>,
     doors: BTreeMap<u64, RegionId>,
+    /// Derived from the maps above and never saved: each region's
+    /// identities, so attaching a region touches only its own.
+    by_region: BTreeMap<RegionId, RegionIdentities>,
+}
+
+/// A directory as saved.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DirectoryData {
+    actors: BTreeMap<ActorId, RegionId>,
+    items: BTreeMap<ItemId, RegionId>,
+    doors: BTreeMap<u64, RegionId>,
+}
+
+impl From<DirectoryData> for Directory {
+    fn from(data: DirectoryData) -> Self {
+        let mut by_region: BTreeMap<RegionId, RegionIdentities> = BTreeMap::new();
+        for (id, region) in &data.actors {
+            by_region.entry(*region).or_default().actors.insert(*id);
+        }
+        for (id, region) in &data.items {
+            by_region.entry(*region).or_default().items.insert(*id);
+        }
+        for (id, region) in &data.doors {
+            by_region.entry(*region).or_default().doors.insert(*id);
+        }
+        Self {
+            actors: data.actors,
+            items: data.items,
+            doors: data.doors,
+            by_region,
+        }
+    }
+}
+
+impl From<Directory> for DirectoryData {
+    fn from(directory: Directory) -> Self {
+        Self {
+            actors: directory.actors,
+            items: directory.items,
+            doors: directory.doors,
+        }
+    }
+}
+
+impl Directory {
+    /// Place `identities` in `region`. The index lists only regions with
+    /// identities, as rebuilding it after a save round trip does.
+    fn insert(&mut self, region: RegionId, identities: RegionIdentities) {
+        if identities == RegionIdentities::default() {
+            return;
+        }
+        self.actors
+            .extend(identities.actors.iter().map(|id| (*id, region)));
+        self.items
+            .extend(identities.items.iter().map(|id| (*id, region)));
+        self.doors
+            .extend(identities.doors.iter().map(|id| (*id, region)));
+        let listed = self.by_region.entry(region).or_default();
+        listed.actors.extend(identities.actors);
+        listed.items.extend(identities.items);
+        listed.doors.extend(identities.doors);
+    }
+
+    /// Remove and return `region`'s identities, touching only those.
+    fn remove_region(&mut self, region: RegionId) -> RegionIdentities {
+        let identities = self.by_region.remove(&region).unwrap_or_default();
+        for id in &identities.actors {
+            self.actors.remove(id);
+        }
+        for id in &identities.items {
+            self.items.remove(id);
+        }
+        for id in &identities.doors {
+            self.doors.remove(id);
+        }
+        identities
+    }
 }
 
 /// Everything located in one detached region: its world slice, the actors
@@ -230,18 +319,20 @@ impl RegionRecord {
             })
     }
 
+    /// The identities this record holds.
+    fn identities(&self) -> RegionIdentities {
+        RegionIdentities {
+            actors: self.actors.keys().copied().collect(),
+            items: self.items.keys().copied().collect(),
+            doors: self.world.door_ids().collect(),
+        }
+    }
+
     /// Whether the record holds exactly the identities `directory` places in
     /// `region`.
     fn matches_directory(&self, region: RegionId, directory: &Directory) -> bool {
-        fn listed<K: Copy + Ord>(map: &BTreeMap<K, RegionId>, region: RegionId) -> BTreeSet<K> {
-            map.iter()
-                .filter(|(_, r)| **r == region)
-                .map(|(id, _)| *id)
-                .collect()
-        }
-        listed(&directory.actors, region) == self.actors.keys().copied().collect()
-            && listed(&directory.items, region) == self.items.keys().copied().collect()
-            && listed(&directory.doors, region) == self.world.door_ids().collect()
+        let empty = RegionIdentities::default();
+        *directory.by_region.get(&region).unwrap_or(&empty) == self.identities()
     }
 }
 
@@ -257,11 +348,13 @@ pub(crate) struct Lifecycle {
     /// When each actor in a frozen region stopped. On thaw its tick fields
     /// move forward by the time since, so nothing catches up.
     stamps: BTreeMap<ActorId, u64>,
-    /// Each detached region's record, kept in a [`RecordStore`].
-    detached: BTreeMap<RegionId, RecordId>,
+    /// Each detached region's record, kept in a [`RecordStore`]. Shared, like
+    /// `unbuilt` and the directory, so cloning a game (every command does)
+    /// doesn't copy state that grows with the world.
+    detached: Shared<BTreeMap<RegionId, RecordId>>,
     next_record: u64,
     /// Regions known from metadata only, never built.
-    unbuilt: BTreeSet<RegionId>,
+    unbuilt: Shared<BTreeSet<RegionId>>,
     /// Identities in detached and unbuilt regions. Shared, so cloning a game
     /// doesn't copy them.
     directory: Shared<Directory>,
@@ -274,9 +367,9 @@ impl Default for Lifecycle {
             next_point: 1,
             frozen: BTreeSet::new(),
             stamps: BTreeMap::new(),
-            detached: BTreeMap::new(),
+            detached: Shared::default(),
             next_record: 1,
-            unbuilt: BTreeSet::new(),
+            unbuilt: Shared::default(),
             directory: Shared::default(),
         }
     }
@@ -296,8 +389,6 @@ struct PinCache {
     /// An active actor's reach and the regions its view reads.
     reach: BTreeMap<ActorId, (BTreeSet<RegionId>, Vec<RegionId>)>,
     linked: BTreeMap<RegionId, BTreeSet<RegionId>>,
-    /// Levels where a region's vertical links start.
-    vertical: BTreeMap<RegionId, Vec<i32>>,
 }
 
 /// Axis steps covering movement (a diagonal is two), melee (up to three)
@@ -548,7 +639,7 @@ impl Game {
                             self.world.eye_scene_regions(eye, frame, SIGHT_RANGE)
                         })
                         .unwrap_or_default();
-                    let reach = self.reach_regions(*id, cache);
+                    let reach = self.reach_regions(*id);
                     cache.reach.insert(*id, (reach, view));
                 }
                 let (reach, view) = &cache.reach[id];
@@ -661,120 +752,36 @@ impl Game {
 
     /// Regions within [`REACH_STEPS`] axis steps of an actor's body, by any
     /// movement, physics or sight step. The next action can't touch anything
-    /// farther.
-    fn reach_regions(&self, id: ActorId, cache: &mut PinCache) -> BTreeSet<RegionId> {
+    /// farther. The world answers from its exit field where the body is far
+    /// from every exit, so this rarely searches.
+    fn reach_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let actor = &self.actors[&id];
         let frontier: BTreeSet<Location> =
             match self.body_cells(actor.location, actor.orientation, &actor.body) {
                 Some(cells) => cells.into_iter().map(|(at, _)| at).collect(),
                 None => BTreeSet::from([actor.location]),
             };
-        let home = actor.location.region;
-        if self.reach_stays_home(home, &frontier, cache) {
-            return BTreeSet::from([home]);
-        }
         self.world.reach_regions(&frontier, REACH_STEPS)
     }
 
-    /// Every region a breadth-first search of [`REACH_STEPS`] steps from
-    /// `frontier` enters, without the shortcut or reuse, for tests.
-    fn search_reach(&self, frontier: BTreeSet<Location>) -> BTreeSet<RegionId> {
-        self.world.reach_regions_uncached(&frontier, REACH_STEPS)
-    }
-
-    /// Whether no step within [`REACH_STEPS`] of `cells` can leave `home`,
-    /// so the reach search would find only `home`. A step leaves a region
-    /// only through a link from the cell it starts at, or out of the
-    /// region's bounds: horizontal links start only on the boundary of a
-    /// region (a chamber's interior), on its x and y faces, and a chamber
-    /// projects across its rim only from a cell on a link's plane. So it's
-    /// enough that every cell within reach horizontally is inside that
-    /// boundary and no vertical link starts within two levels of a cell. Checking this
-    /// costs a few comparisons per body cell; the search it replaces visits
-    /// every cell within reach.
-    fn reach_stays_home(
-        &self,
-        home: RegionId,
-        cells: &BTreeSet<Location>,
-        cache: &mut PinCache,
-    ) -> bool {
-        // A chamber projects across its rim on its interior's faces, so the
-        // interior, not the stone shell around it, is what must contain the
-        // reach.
-        let Some(bounds) = self.world.interior(home) else {
-            return false;
-        };
-        let levels = cache.vertical.entry(home).or_insert_with(|| {
-            self.world
-                .exits(home)
-                .filter(|p| matches!(p.direction, Direction::Up | Direction::Down))
-                .map(|p| p.from.position.z)
-                .collect()
-        });
-        let reach = REACH_STEPS as i32;
-        cells.iter().all(|at| {
-            let p = at.position;
-            // Only horizontal distance matters: a step up or down out of the
-            // bounds leads nowhere without a vertical link, and those are
-            // checked by level below.
-            let corner = |d: i32| {
-                Some(tor_world::Position {
-                    x: p.x.checked_add(d)?,
-                    y: p.y.checked_add(d)?,
-                    z: p.z,
-                })
-            };
-            at.region == home
-                && corner(-reach).is_some_and(|c| bounds.contains(c))
-                && corner(reach).is_some_and(|c| bounds.contains(c))
-                && levels
-                    .iter()
-                    .all(|z| (i64::from(*z) - i64::from(p.z)).abs() > reach as i64 - 1)
-        })
-    }
-
-    /// Check the reach shortcut against the search from every cell of every
-    /// loaded region, for tests over real scenarios. Returns how many cells
-    /// took the shortcut, or the first cell where the two disagree.
-    pub fn check_reach_shortcut(&self) -> Result<usize, Location> {
-        let mut cache = PinCache::default();
-        let mut shortcut = 0;
-        for region in self.world.loaded_regions() {
-            let bounds = self.world.region(region).expect("loaded region").bounds;
-            let (dx, dy, dz) = bounds.dimensions();
-            let origin = bounds.origin();
-            for x in 0..dx {
-                for y in 0..dy {
-                    for z in 0..dz {
-                        let cell = Location {
-                            region,
-                            position: tor_world::Position {
-                                x: origin.x + x,
-                                y: origin.y + y,
-                                z: origin.z + z,
-                            },
-                        };
-                        let cells = BTreeSet::from([cell]);
-                        if self.reach_stays_home(region, &cells, &mut cache) {
-                            if self.search_reach(cells) != BTreeSet::from([region]) {
-                                return Err(cell);
-                            }
-                            shortcut += 1;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(shortcut)
+    /// Check the world's reach answers against an uncached search from every
+    /// cell of every loaded region, for tests over real scenarios. Returns
+    /// how many cells the exit field answered, or the first cell where the
+    /// two disagree.
+    pub fn check_reach(&self) -> Result<usize, Location> {
+        self.world.check_reach(REACH_STEPS)
     }
 
     /// Grow proposed sets until every pin that loaded state reveals holds.
     pub fn settle_region_transition(&self, proposed: &RegionTransition) -> RegionTransition {
+        self.settle(proposed, &mut PinCache::default())
+    }
+
+    fn settle(&self, proposed: &RegionTransition, cache: &mut PinCache) -> RegionTransition {
         let mut t = proposed.clone();
         t.loaded.extend(t.active.iter().copied());
-        let mut cache = PinCache::default();
         loop {
-            let need = self.requirements(&t.active, &t.loaded, &mut cache);
+            let need = self.requirements(&t.active, &t.loaded, cache);
             let before = (t.active.len(), t.loaded.len());
             t.active.extend(need.active);
             t.loaded.extend(need.loaded);
@@ -792,15 +799,59 @@ impl Game {
         proposed: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<(RegionTransition, TransitionReport), TransitionError> {
-        let mut t = self.settle_region_transition(proposed);
+        self.transition_regions_counted(proposed, records)
+            .map(|(t, report, _)| (t, report))
+    }
+
+    /// Settle `proposed` as [`Game::transition_regions`] would, counting the
+    /// work, without applying anything.
+    pub fn settle_counted(&self, proposed: &RegionTransition) -> (RegionTransition, PinWork) {
+        let mut cache = PinCache::default();
+        let t = self.settle(proposed, &mut cache);
+        let work = PinWork {
+            actors: cache.live.len(),
+            reaches: cache.reach.len(),
+        };
+        (t, work)
+    }
+
+    /// Whether `t` names exactly the regions active and loaded now. A
+    /// settled transition to them changes nothing.
+    pub fn regions_are(&self, t: &RegionTransition) -> bool {
+        self.current_regions() == *t
+    }
+
+    /// Actors in loaded regions, in identity order.
+    pub fn loaded_actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.actors.keys().copied()
+    }
+
+    /// Known actors in regions that are detached or not built, in identity
+    /// order.
+    pub fn unloaded_actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.lifecycle.directory.actors.keys().copied()
+    }
+
+    /// [`Game::transition_regions`], also counting the settling's work.
+    pub fn transition_regions_counted(
+        &mut self,
+        proposed: &RegionTransition,
+        records: &mut dyn RecordStore,
+    ) -> Result<(RegionTransition, TransitionReport, PinWork), TransitionError> {
+        let mut cache = PinCache::default();
+        let mut t = self.settle(proposed, &mut cache);
+        let work = PinWork {
+            actors: cache.live.len(),
+            reaches: cache.reach.len(),
+        };
         // Settling proved every pin holds for these sets in this state, so
         // if they're the current sets there's nothing to apply or check.
         if self.current_regions() == t {
-            return Ok((t, TransitionReport::default()));
+            return Ok((t, TransitionReport::default(), work));
         }
         loop {
             match self.apply_region_transition(&t, records) {
-                Ok(report) => return Ok((t, report)),
+                Ok(report) => return Ok((t, report, work)),
                 Err(TransitionError::MustBeActive(region)) if !t.active.contains(&region) => {
                     t.active.insert(region);
                     t.loaded.insert(region);
@@ -844,13 +895,15 @@ impl Game {
             })
             .copied()
             .collect();
+        let mut arrived = Vec::new();
         for region in attach {
             if next.lifecycle.unbuilt.contains(&region) {
                 report.built.push(region);
             }
-            next.attach_record(region, records)?;
+            arrived.push((region, next.attach_record(region, records)?));
             report.attached.push(region);
         }
+        next.check_arrivals(&arrived)?;
         let loaded: Vec<_> = next.world.loaded_regions().collect();
         for region in &loaded {
             match (
@@ -996,16 +1049,7 @@ impl Game {
             .add_unbuilt_region(region, chamber)
             .map_err(|_| GameError::InvalidLocation)?;
         self.world = Shared::new(world);
-        let directory = &mut self.lifecycle.directory;
-        directory
-            .actors
-            .extend(identities.actors.iter().map(|a| (*a, id)));
-        directory
-            .items
-            .extend(identities.items.iter().map(|i| (*i, id)));
-        directory
-            .doors
-            .extend(identities.doors.iter().map(|d| (*d, id)));
+        self.lifecycle.directory.insert(id, identities);
         self.lifecycle.unbuilt.insert(id);
         (self.next_actor_id, self.next_item_id, self.next_door_id) =
             (next_actor, next_item, next_door);
@@ -1054,14 +1098,14 @@ impl Game {
             .into_iter()
             .partition(|impact| owned(&impact.entity));
         self.physics.impacts = kept;
-        let directory = &mut self.lifecycle.directory;
-        directory
-            .doors
-            .extend(world.door_ids().map(|door| (door, region)));
-        directory
-            .actors
-            .extend(actors.iter().map(|id| (*id, region)));
-        directory.items.extend(items.iter().map(|id| (*id, region)));
+        self.lifecycle.directory.insert(
+            region,
+            RegionIdentities {
+                actors: actors.iter().copied().collect(),
+                items: items.iter().copied().collect(),
+                doors: world.door_ids().collect(),
+            },
+        );
         let mut record = RegionRecord {
             world,
             actors: BTreeMap::new(),
@@ -1103,11 +1147,61 @@ impl Game {
         Ok((id, Shared::new(record)))
     }
 
+    /// Give what attached regions brought the checks restoring gives loaded
+    /// state, now that everything that attaches together is in place. Runs
+    /// before anything computes bodies or pins, so a bad record can't upset
+    /// them.
+    fn check_arrivals(
+        &self,
+        arrived: &[(RegionId, RegionIdentities)],
+    ) -> Result<(), TransitionError> {
+        if arrived.is_empty() {
+            return Ok(());
+        }
+        for (region, identities) in arrived {
+            let invalid = Err(TransitionError::InvalidRecord(*region));
+            let actors_valid = identities.actors.iter().all(|id| {
+                self.actors
+                    .get(id)
+                    .is_some_and(|actor| self.actor_state_valid(*id, actor))
+                    && self
+                        .navigation
+                        .get(id)
+                        .is_none_or(|n| n.checkpoint_valid(&self.world))
+            });
+            let items_valid = identities.items.iter().all(|id| {
+                self.items
+                    .get(id)
+                    .is_some_and(|item| self.item_state_valid(*id, item))
+            });
+            if !actors_valid || !items_valid {
+                return invalid;
+            }
+        }
+        // Bodies may not overlap anyone's, loaded before or arriving now.
+        let mut occupied = BTreeSet::new();
+        let first = arrived[0].0;
+        if !self
+            .actors
+            .values()
+            .all(|actor| self.actor_state_valid_body(actor, &mut occupied))
+            || !self.combat_valid()
+            || !self.physics_valid()
+        {
+            return Err(TransitionError::InvalidRecord(first));
+        }
+        Ok(())
+    }
+
+    fn actor_state_valid_body(&self, actor: &Actor, occupied: &mut BTreeSet<Location>) -> bool {
+        actor.orientation < 24 && actor.body.valid() && self.body_has_room(actor, occupied)
+    }
+
     fn attach_record(
         &mut self,
         region: RegionId,
         records: &mut dyn RecordStore,
-    ) -> Result<(), TransitionError> {
+    ) -> Result<RegionIdentities, TransitionError> {
         let invalid = TransitionError::InvalidRecord(region);
         let unavailable = TransitionError::RecordUnavailable(region);
         let record = if self.lifecycle.unbuilt.remove(&region) {
@@ -1150,12 +1244,9 @@ impl Game {
         }
         self.physics.displaced.extend(displaced);
         self.physics.impacts.extend(impacts);
-        let directory = &mut self.lifecycle.directory;
-        directory.actors.retain(|_, r| *r != region);
-        directory.items.retain(|_, r| *r != region);
-        directory.doors.retain(|_, r| *r != region);
+        let identities = self.lifecycle.directory.remove_region(region);
         self.lifecycle.frozen.insert(region);
-        Ok(())
+        Ok(identities)
     }
 
     // ----- Validation -----
@@ -1183,23 +1274,14 @@ impl Game {
             let Some(record) = records.get(*id) else {
                 return false;
             };
-            expected
-                .doors
-                .extend(record.world.door_ids().map(|door| (door, *region)));
-            expected
-                .actors
-                .extend(record.actors.keys().map(|id| (*id, *region)));
-            expected
-                .items
-                .extend(record.items.keys().map(|id| (*id, *region)));
+            expected.insert(*region, record.identities());
             record.valid_contents(*region, self.tick)
         }) && {
             // Unbuilt regions' identities are declared, not recorded.
-            let recorded = |r: &RegionId| !l.unbuilt.contains(r);
             let mut directory = (*l.directory).clone();
-            directory.actors.retain(|_, r| recorded(r));
-            directory.items.retain(|_, r| recorded(r));
-            directory.doors.retain(|_, r| recorded(r));
+            for region in l.unbuilt.iter() {
+                directory.remove_region(*region);
+            }
             expected == directory
         }
     }
@@ -1233,7 +1315,7 @@ impl Game {
             && self.world.detached_regions().eq(l
                 .detached
                 .keys()
-                .chain(&l.unbuilt)
+                .chain(l.unbuilt.iter())
                 .copied()
                 .collect::<BTreeSet<_>>())
             && l.frozen.iter().all(|r| self.world.region(*r).is_some())
@@ -1530,13 +1612,13 @@ mod tests {
         assert_eq!(game, before);
     }
 
-    /// The reach shortcut must never disagree with the search: wherever it
-    /// says a reach stays home, searching from there finds only home. The
+    /// The world's reach answers (exit field, then cached search) must never
+    /// disagree with an uncached search, from any cell. The
     /// world has a tall chamber with a stair in its middle, joins across two of
     /// its faces to other chambers (rim projection), and walls
     /// near the faces.
     #[test]
-    fn the_reach_shortcut_agrees_with_the_search_everywhere() {
+    fn reach_answers_agree_with_the_search_everywhere() {
         use tor_world::{Extent, Passage, World};
         let at = |region, x, y, z| Location {
             region: RegionId(region),
@@ -1628,37 +1710,84 @@ mod tests {
         ] {
             let _ = game.set_wall(wall, true);
         }
-        let mut cache = PinCache::default();
-        let (mut shortcut, mut searched) = (0, 0);
-        for id in 1..=4 {
-            let region = RegionId(id);
-            let bounds = game.world.region(region).unwrap().bounds;
-            let (dx, dy, dz) = bounds.dimensions();
-            for x in -1..dx + 1 {
-                for y in -1..dy + 1 {
-                    for z in -1..dz + 1 {
-                        let cell = at(id, x, y, z);
-                        if !bounds.contains(cell.position) {
-                            continue;
-                        }
-                        let cells = BTreeSet::from([cell]);
-                        if game.reach_stays_home(region, &cells, &mut cache) {
-                            shortcut += 1;
-                            assert_eq!(
-                                game.search_reach(cells),
-                                BTreeSet::from([region]),
-                                "{cell:?}"
-                            );
-                        } else {
-                            searched += 1;
-                        }
-                    }
-                }
-            }
-        }
+        let fielded = game
+            .check_reach()
+            .unwrap_or_else(|cell| panic!("disagreement at {cell:?}"));
+        let cells: i32 = (1..=4)
+            .map(|id| {
+                let (x, y, z) = game.world.region(RegionId(id)).unwrap().bounds.dimensions();
+                x * y * z
+            })
+            .sum();
+        // Both kinds of cell occur: answered by the field, and searched.
         assert!(
-            shortcut > 50 && searched > 50,
-            "{shortcut} shortcut, {searched} searched"
+            fielded > 50 && (cells as usize) - fielded > 50,
+            "{fielded} of {cells}"
         );
+    }
+
+    /// Every command clones the game, so lifecycle state that grows with the
+    /// world (unbuilt and detached regions, their identities) must be
+    /// shared by the clone, not copied.
+    #[test]
+    fn cloning_a_game_shares_state_that_grows_with_the_world() {
+        let (_, game, _) = unbuilt_corridor();
+        let clone = game.clone();
+        let (l, c) = (&game.lifecycle, &clone.lifecycle);
+        assert!(l.unbuilt.shares_storage(&c.unbuilt));
+        assert!(l.detached.shares_storage(&c.detached));
+        assert!(l.directory.shares_storage(&c.directory));
+    }
+
+    /// The directory's region index, used when a region attaches, agrees with
+    /// its maps through insertion, removal and a save round trip.
+    #[test]
+    fn the_directory_region_index_stays_consistent() {
+        let identities = |actor, item, door| RegionIdentities {
+            actors: BTreeSet::from([ActorId(actor)]),
+            items: BTreeSet::from([ItemId(item)]),
+            doors: BTreeSet::from([door]),
+        };
+        let mut directory = Directory::default();
+        directory.insert(RegionId(1), identities(2, 3, 4));
+        directory.insert(RegionId(5), identities(6, 7, 8));
+        let saved = serde_json::to_string(&directory).unwrap();
+        assert!(!saved.contains("by_region"), "the index is never saved");
+        let restored: Directory = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored, directory);
+        assert_eq!(directory.remove_region(RegionId(1)), identities(2, 3, 4));
+        assert_eq!(directory.actors.keys().collect::<Vec<_>>(), [&ActorId(6)]);
+        assert_eq!(
+            directory.remove_region(RegionId(1)),
+            RegionIdentities::default()
+        );
+        let mut expected = Directory::default();
+        expected.insert(RegionId(5), identities(6, 7, 8));
+        assert_eq!(directory, expected);
+    }
+
+    /// A record from storage gets the checks restoring a checkpoint gives
+    /// loaded actors and items, not only its own consistency: one with an
+    /// impossible actor (a 30th orientation) is rejected, changing nothing.
+    #[test]
+    fn attach_checks_a_record_as_thoroughly_as_restore() {
+        let (mut game, other, mut records) = detached_corridor();
+        let three = RegionId(3);
+        let mut damaged = MemoryRecords::default();
+        for (region, id) in game.detached_records() {
+            let mut record = (*records.get(id).unwrap()).clone();
+            if region == three {
+                record.actors.get_mut(&other).unwrap().orientation = 30;
+                assert!(record.valid_contents(three, game.tick()));
+                assert!(record.matches_directory(three, &game.lifecycle.directory));
+            }
+            damaged.put(id, Shared::new(record));
+        }
+        let before = game.clone();
+        let error = game
+            .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut damaged)
+            .unwrap_err();
+        assert_eq!(error, TransitionError::InvalidRecord(three));
+        assert_eq!(game, before);
     }
 }

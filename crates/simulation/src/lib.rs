@@ -18,9 +18,9 @@ mod observation;
 mod places;
 mod streaming;
 pub use streaming::{
-    MemoryRecords, RecordId, RecordStore, ReferencePoint, ReferencePointId, ReferenceTarget,
-    RegionIdentities, RegionRecord, RegionRoot, RegionState, RegionTransition, TransitionError,
-    TransitionReport,
+    MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
+    ReferenceTarget, RegionIdentities, RegionRecord, RegionRoot, RegionState, RegionTransition,
+    TransitionError, TransitionReport,
 };
 mod travel;
 pub use travel::TravelStep;

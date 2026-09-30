@@ -1,5 +1,5 @@
 import unittest
-from performance_report import SPEC, expected_actions, validate, validate_work
+from performance_report import SPEC, STREAM_BOUNDS, expected_actions, validate, validate_work
 
 
 class PerformanceReportTests(unittest.TestCase):
@@ -101,3 +101,38 @@ class SavedDiscoveryTests(unittest.TestCase):
         end["persistence"]["checkpoint_diagnostic_ms"] = float("nan")
         with self.assertRaises(AssertionError):
             validate_saved_discovery(meta,samples,end)
+
+
+def stream_rows(cycles=1, **work):
+    profile = {name: 0 for name in STREAM_BOUNDS}
+    profile.update(simulation_transitions=1, candidate_captures=1, rollback_snapshots=1)
+    rows = [{"kind": "stream", "case": "stream-r16-memory", "workload": "streaming-v1", "cycles": cycles,
+             "steps_per_cycle": 200, "storage": "memory"}]
+    history = 0
+    labels = (["walk_east"]*100 + ["walk_west"]*100) * cycles
+    for index, label in enumerate(labels):
+        sample_profile = dict(profile, region_changes=int(index == 50), **work)
+        rows.append({"kind": "sample", "case": "stream-r16-memory", "actor": 1, "label": label,
+                     "history_start": history, "history_end": history + 1, "rewind_count": 0,
+                     "profile": sample_profile})
+        history += 1
+    rows.append({"kind": "stream_end", "case": "stream-r16-memory", "history_end": history,
+                 "recovery": {"records_loaded": history}})
+    return rows
+
+
+class StreamingValidationTests(unittest.TestCase):
+    def test_a_complete_walk_with_bounded_work_passes(self):
+        cases, samples, ends = validate(stream_rows(), selected_case="stream-r16-memory")
+        self.assertEqual(200, len(samples["stream-r16-memory"]))
+
+    def test_unbounded_transition_work_fails(self):
+        with self.assertRaises(AssertionError):
+            validate(stream_rows(horizon_regions_expanded=64), selected_case="stream-r16-memory")
+
+    def test_a_short_walk_or_missing_completion_fails(self):
+        rows = stream_rows()
+        with self.assertRaises(AssertionError):
+            validate(rows[:-2] + rows[-1:], selected_case="stream-r16-memory")
+        with self.assertRaises(AssertionError):
+            validate(rows[:-1], selected_case="stream-r16-memory")

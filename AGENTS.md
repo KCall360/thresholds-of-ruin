@@ -138,7 +138,12 @@ order on `main`):
   2. unbuilt regions and region sources (done, `design/region-sources`);
   3. disk rows, save format 13 and engine wiring, merged into one slice at
      the maintainer's request (done, `design/region-streaming-engine`):
-     package games stream after every command; fixtures don't;
+     package games stream after every command; fixtures don't. A review of
+     phases 0–3 then fixed eight findings with regression tests, added the
+     policy's missing tests (validated streaming packages, an actual-process
+     test, row crash tests, a `latency_bench` streaming workload and a CI
+     scaling contract), exit fields for reach, and a headless `wizard` input.
+     Next: one PR for all of it, merged only with the maintainer's approval;
   4. background preloading;
   5. large per-region packages, the package pin, and generation.
 

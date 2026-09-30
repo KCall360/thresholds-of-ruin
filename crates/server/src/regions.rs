@@ -34,6 +34,20 @@ impl Default for Streaming {
     }
 }
 
+/// What a transition did, and the deterministic work it took. Performance
+/// contracts require none of the counts to grow with the world's size.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TransitionWork {
+    pub(crate) report: TransitionReport,
+    pub(crate) horizon_regions_expanded: usize,
+    pub(crate) horizon_links_examined: usize,
+    pub(crate) pinned_actors: usize,
+    pub(crate) reach_lookups: usize,
+    pub(crate) records_read: usize,
+    /// The game just before the transition, when it changed anything.
+    pub(crate) before: Option<Game>,
+}
+
 /// Durable records kept in memory besides those not yet on disk.
 const CACHED_RECORDS: usize = 32;
 
@@ -42,6 +56,8 @@ const CACHED_RECORDS: usize = 32;
 #[derive(Clone, Debug)]
 pub(crate) struct Regions {
     package: Arc<Package>,
+    /// Built once, so building a region costs the same in any package.
+    index: crate::scenario_package::PackageIndex,
     seed: u64,
     catalog: RegionCatalog,
     streaming: Streaming,
@@ -61,6 +77,7 @@ impl Regions {
     ) -> Result<Self, Failure> {
         Ok(Self {
             catalog: RegionCatalog::from_package(&package)?,
+            index: package.index(seed)?,
             package,
             seed,
             streaming,
@@ -79,15 +96,18 @@ impl Regions {
     /// region and everything within its radii, by the package's links. A
     /// region the package doesn't have (a wizard added it) counts alone;
     /// pins still follow its links.
-    fn horizon(&self, game: &Game) -> RegionTransition {
+    fn horizon(&self, game: &Game, work: &mut TransitionWork) -> RegionTransition {
         let mut t = RegionTransition::default();
         for root in game.region_roots() {
             let roots = BTreeSet::from([root.region]);
             let none = BTreeSet::new();
-            let within = |hops: usize| {
-                self.catalog
-                    .plan(&roots, hops, &none)
-                    .map_or_else(|_| roots.clone(), |plan| plan.required)
+            let mut within = |hops: usize| match self.catalog.plan(&roots, hops, &none) {
+                Ok(plan) => {
+                    work.horizon_regions_expanded += plan.expanded_regions;
+                    work.horizon_links_examined += plan.examined_links;
+                    plan.required
+                }
+                Err(_) => roots.clone(),
             };
             let hops = |radius: Option<u32>, default: u32| radius.unwrap_or(default) as usize;
             let active = hops(root.active_radius, self.streaming.active_radius);
@@ -105,7 +125,7 @@ impl Regions {
         &mut self,
         game: &mut Game,
         made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
-    ) -> Result<TransitionReport, Failure> {
+    ) -> Result<TransitionWork, Failure> {
         self.transition_with(game, made, BTreeSet::new())
     }
 
@@ -117,21 +137,35 @@ impl Regions {
         game: &mut Game,
         made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
         extra: BTreeSet<RegionId>,
-    ) -> Result<TransitionReport, Failure> {
-        let mut t = self.horizon(game);
+    ) -> Result<TransitionWork, Failure> {
+        let mut work = TransitionWork::default();
+        let mut t = self.horizon(game, &mut work);
         let known: Vec<_> = extra
             .into_iter()
             .filter(|r| game.region_state(*r).is_some())
             .collect();
         t.active.extend(known.iter().copied());
         t.loaded.extend(known);
+        let (settled, pins) = game.settle_counted(&t);
+        work.pinned_actors = pins.actors;
+        work.reach_lookups = pins.reaches;
+        if game.regions_are(&settled) {
+            return Ok(work);
+        }
+        // Something changes: keep the game as it was, so callers can tell
+        // which observers' views changed.
+        work.before = Some(game.clone());
+        let reads = self.reads;
         let mut store = Pending {
             regions: self,
             made,
         };
-        game.transition_regions(&t, &mut store)
-            .map(|(_, report)| report)
-            .map_err(|_| storage_failure())
+        let (_, report, _) = game
+            .transition_regions_counted(&settled, &mut store)
+            .map_err(|_| storage_failure())?;
+        work.report = report;
+        work.records_read = self.reads - reads;
+        Ok(work)
     }
 
     /// Keep records a published command made.
@@ -173,6 +207,14 @@ impl Regions {
         });
     }
 
+    /// Drop every record that's on disk from memory, as eviction would with
+    /// enough records.
+    #[cfg(test)]
+    pub(crate) fn evict_durable(&mut self) {
+        let durable = &self.durable;
+        self.resident.retain(|id, _| !durable.contains(id));
+    }
+
     pub(crate) fn resident_count(&self) -> usize {
         self.resident.len()
     }
@@ -191,7 +233,9 @@ impl RecordStore for Regions {
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
-        self.package.build_region(self.seed, region.0).ok()
+        self.package
+            .build_region(self.seed, &self.index, region.0)
+            .ok()
     }
 }
 
