@@ -857,6 +857,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tor-client-common",
+ "tor-client-hack",
  "tor-protocol",
 ]
 
@@ -871,6 +872,17 @@ dependencies = [
  "tokio-tungstenite",
  "tor-protocol",
  "uuid",
+]
+
+[[package]]
+name = "tor-client-hack"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
+ "tor-client-common",
+ "tor-protocol",
 ]
 
 [[package]]

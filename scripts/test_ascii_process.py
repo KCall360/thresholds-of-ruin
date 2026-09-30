@@ -207,6 +207,67 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)
 
+    def start_package(self, name):
+        self.server.stop()
+        self.save = self.save.with_name(f"{name}.json")
+        scenario = text_support.ROOT / "scenarios" / "tests" / name
+        self.server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42", "--save", self.save, "--scenario", scenario])
+        self.address = json.loads(self.server.until(lambda line: line.startswith("{")))["address"]
+
+    def test_flat_map_status_and_pits(self):
+        client, _ = self.ascii(observe=False)
+        stepped = self.key(client, "right")
+        observation = stepped["state"]["observation"]
+        tiles = stepped["map_tiles"]
+        self.assertEqual({tile["position"]["z"] for tile in tiles}, {observation["position"]["z"]})
+        player = next(tile for tile in tiles if tile["glyph"] == "@")
+        x, y = player["center"]
+        self.assertTrue(0 <= x < 1200 and 48 <= y < 768)
+        lines = stepped["status_lines"]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], f"T:{observation['tick']}  Ready  IN CONTROL")
+        self.assertEqual(lines[1], "FLOOR: stone / CEILING: stone (10 ft above feet)")
+        self.assert_pit_columns(stepped)
+        client.stop()
+
+        self.start_package("physics")
+        _, shaft = self.ascii(observe=False)
+        self.assertEqual(shaft["state"]["observation"]["tick"], 0)
+        self.assertTrue(any(tile["glyph"] == "^" for tile in shaft["map_tiles"]))
+        self.assert_pit_columns(shaft)
+
+        self.start_package("travel-setup")
+        _, corridor = self.ascii(observe=False)
+        self.assertTrue(corridor["status_lines"])
+        self.assertNotIn("FLOOR", corridor["status_lines"][1])
+        self.assertNotIn("CEILING", corridor["status_lines"][1])
+        self.assertFalse(any(tile["glyph"] == "^" for tile in corridor["map_tiles"]))
+        self.assert_pit_columns(corridor)
+
+    def assert_pit_columns(self, frame):
+        observation = frame["state"]["observation"]
+        z0 = observation["position"]["z"]
+        here = (observation["position"]["x"], observation["position"]["y"])
+        cells = {}
+        for cell in observation["visible_cells"]:
+            position = cell["position"]
+            cells[(position["x"], position["y"], position["z"])] = cell
+        tiles = {(tile["position"]["x"], tile["position"]["y"]): tile for tile in frame["map_tiles"]}
+
+        def open_cell(cell):
+            if cell is None or cell["wall"]:
+                return False
+            door = cell.get("door")
+            return door is None or door["open"]
+
+        for (x, y), tile in tiles.items():
+            standing = cells.get((x, y, z0))
+            lower = cells.get((x, y, z0 - 1))
+            if (x, y) != here and open_cell(standing) and open_cell(lower):
+                self.assertEqual(tile["glyph"], "^", (x, y))
+            if lower is None:
+                self.assertNotEqual(tile["glyph"], "^", (x, y))
+
 
 if __name__ == "__main__":
     unittest.main()

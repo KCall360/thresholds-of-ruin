@@ -6,6 +6,7 @@ members = [
     "crates/protocol",
     "crates/server",
     "crates/client-common",
+    "crates/client-hack",
     "crates/client-ascii",
     "crates/client-text",
     "crates/client-headless",
@@ -23,6 +24,7 @@ tor-world = { path = "crates/world" }
 tor-simulation = { path = "crates/simulation" }
 tor-protocol = { path = "crates/protocol" }
 tor-client-common = { path = "crates/client-common" }
+tor-client-hack = { path = "crates/client-hack" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal"] }

@@ -41,7 +41,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.key(window,"close_door")
         closed = self.key(window,"right")
         remembered = self.tile(closed,4)
-        self.assertEqual(remembered["glyph"],"!")
+        self.assertEqual(remembered["glyph"],".")
         self.assertTrue(remembered["remembered"])
         self.assertEqual(remembered["color"],0x626262)
         # Verify the actual presented pixels, not only the diagnostic model.
@@ -56,7 +56,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],closed["state"])
         shifted = self.key(window,"left")
         self.assertTrue(self.tile(shifted,5)["remembered"])
-        self.assertEqual(self.tile(shifted,5)["glyph"],"!")
+        self.assertEqual(self.tile(shifted,5)["glyph"],".")
         self.key(window,"right")
         self.key(window,"open_door")
         opened = self.key(window,"right")
@@ -85,7 +85,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.key(window,"right")
         self.key(window,"close_door")
         hidden = self.key(window,"left")
-        self.assertEqual(self.tile(hidden,-3)["glyph"],"!")
+        self.assertEqual(self.tile(hidden,-3)["glyph"],".")
         self.assertTrue(self.tile(hidden,-3)["remembered"])
         wizard.command("sync")
         self.assertNotIn("Server error",wizard.command("wizard rewind initial"))
@@ -99,7 +99,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.assertEqual(self.tile(initial,4)["glyph"],"&")
         self.assertNotIn("Server error",wizard.command("wizard wall 3 2 0 0 closed"))
         hidden = self.frame(window,lambda f:f.get("state",{}).get("revision",0)>initial["state"]["revision"])
-        self.assertEqual(self.tile(hidden,4)["glyph"],"!")
+        self.assertEqual(self.tile(hidden,4)["glyph"],".")
         self.assertTrue(self.tile(hidden,4)["remembered"])
         self.assertFalse(any(t["glyph"] == "&" for t in hidden["map_tiles"]))
         self.assertNotIn("Server error",wizard.command("wizard item token 3 3 0 0"))
@@ -113,6 +113,26 @@ class AsciiMemoryProcesses(unittest.TestCase):
         self.assertEqual(self.tile(seen,3)["glyph"],"!")
         self.assertFalse(self.tile(seen,3)["remembered"])
         self.assertEqual(self.tile(seen,4)["glyph"],"&")
+
+    def test_remembered_cell_beyond_the_old_clip_stays_drawn(self):
+        self.server(scenario="streaming-corridor")
+        window, _ = self.window()
+        found = None
+        last = None
+        for _ in range(40):
+            last = self.key(window, "right")
+            if "InvalidAction" in last.get("status", ""):
+                self.fail(last["status"])
+            found = next((tile for tile in last["map_tiles"] if tile["remembered"] and abs(tile["position"]["x"]) > 24), None)
+            if found:
+                break
+        self.assertIsNotNone(found, last["status"] if last else "no frame")
+        self.assertEqual(found["glyph"], ".")
+        self.assertEqual(found["color"], 0x626262)
+        pixels = self.capture.read_bytes().split(b"\n", 3)[3]
+        cx, cy = found["center"]
+        colors = [pixels[(y * 1200 + x) * 3:(y * 1200 + x) * 3 + 3] for y in range(cy - 4, cy + 4) for x in range(cx - 4, cx + 4)]
+        self.assertIn(bytes([98, 98, 98]), colors)
 
 
 if __name__ == "__main__":
