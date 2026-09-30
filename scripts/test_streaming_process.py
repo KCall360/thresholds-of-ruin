@@ -15,6 +15,12 @@ import test_headless_process as headless
 import test_text_process as support
 
 SCENARIO = Path(__file__).resolve().parents[1] / "scenarios/tests/streaming-corridor"
+# Two authored halls around two generated caves. Each cave's entries share a
+# row, so walking east from the start hall's portal always crosses it.
+GENERATED = SCENARIO.parent / "generated-filler"
+# From the start into the first cave, and through both caves to the far hall.
+INTO_CAVE = 12
+THROUGH_CAVES = 35
 # From the start (x = 2 in hall 1) to the middle of hall 4. There, at the
 # default radii, hall 1 is detached and hall 6 is built but frozen.
 TO_HALL_4 = 68
@@ -44,6 +50,27 @@ class StreamingProcesses(unittest.TestCase):
         for _ in range(steps):
             moved = self.act(client, {"type": "move", "direction": direction})
             self.assertIsNone(moved.get("error"), moved)
+        return moved
+
+    def east_through(self, client, steps):
+        """Walk east. The server runs the caves' rats between the
+        character's turns, so a move may come before the character is ready:
+        try again shortly. While the character is ready, game time waits for
+        it, so a fresh snapshot then shows whether a rat blocks the way, and
+        the walk waits a turn only then: the same commands every run."""
+        for _ in range(steps):
+            for _ in range(200):
+                moved = self.act(client, {"type": "move", "direction": "east"})
+                if moved.get("error") is None:
+                    break
+                now = self.request(client, {"type": "snapshot"})["state"]["observation"]
+                east = {"x": 1, "y": 0, "z": 0}
+                if now["ready"] and any(a["position"] == east for a in now["visible_actors"]):
+                    self.assertIsNone(self.act(client, {"type": "wait"}).get("error"))
+                else:
+                    time.sleep(0.05)
+            else:
+                self.fail("blocked for good: " + str(moved.get("error")))
         return moved
 
     def rows(self):
@@ -148,6 +175,40 @@ class StreamingProcesses(unittest.TestCase):
         with closing(sqlite3.connect(self.save)) as db:
             copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]
         self.assertEqual(copied, [1, 2, 3, 4, 5, 6])
+
+    def test_generated_caves_are_played_spectated_rewound_and_resumed(self):
+        server = self.server(wizard=True, scenario=GENERATED)
+        wizard, _ = self.client(headless.WIZARD_TOKEN)
+        native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
+            token=support.SPECTATOR_TOKEN)
+        ascii_support.AsciiProcesses.frame(self, native, lambda f: f["state"] is not None)
+        # Into the first cave. Rewinding and walking in again builds the same
+        # caves, so the same commands see exactly the same thing.
+        inside = self.east_through(wizard, INTO_CAVE)
+        rewound = self.command(wizard, {"type": "wizard", "command": "rewind initial"})
+        self.assertIsNone(rewound["error"], rewound["error"])
+        again = self.east_through(wizard, INTO_CAVE)
+        self.assertEqual(again["state"]["observation"], inside["state"]["observation"])
+        far = self.east_through(wizard, THROUGH_CAVES - INTO_CAVE)
+        shown = ascii_support.AsciiProcesses.frame(self, native,
+            lambda f: f["state"]["observation"]["tick"] == far["state"]["observation"]["tick"])
+        self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
+        # The rats act until the character is ready again; then time waits.
+        for _ in range(200):
+            settled = self.request(wizard, {"type": "snapshot"})["state"]["observation"]
+            if settled["ready"]:
+                break
+            time.sleep(0.05)
+        self.assertIsNone(self.request(wizard, {"type": "save"})["error"])
+        with closing(sqlite3.connect(self.save)) as db:
+            copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]
+        self.assertEqual(copied, [1, 2, 3, 4])
+        native.stop()
+        wizard.stop()
+        server.stop()
+        self.server(wizard=True, scenario=GENERATED)
+        _, resumed = self.client(headless.WIZARD_TOKEN)
+        self.assertEqual(resumed["state"]["observation"], settled)
 
     def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
         server = self.server(wizard=True)

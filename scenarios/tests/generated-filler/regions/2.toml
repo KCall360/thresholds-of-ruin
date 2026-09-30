@@ -1,0 +1,14 @@
+# Only the cave's bounds, entries and links are authored; its generator
+# fills the rest.
+id = 2
+name = "Cave"
+size = [24, 12, 1]
+anchors = { west = [0, 6, 0], east = [23, 6, 0] }
+portals = [{ at = [0, 6, 0], direction = "west", to = "1/east" }, { at = [23, 6, 0], direction = "east", to = "3/west" }]
+
+[generate]
+generator = "rooms"
+version = 1
+rooms = [3, 6]
+actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
+items = { archetypes = ["coin"], count = [2, 4] }

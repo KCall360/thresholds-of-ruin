@@ -1,0 +1,13 @@
+# A second, smaller cave: crossing the first builds it.
+id = 3
+name = "Small cave"
+size = [16, 9, 1]
+anchors = { west = [0, 4, 0], east = [15, 4, 0] }
+portals = [{ at = [0, 4, 0], direction = "west", to = "2/east" }, { at = [15, 4, 0], direction = "east", to = "4/west" }]
+
+[generate]
+generator = "rooms"
+version = 1
+rooms = [2, 4]
+actors = { archetypes = ["rat"], ai = "wander", count = [0, 2] }
+items = { archetypes = ["coin"], count = [1, 3] }

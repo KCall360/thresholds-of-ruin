@@ -1,0 +1,18 @@
+# Ordinary authored scenario; validate after every edit.
+# Two authored halls with two generated caves between them. The caves' rooms,
+# corridors, rats and coins come from their generator when first built. Each
+# cave's two entries share a row, so a corridor always joins them straight.
+format = 2
+id = "generated-filler"
+version = "1.0"
+ruleset = "dungeon-v17"
+default_character = 1
+themes = ["stone"]
+factions = { delvers = [], vermin = [] }
+ai_profiles = { wander = { memory_ticks = 200, flee_percent = 0 } }
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 5, wind_up = 20, recovery = 80, damage = { keen = 5 } } } }]
+
+[archetypes.rat]
+combat = { name = "cave rat", max_hp = 4, defense = 8, faction = "vermin", attack = { bonus = 0, wind_up = 60, recovery = 80, damage = { keen = 1 } } }
+[archetypes.coin]
+name = "copper coin"

@@ -115,7 +115,7 @@ Merged: the structural `RegionCatalog` and horizon planner, the
 `design/region-streaming-completion`, not pushed yet), one commit per slice:
 background preloading (done), per-region package files with the package pin
 and save format 14 (done), a bounded identity directory (done), generated filler
-regions, the palette protocol, palettes in the clients, then docs. Run
+regions (done), the palette protocol, palettes in the clients, then docs. Run
 `scripts/verify.py quick` before each slice's commit and `full` once before
 pushing; review the whole branch for bugs and testing-policy gaps before
 pushing. **Merge only with the maintainer's approval.**
@@ -135,7 +135,8 @@ Decisions agreed with the maintainer:
   is gone (no compatibility readers). Saves pin their package and copy each
   region file they build from; resuming with regions still unbuilt needs the
   package directory.
-- Generated regions fill gaps between authored ones (rooms and corridors); palettes
+- Generated regions fill gaps between authored ones (rooms and corridors), with
+  identities fixed by region id, so nothing depends on build order; palettes
   are asset ids that clients resolve through built-in tables.
 - Performance fixes must help large maps, not just small ones; prove scaling
   with operation counts at more than one size (16, 256 and 4,096 regions).

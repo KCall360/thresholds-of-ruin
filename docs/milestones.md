@@ -162,8 +162,10 @@ move to the regions their reference points ask for after every command, and
 keep detached regions on disk, and the server builds or reads the regions just
 beyond the loaded ones in the background. Packages keep one file per region with
 a generated index, so a game reads a region's file only when it builds it, and
-saves pin their package, copying each region file they build from. Generation
-and palette delivery aren't implemented; see
+saves pin their package, copying each region file they build from. Regions can
+be generated between authored ones, the same in any build order; see
+[generated regions](scenario-packages.md#generated-regions). Palette delivery
+isn't implemented; see
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only

@@ -147,6 +147,10 @@ pub struct RegionDef {
     pub items: Vec<Item>,
     #[serde(default)]
     pub actors: Vec<Actor>,
+    /// A generated region's recipe: the generator fills the region on first
+    /// build. See [`crate::generator`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate: Option<crate::generator::Generate>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -263,6 +267,9 @@ pub struct IndexedRegion {
     pub actors: Vec<IndexedActor>,
     pub items: Vec<IndexedItem>,
     pub doors: Vec<u64>,
+    /// Filled by a generator; its identities aren't known until then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -313,6 +320,7 @@ impl IndexedRegion {
                 })
                 .collect(),
             doors: def.doors.iter().map(|d| d.id).collect(),
+            generated: def.generate.is_some(),
         }
     }
 }
@@ -603,7 +611,7 @@ impl Package {
             content_hash,
             files,
             regions: index.regions.len(),
-            coverage: "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof".into(),
+            coverage: "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof".into(),
         };
         Ok(Self {
             selected: manifest.default_character,
@@ -742,7 +750,26 @@ pub fn validate(root: &Path) -> Result<Certificate, Failure> {
     let mut package = read_package(root)?;
     package.check()?;
     for def in package.region_defs()? {
+        if let Some(generate) = &def.generate {
+            crate::generator::check(&def, generate)?;
+        }
         package.check_region(&def)?;
+    }
+    for seed in [0, 1, 42] {
+        let index = package.index(seed)?;
+        for entry in package.index.regions.iter().filter(|r| r.generated) {
+            let region = index.region(&package, entry.id)?;
+            let again = index.region(&package, entry.id)?;
+            let bytes = |r: &RegionDef| serde_json::to_vec(r).map_err(|e| fail(e.to_string()));
+            require(
+                bytes(&region)? == bytes(&again)?,
+                format!("Region {}: nondeterministic generation", entry.id),
+            )?;
+            require(
+                crate::generator::entries_connected(&region),
+                format!("Region {}: generated entries aren't connected", entry.id),
+            )?;
+        }
     }
     for character in &package.manifest.characters {
         package.selected = character.id;
@@ -810,6 +837,28 @@ pub fn streaming_corridor(
     halls: u64,
     seed: u64,
 ) -> Result<Scenario, Failure> {
+    corridor(root, out, halls, seed, false)
+}
+
+/// [`streaming_corridor`], with every hall after the first generated: each
+/// keeps its bounds and links, and entries on row 0 only, so a straight
+/// corridor along row 0 always crosses it.
+pub fn generated_corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+) -> Result<Scenario, Failure> {
+    corridor(root, out, halls, seed, true)
+}
+
+fn corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+    generated: bool,
+) -> Result<Scenario, Failure> {
     require(
         (2..=MAX_REGIONS as u64).contains(&halls),
         format!("A corridor has 2 to {MAX_REGIONS} halls"),
@@ -850,6 +899,18 @@ pub fn streaming_corridor(
             hall.portals.push(Portal {
                 to: format!("{}/east", id - 1),
                 ..west.clone()
+            });
+        }
+        if generated && id > 1 {
+            hall.anchors.remove("start");
+            hall.actors.clear();
+            hall.items.clear();
+            hall.generate = Some(crate::generator::Generate {
+                generator: crate::generator::ROOMS.into(),
+                version: crate::generator::ROOMS_VERSION,
+                rooms: [1, 3],
+                actors: None,
+                items: None,
             });
         }
         regions.push(hall);
@@ -1087,6 +1148,25 @@ impl Package {
     /// What only a region's own file can show: its actors' controllers and
     /// combat. The validator checks every region; building one checks it.
     fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
+        if let Some(generate) = &r.generate {
+            let archetypes = generate
+                .actors
+                .iter()
+                .flat_map(|p| &p.archetypes)
+                .chain(generate.items.iter().flat_map(|p| &p.archetypes));
+            for archetype in archetypes {
+                require(
+                    self.manifest.archetypes.contains_key(archetype),
+                    format!("Region {}: unknown archetype {archetype}", r.id),
+                )?;
+            }
+            if let Some(pool) = &generate.actors {
+                require(
+                    self.manifest.ai_profiles.contains_key(&pool.ai),
+                    format!("Region {}: unknown AI profile {}", r.id, pool.ai),
+                )?;
+            }
+        }
         for a in &r.actors {
             require(
                 matches!(a.controller.as_str(), "external" | "ai")
@@ -1180,13 +1260,20 @@ impl Package {
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        let defs = self.region_defs()?;
+        let defs = self
+            .index
+            .regions
+            .iter()
+            .map(|entry| index.region(self, entry.id))
+            .collect::<Result<Vec<_>, _>>()?;
         for r in &defs {
             self.check_region(r)?;
         }
-        let all: Vec<&RegionDef> = defs.iter().collect();
+        let (actors, items, doors) = index.ceilings;
+        game.reserve_identities(actors, items, doors);
+        let all: Vec<&RegionDef> = defs.iter().map(|d| &**d).collect();
         self.add_geometry(&mut game, &all)?;
-        for r in &defs {
+        for r in &all {
             self.add_structure(&mut game, r, &index.anchors)?;
         }
         for (name, position) in &index.anchors {
@@ -1260,12 +1347,45 @@ impl Package {
             )?,
             ceiling(&mut regions.iter().flat_map(|r| r.doors.iter().copied()))?,
         );
+        // Generated regions take identities above every authored one (even
+        // omitted characters', so the ranges don't depend on the selection),
+        // each region in its own range; the ceilings cover them all.
+        let generated_base = (
+            ceiling(
+                &mut self
+                    .manifest
+                    .characters
+                    .iter()
+                    .map(|c| c.id)
+                    .chain(regions.iter().flat_map(|r| r.actors.iter().map(|a| a.id))),
+            )?,
+            ceiling(&mut regions.iter().flat_map(|r| r.items.iter().map(|i| i.id)))?,
+        );
+        // Reserved up to a fixed end, so the ceilings (which every game
+        // state records) don't grow with the package.
+        let mut ceilings = ceilings;
+        if let Some(last) = regions.iter().filter(|r| r.generated).map(|r| r.id).max() {
+            require(
+                last <= MAX_REGIONS as u64,
+                format!("Generated region ids must be at most {MAX_REGIONS}"),
+            )?;
+            let end = |base: u64| {
+                (MAX_REGIONS as u64)
+                    .checked_mul(crate::generator::IDENTITY_STRIDE)
+                    .and_then(|n| n.checked_add(base))
+                    .ok_or_else(|| fail("Authored identity too large"))
+            };
+            ceilings.0 = ceilings.0.max(end(generated_base.0)?);
+            ceilings.1 = ceilings.1.max(end(generated_base.1)?);
+        }
         Ok(PackageIndex {
             anchors,
             anchors_by_region,
             homes,
             spawns: spawns_by_region,
             ceilings,
+            seed,
+            generated_base,
             appearances: self.appearance_mapping(seed)?,
             lookups: std::cell::Cell::new(0),
         })
@@ -1334,6 +1454,26 @@ impl Package {
             .index
             .region(region)
             .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        if r.generated {
+            let def = index.region(self, region)?;
+            return Ok(tor_simulation::UnbuiltRegion {
+                region: region_of(r.id, &r.name, r.size)?,
+                chamber: r.chamber,
+                identities: tor_simulation::RegionIdentities {
+                    actors: def
+                        .actors
+                        .iter()
+                        .map(|a| tor_simulation::ActorId(a.id))
+                        .collect(),
+                    items: def
+                        .items
+                        .iter()
+                        .map(|i| tor_simulation::ItemId(i.id))
+                        .collect(),
+                    doors: BTreeSet::new(),
+                },
+            });
+        }
         Ok(tor_simulation::UnbuiltRegion {
             region: region_of(r.id, &r.name, r.size)?,
             chamber: r.chamber,
@@ -1520,6 +1660,16 @@ impl Package {
             .flat_map(|r| index.spawns.get(r).into_iter().flatten())
             .copied()
             .collect();
+        // A generated region's actors come from its materialized definition.
+        for r in regions.iter().filter(|r| r.generate.is_some()) {
+            for a in &r.actors {
+                let ticks = a
+                    .turn_ticks
+                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .unwrap_or(100);
+                spawns.push((a.id, loc(r.id, a.at), ticks));
+            }
+        }
         spawns.sort_by_key(|(id, _, _)| *id);
         for (id, at, ticks) in spawns {
             game.spawn_authored_actor(
@@ -1782,17 +1932,51 @@ pub(crate) struct PackageIndex {
     homes: BTreeMap<u64, Location>,
     /// Actors by the region they start in: identity, start, turn length.
     spawns: BTreeMap<u64, Vec<(u64, Location, u64)>>,
-    /// One more than the largest authored actor, item and door identity.
+    /// One more than the largest actor, item and door identity the package
+    /// can make, generated ones included.
     ceilings: (u64, u64, u64),
+    /// The game's seed: with a region's id and file, it seeds its generator.
+    seed: u64,
+    /// Where generated actor and item identity ranges start.
+    generated_base: (u64, u64),
     appearances: BTreeMap<String, String>,
     /// Region definitions handed out, for scaling contracts.
     lookups: std::cell::Cell<usize>,
 }
 
 impl PackageIndex {
+    /// A region's definition: authored, or materialized by its generator.
     fn region(&self, package: &Package, id: u64) -> Result<Arc<RegionDef>, Failure> {
         self.lookups.set(self.lookups.get() + 1);
-        package.region_def(id)
+        let def = package.region_def(id)?;
+        let Some(generate) = &def.generate else {
+            return Ok(def);
+        };
+        let first = |base: u64| {
+            (id - 1)
+                .checked_mul(crate::generator::IDENTITY_STRIDE)
+                .and_then(|n| n.checked_add(base))
+                .ok_or_else(|| fail("Generated region id too large"))
+        };
+        Ok(Arc::new(crate::generator::materialize(
+            &def,
+            generate,
+            self.region_seed(id, &package.index.region(id).expect("defined region").hash),
+            first(self.generated_base.0)?,
+            first(self.generated_base.1)?,
+        )?))
+    }
+
+    /// A generated region's seed, from the game's seed and the region's own
+    /// file: its content depends on nothing else in the package, and never on
+    /// which regions were generated before.
+    fn region_seed(&self, region: u64, file_hash: &str) -> u64 {
+        let mut hash = Sha256::new();
+        hash.update(self.seed.to_le_bytes());
+        hash.update(file_hash.as_bytes());
+        hash.update(region.to_le_bytes());
+        let bytes = <[u8; 32]>::from(hash.finalize());
+        u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes"))
     }
 
     /// Region definitions handed out so far.

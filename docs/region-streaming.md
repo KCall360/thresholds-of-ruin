@@ -476,11 +476,7 @@ base to compare them against.
 
 ### Later slices
 
-1. **Generation:** a procedural region source. A generated region's content
-   mustn't depend on the order regions were built in, so each region gets its
-   own random seed; generated identities come from the game-wide allocators,
-   which replay reproduces.
-2. **Asset palettes.**
+1. **Asset palettes.**
 
 ### Lifecycle verification
 

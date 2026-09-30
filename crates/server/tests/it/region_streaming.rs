@@ -355,6 +355,58 @@ fn a_game_holds_only_the_regions_it_played_however_large_the_package() {
     assert_eq!(small, held(4096));
 }
 
+/// Generated halls cost the same to build, and a game holds the same, however
+/// long the corridor of them is.
+#[test]
+fn generated_regions_cost_the_same_however_large_the_package() {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+    let directory = tempfile::tempdir().unwrap();
+    let work = |halls: u64| {
+        let out = directory.path().join(format!("generated-{halls}"));
+        let scenario = scenario_package::generated_corridor(&root, &out, halls, 5).unwrap();
+        let mut engine = Engine::memory(scenario).unwrap();
+        let mut totals = [0usize; 6];
+        let mut step = 0;
+        // Row 0 is open in every generated hall.
+        for direction in
+            std::iter::once(Direction::North).chain(std::iter::repeat_n(Direction::East, TO_HALL_4))
+        {
+            let revision = engine.revision(ActorId(1)).unwrap();
+            step += 1;
+            let (_, profile) = engine
+                .command_profiled(
+                    "bench",
+                    "test",
+                    ActorId(1),
+                    &format!("step-{step}"),
+                    &engine.branch().clone(),
+                    Command::Act {
+                        expected_revision: revision,
+                        action: Action::Move { direction },
+                    },
+                )
+                .unwrap_or_else(|e| panic!("step {step}: {e}"));
+            for (total, count) in totals.iter_mut().zip([
+                profile.region_changes,
+                profile.horizon_regions_expanded,
+                profile.horizon_links_examined,
+                profile.regions_built,
+                profile.region_records_read,
+                profile.scene_calls,
+            ]) {
+                *total += count;
+            }
+        }
+        let bytes = engine.profile_checkpoint_encoding().unwrap().0;
+        (totals, bytes)
+    };
+    let small = work(16);
+    assert!(small.0[3] > 0, "the walk built generated halls: {small:?}");
+    assert_eq!(small, work(256));
+    assert_eq!(small, work(4096));
+}
+
 /// An actor a client controls keeps its own region in play, however far it
 /// is from the default character: it gets a reference point like a
 /// character does.

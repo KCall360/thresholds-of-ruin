@@ -8,6 +8,7 @@ mod developer;
 mod diagonal;
 mod doors;
 mod dungeon;
+mod generated_regions;
 mod geometry;
 mod history;
 mod items;

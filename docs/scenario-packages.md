@@ -86,10 +86,52 @@ an `ai` identifier. AI identifiers resolve to manifest `ai_profiles`; see [dunge
 Region gravity vectors/sparse overrides, body declarations, initial velocity,
 and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
-`continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Generation,
-dependency registries and equipment aren't supported yet. The current
+`continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Regions
+can be generated; see [generated regions](#generated-regions). Dependency
+registries and equipment aren't supported yet. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.
+
+## Generated regions
+
+A region file with a `[generate]` table authors only the region's structure:
+`id`, `name`, `size`, optional `zone` and `chamber`, its entry `anchors` and its
+`portals`. Walls, openings, places, doors, items, actors and gravity overrides
+are refused there. The generator fills the region the first time it's built:
+
+```toml
+[generate]
+generator = "rooms"
+version = 1
+rooms = [3, 6]
+actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
+items = { archetypes = ["coin"], count = [2, 4] }
+```
+
+- `rooms` (the only generator, version 1) keeps a clearing two cells wide
+  around every anchor, places 1–16 rooms, and joins the anchors and rooms in
+  turn with corridors, so every entry reaches every other. Two entries on the
+  same row are joined by a straight corridor along it. Actors (up to 64, each
+  an archetype from the pool, run by the named AI profile) and items (up to
+  64) go on open floor away from the entries.
+- A region's content depends only on the game's seed, the region's own file
+  and its id: never on the rest of the package, or on which regions were
+  built before. Its actors and items take identities from a range of 256 fixed
+  by its region id, above every authored identity; generated region ids are
+  at most 65,536, and a game reserves the whole space. So identities don't
+  depend on build order either, and the preloader can build generated regions
+  ahead of need.
+- Declaring a generated region (see
+  [region streaming](region-streaming.md#never-built-regions-and-region-sources))
+  runs its generator to learn the identities it will hold.
+- Saves copy a generated region's file like any other, and replay regenerates
+  it from the copy.
+- The validator checks each generated region at seeds 0, 1 and 42:
+  generating it twice gives the same result, and its entries are connected.
+  Building the whole package, as validation does, also checks its links.
+
+`scenarios/tests/generated-filler` has two authored halls around two
+generated caves.
 
 ## Validation, persistence, and tests
 

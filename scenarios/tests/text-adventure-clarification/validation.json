@@ -8,5 +8,5 @@
   },
   "regions": 2,
   "model_hash": "ed543859b0e184088d760182142a8c6ca12912396f14fa91ab18499ff850ee9b",
-  "coverage": "all authored regions; all character starts; deterministic construction twice at seeds 0, 1, 42; no generation or winnability proof"
+  "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
 }
