@@ -304,7 +304,7 @@ not make those items worse.
 
 **Coverage so far.**
 
-- *World:* `crates/world/tests/sight3d.rs` covers:
+- *World:* `crates/world/tests/it/sight3d.rs` covers:
   - open-room floors and ceilings at one-, two- and three-cell eye heights
   - the waist wall, head-height air, and one-way sight
   - reciprocity, and equivalence with 2D shadowcasting
@@ -319,14 +319,14 @@ not make those items worse.
     beyond it from a humanoid
   - blocks touching only along a vertical or horizontal edge, which sight
     passes between in both directions
-- *Scene cache:* `crates/world/tests/sight_cache.rs` compares cached scenes
+- *Scene cache:* `crates/world/tests/it/sight_cache.rs` compares cached scenes
   with the uncached builder under random wall and door edits, clones and
   rewinds, in the latency fixture, the first dungeon's chambers (rim
   projection), and a chain of small rooms whose views end just past a join.
   It also checks that edits invalidate only scenes that read their region, and
   that checkpoint worlds differing only in doors don't share scenes. Each of
   these tests fails if the matching invalidation is removed.
-- *Game:* `crates/simulation/tests/sight.rs` checks that sight starts at the
+- *Game:* `crates/simulation/tests/it/sight.rs` checks that sight starts at the
   declared eye cell, with offsets kept at the feet, for an upright humanoid and
   for a body lying sideways after a rotated portal.
 - *End to end:* `scripts/test_sight_process.py` drives the real server with
@@ -335,7 +335,7 @@ not make those items worse.
   `sight-3d-giant` package runs the same hall as a three-cell giant and as a
   two-cell humanoid: only the giant sees the creature behind the wall.
 - *Server:* repeated occurrences through a portal loop stay disclosed through
-  the server (`crates/server/tests/place_hints.rs`).
+  the server (`crates/server/tests/it/place_hints.rs`).
 - Every case in the verification plan is now covered.
 
 ## Decisions
@@ -362,7 +362,7 @@ occlusion masks (layer 3) haven't been needed.
 ## Reference implementation findings
 
 The reference is `World::eye_scene_reference`, in `crates/world/src/sight3d.rs`,
-with tests in `crates/world/tests/sight3d.rs`. Gameplay uses the accelerated,
+with tests in `crates/world/tests/it/sight3d.rs`. Gameplay uses the accelerated,
 cached `World::eye_scene`.
 
 - **Portals and rotations.** A room split across a join looks identical to the

@@ -50,7 +50,7 @@ There is no persistent visibility cache to invalidate after a door edit or rewin
 
 ## Verification and performance
 
-`crates/world/tests/shadowcasting.rs` exhausts all 512 patterns of a 3x3 obstacle
+`crates/world/tests/it/shadowcasting.rs` exhausts all 512 patterns of a 3x3 obstacle
 area and tests every floor pair for reciprocity. It also checks door corners,
 straight shadows, convex room walls, diagonal blockers, rotated split-room
 invariance from both sides, and bounded repeated appearances through cycles.

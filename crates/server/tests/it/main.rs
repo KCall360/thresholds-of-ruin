@@ -1,0 +1,29 @@
+//! Integration tests for this crate, compiled as one binary so each build
+//! links one test executable instead of one per file.
+
+mod background_save;
+mod checkpoints;
+mod descriptions;
+mod developer;
+mod diagonal;
+mod doors;
+mod dungeon;
+mod geometry;
+mod history;
+mod items;
+mod materials;
+mod performance_contracts;
+mod performance_workloads;
+mod physics;
+mod place_hints;
+mod process;
+mod recovery_fixtures;
+mod region_horizon;
+mod region_streaming;
+mod scenario_packages;
+mod streaming_websocket;
+mod support;
+mod travel;
+mod websocket;
+mod wizard;
+mod wizard_websocket;

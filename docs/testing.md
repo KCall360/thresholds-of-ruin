@@ -37,13 +37,13 @@ cover the rest of the contribution workflow.
 | Layer | What it proves | Where it lives |
 | --- | --- | --- |
 | Unit | Individual rules and data structures behave correctly, including boundaries and overflow | `#[cfg(test)]` modules inside each crate |
-| Crate integration | Public APIs of one crate work together | `crates/<crate>/tests/*.rs` |
+| Crate integration | Public APIs of one crate work together | `crates/<crate>/tests/it/*.rs`, compiled as one binary per crate |
 | Cross-crate integration | Simulation, world, and server behave correctly together | `crates/test-support/tests`, `crates/server/tests` |
-| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering | `crates/server/tests/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` |
-| Persistence and recovery | Saves, checkpoints, crash rollback, corruption, and replay | `crates/server/tests/background_save.rs`, `checkpoints.rs`, `recovery_fixtures.rs` |
+| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` |
+| Persistence and recovery | Saves, checkpoints, crash rollback, corruption, and replay | `crates/server/tests/it/background_save.rs`, `checkpoints.rs`, `recovery_fixtures.rs` |
 | Client model | Parsing, presentation models, input mapping, and shared client state | `crates/client-*/tests` |
 | Actual-process acceptance | The real server and clients work end to end | `scripts/test_*_process.py` |
-| Scenario packages | Authored content validates and loads | `scenarios/`, `crates/server/tests/scenario_packages.rs` |
+| Scenario packages | Authored content validates and loads | `scenarios/`, `crates/server/tests/it/scenario_packages.rs` |
 | Documentation | Local links resolve, guides are indexed, and stated versions match the code | `scripts/test_documentation.py` |
 | Performance tooling | Comparison logic and the performance ledger's format (never timing thresholds) | `scripts/test_perf_compare.py`, `scripts/test_perf_ledger.py` |
 | Dependency boundaries | Crates only depend on permitted crates | `scripts/check_architecture.py`, `scripts/test_check_architecture.py` |
@@ -126,7 +126,70 @@ When you find or fix a bug:
 
 ## Running the checks
 
-Run the full suite before publishing a change:
+**The tiers change when checks run, never what gets tested.** Every rule above
+still applies to every change. That includes TDD, tests at every layer that
+changes, an actual-process acceptance test for every user-visible feature, and
+a regression test for every bug. A tier can only run tests that exist, so a
+change that adds a feature or fixes a bug without adding its tests is
+incomplete, however green the tiers look. Tiered runs only save time
+because the suite is complete and CI runs all of it.
+
+[`scripts/verify.py`](../scripts/verify.py) runs these checks in tiers. It
+writes each step's log to the gitignored local directory, checks exit codes, and prints a compact
+table showing which steps passed, failed, or didn't run, with their durations.
+Each tier has its own job, and none of them is optional:
+
+| Tier | Required | What it runs | Why it matters |
+| --- | --- | --- | --- |
+| `quick` | While iterating, after each meaningful edit | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | The TDD loop: confirm the new test fails first, then passes, and catch regressions in affected code within minutes instead of at push time |
+| `push` (default) | **Before every push** | Every debug check CI runs, plus release Rust tests and release process tests for the affected packages | Catches regressions anywhere in the workspace and in any client, plus release-only timing and ordering problems in the changed code, before anyone else sees the branch |
+| `full` | **Required** for save-format, protocol, ruleset, persistence, or storage changes, and for toolchain or dependency updates. Also required when CI can't run, and on request | Everything CI runs on one platform, debug and release | These changes can break any layer in either profile. A local full run catches that before CI does, and substitutes for CI when CI is unavailable |
+| CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
+
+When a feature is implemented or a bug is fixed, add its tests to the suite
+in the same change, at the layers described in
+[required test layers](#required-test-layers) and
+[bugs and regressions](#bugs-and-regressions):
+
+- **New feature:** unit tests for new rules, integration tests where it crosses
+  crate boundaries, protocol, persistence, and client-model tests where those
+  change, and an actual-process acceptance test (`scripts/test_*_process.py`)
+  that launches the real server and clients.
+- **Bug fix:** a regression test at the lowest layer that reproduces it,
+  confirmed to fail before the fix. Extend the relevant process test too if the
+  bug was user-visible.
+- **Latency-sensitive behavior:** extend the performance workloads and
+  contracts (see [performance testing](#performance-testing)).
+
+Put new Rust integration tests in the crate's single test binary
+(`crates/<crate>/tests/it/`) as a module listed in `tests/it/main.rs`. Put new
+process tests in `scripts/test_*_process.py`, where every tier finds them
+automatically. A process test for a new client binary also needs an entry in
+`verify.py`'s `CLIENT_BINARIES`, and `scripts/test_verify.py` must cover it.
+
+```sh
+python scripts/verify.py quick
+python scripts/verify.py            # push tier
+python scripts/verify.py full --rerun-failed
+```
+
+The affected packages are the changed crates plus every workspace crate that
+depends on them. Shared inputs (`Cargo.lock`, toolchain, scenarios) and any
+path the script doesn't recognize select everything, so a tier can run more
+than it needs but never less. A change to a runtime crate runs every process
+test. A change to a client, or to a process-test helper script, runs the
+process tests that can reach it.
+
+The script chooses `CARGO_BUILD_JOBS` from free memory, refuses to start while
+another cargo or rustc process is running, and never overlaps its own steps.
+`--rerun-failed` reruns failed Python tests once. The step stays failed, and
+the summary says whether the rerun passed, so an intermittent failure is
+visible instead of hidden.
+
+A lower tier never replaces a higher one when that one is required, and no tier
+replaces CI. The full Windows and Linux matrix below must pass on the final
+commit before merging. The individual commands, which the
+`full` tier runs, are:
 
 ```sh
 cargo fmt --all --check
