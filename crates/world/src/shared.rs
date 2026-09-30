@@ -23,6 +23,13 @@ impl<T> Shared<T> {
     pub fn new(value: T) -> Self {
         Self(Arc::new(value))
     }
+    /// The value, copied only if something else still shares it.
+    pub fn into_inner(self) -> T
+    where
+        T: Clone,
+    {
+        Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+    }
     /// Diagnostic ownership check; never use pointer identity for game decisions.
     pub fn shares_storage(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)

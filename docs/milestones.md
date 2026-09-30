@@ -159,8 +159,9 @@ can also start with no region built: a scenario package builds each region
 when it's first loaded, with the same result as building everything at once.
 Package games now stream: they start with the regions their characters need,
 move to the regions their reference points ask for after every command, and
-keep detached regions on disk (save format 13). Background preloading,
-larger scenarios, generation and palette delivery aren't implemented; see
+keep detached regions on disk (save format 13), and the server builds or reads
+the regions just beyond the loaded ones in the background. Larger scenarios,
+generation and palette delivery aren't implemented; see
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only

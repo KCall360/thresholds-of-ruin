@@ -43,6 +43,9 @@ STREAM_CASES = {"stream-r16-memory", "stream-r16-durable", "stream-r256-memory",
 # on the corridor's length.
 STREAM_BOUNDS = {"horizon_regions_expanded": 8, "horizon_links_examined": 16, "pinned_actors": 2,
                  "reach_lookups": 2, "region_records_read": 4, "regions_built": 4, "region_changes": 1}
+# What the preloader is asked for after each command: one hop beyond the
+# loaded regions. Recorded when the run preloads.
+PRELOAD_BOUNDS = {"preload_jobs": 4, "preload_regions_expanded": 8, "preload_links_examined": 16}
 
 
 def validate_stream(rows, case):
@@ -68,13 +71,16 @@ def validate_stream(rows, case):
         profile = sample["profile"]
         assert profile["simulation_transitions"] == 1
         assert profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1
-        for name, bound in STREAM_BOUNDS.items():
+        bounds = STREAM_BOUNDS | (PRELOAD_BOUNDS if meta.get("preloading") else {})
+        for name, bound in bounds.items():
             assert 0 <= profile[name] <= bound, (case, name, profile[name])
         assert sample["history_end"] == history and sample["rewind_count"] <= 128
         if meta["storage"] == "background_sqlite_journal":
             status = sample["save_status"]
             assert status["accepted_sequence"] == history and status["error"] is None
     assert any(s["profile"]["region_changes"] for s in samples), (case, "nothing streamed")
+    if meta.get("preloading"):
+        assert any(s["profile"]["preload_jobs"] for s in samples), (case, "nothing preloaded")
     assert end["history_end"] == history
     assert end["recovery"]["records_loaded"] == history
     if meta["storage"] == "background_sqlite_journal":

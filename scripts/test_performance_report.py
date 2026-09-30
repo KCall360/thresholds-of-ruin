@@ -1,5 +1,5 @@
 import unittest
-from performance_report import SPEC, STREAM_BOUNDS, expected_actions, validate, validate_work
+from performance_report import PRELOAD_BOUNDS, SPEC, STREAM_BOUNDS, expected_actions, validate, validate_work
 
 
 class PerformanceReportTests(unittest.TestCase):
@@ -103,15 +103,16 @@ class SavedDiscoveryTests(unittest.TestCase):
             validate_saved_discovery(meta,samples,end)
 
 
-def stream_rows(cycles=1, **work):
-    profile = {name: 0 for name in STREAM_BOUNDS}
+def stream_rows(cycles=1, preloading=False, **work):
+    profile = {name: 0 for name in STREAM_BOUNDS | PRELOAD_BOUNDS}
     profile.update(simulation_transitions=1, candidate_captures=1, rollback_snapshots=1)
     rows = [{"kind": "stream", "case": "stream-r16-memory", "workload": "streaming-v1", "cycles": cycles,
-             "steps_per_cycle": 200, "storage": "memory"}]
+             "steps_per_cycle": 200, "storage": "memory", "preloading": preloading}]
     history = 0
     labels = (["walk_east"]*100 + ["walk_west"]*100) * cycles
     for index, label in enumerate(labels):
-        sample_profile = dict(profile, region_changes=int(index == 50), **work)
+        sample_profile = dict(profile, region_changes=int(index == 50),
+                              preload_jobs=int(preloading and index == 50), **work)
         rows.append({"kind": "sample", "case": "stream-r16-memory", "actor": 1, "label": label,
                      "history_start": history, "history_end": history + 1, "rewind_count": 0,
                      "profile": sample_profile})
@@ -129,6 +130,20 @@ class StreamingValidationTests(unittest.TestCase):
     def test_unbounded_transition_work_fails(self):
         with self.assertRaises(AssertionError):
             validate(stream_rows(horizon_regions_expanded=64), selected_case="stream-r16-memory")
+
+    def test_a_preloading_walk_with_bounded_preload_work_passes(self):
+        validate(stream_rows(preloading=True), selected_case="stream-r16-memory")
+
+    def test_unbounded_or_missing_preload_work_fails(self):
+        with self.assertRaises(AssertionError):
+            validate(stream_rows(preloading=True, preload_links_examined=64),
+                     selected_case="stream-r16-memory")
+        rows = stream_rows(preloading=True)
+        for row in rows:
+            if row["kind"] == "sample":
+                row["profile"]["preload_jobs"] = 0
+        with self.assertRaises(AssertionError):
+            validate(rows, selected_case="stream-r16-memory")
 
     def test_a_short_walk_or_missing_completion_fails(self):
         rows = stream_rows()

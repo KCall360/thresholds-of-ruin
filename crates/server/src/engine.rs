@@ -307,6 +307,14 @@ pub struct CommandProfile {
     pub reach_lookups: usize,
     pub region_records_read: usize,
     pub regions_built: usize,
+    /// Builds and reads the preloader had ready. Depends on timing, unlike
+    /// the other counts.
+    pub regions_prepared: usize,
+    /// Background preloading: what it was asked for after the command, and
+    /// the deterministic work of choosing it.
+    pub preload_jobs: usize,
+    pub preload_regions_expanded: usize,
+    pub preload_links_examined: usize,
 }
 
 /// Startup measurements; retained history is read but only the checkpoint tail is simulated.
@@ -472,14 +480,16 @@ impl Candidate {
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
     }
-    fn publish(self, engine: &mut Engine) {
+    /// Publish, then ask the preloader for what the next transitions are
+    /// likely to need.
+    fn publish(self, engine: &mut Engine) -> Option<crate::regions::PreloadWork> {
         engine.current_branch = self.current_branch;
         engine.boundaries = self.boundaries;
         engine.game = self.game;
         engine.revisions = self.revisions;
-        if let Some(regions) = &mut engine.regions {
-            regions.publish(self.made);
-        }
+        let regions = engine.regions.as_mut()?;
+        regions.publish(self.made);
+        regions.preload(&engine.game)
     }
 
     /// Move to the regions the reference points ask for. When anything
@@ -553,6 +563,7 @@ impl Candidate {
             profile.reach_lookups += work.reach_lookups;
             profile.region_records_read += work.records_read;
             profile.regions_built += report.built.len();
+            profile.regions_prepared += work.prepared;
         }
         if let Some(before) = work.before {
             // Only observers whose view the transition changed move on, so
@@ -714,6 +725,28 @@ impl Engine {
         engine.lock = Some(lock);
         engine.store = Some(store);
         Ok(engine)
+    }
+    /// Build regions and read region rows in the background, just beyond
+    /// what the reference points keep loaded. Games play identically with or
+    /// without it; replay and recovery don't use it. Does nothing in a game
+    /// that doesn't stream.
+    pub fn start_preloading(&mut self) {
+        if let Some(regions) = &mut self.regions {
+            regions.start_preloading();
+            regions.preload(&self.game);
+        }
+    }
+    pub fn stop_preloading(&mut self) {
+        if let Some(regions) = &mut self.regions {
+            regions.stop_preloading();
+        }
+    }
+    /// Wait until the preloader has done what it was asked for. For tests
+    /// and benchmarks that measure the prepared path; commands never wait.
+    pub fn settle_preloading(&self) {
+        if let Some(regions) = &self.regions {
+            regions.settle_preloading();
+        }
     }
     /// Wait for the records accepted before this call to become durable.
     pub fn flush(&self) -> Result<(), Failure> {
@@ -1636,7 +1669,12 @@ impl Engine {
         }
         self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();
-        candidate.publish(self);
+        let preload = candidate.publish(self);
+        if let (Some(profile), Some(preload)) = (profile.as_deref_mut(), preload) {
+            profile.preload_jobs += preload.jobs.len();
+            profile.preload_regions_expanded += preload.regions_expanded;
+            profile.preload_links_examined += preload.links_examined;
+        }
         self.receipts.insert(
             (receipt.user.clone(), receipt.request_id.clone()),
             self.archive.records.len(),

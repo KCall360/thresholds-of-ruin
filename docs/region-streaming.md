@@ -333,6 +333,36 @@ performance fixture) don't, so their measurements stay comparable.
 - **Validation** of an edited package game checks anchors in loaded regions
   only; regions that aren't loaded can't have been edited.
 
+### Background preloading
+
+The server builds regions and reads region rows on a `region-preload`
+thread, one portal hop beyond the loaded regions, so the command that loads
+them usually finds them ready:
+
+- After each command publishes, the engine asks for every region one hop
+  beyond the loaded ones (including those pins keep loaded) that isn't
+  loaded: a build for an unbuilt region, a row read for a detached one whose
+  record isn't in memory. Choosing them costs work bounded by the loaded
+  regions; the scaling contract counts it.
+- A transition takes a prepared result instead of building or reading
+  itself. Nothing else changes: a region builds the same way on any thread,
+  and records never change once made, so the result is exactly what the
+  command would have produced. Attaching still checks the record in full.
+- A command never waits for the preloader. Anything not ready yet, or that
+  failed, the command builds or reads itself, as before.
+- Asking again drops prepared results and queued work nobody wants any more,
+  so a rewind or a change of direction needs no special handling. At most 32
+  results are kept.
+- The preloader reads rows on its own connection, so a read that waits for
+  the save worker's commit no longer waits on the command's thread.
+- The server turns it on once the game has loaded; replay and recovery run
+  without it. Tests check that games play identically with it on, off and
+  racing commands, and that every build and read in a walk was prepared.
+
+`CommandProfile.regions_prepared` counts the builds and reads taken ready.
+It depends on timing; `regions_built` and `region_records_read` still count
+every build and read, whichever thread did it, so they don't.
+
 ### Persistence
 
 Lifecycle state (points, frozen regions, stamps, record identities, the
@@ -365,7 +395,8 @@ are.
   the journal, history and checkpoint tables. Records are read when their
   regions attach, on a separate connection. A row read while the save
   worker is writing pages waits for that commit (rollback-journal mode);
-  that only happens when a record has left memory.
+  that only happens when a record has left memory, and the preloader
+  usually reads it first, off the command's thread.
 - **Checks.** An attached record gets the checks restoring a checkpoint gives
   loaded state: its checksum, its own consistency and its identities against
   the directory, then each actor and item (identities, combat, orientation,
@@ -428,17 +459,14 @@ base to compare them against.
 
 ### Later slices
 
-1. **Background preloading:** reading rows and building regions ahead of
-   need on another thread. Correctness never depends on it; today a record
-   is read when its region attaches.
-2. **Large scenarios and generation:** per-region package files with a
+1. **Large scenarios and generation:** per-region package files with a
    manifest, lifting the 256-region limit; pinning the package by manifest
    hash instead of embedding it, and copying each region's source into the
    save when it's first built (another save-format bump); and a procedural
    region source. A generated region's content mustn't depend on the order
    regions were built in, so each region gets its own random seed; generated
    identities come from the game-wide allocators, which replay reproduces.
-3. **Asset palettes.**
+2. **Asset palettes.**
 
 ### Lifecycle verification
 

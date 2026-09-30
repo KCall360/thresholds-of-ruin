@@ -285,7 +285,8 @@ const STREAM_LEG: usize = 70;
 /// [`STREAM_LEG`] steps east and back through a corridor of `halls` halls
 /// (the checked-in streaming corridor, lengthened), `cycles` times, at the
 /// default radii, so halls behind it detach and halls ahead are built and
-/// reattached every cycle. Any AI turns are sampled too. Selected only by
+/// reattached every cycle, with background preloading on as in the server.
+/// Any AI turns are sampled too. Selected only by
 /// name, so the ordinary matrix is unchanged.
 #[allow(clippy::too_many_arguments)]
 fn streaming_case(
@@ -310,9 +311,11 @@ fn streaming_case(
             .attach_profile_save_with_policy(&path, save_policy.clone())
             .unwrap();
     }
+    // As the server does: commands race the preloader, never waiting.
+    engine.start_preloading();
     println!(
         "{}",
-        json!({"kind":"stream","case":case,"workload":"streaming-v1","regions":halls,"actors":1,
+        json!({"kind":"stream","preloading":true,"case":case,"workload":"streaming-v1","regions":halls,"actors":1,
         "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},

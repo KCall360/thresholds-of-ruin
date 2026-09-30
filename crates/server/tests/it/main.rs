@@ -19,6 +19,7 @@ mod place_hints;
 mod process;
 mod recovery_fixtures;
 mod region_horizon;
+mod region_preloading;
 mod region_streaming;
 mod scenario_packages;
 mod streaming_websocket;

@@ -273,6 +273,37 @@ impl<'de> Deserialize<'de> for UniqueJson {
         deserializer.deserialize_any(Visitor)
     }
 }
+fn read_region_row(
+    conn: &Connection,
+    id: tor_simulation::RecordId,
+) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
+    let bytes: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT frame FROM regions WHERE record=?1",
+            [id.0 as i64],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| storage_failure())?;
+    bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
+}
+/// Reads region rows on a connection of its own, opened on first use.
+#[derive(Debug)]
+pub(crate) struct RegionReader {
+    path: PathBuf,
+    conn: Option<Connection>,
+}
+impl RegionReader {
+    pub(crate) fn read(
+        &mut self,
+        id: tor_simulation::RecordId,
+    ) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
+        if self.conn.is_none() {
+            self.conn = Some(connection(&self.path)?);
+        }
+        read_region_row(self.conn.as_ref().unwrap(), id)
+    }
+}
 fn connection(path: &Path) -> Result<Connection, Failure> {
     let conn = Connection::open(path).map_err(|_| storage_failure())?;
     conn.busy_timeout(Duration::from_secs(2))
@@ -811,17 +842,18 @@ impl Store {
         if reader.is_none() {
             *reader = Some(connection(&self.0.path)?);
         }
-        let bytes: Option<Vec<u8>> = reader
-            .as_ref()
-            .unwrap()
-            .query_row(
-                "SELECT frame FROM regions WHERE record=?1",
-                [id.0 as i64],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|_| storage_failure())?;
-        bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
+        read_region_row(reader.as_ref().unwrap(), id)
+    }
+    /// Whether both handles are the same open save.
+    pub(crate) fn same(&self, other: &Store) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+    /// A reader of region rows with its own connection, for another thread.
+    pub(crate) fn region_reader(&self) -> RegionReader {
+        RegionReader {
+            path: self.0.path.clone(),
+            conn: None,
+        }
     }
     pub(crate) fn wizard(&self) -> Result<(), Failure> {
         self.push(2, &(), None::<fn() -> Checkpoint>)?;

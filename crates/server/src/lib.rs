@@ -5,6 +5,7 @@ mod developer;
 mod engine;
 pub mod journal;
 pub mod performance_fixture;
+mod preload;
 pub mod region_streaming;
 mod regions;
 pub use regions::Streaming;

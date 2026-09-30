@@ -488,6 +488,11 @@ impl Game {
         }
     }
 
+    /// The record identity a detached region's record is kept under.
+    pub fn detached_record(&self, region: RegionId) -> Option<RecordId> {
+        self.lifecycle.detached.get(&region).copied()
+    }
+
     fn actor_region(&self, id: ActorId) -> Option<RegionId> {
         match self.actors.get(&id) {
             Some(actor) => Some(actor.location.region),
@@ -819,6 +824,11 @@ impl Game {
     /// settled transition to them changes nothing.
     pub fn regions_are(&self, t: &RegionTransition) -> bool {
         self.current_regions() == *t
+    }
+
+    /// Loaded regions (active or frozen), in region order.
+    pub fn loaded_regions(&self) -> impl Iterator<Item = RegionId> + '_ {
+        self.world.loaded_regions()
     }
 
     /// Actors in loaded regions, in identity order.

@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     save_policy.validate()?;
     let mut engine = Engine::open_with_policy(save, scenario, save_policy)?;
+    engine.start_preloading();
     if wizard {
         engine.enable_wizard()?;
     }

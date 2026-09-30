@@ -272,7 +272,10 @@ fn transition_work_does_not_grow_with_the_world() {
         let out = directory.path().join(format!("corridor-{halls}"));
         let scenario = scenario_package::streaming_corridor(&root, &out, halls, 5).unwrap();
         let mut engine = Engine::memory(scenario).unwrap();
-        let mut totals = [0usize; 8];
+        // What the preloader is asked for is decided on the command's
+        // thread, so it must scale like the transition does.
+        engine.start_preloading();
+        let mut totals = [0usize; 11];
         let mut step = 0;
         let mut run = |engine: &mut Engine, actor: ActorId, action: Action| {
             let revision = engine.revision(actor).unwrap();
@@ -299,6 +302,9 @@ fn transition_work_does_not_grow_with_the_world() {
                 profile.region_records_read,
                 profile.regions_built,
                 profile.scene_calls,
+                profile.preload_jobs,
+                profile.preload_regions_expanded,
+                profile.preload_links_examined,
             ]) {
                 *total += count;
             }
@@ -319,6 +325,8 @@ fn transition_work_does_not_grow_with_the_world() {
     assert_eq!(small_loaded, large_loaded);
     // The walk really streamed: regions changed and were built.
     assert!(small[0] > 0 && small[6] > 0, "{small:?}");
+    // The preloader was asked for regions ahead of the walk.
+    assert!(small[8] > 0, "{small:?}");
 }
 
 /// An actor a client controls keeps its own region in play, however far it
