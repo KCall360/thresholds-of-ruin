@@ -1,0 +1,12 @@
+# Seven halls in a row for region streaming tests: long enough that, at the
+# default radii, halls behind the character detach and halls ahead are built
+# only when needed. A guard waits in a far hall.
+format = 1
+id = "streaming-corridor"
+version = "1.0"
+ruleset = "dungeon-v17"
+files = ["regions.toml"]
+default_character = 1
+factions = { delvers = [], wardens = [] }
+ai_profiles = { patrol = { memory_ticks = 200, flee_percent = 0 } }
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 100, wind_up = 20, recovery = 80, damage = { keen = 10 } } } }]

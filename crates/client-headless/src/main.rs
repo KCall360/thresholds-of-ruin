@@ -14,8 +14,17 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Input {
-    Act { action: Action },
-    Request { request: Request },
+    Act {
+        action: Action,
+    },
+    /// A developer command, in the text client's `wizard` form; the current
+    /// branch and revision are supplied, as for `act`.
+    Wizard {
+        command: String,
+    },
+    Request {
+        request: Request,
+    },
     Inspect,
     Quit,
 }
@@ -40,7 +49,7 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, request, inspect, quit.\nSee docs/headless-client.md for the input and output contract.");
+                println!("tor-client-headless [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN. Send JSON lines: act, wizard, request, inspect, quit.\nSee docs/headless-client.md for the input and output contract.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -95,8 +104,20 @@ async fn run() -> Result<(), Error> {
                             transact(&mut connection, request).await?
                         }
                     },
+                    Ok(Input::Wizard { command }) => {
+                        // The server decides whether this account may use
+                        // wizard commands; spectators never can.
+                        let request = Request::Command {
+                            branch: connection.state.branch().clone(),
+                            command: Command::Wizard {
+                                expected_revision: connection.state.state().revision,
+                                operation: command,
+                            },
+                        };
+                        transact(&mut connection, request).await?
+                    },
                     Ok(Input::Request { request }) => transact(&mut connection, request).await?,
-                    Err(_) => Some("Invalid input; expected a JSON act, request, inspect or quit".into()),
+                    Err(_) => Some("Invalid input; expected a JSON act, wizard, request, inspect or quit".into()),
                 };
                 emit(&connection, "ready", None, result.as_deref())?;
             },
@@ -168,4 +189,20 @@ fn emit(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wizard_input_carries_a_developer_command() {
+        let input: Input =
+            serde_json::from_str(r#"{"type":"wizard","command":"rewind initial"}"#).unwrap();
+        assert!(matches!(input, Input::Wizard { command } if command == "rewind initial"));
+        assert!(serde_json::from_str::<Input>(r#"{"type":"wizard"}"#).is_err());
+        assert!(
+            serde_json::from_str::<Input>(r#"{"type":"wizard","command":"x","extra":1}"#).is_err()
+        );
+    }
 }

@@ -37,7 +37,56 @@ def expected_actions(regions, actors, history, cycles):
     return result
 
 
+STREAM_CASES = {"stream-r16-memory", "stream-r16-durable", "stream-r256-memory", "stream-r256-durable"}
+# Per-command bounds for the streaming workload: one reference point, radii
+# 1 and 2, and at most the character and the guard loaded. None may depend
+# on the corridor's length.
+STREAM_BOUNDS = {"horizon_regions_expanded": 8, "horizon_links_examined": 16, "pinned_actors": 2,
+                 "reach_lookups": 2, "region_records_read": 4, "regions_built": 4, "region_changes": 1}
+
+
+def validate_stream(rows, case):
+    """A streaming run walks the same number of steps east then west per
+    cycle, with any AI turns in between, and bounded transition work per
+    command."""
+    meta = [r for r in rows if r["kind"] == "stream" and r["case"] == case]
+    ends = [r for r in rows if r["kind"] == "stream_end" and r["case"] == case]
+    assert len(meta) == 1 and len(ends) == 1, "Missing or duplicate streaming metadata or completion"
+    meta, end = meta[0], ends[0]
+    assert meta["workload"] == "streaming-v1"
+    samples = [r for r in rows if r["kind"] == "sample"]
+    assert all(s["case"] == case for s in samples), "Unexpected sample case"
+    walked = [s["label"] for s in samples if s["actor"] == 1]
+    leg = meta["steps_per_cycle"] // 2
+    expected = (["walk_east"]*leg + ["walk_west"]*leg) * meta["cycles"]
+    assert walked == expected, (case, "walk coverage")
+    assert all(s["label"] == "ai_turn" for s in samples if s["actor"] != 1), (case, "unexpected actor")
+    history = 0
+    for sample in samples:
+        assert sample["history_start"] == history, (case, "history")
+        history += 1
+        profile = sample["profile"]
+        assert profile["simulation_transitions"] == 1
+        assert profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1
+        for name, bound in STREAM_BOUNDS.items():
+            assert 0 <= profile[name] <= bound, (case, name, profile[name])
+        assert sample["history_end"] == history and sample["rewind_count"] <= 128
+        if meta["storage"] == "background_sqlite_journal":
+            status = sample["save_status"]
+            assert status["accepted_sequence"] == history and status["error"] is None
+    assert any(s["profile"]["region_changes"] for s in samples), (case, "nothing streamed")
+    assert end["history_end"] == history
+    assert end["recovery"]["records_loaded"] == history
+    if meta["storage"] == "background_sqlite_journal":
+        status = end["save_status"]
+        assert status["accepted_sequence"] == status["durable_sequence"] == history
+        assert status["pending_bytes"] == 0 and status["error"] is None
+    return {case: meta}, {case: samples}, {case: end}
+
+
 def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None, phase_d=False, discovery_only=False, saved_discovery=False):
+    if selected_case in STREAM_CASES:
+        return validate_stream(rows, selected_case)
     discovery_only = discovery_only or saved_discovery
     cases, samples, ends = {}, defaultdict(list), {}
     traversals, traversal_ends = {}, {}

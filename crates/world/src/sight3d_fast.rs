@@ -419,6 +419,22 @@ impl World {
         regions
     }
 
+    /// The regions [`World::eye_scene`]'s visible cells are in, in order,
+    /// without copying the scene when it's cached.
+    pub fn eye_scene_visible_regions(&self, eye: Location, frame: u8, radius: u8) -> Vec<RegionId> {
+        if let Some(regions) = self.sight.visible(eye, frame, radius) {
+            return regions;
+        }
+        let mut regions: Vec<_> = self
+            .eye_scene(eye, frame, radius)
+            .iter()
+            .map(|cell| cell.location.region)
+            .collect();
+        regions.sort();
+        regions.dedup();
+        regions
+    }
+
     /// [`World::eye_scene`] without reuse, for tests and measurements.
     pub fn eye_scene_uncached(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
         self.build_eye_scene(eye, frame, radius).0

@@ -40,13 +40,16 @@ Backend snapshot types never cross the client protocol boundary.
 
 ## Atomic selection and compaction
 
-Each database has `journal`, `history`, and `checkpoint` tables. The initial base
+Each database has `journal`, `history`, `checkpoint` and `regions` tables. The initial base
 remains at journal sequence zero. One transaction performs these steps:
 
 1. Append the admitted records, reconciling exact bytes for any uncertain retry.
-2. Replace the selected checkpoint at slot 1.
-3. Copy covered nonzero journal rows into retained history without changing bytes.
-4. Delete those covered rows from the active journal and commit.
+2. Write the region record rows the checkpoint refers to that aren't stored
+   yet, reconciling exact bytes likewise.
+3. Replace the selected checkpoint at slot 1.
+4. Copy covered nonzero journal rows into retained history without changing bytes.
+5. Delete those covered rows from the active journal.
+6. Delete region record rows the new checkpoint doesn't refer to, and commit.
 
 Until commit, SQLite rollback recovery preserves the previous selection and rows.
 After commit, the new snapshot and its history are selected together. There is no
@@ -62,7 +65,8 @@ history or run a blocking `VACUUM` to shrink the file.
 
 ## Recovery and limits
 
-Loading checks the format, SQLite integrity, contiguous frame sequence, row
+Loading checks the format, SQLite integrity of the journal, history and
+checkpoint tables, contiguous frame sequence, row
 placement on the correct side of the checkpoint boundary, checksums, save identity,
 checkpoint record count, current ruleset and snapshot structure. Checkpoint JSON
 is capped at 64 MiB both during writing and before allocation on reading, with

@@ -28,7 +28,10 @@ script exit nonzero.
 
 A case is either a `latency_bench` case name (`--cycles` sets its cycle count,
 default five) or `WORKLOAD[:GROUP]` for `combat`, `physics`, `items`, `client`,
-or `places`. Those workloads always run their complete matrix, because their
+or `places`. The `latency_bench` region streaming cases, `stream-r16-memory`,
+`stream-r16-durable`, `stream-r256-memory` and `stream-r256-durable` (workload
+`streaming-v1`), run only when selected by name; see
+[region streaming performance](region-streaming.md#performance). Those workloads always run their complete matrix, because their
 validators require it; the group only selects what's displayed. Arguments after
 `--` go to every benchmark invocation, and validator flags such as `--phase-d`
 or `--narration` are passed through to the validators.

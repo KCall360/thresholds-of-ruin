@@ -17,6 +17,7 @@ fn scenario(actors: usize) -> Scenario {
         seed: 7,
         regions: 2,
         package: None,
+        streaming: None,
         workload_version: None,
         actors: positions[..actors]
             .iter()

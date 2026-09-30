@@ -1,8 +1,10 @@
 //! Backend-only deterministic checkpoint state. Identical worlds and navigation
 //! regions are encoded once across navigation maps and rewind boundaries. This module does not perform storage or I/O.
+use crate::streaming::Lifecycle;
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use tor_world::Location;
 use tor_world::{Shared, World};
 
 #[derive(Serialize, Deserialize)]
@@ -19,10 +21,10 @@ pub struct Snapshot {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
-    /// Region streaming state, omitted while empty so games that never
-    /// stream save exactly as before.
-    #[serde(default, skip_serializing_if = "crate::streaming::Lifecycle::is_empty")]
-    lifecycle: crate::streaming::Lifecycle,
+    /// Region streaming state in [`SharedState`], omitted while empty so
+    /// games that never stream save exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lifecycle: Option<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -33,6 +35,10 @@ pub struct SharedState {
     #[serde(with = "navigation_regions")]
     navigation: Vec<Navigation>,
     items: Vec<BTreeMap<ItemId, Item>>,
+    /// Identical lifecycle states (with their identity directories) across
+    /// rewind boundaries are encoded once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    lifecycles: Vec<Lifecycle>,
 }
 
 impl SharedState {
@@ -84,7 +90,16 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
-            lifecycle: self.lifecycle.clone(),
+            lifecycle: (!self.lifecycle.is_empty()).then(|| {
+                let lifecycles = &mut shared.lifecycles;
+                lifecycles
+                    .iter()
+                    .position(|l| l == &self.lifecycle)
+                    .unwrap_or_else(|| {
+                        lifecycles.push(self.lifecycle.clone());
+                        lifecycles.len() - 1
+                    })
+            }),
         }
     }
 
@@ -107,10 +122,16 @@ impl Game {
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
-            lifecycle: snapshot.lifecycle,
+            lifecycle: match snapshot.lifecycle {
+                None => Lifecycle::default(),
+                // An empty state is always omitted, so encodings stay unique.
+                Some(index) => {
+                    Some(shared.lifecycles.get(index)?.clone()).filter(|l| !l.is_empty())?
+                }
+            },
         };
         let mut occupied = BTreeSet::new();
-        if !game.lifecycle_valid()
+        if !game.lifecycle_state_valid()
             || !game.physics_valid()
             || !game.combat_valid()
             || (game.actors.is_empty() && !game.has_detached_actors())
@@ -121,46 +142,12 @@ impl Game {
                 .next_actor()
                 .is_some_and(|id| game.actors[&id].ready_at != game.tick)
             || game.actors.iter().any(|(id, actor)| {
-                id.0 == 0
-                    || actor
-                        .combat
-                        .as_ref()
-                        .is_some_and(|c| !c.spec.valid() || c.hp > c.spec.max_hp)
-                    || id.0 >= game.next_actor_id
-                    || actor.orientation >= 24
-                    || (actor.alive() && actor.ready_at < game.actor_clock(*id))
-                    || !game.world.contains(actor.location)
-                    || actor.visited.iter().any(|id| !game.world.knows_region(*id))
-                    || !actor.body.valid()
-                    || !actor.motion.valid()
-                    || actor
-                        .motion
-                        .acceleration_remainder
-                        .iter()
-                        .any(|v| v.unsigned_abs() >= actor.body.cells.len() as u64)
-                    || (actor.alive()
-                        && game
-                            .body_cells(actor.location, actor.orientation, &actor.body)
-                            .is_none_or(|cells| {
-                                cells.iter().any(|(at, _)| {
-                                    !game.world.walkable(*at) || !occupied.insert(*at)
-                                })
-                            }))
+                !game.actor_state_valid(*id, actor) || !game.body_has_room(actor, &mut occupied)
             })
-            || game.items.iter().any(|(id, item)| {
-                id.0 == 0
-                    || id.0 >= game.next_item_id
-                    || item.quantity == 0
-                    || (!item.spec.stackable && item.quantity != 1)
-                    || !item.spec.valid()
-                    || !item.motion.valid()
-                    || item.motion.acceleration_remainder != [0; 3]
-                    || item.orientation >= 24
-                    || match item.location {
-                        ItemLocation::Ground(location) => !game.world.contains(location),
-                        ItemLocation::Carried(actor) => !game.actors.contains_key(&actor),
-                    }
-            })
+            || game
+                .items
+                .iter()
+                .any(|(id, item)| !game.item_state_valid(*id, item))
             || game.navigation.iter().any(|(id, navigation)| {
                 !game.actors.contains_key(id) || !navigation.checkpoint_valid(&game.world)
             })
@@ -171,8 +158,68 @@ impl Game {
         Some(game)
     }
 
+    /// Checks restoring gives a loaded actor, apart from its body's room;
+    /// attaching a stored region gives its actors the same.
+    pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
+        id.0 != 0
+            && actor
+                .combat
+                .as_ref()
+                .is_none_or(|c| c.spec.valid() && c.hp <= c.spec.max_hp)
+            && id.0 < self.next_actor_id
+            && actor.orientation < 24
+            && (!actor.alive() || actor.ready_at >= self.actor_clock(id))
+            && self.world.contains(actor.location)
+            && actor.visited.iter().all(|id| self.world.knows_region(*id))
+            && actor.body.valid()
+            && actor.motion.valid()
+            && actor
+                .motion
+                .acceleration_remainder
+                .iter()
+                .all(|v| v.unsigned_abs() < actor.body.cells.len() as u64)
+    }
+
+    /// Whether a living actor's body fits walkable cells that no body in
+    /// `occupied` holds, adding its cells. Only call this for an actor whose
+    /// state is valid.
+    pub(crate) fn body_has_room(&self, actor: &Actor, occupied: &mut BTreeSet<Location>) -> bool {
+        !actor.alive()
+            || self
+                .body_cells(actor.location, actor.orientation, &actor.body)
+                .is_some_and(|cells| {
+                    cells
+                        .iter()
+                        .all(|(at, _)| self.world.walkable(*at) && occupied.insert(*at))
+                })
+    }
+
+    /// Checks restoring gives a loaded item; attaching a stored region gives
+    /// its items the same.
+    pub(crate) fn item_state_valid(&self, id: ItemId, item: &Item) -> bool {
+        id.0 != 0
+            && id.0 < self.next_item_id
+            && item.quantity != 0
+            && (item.spec.stackable || item.quantity == 1)
+            && item.spec.valid()
+            && item.motion.valid()
+            && item.motion.acceleration_remainder == [0; 3]
+            && item.orientation < 24
+            && match item.location {
+                ItemLocation::Ground(location) => self.world.contains(location),
+                ItemLocation::Carried(actor) => self.actors.contains_key(&actor),
+            }
+    }
+
+    /// Every actor a checkpoint's revisions cover: loaded, detached or not
+    /// built yet.
     pub fn checkpoint_actor_ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.actors.keys().map(|id| id.0)
+        self.known_actor_ids().into_iter().map(|id| id.0)
+    }
+
+    /// Whether an actor is in a loaded region.
+    pub fn has_actor(&self, id: ActorId) -> bool {
+        self.actors.contains_key(&id)
     }
 }
 

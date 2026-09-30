@@ -44,6 +44,10 @@ impl Extent {
     pub fn dimensions(self) -> (i32, i32, i32) {
         (self.width, self.depth, self.height)
     }
+    /// The minimum corner.
+    pub fn origin(self) -> Position {
+        self.origin
+    }
 
     pub fn new(width: i32, depth: i32, height: i32) -> Option<Self> {
         (width > 0 && depth > 0 && height > 0).then_some(Self {
@@ -99,6 +103,7 @@ pub use shared::Shared;
 mod rotation;
 pub use rotation::{compose_rotation, inverse_rotation, rotate_vector};
 
+mod reach;
 mod sight3d;
 mod sight3d_fast;
 mod sight_cache;

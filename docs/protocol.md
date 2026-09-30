@@ -185,6 +185,13 @@ disconnected and releases control instead of silently missing updates. It must
 reconnect and rebuild from a snapshot. Handshakes and socket writes have deadlines;
 incoming messages are capped at 16 KiB, and there are at most 128 connections.
 
+A client whose attached actor leaves the loaded world (see
+[region streaming](region-streaming.md#engine-streaming); a spectator watching
+an AI actor, say) receives an unsolicited `error` with code `not_attached`
+and is disconnected. It may attach again once the actor is back in play.
+Messages already queued for a client, such as that error, are delivered
+before the connection closes.
+
 ## Annotations
 
 Annotations are explicit plain-text history entries, not actions, queries, or

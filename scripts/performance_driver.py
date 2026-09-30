@@ -121,6 +121,10 @@ class JsonProcess:
                 wall_received = wall_time_ns(received)
                 self.log.write(line)
                 self.log.flush()
+                if self.stopped and not line.endswith("\n"):
+                    # Killing the child can cut its final line short; the
+                    # retained log keeps the fragment, but it isn't a frame.
+                    break
                 value = json.loads(line)
                 self.lines.put((value, received, (time.perf_counter()-received)*1000, wall_received))
         except Exception as error:

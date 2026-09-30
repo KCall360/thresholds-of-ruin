@@ -6,7 +6,7 @@ use crate::{
 };
 use rusqlite::{params, Connection};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -14,7 +14,11 @@ use std::time::{Duration, Instant};
 
 pub const MAX_PAYLOAD: usize = 1024 * 1024;
 const MAX_CHECKPOINT: usize = 64 * MAX_PAYLOAD;
+/// A region record row may be larger than a journal record.
+const MAX_REGION: usize = 16 * MAX_PAYLOAD;
 const APP_ID: i64 = 0x544f524a;
+/// SQLite `user_version`: the save format, as `ARCHIVE_VERSION`.
+const SAVE_FORMAT: i64 = crate::engine::ARCHIVE_VERSION as i64;
 
 #[derive(Clone, Debug)]
 pub struct SavePolicy {
@@ -126,6 +130,61 @@ pub(crate) fn frame<T: Serialize>(kind: u16, sequence: u64, value: &T) -> Result
     bytes.extend_from_slice(&payload);
     Ok(bytes)
 }
+/// A region record row: the journal frame layout with magic `TORR`, kind 3
+/// and the record identity in the sequence field.
+fn region_frame(id: u64, record: &tor_simulation::RegionRecord) -> Result<Vec<u8>, Failure> {
+    let payload = serde_json::to_vec(record).map_err(|_| storage_failure())?;
+    if payload.len() > MAX_REGION {
+        return Err(storage_failure());
+    }
+    let mut bytes = Vec::with_capacity(24 + payload.len());
+    bytes.extend_from_slice(b"TORR");
+    bytes.extend_from_slice(&6u16.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&id.to_le_bytes());
+    bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    let crc = crc32c(bytes[4..].iter().copied().chain(payload.iter().copied()));
+    bytes.extend_from_slice(&crc.to_le_bytes());
+    bytes.extend_from_slice(&payload);
+    Ok(bytes)
+}
+fn decode_region(bytes: &[u8], id: u64) -> Result<tor_simulation::RegionRecord, Failure> {
+    if bytes.len() < 24
+        || bytes.len() > MAX_REGION + 24
+        || &bytes[..4] != b"TORR"
+        || bytes[4..6] != 6u16.to_le_bytes()
+        || bytes[6..8] != 3u16.to_le_bytes()
+        || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != id
+        || u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize != bytes.len() - 24
+        || crc32c(
+            bytes[4..20]
+                .iter()
+                .copied()
+                .chain(bytes[24..].iter().copied()),
+        ) != u32::from_le_bytes(bytes[20..24].try_into().unwrap())
+    {
+        return Err(invalid_archive());
+    }
+    strict(&bytes[24..])
+}
+/// Region record rows a checkpoint's transaction writes, and the rows it
+/// keeps; it deletes every other row.
+pub(crate) struct RegionWrite {
+    rows: Vec<(u64, Vec<u8>)>,
+    keep: BTreeSet<u64>,
+}
+impl RegionWrite {
+    fn encode(checkpoint: &Checkpoint) -> Result<Self, Failure> {
+        Ok(Self {
+            rows: checkpoint
+                .records
+                .iter()
+                .map(|(id, record)| Ok((id.0, region_frame(id.0, record)?)))
+                .collect::<Result<_, Failure>>()?,
+            keep: checkpoint.referenced().into_iter().map(|id| id.0).collect(),
+        })
+    }
+}
 fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failure> {
     if bytes.len() < 24 || bytes.len() > MAX_PAYLOAD + 24 {
         return Err(invalid_archive());
@@ -228,6 +287,7 @@ fn commit_batch(
     conn: &mut Connection,
     entries: &[Pending],
     checkpoint: Option<(u64, &[u8])>,
+    regions: Option<&RegionWrite>,
     mut fault: impl FnMut(&Connection, &str) -> Result<(), Failure>,
 ) -> Result<(), Failure> {
     let tx = conn.transaction().map_err(|_| storage_failure())?;
@@ -256,6 +316,30 @@ fn commit_batch(
     }
     fault(&tx, "after_append")?;
     if let Some((sequence, bytes)) = checkpoint {
+        // Rows are written before the checkpoint naming them, in the same
+        // transaction. A row is never rewritten: a retry must match it exactly.
+        for (id, frame) in regions.map(|r| r.rows.as_slice()).unwrap_or_default() {
+            let existing: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT frame FROM regions WHERE record=?1",
+                    [*id as i64],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| storage_failure())?;
+            match existing {
+                Some(old) if old == *frame => {}
+                Some(_) => return Err(invalid_archive()),
+                None => {
+                    tx.execute(
+                        "INSERT INTO regions(record,frame) VALUES (?1,?2)",
+                        params![*id as i64, frame],
+                    )
+                    .map_err(|_| storage_failure())?;
+                }
+            }
+        }
+        fault(&tx, "after_regions")?;
         let current: Option<(i64, Vec<u8>)> = tx
             .query_row(
                 "SELECT sequence,payload FROM checkpoint WHERE slot=1",
@@ -291,6 +375,24 @@ fn commit_batch(
         )
         .map_err(|_| storage_failure())?;
         fault(&tx, "after_rotation")?;
+        // Delete rows the new checkpoint doesn't refer to. Record identities
+        // are never reused, so nothing will refer to them again.
+        let keep = regions.map(|r| &r.keep);
+        let stored: Vec<i64> = tx
+            .prepare("SELECT record FROM regions")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<_, _>>()
+            })
+            .map_err(|_| storage_failure())?;
+        for id in stored {
+            if !keep.is_some_and(|keep| keep.contains(&(id as u64))) {
+                tx.execute("DELETE FROM regions WHERE record=?1", [id])
+                    .map_err(|_| storage_failure())?;
+            }
+        }
+        fault(&tx, "after_gc")?;
     }
     fault(&tx, "before_commit")?;
     tx.commit().map_err(|_| storage_failure())?;
@@ -382,14 +484,22 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
     let app: i64 = conn
         .query_row("PRAGMA application_id", [], |r| r.get(0))
         .map_err(|_| invalid_archive())?;
-    let integrity: String = conn
-        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+    // Region record rows aren't checked here, so opening a save doesn't read
+    // the whole world; each row's checksum is checked when it's read.
+    let integrity = ["journal", "history", "checkpoint"]
+        .iter()
+        .map(|table| {
+            conn.query_row(&format!("PRAGMA quick_check({table})"), [], |r| {
+                r.get::<_, String>(0)
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|_| invalid_archive())?;
     // SQLite must get the first opportunity to recover a hot rollback journal,
     // including a partially extended database page from an interrupted write.
-    if version != 11
+    if version != SAVE_FORMAT
         || app != APP_ID
-        || integrity != "ok"
+        || integrity.iter().any(|result| result != "ok")
         || file.metadata().map_err(|_| storage_failure())?.len() % page_size != 0
     {
         return Err(invalid_archive());
@@ -494,6 +604,9 @@ struct State {
     last_activity: Instant,
     force: u64,
     closing: bool,
+    /// After a checkpoint commits: the records on disk, and the identity
+    /// watermark at its capture. Taken by the engine.
+    written: Option<(BTreeSet<tor_simulation::RecordId>, tor_simulation::RecordId)>,
 }
 #[derive(Debug)]
 struct Shared {
@@ -507,6 +620,8 @@ struct Owner {
     shared: Arc<Shared>,
     thread: Mutex<Option<JoinHandle<()>>>,
     save_id: String,
+    path: PathBuf,
+    reader: Mutex<Option<Connection>>,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Store(Arc<Owner>);
@@ -536,7 +651,7 @@ impl Store {
                 },
             )?;
             let tx = conn.transaction().map_err(|_| storage_failure())?;
-            tx.execute_batch("PRAGMA application_id=1414484554; PRAGMA user_version=11; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT;").map_err(|_| storage_failure())?;
+            tx.execute_batch(&format!("PRAGMA application_id=1414484554; PRAGMA user_version={SAVE_FORMAT}; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT; CREATE TABLE regions(record INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT;")).map_err(|_| storage_failure())?;
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
             for (index, record) in initial.records.iter().enumerate() {
@@ -579,9 +694,11 @@ impl Store {
                 last_activity: Instant::now(),
                 force: sequence,
                 closing: false,
+                written: None,
             }),
         });
         let worker = shared.clone();
+        let owned = path.to_owned();
         let path = path.to_owned();
         let thread = std::thread::Builder::new()
             .name("save-journal".into())
@@ -595,6 +712,8 @@ impl Store {
                 shared,
                 thread: Mutex::new(Some(thread)),
                 save_id,
+                path: owned,
+                reader: Mutex::new(None),
             })),
             archive,
             checkpoint,
@@ -675,6 +794,34 @@ impl Store {
         s.last_activity = now;
         shared.wake.notify_one();
         Ok(len)
+    }
+    /// The records on disk after the latest committed checkpoint, once.
+    pub(crate) fn take_written(
+        &self,
+    ) -> Option<(BTreeSet<tor_simulation::RecordId>, tor_simulation::RecordId)> {
+        self.0.shared.state.lock().unwrap().written.take()
+    }
+    /// Read a region record row, on its own connection so the engine never
+    /// waits on the worker's lock beyond SQLite's busy timeout.
+    pub(crate) fn read_region(
+        &self,
+        id: tor_simulation::RecordId,
+    ) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
+        let mut reader = self.0.reader.lock().unwrap();
+        if reader.is_none() {
+            *reader = Some(connection(&self.0.path)?);
+        }
+        let bytes: Option<Vec<u8>> = reader
+            .as_ref()
+            .unwrap()
+            .query_row(
+                "SELECT frame FROM regions WHERE record=?1",
+                [id.0 as i64],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| storage_failure())?;
+        bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
     }
     pub(crate) fn wizard(&self) -> Result<(), Failure> {
         self.push(2, &(), None::<fn() -> Checkpoint>)?;
@@ -764,7 +911,12 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
         let checkpoint_started = Instant::now();
         let encoded = checkpoint
             .as_ref()
-            .map(|(seq, state)| encode_checkpoint(&state.encode(&shared.save_id, *seq)))
+            .map(|(seq, state)| {
+                Ok((
+                    encode_checkpoint(&state.encode(&shared.save_id, *seq))?,
+                    RegionWrite::encode(state)?,
+                ))
+            })
             .transpose();
         let checkpoint_ms = checkpoint_started
             .elapsed()
@@ -774,7 +926,9 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
             .as_ref()
             .ok()
             .and_then(|v| v.as_ref())
-            .map(|b| b.len() as u64)
+            .map(|(b, regions)| {
+                (b.len() + regions.rows.iter().map(|r| r.1.len()).sum::<usize>()) as u64
+            })
             .unwrap_or(0);
         let outcome = encoded.and_then(|encoded| {
             if conn.is_none() {
@@ -786,7 +940,8 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 checkpoint
                     .as_ref()
                     .zip(encoded.as_ref())
-                    .map(|((seq, _), bytes)| (*seq, bytes.as_slice())),
+                    .map(|((seq, _), (bytes, _))| (*seq, bytes.as_slice())),
+                encoded.as_ref().map(|(_, regions)| regions),
                 |_, _| Ok(()),
             )
         });
@@ -794,7 +949,8 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
         s.status.saving = false;
         match outcome {
             Ok(()) => {
-                if let Some((seq, _)) = &checkpoint {
+                if let Some((seq, state)) = &checkpoint {
+                    s.written = Some((state.referenced(), state.watermark));
                     s.status.checkpoint_sequence = *seq;
                     s.status.checkpoints += 1;
                     s.status.checkpoint_bytes = checkpoint_bytes;
@@ -868,12 +1024,81 @@ mod tests {
     }
 
     #[test]
+    fn region_rows_commit_with_their_checkpoint_and_are_collected_after() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("regions.db");
+        let (bytes, _) = checkpoint_fixture(&path);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let package = crate::scenario_package::read_package(&root).unwrap();
+        let index = package.index(0).unwrap();
+        let record = package.build_region(0, &index, 1).unwrap();
+        let row = region_frame(7, &record).unwrap();
+        let write = |keep: &[u64], rows: Vec<(u64, Vec<u8>)>| RegionWrite {
+            rows,
+            keep: keep.iter().copied().collect(),
+        };
+        let stored = |conn: &Connection| -> Vec<(i64, Vec<u8>)> {
+            conn.prepare("SELECT record,frame FROM regions ORDER BY record")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let mut conn = connection(&path).unwrap();
+        let commit = |conn: &mut Connection, regions: &RegionWrite, stage: &str| {
+            commit_batch(conn, &[], Some((4, &bytes)), Some(regions), |_, at| {
+                if at == stage {
+                    Err(storage_failure())
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        // A failure anywhere in the transaction leaves no row behind.
+        let first = write(&[7], vec![(7, row.clone())]);
+        for stage in [
+            "after_regions",
+            "after_checkpoint",
+            "after_gc",
+            "before_commit",
+        ] {
+            assert!(commit(&mut conn, &first, stage).is_err(), "{stage}");
+            assert!(stored(&conn).is_empty(), "{stage}");
+        }
+        commit(&mut conn, &first, "").unwrap();
+        assert_eq!(stored(&conn), [(7, row.clone())]);
+        // A retry must match the stored row exactly; a row is never rewritten.
+        commit(&mut conn, &first, "").unwrap();
+        let other = region_frame(7, &package.build_region(0, &index, 2).unwrap()).unwrap();
+        assert!(commit(&mut conn, &write(&[7], vec![(7, other)]), "").is_err());
+        assert_eq!(stored(&conn), [(7, row.clone())]);
+        // Rows decode to their record, and only under their own identity.
+        assert_eq!(decode_region(&row, 7).unwrap(), record);
+        assert!(decode_region(&row, 8).is_err());
+        let mut damaged = row.clone();
+        *damaged.last_mut().unwrap() ^= 1;
+        assert!(decode_region(&damaged, 7).is_err());
+        // Rows the checkpoint still refers to stay without being rewritten;
+        // the others are deleted with the checkpoint that stops referring to
+        // them, and a failure keeps them.
+        commit(&mut conn, &write(&[7], vec![]), "").unwrap();
+        assert_eq!(stored(&conn).len(), 1);
+        assert!(commit(&mut conn, &write(&[], vec![]), "after_gc").is_err());
+        assert_eq!(stored(&conn).len(), 1);
+        commit(&mut conn, &write(&[], vec![]), "").unwrap();
+        assert!(stored(&conn).is_empty());
+    }
+
+    #[test]
     fn checkpoint_transaction_failures_and_uncertain_commits_are_retryable() {
         for stage in [
             "after_append",
+            "after_regions",
             "after_checkpoint",
             "after_history",
             "after_rotation",
+            "after_gc",
             "before_commit",
             "after_commit",
         ] {
@@ -882,10 +1107,12 @@ mod tests {
             let (bytes, expected) = checkpoint_fixture(&path);
             let mut conn = connection(&path).unwrap();
             assert!(
-                commit_batch(&mut conn, &[], Some((4, &bytes)), |_, at| if at == stage {
-                    Err(storage_failure())
-                } else {
-                    Ok(())
+                commit_batch(&mut conn, &[], Some((4, &bytes)), None, |_, at| {
+                    if at == stage {
+                        Err(storage_failure())
+                    } else {
+                        Ok(())
+                    }
                 })
                 .is_err()
             );
@@ -898,7 +1125,7 @@ mod tests {
             );
             drop(recovered);
             let mut conn = connection(&path).unwrap();
-            commit_batch(&mut conn, &[], Some((4, &bytes)), |_, _| Ok(())).unwrap();
+            commit_batch(&mut conn, &[], Some((4, &bytes)), None, |_, _| Ok(())).unwrap();
             assert_eq!(
                 conn.query_row("SELECT count(*) FROM checkpoint", [], |r| r
                     .get::<_, i64>(0))
@@ -921,15 +1148,30 @@ mod tests {
         let stage = std::env::var("TOR_CHECKPOINT_TEST_STAGE").unwrap();
         let path = Path::new(&path);
         let bytes = std::fs::read(path.with_extension("checkpoint")).unwrap();
+        // A streaming fixture also passes its region rows and sequence.
+        let (sequence, regions) = match std::fs::read(path.with_extension("rows")) {
+            Ok(rows) => {
+                type Rows = (u64, Vec<(u64, Vec<u8>)>, BTreeSet<u64>);
+                let (sequence, rows, keep): Rows = serde_json::from_slice(&rows).unwrap();
+                (sequence, Some(RegionWrite { rows, keep }))
+            }
+            Err(_) => (4, None),
+        };
         let mut conn = connection(path).unwrap();
         conn.execute_batch("PRAGMA cache_size=1").unwrap();
-        commit_batch(&mut conn, &[], Some((4, &bytes)), |connection, at| {
-            if at == stage {
-                connection.cache_flush().unwrap();
-                std::process::exit(81);
-            }
-            Ok(())
-        })
+        commit_batch(
+            &mut conn,
+            &[],
+            Some((sequence, &bytes)),
+            regions.as_ref(),
+            |connection, at| {
+                if at == stage {
+                    connection.cache_flush().unwrap();
+                    std::process::exit(81);
+                }
+                Ok(())
+            },
+        )
         .unwrap();
         panic!("crash stage was not reached");
     }
@@ -938,9 +1180,11 @@ mod tests {
     fn process_death_at_each_checkpoint_transition_recovers_a_complete_prefix() {
         for stage in [
             "after_append",
+            "after_regions",
             "after_checkpoint",
             "after_history",
             "after_rotation",
+            "after_gc",
             "before_commit",
             "after_commit",
         ] {
@@ -1000,6 +1244,244 @@ mod tests {
             );
         }
     }
+    /// Steps from the corridor's start to the middle of hall 4.
+    const TO_HALL_4: usize = 68;
+
+    fn corridor() -> Scenario {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        scenario
+    }
+
+    fn walk(engine: &mut Engine, direction: tor_protocol::Direction, steps: usize) {
+        for _ in 0..steps {
+            let revision = engine.revision(ActorId(1)).unwrap();
+            let request = format!("walk-{direction:?}-{revision}");
+            engine
+                .command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &request,
+                    &engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: revision,
+                        action: Action::Move { direction },
+                    },
+                )
+                .unwrap();
+        }
+    }
+
+    /// A saved corridor game with halls 1 and 2 detached and no checkpoint
+    /// yet, and the checkpoint (with its two region rows) that would follow.
+    fn streaming_fixture(path: &Path) -> (Vec<u8>, RegionWrite, tor_protocol::StateView) {
+        let mut engine = Engine::open_with_policy(
+            path,
+            corridor(),
+            SavePolicy {
+                checkpoint_interval: 0,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        assert_eq!(engine.region_counts().unwrap().detached, 2);
+        engine.flush().unwrap();
+        let (_, _, save_id, _, _) = load(path).unwrap();
+        let checkpoint = Checkpoint::capture(&engine);
+        let bytes = encode_checkpoint(&checkpoint.encode(&save_id, TO_HALL_4 as u64)).unwrap();
+        let regions = RegionWrite::encode(&checkpoint).unwrap();
+        assert_eq!(regions.rows.len(), 2);
+        (bytes, regions, engine.state(ActorId(1)).unwrap())
+    }
+
+    /// Killing the process at any stage of a checkpoint that writes region
+    /// rows leaves either the checkpoint with its rows or neither, and the
+    /// game continues: detached halls come back from their rows, or from
+    /// records replay makes again.
+    #[test]
+    fn process_death_while_writing_region_rows_recovers_a_complete_prefix() {
+        for stage in [
+            "after_append",
+            "after_regions",
+            "after_checkpoint",
+            "after_history",
+            "after_rotation",
+            "after_gc",
+            "before_commit",
+            "after_commit",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("crash.db");
+            let (bytes, regions, expected) = streaming_fixture(&path);
+            std::fs::write(path.with_extension("checkpoint"), bytes).unwrap();
+            std::fs::write(
+                path.with_extension("rows"),
+                serde_json::to_vec(&(TO_HALL_4 as u64, &regions.rows, &regions.keep)).unwrap(),
+            )
+            .unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::tests::checkpoint_crash_child",
+                    "--nocapture",
+                ])
+                .env("TOR_CHECKPOINT_TEST_PATH", &path)
+                .env("TOR_CHECKPOINT_TEST_STAGE", stage)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(81), "{stage}");
+            let committed = stage == "after_commit";
+            let rows: i64 = connection(&path)
+                .unwrap()
+                .query_row("SELECT count(*) FROM regions", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, if committed { 2 } else { 0 }, "{stage}");
+            let mut recovered = Engine::open(&path, Scenario::two_room(0)).unwrap();
+            assert_eq!(recovered.state(ActorId(1)).unwrap(), expected, "{stage}");
+            assert_eq!(
+                recovered.recovery_profile().records_replayed,
+                if committed { 0 } else { TO_HALL_4 },
+                "{stage}"
+            );
+            walk(&mut recovered, tor_protocol::Direction::West, TO_HALL_4);
+            let counts = recovered.region_counts().unwrap();
+            assert_eq!(counts.detached, 3, "{stage}");
+            assert_eq!(
+                counts.records_read,
+                if committed { 2 } else { 0 },
+                "{stage}"
+            );
+        }
+    }
+
+    /// A damaged or missing region row fails closed: the save still opens
+    /// (rows aren't read then), the command that needs the row is rejected
+    /// without changing the game, its history or the file, and the game can
+    /// still be played up to that point.
+    #[test]
+    fn damaged_and_missing_region_rows_fail_closed_atomically() {
+        for damage in ["flipped", "missing"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("damaged.db");
+            let policy = SavePolicy {
+                checkpoint_interval: 4,
+                ..SavePolicy::default()
+            };
+            let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
+            walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+            engine.flush().unwrap();
+            drop(engine);
+            let conn = connection(&path).unwrap();
+            let (id, mut frame): (i64, Vec<u8>) = conn
+                .query_row(
+                    "SELECT record,frame FROM regions ORDER BY record",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            match damage {
+                "flipped" => {
+                    *frame.last_mut().unwrap() ^= 1;
+                    conn.execute(
+                        "UPDATE regions SET frame=?1 WHERE record=?2",
+                        params![frame, id],
+                    )
+                    .unwrap();
+                }
+                _ => {
+                    conn.execute("DELETE FROM regions WHERE record=?1", [id])
+                        .unwrap();
+                }
+            }
+            drop(conn);
+
+            let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
+            let mut failure = None;
+            for step in 0..TO_HALL_4 {
+                let before = engine.state(ActorId(1)).unwrap();
+                let history = engine.history(ActorId(1), "player", None, 100).unwrap();
+                engine.flush().unwrap();
+                let file = std::fs::read(&path).unwrap();
+                let result = engine.command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &format!("back-{step}"),
+                    &engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: before.revision,
+                        action: Action::Move {
+                            direction: tor_protocol::Direction::West,
+                        },
+                    },
+                );
+                if let Err(error) = result {
+                    assert_eq!(
+                        error.code,
+                        tor_protocol::ErrorCode::StorageFailure,
+                        "{damage}"
+                    );
+                    assert_eq!(engine.state(ActorId(1)).unwrap(), before, "{damage}");
+                    assert_eq!(
+                        engine.history(ActorId(1), "player", None, 100).unwrap(),
+                        history,
+                        "{damage}"
+                    );
+                    engine.flush().unwrap();
+                    assert_eq!(std::fs::read(&path).unwrap(), file, "{damage}");
+                    failure = Some(step);
+                    break;
+                }
+            }
+            assert!(
+                failure.is_some(),
+                "{damage}: the damaged row was never needed"
+            );
+        }
+    }
+
+    /// Reading a region row needs only a shared lock: it succeeds while
+    /// another connection holds a write reservation, as the save worker does
+    /// during a commit, without waiting for it.
+    #[test]
+    fn region_rows_can_be_read_during_another_connections_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reader.db");
+        let mut engine = Engine::open_with_policy(
+            &path,
+            corridor(),
+            SavePolicy {
+                checkpoint_interval: 4,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        engine.flush().unwrap();
+        let id: i64 = connection(&path)
+            .unwrap()
+            .query_row("SELECT min(record) FROM regions", [], |r| r.get(0))
+            .unwrap();
+        let writer = connection(&path).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = Instant::now();
+        let record = engine
+            .flush_handle()
+            .unwrap()
+            .read_region(tor_simulation::RecordId(id as u64));
+        assert!(matches!(record, Ok(Some(_))), "{record:?}");
+        assert!(started.elapsed() < Duration::from_millis(500));
+        writer.execute_batch("ROLLBACK").unwrap();
+    }
+
     #[test]
     fn crc_and_frame_corruption() {
         assert_eq!(crc32c(b"123456789".iter().copied()), 0xe3069283);
@@ -1031,15 +1513,15 @@ mod tests {
             bytes: vec![1, 2, 3],
             queued: Instant::now(),
         }];
-        commit_batch(&mut conn, &batch, None, |_, _| Ok(())).unwrap();
-        commit_batch(&mut conn, &batch, None, |_, _| Ok(())).unwrap();
+        commit_batch(&mut conn, &batch, None, None, |_, _| Ok(())).unwrap();
+        commit_batch(&mut conn, &batch, None, None, |_, _| Ok(())).unwrap();
         assert_eq!(
             conn.query_row("SELECT count(*) FROM journal", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             1
         );
         batch[0].bytes[0] = 9;
-        assert!(commit_batch(&mut conn, &batch, None, |_, _| Ok(())).is_err());
+        assert!(commit_batch(&mut conn, &batch, None, None, |_, _| Ok(())).is_err());
         assert_eq!(
             conn.query_row("SELECT frame FROM journal", [], |r| r.get::<_, Vec<u8>>(0))
                 .unwrap(),

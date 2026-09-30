@@ -23,6 +23,7 @@ fn phases(p: &CommandProfile) -> BTreeMap<String, f64> {
         ("sync", p.journal_sync),
         ("replacement", p.journal_replace),
         ("publication", p.publication),
+        ("region_transition", p.region_transition),
         ("authoritative_total", p.authoritative_total),
         (
             "unattributed",
@@ -112,6 +113,31 @@ impl Runner {
     fn perform(&mut self, actor: ActorId, step: &Step, cycle: usize, index: usize) {
         let before = self.engine.state(actor).unwrap();
         let action = step.resolve(&before);
+        self.execute(
+            actor,
+            &step.label,
+            &step.expected,
+            action,
+            Some(step),
+            before,
+            cycle,
+            index,
+        );
+    }
+    /// Run one command and record its sample; `step`, when given, verifies
+    /// the outcome.
+    #[allow(clippy::too_many_arguments)]
+    fn execute(
+        &mut self,
+        actor: ActorId,
+        label: &str,
+        expected: &str,
+        action: tor_protocol::Action,
+        step: Option<&Step>,
+        before: tor_protocol::StateView,
+        cycle: usize,
+        index: usize,
+    ) {
         let request = format!("sample-{}", self.attempt);
         self.attempt += 1;
         let command = Command::Act {
@@ -127,7 +153,7 @@ impl Runner {
         let command_call_ms = start.elapsed().as_secs_f64() * 1000.;
         let after = self.engine.state(actor).unwrap();
         if let Err(error) = &result {
-            if step.expected != "blocked" {
+            if expected != "blocked" {
                 println!(
                     "{}",
                     json!({"kind":"failure","case":self.case,
@@ -137,7 +163,11 @@ impl Runner {
                 );
             }
         }
-        step.verify(&before, &after, result.is_ok());
+        if let Some(step) = step {
+            step.verify(&before, &after, result.is_ok());
+        } else {
+            assert!(result.is_ok(), "{label} rejected");
+        }
         let mut timings = BTreeMap::new();
         let mut profile = None;
         let mut event = None;
@@ -202,10 +232,10 @@ impl Runner {
         timings.insert("command_call".into(), command_call_ms);
         for (phase, value) in &timings {
             self.distributions
-                .entry((step.label.clone(), phase.clone()))
+                .entry((label.to_string(), phase.clone()))
                 .or_default()
                 .push(*value);
-            if step.expected != "blocked" {
+            if expected != "blocked" {
                 self.distributions
                     .entry(("mixed".into(), phase.clone()))
                     .or_default()
@@ -215,7 +245,7 @@ impl Runner {
         println!(
             "{}",
             json!({"kind":"sample","case":self.case,"cycle":cycle,"step":index,"attempt":self.attempt,
-            "actor":actor,"label":step.label,"action":action,"expected":step.expected,
+            "actor":actor,"label":label,"action":action,"expected":expected,
             "history_start":history_start,"history_end":self.engine.profile_counts().0,"rewind_count":self.engine.profile_counts().1,
             "client_memory":self.app.state.as_ref().unwrap().memory().count(),"phases_ms":timings,
             "save_status":self.engine.save_status(),"profile":profile,"event":event.map(|e|e.content)})
@@ -247,6 +277,97 @@ impl Runner {
         self.perform(ActorId(1), step, cycle, index);
     }
 }
+/// Steps each way in the streaming workload: from hall 1 to hall 4 and back.
+/// Hall 6's guard is then loaded but frozen, so every run is identical.
+const STREAM_LEG: usize = 70;
+
+/// Region streaming workload (`streaming-v1`): a character walks
+/// [`STREAM_LEG`] steps east and back through a corridor of `halls` halls
+/// (the checked-in streaming corridor, lengthened), `cycles` times, at the
+/// default radii, so halls behind it detach and halls ahead are built and
+/// reattached every cycle. Any AI turns are sampled too. Selected only by
+/// name, so the ordinary matrix is unchanged.
+#[allow(clippy::too_many_arguments)]
+fn streaming_case(
+    case: &str,
+    halls: u64,
+    durable: bool,
+    cycles: usize,
+    save_policy: &tor_server::SavePolicy,
+    directory: &std::path::Path,
+    commit: &str,
+    dirty: bool,
+) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scenarios/tests/streaming-corridor");
+    let scenario =
+        tor_server::scenario_package::streaming_corridor(&root, &directory.join(case), halls, 5)
+            .unwrap();
+    let path = directory.join(format!("{case}.db"));
+    let mut engine = Engine::memory(scenario.clone()).unwrap();
+    if durable {
+        engine = engine
+            .attach_profile_save_with_policy(&path, save_policy.clone())
+            .unwrap();
+    }
+    println!(
+        "{}",
+        json!({"kind":"stream","case":case,"workload":"streaming-v1","regions":halls,"actors":1,
+        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,
+        "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+        "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
+        "storage":if durable{"background_sqlite_journal"}else{"memory"},
+        "save_policy":{"checkpoint_interval":save_policy.checkpoint_interval}})
+    );
+    let mut runner = Runner::new(engine, case.to_string());
+    for cycle in 0..cycles {
+        for (leg, direction) in [
+            (0, tor_protocol::Direction::East),
+            (1, tor_protocol::Direction::West),
+        ] {
+            let step = Step {
+                label: if leg == 0 { "walk_east" } else { "walk_west" }.into(),
+                action: TraceAction::Move { direction },
+                expected: "moved".into(),
+                min_regions: 1,
+            };
+            for index in 0..STREAM_LEG {
+                while let Some((actor, action)) = runner.engine.next_ai_action() {
+                    let before = runner.engine.state(actor).unwrap();
+                    runner.execute(
+                        actor, "ai_turn", "acted", action, None, before, cycle, index,
+                    );
+                }
+                runner.perform(ActorId(1), &step, cycle, leg * STREAM_LEG + index);
+            }
+        }
+    }
+    let (history_end, rewind_count) = runner.engine.profile_counts();
+    if !durable {
+        runner.engine.profile_persistence(&path).unwrap();
+    }
+    let state = runner.engine.state(ActorId(1)).unwrap();
+    let regions = runner.engine.region_counts();
+    let flush_started = Instant::now();
+    runner.engine.flush().unwrap();
+    let flush_ms = flush_started.elapsed().as_secs_f64() * 1000.;
+    let save_status = runner.engine.save_status();
+    let final_save_bytes = std::fs::metadata(&path).unwrap().len();
+    drop(runner.engine);
+    let start = Instant::now();
+    let resumed = Engine::open(&path, scenario).unwrap();
+    let restart_replay_ms = start.elapsed().as_secs_f64() * 1000.;
+    assert_eq!(resumed.state(ActorId(1)).unwrap(), state);
+    println!(
+        "{}",
+        json!({"kind":"stream_end","case":case,"history_end":history_end,"rewind_count":rewind_count,
+        "regions_final":regions,"final_save_bytes":final_save_bytes,"final_flush_ms":flush_ms,
+        "save_status":save_status,"restart_replay_ms":restart_replay_ms,"recovery":resumed.recovery_profile()})
+    );
+    summarize_wire(case, std::mem::take(&mut runner.wire_bytes));
+    summarize(case, runner.distributions);
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let quick = args.iter().any(|s| s == "--quick");
@@ -290,6 +411,26 @@ fn main() {
         .status()
         .unwrap();
     let directory = tempfile::tempdir().unwrap();
+    if let Some(case) = selected_case.filter(|case| case.starts_with("stream-")) {
+        let (halls, durable) = match case {
+            "stream-r16-memory" => (16, false),
+            "stream-r16-durable" => (16, true),
+            "stream-r256-memory" => (256, false),
+            "stream-r256-durable" => (256, true),
+            _ => panic!("unknown streaming case {case}"),
+        };
+        streaming_case(
+            case,
+            halls,
+            durable,
+            cycles,
+            &save_policy,
+            directory.path(),
+            String::from_utf8_lossy(&commit.stdout).trim(),
+            !dirty.success(),
+        );
+        return;
+    }
     let regions: &[u64] = if focused {
         &[8, 256]
     } else if quick {

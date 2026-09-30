@@ -3,15 +3,21 @@
 use super::*;
 use std::collections::BTreeSet;
 use tor_simulation::checkpoint::{SharedState, Snapshot};
+use tor_simulation::RecordId;
 
 #[derive(Debug)]
 pub(crate) struct Checkpoint {
     current_branch: BranchId,
     game: Game,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
     boundaries: VecDeque<Arc<Boundary>>,
     record_count: usize,
     wizard_game: bool,
+    /// Region records this checkpoint refers to that aren't on disk yet;
+    /// the worker writes them in the checkpoint's transaction.
+    pub(crate) records: BTreeMap<RecordId, tor_world::Shared<tor_simulation::RegionRecord>>,
+    /// Records made from here on have identities at least this one.
+    pub(crate) watermark: RecordId,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -19,7 +25,7 @@ pub(crate) struct Checkpoint {
 struct SavedBoundary {
     id: Option<EntryId>,
     game: Snapshot,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -34,18 +40,22 @@ pub(crate) struct DiskCheckpoint {
     wizard_game: bool,
     shared: SharedState,
     game: Snapshot,
-    revisions: BTreeMap<ActorId, u64>,
+    revisions: Revisions,
     boundaries: Vec<SavedBoundary>,
 }
 
 impl Checkpoint {
     #[cfg(test)]
     pub(crate) fn capture(engine: &Engine) -> Self {
-        Self::capture_candidate(
+        let mut checkpoint = Self::capture_candidate(
             &Candidate::capture(engine),
             engine.archive.records.len(),
             engine.archive.wizard_game,
-        )
+        );
+        if let Some(regions) = &engine.regions {
+            checkpoint.add_records(regions, &[]);
+        }
+        checkpoint
     }
 
     pub(super) fn capture_candidate(
@@ -60,7 +70,33 @@ impl Checkpoint {
             boundaries: state.boundaries.clone(),
             record_count,
             wizard_game,
+            records: BTreeMap::new(),
+            watermark: state.game.next_record_id(),
         }
+    }
+
+    /// Every region record the current game and its boundaries refer to.
+    pub(crate) fn referenced(&self) -> BTreeSet<RecordId> {
+        std::iter::once(&self.game)
+            .chain(self.boundaries.iter().map(|b| &b.game))
+            .flat_map(|game| game.detached_records().map(|(_, id)| id))
+            .collect()
+    }
+
+    /// Carry the referenced records that aren't on disk yet: kept ones, and
+    /// those the command being admitted made.
+    pub(super) fn add_records(
+        &mut self,
+        regions: &crate::regions::Regions,
+        made: &[(RecordId, tor_world::Shared<tor_simulation::RegionRecord>)],
+    ) {
+        let referenced = self.referenced();
+        self.records = regions.unwritten(referenced.iter().copied());
+        self.records.extend(
+            made.iter()
+                .filter(|(id, _)| referenced.contains(id))
+                .cloned(),
+        );
     }
 
     pub(crate) fn encode(&self, save_id: &str, sequence: u64) -> DiskCheckpoint {
@@ -133,11 +169,8 @@ impl DiskCheckpoint {
             }
         }
         let game = Game::restore_checkpoint(self.game, &self.shared).ok_or_else(invalid_archive)?;
-        let valid_revisions = |game: &Game, revisions: &BTreeMap<ActorId, u64>| {
-            game.checkpoint_actor_ids()
-                .eq(revisions.keys().map(|a| a.0))
-        };
-        if !valid_revisions(&game, &self.revisions) {
+        let valid_game = |game: &Game, revisions: &Revisions| revisions.valid_for(game);
+        if !valid_game(&game, &self.revisions) {
             return Err(invalid_archive());
         }
         let mut boundaries = VecDeque::new();
@@ -167,7 +200,7 @@ impl DiskCheckpoint {
             }
             let game = Game::restore_checkpoint(boundary.game, &self.shared)
                 .ok_or_else(invalid_archive)?;
-            if !valid_revisions(&game, &boundary.revisions) {
+            if !valid_game(&game, &boundary.revisions) {
                 return Err(invalid_archive());
             }
             boundaries.push_back(Arc::new(Boundary {
@@ -179,6 +212,20 @@ impl DiskCheckpoint {
         if boundaries
             .back()
             .is_none_or(|b| b.game != game || b.revisions != self.revisions)
+        {
+            return Err(invalid_archive());
+        }
+        let mut regions = crate::engine::streaming_regions(&archive.scenario)?;
+        if let Some(regions) = &mut regions {
+            // Every record the checkpoint refers to was written with it.
+            let on_disk = std::iter::once(&game)
+                .chain(boundaries.iter().map(|b| &b.game))
+                .flat_map(|g| g.detached_records().map(|(_, id)| id))
+                .collect();
+            regions.written(on_disk, game.next_record_id());
+        } else if std::iter::once(&game)
+            .chain(boundaries.iter().map(|b| &b.game))
+            .any(|g| g.detached_records().next().is_some())
         {
             return Err(invalid_archive());
         }
@@ -194,6 +241,7 @@ impl DiskCheckpoint {
             path: None,
             lock: None,
             store: None,
+            regions,
         })
     }
 }
@@ -239,6 +287,82 @@ mod tests {
                 Some(original.game.clone())
             );
         }
+    }
+
+    fn walk(engine: &mut Engine, direction: tor_protocol::Direction, steps: usize) {
+        for _ in 0..steps {
+            let revision = engine.revision(ActorId(1)).unwrap();
+            let request = format!("walk-{direction:?}-{revision}");
+            engine
+                .command(
+                    "player",
+                    "test",
+                    ActorId(1),
+                    &request,
+                    &engine.branch().clone(),
+                    Command::Act {
+                        expected_revision: revision,
+                        action: tor_protocol::Action::Move { direction },
+                    },
+                )
+                .unwrap();
+        }
+    }
+
+    /// Revisions a command copies are bounded by what's loaded: actors in
+    /// unbuilt or detached regions are parked in a map the copy shares.
+    #[test]
+    fn a_command_copies_revisions_only_for_loaded_actors() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let engine = Engine::memory(scenario).unwrap();
+        // The guard is in an unbuilt hall: known, parked, not loaded.
+        assert_eq!(engine.revisions.keys().collect::<Vec<_>>(), [&ActorId(1)]);
+        assert_eq!(engine.revision(ActorId(2)).unwrap(), 0);
+        let candidate = Candidate::capture(&engine);
+        assert!(candidate
+            .revisions
+            .parked
+            .shares_storage(&engine.revisions.parked));
+        assert!(engine.revisions.valid_for(&engine.game));
+    }
+
+    /// A save attached to a game that started in memory (as the benchmarks
+    /// do) must also serve records back once they're only on disk.
+    #[test]
+    fn a_save_attached_later_reads_evicted_records_back() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let mut engine = Engine::memory(scenario)
+            .unwrap()
+            .attach_profile_save_with_policy(
+                directory.path().join("attached.db"),
+                crate::SavePolicy {
+                    checkpoint_interval: 4,
+                    ..crate::SavePolicy::default()
+                },
+            )
+            .unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, 68);
+        assert_eq!(engine.region_counts().unwrap().detached, 2);
+        engine.flush().unwrap();
+        // The next command learns what the checkpoint wrote; then memory
+        // lets go of it.
+        walk(&mut engine, tor_protocol::Direction::East, 1);
+        engine.regions.as_mut().unwrap().evict_durable();
+        walk(&mut engine, tor_protocol::Direction::West, 69);
+        assert!(engine.region_counts().unwrap().records_read >= 2);
     }
 
     #[test]

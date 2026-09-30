@@ -274,7 +274,7 @@ fn read(root: &Path, relative: &str) -> Result<String, Failure> {
 fn parse<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T, Failure> {
     toml::from_str(text).map_err(|e| fail(format!("{name}: {e}")))
 }
-fn read_package(root: &Path) -> Result<Package, Failure> {
+pub(crate) fn read_package(root: &Path) -> Result<Package, Failure> {
     let text = read(root, "scenario.toml")?;
     let manifest: Manifest = parse(&text, "scenario.toml")?;
     require(manifest.format == 1, "Unsupported scenario format")?;
@@ -365,7 +365,68 @@ pub fn load(
         regions: package.regions.len() as u64,
         workload_version: None,
         package: Some(Arc::new(package)),
+        streaming: Some(crate::regions::Streaming::default()),
     })
+}
+
+/// The streaming corridor package at `root` (`scenarios/tests/streaming-
+/// corridor`), lengthened or shortened to `halls` halls in a row and written
+/// as an ordinary package to `out`, for region streaming workloads and
+/// scaling contracts. Hall 1 keeps its pebble and hall 6 its guard; every
+/// other hall is like hall 2. The written package has no certificate, so
+/// it's loaded as unvalidated.
+pub fn streaming_corridor(
+    root: &Path,
+    out: &Path,
+    halls: u64,
+    seed: u64,
+) -> Result<Scenario, Failure> {
+    require((2..=256).contains(&halls), "A corridor has 2 to 256 halls")?;
+    let original = read_package(root)?.regions;
+    let template = original
+        .iter()
+        .find(|r| r.id == 2)
+        .cloned()
+        .ok_or_else(|| fail("Missing hall 2"))?;
+    let portal = |direction: &str| {
+        template
+            .portals
+            .iter()
+            .find(|p| p.direction == direction)
+            .cloned()
+            .ok_or_else(|| fail("Missing hall portal"))
+    };
+    let (east, west) = (portal("east")?, portal("west")?);
+    let mut regions = Vec::new();
+    for id in 1..=halls {
+        let mut hall = original
+            .iter()
+            .find(|r| r.id == id && (id == 1 || id == 6))
+            .cloned()
+            .unwrap_or_else(|| template.clone());
+        hall.id = id;
+        hall.name = format!("Hall {id}");
+        hall.portals.clear();
+        if id < halls {
+            hall.portals.push(Portal {
+                to: format!("{}/west", id + 1),
+                ..east.clone()
+            });
+        }
+        if id > 1 {
+            hall.portals.push(Portal {
+                to: format!("{}/east", id - 1),
+                ..west.clone()
+            });
+        }
+        regions.push(hall);
+    }
+    std::fs::create_dir_all(out).map_err(|e| fail(format!("{e}")))?;
+    std::fs::copy(root.join("scenario.toml"), out.join("scenario.toml"))
+        .map_err(|e| fail(format!("{e}")))?;
+    let text = toml::to_string(&RegionFile { regions }).map_err(|e| fail(format!("{e}")))?;
+    std::fs::write(out.join("regions.toml"), text).map_err(|e| fail(format!("{e}")))?;
+    load(out, seed, None, true)
 }
 
 fn loc(region: u64, [x, y, z]: [i32; 3]) -> Location {
@@ -662,117 +723,45 @@ impl Package {
     pub(crate) fn build(&self, seed: u64, _runtime: bool) -> Result<Game, Failure> {
         self.check()?;
         self.supported()?;
-        let anchors = self.anchors()?;
+        let index = self.index(seed)?;
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
+        let all: Vec<&RegionDef> = self.regions.iter().collect();
+        self.add_geometry(&mut game, &all)?;
         for r in &self.regions {
-            let region = Region {
-                id: RegionId(r.id),
-                name: r.name.clone(),
-                bounds: Extent::new(r.size[0], r.size[1], r.size[2])
-                    .ok_or_else(|| fail("Invalid region extent"))?,
-            };
-            (if r.chamber {
-                game.add_chamber(region)
-            } else {
-                game.add_region(region)
-            })
-            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+            self.add_structure(&mut game, r, &index.anchors)?;
         }
-        for r in &self.regions {
-            for p in &r.walls {
-                game.set_wall(loc(r.id, *p), true)
-                    .map_err(|e| fail(format!("Region {} wall: {e:?}", r.id)))?;
-            }
-            for p in &r.openings {
-                game.set_wall(loc(r.id, *p), false)
-                    .map_err(|e| fail(format!("Region {} opening: {e:?}", r.id)))?;
-            }
-        }
-        for r in &self.regions {
-            if let Some(gravity) = r.gravity {
-                game.set_gravity(RegionId(r.id), gravity)
-                    .map_err(|_| fail("Invalid region gravity"))?;
-            }
-            for p in &r.portals {
-                let direction = match p.direction.as_str() {
-                    "north" => Direction::North,
-                    "east" => Direction::East,
-                    "south" => Direction::South,
-                    "west" => Direction::West,
-                    "up" => Direction::Up,
-                    "down" => Direction::Down,
-                    _ => return Err(fail("Invalid portal direction")),
-                };
-                let to = *anchors
-                    .get(&p.to)
-                    .ok_or_else(|| fail(format!("Missing portal anchor {}", p.to)))?;
-                require(
-                    p.turns < 4 && !(p.rotation.is_some() && p.turns != 0),
-                    "Use rotation for a cube transform, or turns for planar rotation",
-                )?;
-                let rotation = p.rotation.unwrap_or(p.turns);
-                require(
-                    p.kind.as_deref() != Some("stairs")
-                        || matches!(direction, Direction::Up | Direction::Down),
-                    "Stairs require an up/down direction",
-                )?;
-                let connect = match p.kind.as_deref() {
-                    Some("portal") => Game::connect_portal_area,
-                    None | Some("stairs") => Game::connect_area,
-                    _ => return Err(fail("Invalid connection kind")),
-                };
-                connect(
-                    &mut game,
-                    Passage {
-                        from: loc(r.id, p.at),
-                        direction,
-                        to,
-                    },
-                    rotation,
-                    p.width,
-                    p.height,
-                )
-                .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
-            }
-            for p in &r.places {
-                game.set_place_hint(loc(r.id, *p), true)
-                    .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
-            }
-            let mut gravity_cells = BTreeSet::new();
-            for g in &r.gravity_overrides {
-                require(
-                    gravity_cells.insert(g.at),
-                    "Duplicate gravity override cell",
-                )?;
-                game.set_cell_gravity(loc(r.id, g.at), g.vector)
-                    .map_err(|_| fail("Invalid gravity override"))?;
-                require(
-                    game.authored_cell_valid(loc(r.id, g.at)),
-                    "Gravity override outside traversable geometry",
-                )?;
-            }
-        }
-        for (name, position) in &anchors {
+        for (name, position) in &index.anchors {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
-        let mut actors = BTreeMap::new();
+        self.add_entities(&mut game, seed, &index, &all)?;
+        self.configure_run(&mut game, &index.anchors)?;
+        Ok(game)
+    }
+
+    /// Whole-package facts that building regions needs, computed once so
+    /// building one region reads only that region and its neighbours.
+    pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
+        let anchors = self.anchors()?;
+        let mut anchors_by_region: BTreeMap<u64, Vec<(String, Location)>> = BTreeMap::new();
+        for (name, at) in &anchors {
+            anchors_by_region
+                .entry(at.region.0)
+                .or_default()
+                .push((name.clone(), *at));
+        }
+        let mut spawns = BTreeMap::new();
         for c in &self.manifest.characters {
             if c.id == self.selected || c.unselected == "ai" {
-                actors.insert(
-                    c.id,
-                    (
-                        *anchors
-                            .get(&c.anchor)
-                            .ok_or_else(|| fail("Missing character anchor"))?,
-                        c.turn_ticks,
-                    ),
-                );
+                let at = *anchors
+                    .get(&c.anchor)
+                    .ok_or_else(|| fail("Missing character anchor"))?;
+                spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
         for r in &self.regions {
@@ -782,12 +771,280 @@ impl Package {
                     .or(self.archetype(&a.archetype)?.turn_ticks)
                     .unwrap_or(100);
                 require(
-                    actors.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
+                    spawns.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
                     "Duplicate actor ID",
                 )?;
             }
         }
-        for (id, (at, ticks)) in actors {
+        let homes: BTreeMap<u64, Location> =
+            spawns.iter().map(|(id, (at, _))| (*id, *at)).collect();
+        let mut spawns_by_region: BTreeMap<u64, Vec<(u64, Location, u64)>> = BTreeMap::new();
+        for (id, (at, ticks)) in &spawns {
+            spawns_by_region
+                .entry(at.region.0)
+                .or_default()
+                .push((*id, *at, *ticks));
+        }
+        let mut items: BTreeMap<u64, Vec<(u64, usize, usize)>> = BTreeMap::new();
+        for (r_index, r) in self.regions.iter().enumerate() {
+            for (i_index, i) in r.items.iter().enumerate() {
+                items
+                    .entry(self.item_region(r.id, i, &homes))
+                    .or_default()
+                    .push((i.id, r_index, i_index));
+            }
+        }
+        for list in items.values_mut() {
+            list.sort();
+        }
+        Ok(PackageIndex {
+            regions: self
+                .regions
+                .iter()
+                .enumerate()
+                .map(|(index, r)| (r.id, index))
+                .collect(),
+            anchors,
+            anchors_by_region,
+            homes,
+            spawns: spawns_by_region,
+            items,
+            appearances: self.appearance_mapping(seed)?,
+            lookups: std::cell::Cell::new(0),
+        })
+    }
+
+    /// A game with every region known but none built: each is built from
+    /// this package when it's first loaded (see [`Package::build_region`]).
+    /// Building every region gives exactly [`Package::build`]'s game.
+    pub(crate) fn start(&self, seed: u64) -> Result<Game, Failure> {
+        self.check()?;
+        self.supported()?;
+        let index = self.index(seed)?;
+        let mut identities: BTreeMap<u64, tor_simulation::RegionIdentities> = BTreeMap::new();
+        for (id, home) in &index.homes {
+            identities
+                .entry(home.region.0)
+                .or_default()
+                .actors
+                .insert(tor_simulation::ActorId(*id));
+        }
+        for r in &self.regions {
+            for i in r.items.iter().filter(|i| !self.omitted_carrier(i)) {
+                identities
+                    .entry(self.item_region(r.id, i, &index.homes))
+                    .or_default()
+                    .items
+                    .insert(tor_simulation::ItemId(i.id));
+            }
+            identities
+                .entry(r.id)
+                .or_default()
+                .doors
+                .extend(r.doors.iter().map(|d| d.id));
+        }
+        let mut game = Game::new(
+            World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
+            seed,
+        );
+        for r in &self.regions {
+            game.add_unbuilt_region(
+                self.region(r)?,
+                r.chamber,
+                identities.remove(&r.id).unwrap_or_default(),
+            )
+            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+        }
+        self.configure_run(&mut game, &index.anchors)?;
+        Ok(game)
+    }
+
+    /// One region's starting record, built in a scratch game holding it and
+    /// its neighbours' geometry, so its links and entities are checked
+    /// exactly as [`Package::build`] checks them. Reads only that region and
+    /// its neighbours (through `index`), so the result doesn't depend on
+    /// which regions were built before, and the cost doesn't depend on the
+    /// package's size.
+    pub(crate) fn build_region(
+        &self,
+        seed: u64,
+        index: &PackageIndex,
+        region: u64,
+    ) -> Result<tor_simulation::RegionRecord, Failure> {
+        let r = index
+            .region(self, region)
+            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        let mut shell: Vec<&RegionDef> = vec![r];
+        for to in r.portals.iter().filter_map(|p| index.anchors.get(&p.to)) {
+            if shell.iter().all(|s| s.id != to.region.0) {
+                shell.push(
+                    index
+                        .region(self, to.region.0)
+                        .ok_or_else(|| fail("Unknown portal region"))?,
+                );
+            }
+        }
+        shell.sort_by_key(|s| index.regions[&s.id]);
+        let mut game = Game::new(
+            World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
+            seed,
+        );
+        self.add_geometry(&mut game, &shell)?;
+        self.add_structure(&mut game, r, &index.anchors)?;
+        for (name, position) in index.anchors_by_region.get(&region).into_iter().flatten() {
+            require(
+                game.authored_cell_valid(*position),
+                format!("Anchor {name}: outside traversable geometry"),
+            )?;
+        }
+        self.add_entities(&mut game, seed, index, &[r])?;
+        game.into_region_record(RegionId(region))
+            .map_err(|e| fail(format!("Region {region}: {e:?}")))
+    }
+
+    fn region(&self, r: &RegionDef) -> Result<Region, Failure> {
+        Ok(Region {
+            id: RegionId(r.id),
+            name: r.name.clone(),
+            bounds: Extent::new(r.size[0], r.size[1], r.size[2])
+                .ok_or_else(|| fail("Invalid region extent"))?,
+        })
+    }
+
+    /// These regions, in package order, with their walls and openings.
+    fn add_geometry(&self, game: &mut Game, regions: &[&RegionDef]) -> Result<(), Failure> {
+        for r in regions {
+            let region = self.region(r)?;
+            (if r.chamber {
+                game.add_chamber(region)
+            } else {
+                game.add_region(region)
+            })
+            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+        }
+        for r in regions {
+            for p in &r.walls {
+                game.set_wall(loc(r.id, *p), true)
+                    .map_err(|e| fail(format!("Region {} wall: {e:?}", r.id)))?;
+            }
+            for p in &r.openings {
+                game.set_wall(loc(r.id, *p), false)
+                    .map_err(|e| fail(format!("Region {} opening: {e:?}", r.id)))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A region's gravity, outgoing links, place hints and gravity overrides.
+    fn add_structure(
+        &self,
+        game: &mut Game,
+        r: &RegionDef,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<(), Failure> {
+        if let Some(gravity) = r.gravity {
+            game.set_gravity(RegionId(r.id), gravity)
+                .map_err(|_| fail("Invalid region gravity"))?;
+        }
+        for p in &r.portals {
+            let direction = match p.direction.as_str() {
+                "north" => Direction::North,
+                "east" => Direction::East,
+                "south" => Direction::South,
+                "west" => Direction::West,
+                "up" => Direction::Up,
+                "down" => Direction::Down,
+                _ => return Err(fail("Invalid portal direction")),
+            };
+            let to = *anchors
+                .get(&p.to)
+                .ok_or_else(|| fail(format!("Missing portal anchor {}", p.to)))?;
+            require(
+                p.turns < 4 && !(p.rotation.is_some() && p.turns != 0),
+                "Use rotation for a cube transform, or turns for planar rotation",
+            )?;
+            let rotation = p.rotation.unwrap_or(p.turns);
+            require(
+                p.kind.as_deref() != Some("stairs")
+                    || matches!(direction, Direction::Up | Direction::Down),
+                "Stairs require an up/down direction",
+            )?;
+            let connect = match p.kind.as_deref() {
+                Some("portal") => Game::connect_portal_area,
+                None | Some("stairs") => Game::connect_area,
+                _ => return Err(fail("Invalid connection kind")),
+            };
+            connect(
+                game,
+                Passage {
+                    from: loc(r.id, p.at),
+                    direction,
+                    to,
+                },
+                rotation,
+                p.width,
+                p.height,
+            )
+            .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
+        }
+        for p in &r.places {
+            game.set_place_hint(loc(r.id, *p), true)
+                .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
+        }
+        let mut gravity_cells = BTreeSet::new();
+        for g in &r.gravity_overrides {
+            require(
+                gravity_cells.insert(g.at),
+                "Duplicate gravity override cell",
+            )?;
+            game.set_cell_gravity(loc(r.id, g.at), g.vector)
+                .map_err(|_| fail("Invalid gravity override"))?;
+            require(
+                game.authored_cell_valid(loc(r.id, g.at)),
+                "Gravity override outside traversable geometry",
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Items carried by an omitted character are omitted with it.
+    fn omitted_carrier(&self, i: &Item) -> bool {
+        i.carried_by.is_some_and(|id| {
+            id != self.selected
+                && self
+                    .manifest
+                    .characters
+                    .iter()
+                    .any(|c| c.id == id && c.unselected == "omit")
+        })
+    }
+
+    /// The region an item starts in: its carrier's, or where it's authored.
+    fn item_region(&self, authored: u64, i: &Item, homes: &BTreeMap<u64, Location>) -> u64 {
+        i.carried_by
+            .and_then(|id| homes.get(&id))
+            .map_or(authored, |home| home.region.0)
+    }
+
+    /// Actors, items, identity knowledge and doors in these regions (given in
+    /// package order), in the same order whichever regions they are.
+    fn add_entities(
+        &self,
+        game: &mut Game,
+        seed: u64,
+        index: &PackageIndex,
+        regions: &[&RegionDef],
+    ) -> Result<(), Failure> {
+        let chosen: BTreeSet<u64> = regions.iter().map(|r| r.id).collect();
+        let keep = |id: u64| chosen.contains(&id);
+        let homes = &index.homes;
+        let mut spawns: Vec<_> = chosen
+            .iter()
+            .flat_map(|r| index.spawns.get(r).into_iter().flatten())
+            .copied()
+            .collect();
+        spawns.sort_by_key(|(id, _, _)| *id);
+        for (id, at, ticks) in spawns {
             game.spawn_authored_actor(
                 id,
                 at,
@@ -796,7 +1053,9 @@ impl Package {
             .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
         }
         for c in &self.manifest.characters {
-            if c.id == self.selected || c.unselected == "ai" {
+            if (c.id == self.selected || c.unselected == "ai")
+                && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
+            {
                 if let Some(spec) = c.combat.clone().or_else(|| {
                     self.manifest
                         .objective
@@ -827,7 +1086,7 @@ impl Package {
                 }
             }
         }
-        for r in &self.regions {
+        for r in regions {
             for a in &r.actors {
                 if let Some(spec) = a
                     .combat
@@ -862,11 +1121,14 @@ impl Package {
                 }
             }
         }
-        let appearances = self.appearance_mapping(seed)?;
-        let mut items: Vec<_> = self
-            .regions
+        let appearances = &index.appearances;
+        let mut items: Vec<_> = chosen
             .iter()
-            .flat_map(|r| r.items.iter().map(move |i| (r.id, i)))
+            .flat_map(|r| index.items.get(r).into_iter().flatten())
+            .map(|&(_, r_index, i_index)| {
+                let r = &self.regions[r_index];
+                (r.id, &r.items[i_index])
+            })
             .collect();
         items.sort_by_key(|(_, i)| i.id);
         for (region, i) in items {
@@ -937,9 +1199,15 @@ impl Package {
             }) {
                 continue;
             }
+            // A carried item starts with its carrier, which may be authored
+            // in another region.
+            let at = match i.carried_by.and_then(|id| homes.get(&id)) {
+                Some(home) if home.region.0 != region => *home,
+                _ => loc(region, i.at),
+            };
             game.place_item_stack(
                 i.id,
-                loc(region, i.at),
+                at,
                 i.carried_by.map(tor_simulation::ActorId),
                 i.quantity,
                 spec,
@@ -947,15 +1215,16 @@ impl Package {
             .map_err(|e| fail(format!("Item {}: {e:?}", i.id)))?;
         }
         for c in &self.manifest.characters {
-            if c.id == self.selected || c.unselected != "omit" {
+            if (c.id == self.selected || c.unselected != "omit")
+                && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
+            {
                 for identity in &c.known_identities {
                     game.learn_identity(tor_simulation::ActorId(c.id), identity)
                         .map_err(|_| fail("Unknown initial item identity"))?;
                 }
             }
         }
-        let mut doors: Vec<_> = self
-            .regions
+        let mut doors: Vec<_> = regions
             .iter()
             .flat_map(|r| r.doors.iter().map(move |d| (r.id, d)))
             .collect();
@@ -979,6 +1248,14 @@ impl Package {
             game.place_authored_door(d.id, at, d.open, d.height)
                 .map_err(|e| fail(format!("Door {}: {e:?}", d.id)))?;
         }
+        Ok(())
+    }
+
+    fn configure_run(
+        &self,
+        game: &mut Game,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<(), Failure> {
         if self.manifest.characters.iter().any(|c| c.combat.is_some())
             || self.manifest.objective.is_some()
         {
@@ -1007,15 +1284,107 @@ impl Package {
             )
             .map_err(|_| fail("Invalid run configuration"))?;
         }
-        Ok(game)
+        Ok(())
     }
     /// Only structural edits that invalidate an authored anchor break validation.
     /// World mutation APIs independently enforce topology/entity consistency.
+    /// Regions that aren't loaded can't have been edited, so only loaded
+    /// anchors are checked.
     pub(crate) fn state_valid(&self, game: &Game) -> bool {
+        let loaded = |at: &Location| {
+            matches!(
+                game.region_state(at.region),
+                Some(tor_simulation::RegionState::Active | tor_simulation::RegionState::Frozen)
+            )
+        };
         game.authored_links_clear()
-            && self
-                .anchors()
-                .is_ok_and(|anchors| anchors.values().all(|p| game.authored_cell_valid(*p)))
+            && self.anchors().is_ok_and(|anchors| {
+                anchors
+                    .values()
+                    .filter(|p| loaded(p))
+                    .all(|p| game.authored_cell_valid(*p))
+            })
+    }
+}
+
+/// Whole-package facts for building regions (see [`Package::index`]).
+#[derive(Clone, Debug)]
+pub(crate) struct PackageIndex {
+    /// Each region's position in [`Package::regions`].
+    regions: BTreeMap<u64, usize>,
+    anchors: BTreeMap<String, Location>,
+    anchors_by_region: BTreeMap<u64, Vec<(String, Location)>>,
+    /// Where each spawned actor starts.
+    homes: BTreeMap<u64, Location>,
+    /// Actors by the region they start in: identity, start, turn length.
+    spawns: BTreeMap<u64, Vec<(u64, Location, u64)>>,
+    /// Items by the region they start in: identity, then their region's and
+    /// their own position in the package.
+    items: BTreeMap<u64, Vec<(u64, usize, usize)>>,
+    appearances: BTreeMap<String, String>,
+    /// Region definitions handed out, for scaling contracts.
+    lookups: std::cell::Cell<usize>,
+}
+
+impl PackageIndex {
+    fn region<'a>(&self, package: &'a Package, id: u64) -> Option<&'a RegionDef> {
+        self.lookups.set(self.lookups.get() + 1);
+        package.regions.get(*self.regions.get(&id)?)
+    }
+
+    /// Region definitions handed out so far.
+    #[cfg(test)]
+    pub(crate) fn lookups(&self) -> usize {
+        self.lookups.get()
+    }
+}
+
+/// Records for a game started with [`Package::start`]: detached records in
+/// memory, and unbuilt regions built from the package on first load.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "tests build package games without an engine")
+)]
+pub(crate) struct PackageRecords {
+    package: Arc<Package>,
+    index: PackageIndex,
+    seed: u64,
+    records: tor_simulation::MemoryRecords,
+}
+
+impl PackageRecords {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "tests build package games without an engine")
+    )]
+    pub(crate) fn new(package: Arc<Package>, seed: u64) -> Self {
+        Self {
+            index: package.index(seed).expect("a valid package"),
+            package,
+            seed,
+            records: Default::default(),
+        }
+    }
+}
+
+impl tor_simulation::RecordStore for PackageRecords {
+    fn put(
+        &mut self,
+        id: tor_simulation::RecordId,
+        record: tor_world::Shared<tor_simulation::RegionRecord>,
+    ) {
+        self.records.put(id, record);
+    }
+    fn get(
+        &mut self,
+        id: tor_simulation::RecordId,
+    ) -> Option<tor_world::Shared<tor_simulation::RegionRecord>> {
+        self.records.get(id)
+    }
+    fn build(&mut self, region: RegionId) -> Option<tor_simulation::RegionRecord> {
+        self.package
+            .build_region(self.seed, &self.index, region.0)
+            .ok()
     }
 }
 
@@ -1079,6 +1448,107 @@ mod region_lifecycle_tests {
     use super::*;
     use tor_simulation::RegionTransition;
 
+    fn packages() -> Vec<std::path::PathBuf> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+        let mut packages: Vec<_> = std::fs::read_dir(root.join("tests"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .chain([root.join("first-dungeon"), root.join("two-room")])
+            .filter(|path| path.join("scenario.toml").is_file())
+            .collect();
+        packages.sort();
+        packages
+    }
+
+    /// Starting with nothing built and building regions on first load, in
+    /// any order, gives exactly the game that building everything at once
+    /// gives: a region's content never depends on which were built before.
+    #[test]
+    fn every_package_built_region_by_region_equals_building_it_whole() {
+        use tor_simulation::RegionState;
+        for path in packages() {
+            let package = Arc::new(read_package(&path).unwrap());
+            let all: Vec<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
+            let mut reversed = all.clone();
+            reversed.reverse();
+            let mut rotated = all.clone();
+            rotated.rotate_left(all.len() / 2);
+            for seed in [0, 42] {
+                let whole = package.build(seed, true).unwrap();
+                for order in [&all, &reversed, &rotated] {
+                    let context = format!("{} seed {seed} order {order:?}", path.display());
+                    let mut game = package.start(seed).unwrap();
+                    assert!(
+                        all.iter()
+                            .all(|r| game.region_state(*r) == Some(RegionState::Unbuilt)),
+                        "{context}"
+                    );
+                    let mut records = PackageRecords::new(package.clone(), seed);
+                    let mut loaded = BTreeSet::new();
+                    for region in order.iter() {
+                        loaded.insert(*region);
+                        game.transition_regions(
+                            &RegionTransition {
+                                active: loaded.clone(),
+                                loaded: loaded.clone(),
+                            },
+                            &mut records,
+                        )
+                        .unwrap_or_else(|e| panic!("{context}: {e:?}"));
+                    }
+                    assert_eq!(game, whole, "{context}");
+                }
+            }
+        }
+    }
+
+    /// The pins' reach answers (each region's exit field, then a cached
+    /// search) must agree with an uncached search in every cell of every
+    /// checked-in package: rotated and physical portals, stairs, chambers and
+    /// their rims. Most cells are far enough from exits for the field.
+    #[test]
+    fn reach_answers_agree_with_the_search_in_every_package() {
+        let mut fielded = 0;
+        for path in packages() {
+            let game = read_package(&path).unwrap().build(0, true).unwrap();
+            fielded += game
+                .check_reach()
+                .unwrap_or_else(|cell| panic!("{}: {cell:?}", path.display()));
+        }
+        assert!(
+            fielded > 1000,
+            "only {fielded} cells were answered by exit fields"
+        );
+    }
+
+    /// Building one region reads only it and its neighbours, however many
+    /// regions the package has.
+    #[test]
+    fn building_a_region_reads_only_it_and_its_neighbours() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let directory = tempfile::tempdir().unwrap();
+        let scenario = streaming_corridor(&root, directory.path(), 256, 5).unwrap();
+        let package = scenario.package.unwrap();
+        let index = package.index(5).unwrap();
+        for region in 1..=256 {
+            let before = index.lookups();
+            package.build_region(5, &index, region).unwrap();
+            let read = index.lookups() - before;
+            assert!(read <= 3, "region {region} read {read} region definitions");
+        }
+    }
+
+    #[test]
+    fn a_game_with_unbuilt_regions_round_trips_through_a_checkpoint() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+        let package = read_package(&root.join("first-dungeon")).unwrap();
+        let game = package.start(7).unwrap();
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared);
+        assert_eq!(restored, Some(game));
+    }
+
     /// Every checked-in package, shrunk to what its characters' reference
     /// points require and then fully reactivated, equals the original. This
     /// covers real joins, rotations, physical portals, doors and bodies.
@@ -1111,26 +1581,37 @@ mod region_lifecycle_tests {
                 })
                 .unwrap();
             }
-            let original = game.clone();
+            let mut original = game.clone();
+            let mut records = tor_simulation::MemoryRecords::default();
             let roots: BTreeSet<_> = game.region_roots().iter().map(|r| r.region).collect();
             let (_, report) = game
-                .transition_regions(&RegionTransition {
-                    active: roots.clone(),
-                    loaded: roots,
-                })
+                .transition_regions(
+                    &RegionTransition {
+                        active: roots.clone(),
+                        loaded: roots,
+                    },
+                    &mut records,
+                )
                 .unwrap_or_else(|e| panic!("{}: {e:?}", path.display()));
+            assert_eq!(records.len(), report.detached.len());
             detached += report.detached.len();
             let mut shared = tor_simulation::checkpoint::SharedState::default();
-            let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
+            let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared)
                 .unwrap_or_else(|| panic!("{}: {report:?}", path.display()));
             assert_eq!(restored, game, "{}", path.display());
             let all: BTreeSet<_> = package.regions.iter().map(|r| RegionId(r.id)).collect();
-            game.transition_regions(&RegionTransition {
+            let everything = RegionTransition {
                 active: all.clone(),
                 loaded: all,
-            })
-            .unwrap();
+            };
+            game.transition_regions(&everything, &mut records).unwrap();
+            restored
+                .transition_regions(&everything, &mut records)
+                .unwrap();
+            // Only the record-identity allocator moved.
+            original.continue_record_ids(&game);
             assert_eq!(game, original, "{}", path.display());
+            assert_eq!(restored, original, "{}", path.display());
         }
         assert!(detached > 0, "some package has a region to detach");
     }

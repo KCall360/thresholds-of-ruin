@@ -8,8 +8,8 @@ use tor_simulation::{
     ai::AiProfile,
     checkpoint::SharedState,
     combat::{CombatSpec, Objective},
-    Action, ActorId, BodySpec, Game, ItemId, ReferencePoint, ReferenceTarget, RegionState,
-    RegionTransition, TransitionError,
+    Action, ActorId, BodySpec, Game, ItemId, MemoryRecords, ReferencePoint, ReferenceTarget,
+    RegionState, RegionTransition, TransitionError,
 };
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
@@ -88,11 +88,14 @@ fn round_trip(game: &Game) -> Game {
 
 #[test]
 fn keeping_everything_active_changes_nothing() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     run(&mut game, player, &[]);
     let before = game.clone();
     let all = [1, 2, 3, 4];
-    let (_, report) = game.transition_regions(&sets(&all, &all)).unwrap();
+    let (_, report) = game
+        .transition_regions(&sets(&all, &all), &mut records)
+        .unwrap();
     assert_eq!(report, Default::default());
     assert_eq!(game, before);
 }
@@ -130,6 +133,7 @@ fn default_points_follow_characters_and_nothing_else() {
 
 #[test]
 fn frozen_actors_do_not_act_and_keep_their_remaining_recovery() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let far = game.spawn_actor(at(3, 5, 1), ticks(150)).unwrap();
     run(&mut game, player, &[]);
@@ -138,7 +142,9 @@ fn frozen_actors_do_not_act_and_keep_their_remaining_recovery() {
     // The far actor still has 50 ticks of recovery at tick 100.
     assert_eq!((outcome.next_actor, outcome.next_tick), (Some(player), 100));
 
-    let (applied, report) = game.transition_regions(&sets(&[1], &[1])).unwrap();
+    let (applied, report) = game
+        .transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert_eq!(applied.active, regions(&[1]));
     assert_eq!(
         applied.loaded,
@@ -156,7 +162,7 @@ fn frozen_actors_do_not_act_and_keep_their_remaining_recovery() {
     }
     assert_eq!(game.tick(), 400);
 
-    game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]))
+    game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
         .unwrap();
     // Without the shift the far actor would act at once; it has 50 left.
     let outcome = game.act(player, Action::Wait).unwrap();
@@ -165,6 +171,7 @@ fn frozen_actors_do_not_act_and_keep_their_remaining_recovery() {
 
 #[test]
 fn frozen_wind_up_resumes_where_it_stopped() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let attacker = game.spawn_actor(at(3, 5, 1), ticks(100)).unwrap();
     let target = game.spawn_actor(at(3, 6, 1), ticks(100)).unwrap();
@@ -178,7 +185,8 @@ fn frozen_wind_up_resumes_where_it_stopped() {
 
     // The target is due next, so freezing it advances time to the player.
     let frozen_at = game.tick();
-    game.transition_regions(&sets(&[1], &[1, 2, 3])).unwrap();
+    game.transition_regions(&sets(&[1], &[1, 2, 3]), &mut records)
+        .unwrap();
     assert_eq!(game.region_state(RegionId(3)), Some(RegionState::Frozen));
     assert_eq!(game.next_actor(), Some(player));
     game.act(player, Action::Wait).unwrap();
@@ -190,7 +198,7 @@ fn frozen_wind_up_resumes_where_it_stopped() {
         "no progress while frozen"
     );
 
-    game.transition_regions(&sets(&[1, 2, 3], &[1, 2, 3, 4]))
+    game.transition_regions(&sets(&[1, 2, 3], &[1, 2, 3, 4]), &mut records)
         .unwrap();
     let resumed = game.preparation(attacker).unwrap();
     assert_eq!(resumed.started, started.started + elapsed);
@@ -199,6 +207,7 @@ fn frozen_wind_up_resumes_where_it_stopped() {
 
 #[test]
 fn pins_reject_transitions_without_changing_the_game() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let edge = game.spawn_actor(at(2, 11, 1), ticks(100)).unwrap();
     run(&mut game, player, &[]);
@@ -212,29 +221,32 @@ fn pins_reject_transitions_without_changing_the_game() {
     let before = game.clone();
     // An actor at a region's edge can reach the next region.
     assert_eq!(
-        game.apply_region_transition(&sets(&[1, 2], &[1, 2, 3])),
+        game.apply_region_transition(&sets(&[1, 2], &[1, 2, 3]), &mut records),
         Err(TransitionError::MustBeActive(RegionId(3)))
     );
     // Linked regions of active ones stay loaded.
     assert_eq!(
-        game.apply_region_transition(&sets(&[1, 2, 3], &[1, 2, 3])),
+        game.apply_region_transition(&sets(&[1, 2, 3], &[1, 2, 3]), &mut records),
         Err(TransitionError::MustBeLoaded(RegionId(4)))
     );
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[2])),
+        game.apply_region_transition(&sets(&[1], &[2]), &mut records),
         Err(TransitionError::ActiveNotLoaded(RegionId(1)))
     );
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[1, 9])),
+        game.apply_region_transition(&sets(&[1], &[1, 9]), &mut records),
         Err(TransitionError::UnknownRegion(RegionId(9)))
     );
     assert_eq!(game, before);
-    let (applied, _) = game.transition_regions(&sets(&[1], &[1])).unwrap();
+    let (applied, _) = game
+        .transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert_eq!(applied.active, regions(&[1, 2, 3]));
 }
 
 #[test]
 fn an_observer_keeps_everything_it_sees_active() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     game.teleport(player, at(1, 6, 1)).unwrap();
     run(&mut game, player, &[]);
@@ -247,15 +259,18 @@ fn an_observer_keeps_everything_it_sees_active() {
         .collect();
     assert!(visible.contains(&RegionId(2)));
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[1, 2])),
+        game.apply_region_transition(&sets(&[1], &[1, 2]), &mut records),
         Err(TransitionError::MustBeActive(RegionId(2)))
     );
-    let (applied, _) = game.transition_regions(&sets(&[1], &[1])).unwrap();
+    let (applied, _) = game
+        .transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert!(applied.active.contains(&RegionId(2)));
 }
 
 #[test]
 fn a_body_spanning_a_portal_pins_both_regions() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let wide = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
     game.set_body(
@@ -270,15 +285,18 @@ fn a_body_spanning_a_portal_pins_both_regions() {
     run(&mut game, player, &[]);
     // Region 3 frozen but loaded; the body's other half is in region 4.
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[1, 2, 3])),
+        game.apply_region_transition(&sets(&[1], &[1, 2, 3]), &mut records),
         Err(TransitionError::MustBeLoaded(RegionId(4)))
     );
-    let (applied, _) = game.transition_regions(&sets(&[1], &[1, 2, 3])).unwrap();
+    let (applied, _) = game
+        .transition_regions(&sets(&[1], &[1, 2, 3]), &mut records)
+        .unwrap();
     assert!(applied.loaded.contains(&RegionId(4)));
 }
 
 #[test]
 fn a_frozen_attack_keeps_its_target_loaded() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let attacker = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
     let target = game.spawn_actor(at(4, 0, 1), ticks(100)).unwrap();
@@ -288,13 +306,14 @@ fn a_frozen_attack_keeps_its_target_loaded() {
     game.act(player, Action::Wait).unwrap();
     game.act(attacker, Action::Attack { target }).unwrap();
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[1, 2, 3])),
+        game.apply_region_transition(&sets(&[1], &[1, 2, 3]), &mut records),
         Err(TransitionError::MustBeLoaded(RegionId(4)))
     );
 }
 
 #[test]
 fn an_item_point_follows_its_carrier() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let carrier = game.spawn_actor(at(3, 5, 1), ticks(100)).unwrap();
     let item = game
@@ -309,17 +328,19 @@ fn an_item_point_follows_its_carrier() {
     })
     .unwrap();
     assert_eq!(
-        game.apply_region_transition(&sets(&[1], &[1, 2])),
+        game.apply_region_transition(&sets(&[1], &[1, 2]), &mut records),
         Err(TransitionError::MustBeActive(RegionId(3)))
     );
 }
 
 #[test]
 fn a_point_on_a_detached_actor_brings_its_region_back() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let far = game.spawn_actor(at(4, 5, 1), ticks(100)).unwrap();
     run(&mut game, player, &[]);
-    game.transition_regions(&sets(&[1], &[1])).unwrap();
+    game.transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert_eq!(game.region_state(RegionId(4)), Some(RegionState::Detached));
     game.add_reference_point(ReferencePoint {
         target: ReferenceTarget::Actor(far),
@@ -335,7 +356,9 @@ fn a_point_on_a_detached_actor_brings_its_region_back() {
             .collect::<Vec<_>>(),
         [RegionId(1), RegionId(4)]
     );
-    let (applied, report) = game.transition_regions(&sets(&[1], &[1])).unwrap();
+    let (applied, report) = game
+        .transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert!(applied.active.contains(&RegionId(4)));
     assert_eq!(report.attached, [RegionId(3), RegionId(4)]);
     assert_eq!(game.region_state(RegionId(4)), Some(RegionState::Active));
@@ -346,6 +369,7 @@ fn a_point_on_a_detached_actor_brings_its_region_back() {
 /// survive a save round trip while detached.
 #[test]
 fn detaching_and_reattaching_equals_only_freezing() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     let hunter = game.spawn_actor(at(2, 9, 1), ticks(90)).unwrap();
     let prey = game.spawn_actor(at(3, 6, 1), ticks(120)).unwrap();
@@ -385,13 +409,18 @@ fn detaching_and_reattaching_equals_only_freezing() {
 
     let mut frozen = game.clone();
     let mut detached = game.clone();
-    let (applied, report) = detached.transition_regions(&sets(&[1], &[1])).unwrap();
+    let (applied, report) = detached
+        .transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert!(report.detached.contains(&RegionId(4)), "{report:?}");
     frozen
-        .transition_regions(&RegionTransition {
-            active: applied.active.clone(),
-            loaded: regions(&[1, 2, 3, 4]),
-        })
+        .transition_regions(
+            &RegionTransition {
+                active: applied.active.clone(),
+                loaded: regions(&[1, 2, 3, 4]),
+            },
+            &mut records,
+        )
         .unwrap();
     assert!(frozen
         .region_roots()
@@ -402,14 +431,20 @@ fn detaching_and_reattaching_equals_only_freezing() {
     step(&mut detached, 5);
     // Knowledge references into detached regions (the objective item, AI
     // memory, navigation) stay valid through a save round trip.
+    // Restoring reads no records; they're checked when they attach.
     let restored = round_trip(&detached);
     assert_eq!(restored, detached);
+    assert!(restored.detached_records_valid(&mut records));
 
     let all = sets(&[1, 2, 3, 4], &[1, 2, 3, 4]);
     let mut restored = restored;
-    frozen.transition_regions(&all).unwrap();
-    detached.transition_regions(&all).unwrap();
-    restored.transition_regions(&all).unwrap();
+    frozen.transition_regions(&all, &mut records).unwrap();
+    detached.transition_regions(&all, &mut records).unwrap();
+    restored.transition_regions(&all, &mut records).unwrap();
+    // Record identities are never reused, so only the detached games moved
+    // their allocator; everything else must match exactly.
+    assert_ne!(detached, frozen);
+    frozen.continue_record_ids(&detached);
     assert_eq!(detached, frozen);
     assert_eq!(restored, frozen);
     step(&mut frozen, 8);
@@ -441,10 +476,13 @@ fn saves_without_lifecycle_state_are_unchanged() {
 
 #[test]
 fn with_no_reference_points_everything_can_detach() {
+    let mut records = MemoryRecords::default();
     // No run: nothing awaits input and no point follows anyone.
     let (mut game, _) = corridor();
     game.spawn_actor(at(3, 5, 1), ticks(100)).unwrap();
-    let (applied, report) = game.transition_regions(&sets(&[], &[])).unwrap();
+    let (applied, report) = game
+        .transition_regions(&sets(&[], &[]), &mut records)
+        .unwrap();
     assert!(applied.loaded.is_empty());
     assert_eq!(report.detached.len(), 4);
     assert_eq!(game.next_actor(), None);
@@ -454,14 +492,18 @@ fn with_no_reference_points_everything_can_detach() {
 
 #[test]
 fn frozen_and_detached_checkpoints_round_trip() {
+    let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
     game.spawn_actor(at(3, 5, 1), ticks(150)).unwrap();
     run(&mut game, player, &[]);
-    game.transition_regions(&sets(&[1], &[1, 2, 3])).unwrap();
+    game.transition_regions(&sets(&[1], &[1, 2, 3]), &mut records)
+        .unwrap();
     assert_eq!(round_trip(&game), game);
     game.act(player, Action::Wait).unwrap();
-    game.transition_regions(&sets(&[1], &[1])).unwrap();
+    game.transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
     assert_eq!(round_trip(&game), game);
+    assert!(game.detached_records_valid(&mut records));
     let item = ItemId(999);
     assert!(game
         .add_reference_point(ReferencePoint {
@@ -471,6 +513,29 @@ fn frozen_and_detached_checkpoints_round_trip() {
             observes: false,
         })
         .is_err());
+}
+
+#[test]
+fn identical_lifecycle_states_are_encoded_once() {
+    let mut records = MemoryRecords::default();
+    let (mut game, player) = corridor();
+    game.spawn_actor(at(3, 5, 1), ticks(150)).unwrap();
+    run(&mut game, player, &[]);
+    game.transition_regions(&sets(&[1], &[1]), &mut records)
+        .unwrap();
+    // Like rewind boundaries: two unchanged games, then one that moved.
+    let mut moved = game.clone();
+    moved.act(player, Action::Wait).unwrap();
+    let point = moved.reference_points().next().unwrap().0;
+    assert!(moved.remove_reference_point(point));
+    let mut shared = SharedState::default();
+    let snapshots =
+        [&game, &game, &moved].map(|g| serde_json::to_value(g.checkpoint(&mut shared)).unwrap());
+    assert_eq!(snapshots[0]["lifecycle"], 0);
+    assert_eq!(snapshots[1]["lifecycle"], 0);
+    assert_eq!(snapshots[2]["lifecycle"], 1);
+    let text = serde_json::to_string(&shared).unwrap();
+    assert_eq!(text.matches("\"directory\"").count(), 2);
 }
 
 /// Two stacked regions joined by a physical portal, falling under gravity,
@@ -539,8 +604,11 @@ fn shaft() -> (Game, ActorId, ActorId) {
 
 #[test]
 fn falling_into_a_frozen_region_freezes_the_faller_until_it_thaws() {
+    let mut records = MemoryRecords::default();
     let (mut game, _, faller) = shaft();
-    let (applied, _) = game.transition_regions(&sets(&[1, 10], &[1, 10])).unwrap();
+    let (applied, _) = game
+        .transition_regions(&sets(&[1, 10], &[1, 10]), &mut records)
+        .unwrap();
     assert_eq!(applied.loaded, regions(&[1, 10, 11]));
     assert_eq!(game.region_state(RegionId(11)), Some(RegionState::Frozen));
     let mut entered = None;
@@ -559,7 +627,7 @@ fn falling_into_a_frozen_region_freezes_the_faller_until_it_thaws() {
     assert_eq!(game.actor_motion(faller), Some(&motion));
     assert_eq!(round_trip(&game), game);
 
-    game.transition_regions(&sets(&[1, 10, 11], &[1, 10, 11]))
+    game.transition_regions(&sets(&[1, 10, 11], &[1, 10, 11]), &mut records)
         .unwrap();
     step(&mut game, 5);
     assert_ne!(

@@ -142,7 +142,15 @@ async fn connection(socket: TcpStream, service: Arc<Mutex<Service>>, accounts: A
     loop {
         tokio::select! {
             biased;
-            _ = client.close.changed() => break,
+            _ = client.close.changed() => {
+                // Deliver what was queued before the disconnect, such as the
+                // reason for it, without waiting for anything new.
+                while let Ok(message) = client.messages.try_recv() {
+                    let Ok(text) = serde_json::to_string(&message) else { break; };
+                    if !matches!(timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await, Ok(Ok(()))) { break; }
+                }
+                break;
+            },
             outgoing = client.messages.recv() => {
                 let Some(message) = outgoing else { break; };
                 let started = timing.then(std::time::Instant::now);

@@ -27,6 +27,23 @@ class CaseParsing(unittest.TestCase):
         self.assertEqual(("--case", "r8-a1-h100-memory", "--cycles", "3"), units[0].args)
         self.assertEqual(("r8-a1-h100-memory",), units[0].groups)
 
+    def test_streaming_cases_are_latency_units(self):
+        units = compare.parse_cases(["stream-r256-durable"], cycles=2)
+        self.assertEqual(["latency:stream-r256-durable"], [u.id for u in units])
+        self.assertEqual(("--case", "stream-r256-durable", "--cycles", "2"), units[0].args)
+
+    def test_streaming_rows_use_the_latency_extractor(self):
+        rows = [{"kind": "stream", "case": "stream-r16-memory", "workload": "streaming-v1"},
+                {"kind": "sample", "case": "stream-r16-memory", "expected": "moved",
+                 "phases_ms": {"authoritative_total": 0.5}, "profile": {"pinned_actors": 1}, "client_memory": 3},
+                {"kind": "stream_end", "case": "stream-r16-memory", "history_end": 1, "restart_replay_ms": 4.0,
+                 "recovery": {"records_replayed": 1}}]
+        timings, counts, version = compare.extract_latency(rows)
+        self.assertEqual("streaming-v1", version)
+        self.assertEqual([0.5], timings["stream-r16-memory"]["authoritative_total"])
+        self.assertEqual([4.0], timings["stream-r16-memory"]["restart_replay_ms"])
+        self.assertEqual(1, counts["stream-r16-memory"]["profile.pinned_actors"])
+
     def test_workload_groups_share_one_complete_run(self):
         units = compare.parse_cases(["combat:a8-h1000", "combat:a2-h0", "combat:a8-h1000", "physics"], cycles=5)
         self.assertEqual(["combat", "physics"], [u.id for u in units])

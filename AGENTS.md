@@ -94,33 +94,52 @@ duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
 **Milestone 4e — region streaming, generation, and asset palettes (in progress).**
-The first slice is merged: a structural `RegionCatalog`, deterministic directed
-preload-horizon planning, the `tor-scenario horizon` command, and the
-`horizon-profile` example. See [region streaming foundations](docs/region-streaming.md).
-Ordinary games still activate every region, and no format bump was needed.
+Merged: the structural `RegionCatalog` and horizon planner, and the
+[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
+(PR #44).
 
-In review on the `design/region-lifecycle` branch: the
-[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract),
-implemented in the simulation. Decisions, agreed with the maintainer:
+**In review: PR #45** (branch `design/region-streaming-engine`, save format
+13). Package games stream between memory and disk; see
+[region streaming](docs/region-streaming.md). It holds, as separate commits:
+detach/attach preparation, the record store, never-built regions, engine
+streaming with disk rows, and the fixes and tests from reviewing those.
+**Merge only with the maintainer's approval.** To resume: check its CI
+(`gh pr checks 45`) and fix any failures on that branch. `ruff`, `actionlint`
+and `cargo deny` weren't run locally (not installed here), so CI is their
+first run. The local branches `design/region-streaming-prep`,
+`design/region-record-store` and `design/region-sources` are older stages of
+the same work and aren't needed.
 
-- Whole regions are active, frozen (loaded, time stopped) or detached into a
-  self-contained record. The planner's horizon is what's *loaded*; the active
-  set is smaller.
-- **Reference points** in game state, not hardcoded players, decide what stays
-  active. Characters get observing points by default; scrying or machines may
-  add more.
-- Frozen actors carry freeze stamps; thawing shifts their tick fields, so
-  nothing catches up. Pins keep live references (bodies, attacks, reach)
-  active or loaded; knowledge references may point into detached regions,
-  checked through an identity directory.
-- Lifecycle state is saved only when non-empty, so ordinary saves are
-  unchanged. The on-disk save layout is designed in the doc; building it is
-  the next slice, with **one save-format bump the maintainer has agreed to**.
+Decisions agreed with the maintainer:
 
-Next: wait for CI on its PR and **merge only with the maintainer's approval**.
-Then the per-region storage and record-store slice, then
-engine wiring, where default points must come from the actors the engine
-controls, since packages without combat have no run characters.
+- Reference points in game state, not hardcoded players, decide what stays
+  active. Characters and actors clients control (`controller = "external"`)
+  get them by default; AI actors don't keep regions alive.
+- Only *detached* regions get disk rows, keyed by a record ID the game
+  allocates, so replay and checkpoint retries reproduce them byte for byte.
+  Loaded regions stay inside the checkpoint; the in-memory world keeps its
+  global tables. Per-region memory tables only if measurements need them.
+- Never-needed regions are never built; the package builds one region just
+  before it's loaded. That renumbers nothing, since authored IDs are fixed
+  (the maintainer had accepted renumbering).
+- Saves still embed their package. Pinning it by manifest hash waits for
+  per-region package files, with its own format bump.
+- Performance fixes must help large maps, not just small ones; prove scaling
+  with operation counts at two sizes (16 and 256 regions).
+- The headless client is the automation client: add capabilities to it (it
+  now takes `{"type":"wizard","command":...}`) rather than using another
+  client.
+
+Next, after PR #45 merges: background preloading (reading rows and building
+regions ahead of need on another thread; correctness must never depend on
+it), then per-region package files with the package pin, larger scenarios
+and generation, then asset palettes. Known limits are listed in the
+[guide](docs/region-streaming.md#persistence): the identity directory and
+unbuilt-region metadata grow with authored content, and reading an evicted
+record waits for any save commit in progress.
+
+The desktop launchers now run this branch's build, so playtest saves from
+before format 13 won't resume with them.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,
