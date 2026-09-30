@@ -1012,7 +1012,16 @@ impl Engine {
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
         self.revision(actor)?;
         let (view, scene, ready) = self.revision_view(actor)?;
-        let mut observation = adapt::observation(view, scene, &self.archive.view_salt, ready);
+        let package = self.archive.scenario.package.as_deref();
+        let terrain = |region: tor_world::RegionId| {
+            package
+                .and_then(|p| p.region_terrain(region.0))
+                .map_or([None, None, None], |t| {
+                    [t.floor.clone(), t.wall.clone(), t.door.clone()]
+                })
+        };
+        let mut observation =
+            adapt::observation(view, scene, &self.archive.view_salt, ready, &terrain);
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -1025,6 +1034,21 @@ impl Engine {
     }
     fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
         revision_view(&self.game, actor)
+    }
+
+    /// The assets an actor's client may soon need: those of the themes of
+    /// every region within one portal hop beyond what's kept loaded around
+    /// it, from the package's structure alone, never from what the regions
+    /// hold. `None` when the scenario names no assets.
+    pub fn palette(&self, actor: ActorId) -> Option<std::collections::BTreeSet<String>> {
+        let package = self
+            .archive
+            .scenario
+            .package
+            .as_deref()
+            .filter(|p| p.has_assets())?;
+        let region = self.game.known_actor_region(SimActor(actor.0))?;
+        Some(self.regions.as_ref()?.palette(package, region))
     }
 
     pub fn travel_route(

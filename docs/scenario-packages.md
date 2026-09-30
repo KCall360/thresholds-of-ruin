@@ -92,6 +92,24 @@ registries and equipment aren't supported yet. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.
 
+## Assets
+
+Assets are optional. A manifest may give:
+
+- `[assets]`: for each theme, the asset identifiers a client near a region
+  with that theme may need (`caves = ["terrain.floor.cave", "creature.rat"]`).
+  Identifiers are dotted lowercase names.
+- `terrain = { floor, wall, door }` for the world, and per zone
+  (`zones.<name>.terrain`), naming the assets of a region's cells and doors.
+- `asset` on an archetype (its actors and items), on a character, and on an
+  appearance pool. A concealed item shows its pool's asset, never its
+  archetype's, so the asset can't disclose its identity.
+
+The validator requires everything a region shows (its terrain, and its
+actors' and items' assets, including a generated region's pools) to be among
+the assets of that region's themes, so a palette always forecasts them. See
+[asset palettes](protocol.md#asset-palettes).
+
 ## Generated regions
 
 A region file with a `[generate]` table authors only the region's structure:

@@ -1,6 +1,7 @@
 # A second, smaller cave: crossing the first builds it.
 id = 3
 name = "Small cave"
+zone = "caves"
 size = [16, 9, 1]
 anchors = { west = [0, 4, 0], east = [15, 4, 0] }
 portals = [{ at = [0, 4, 0], direction = "west", to = "2/east" }, { at = [15, 4, 0], direction = "east", to = "4/west" }]

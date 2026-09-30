@@ -2,6 +2,7 @@
 # fills the rest.
 id = 2
 name = "Cave"
+zone = "caves"
 size = [24, 12, 1]
 anchors = { west = [0, 6, 0], east = [23, 6, 0] }
 portals = [{ at = [0, 6, 0], direction = "west", to = "1/east" }, { at = [23, 6, 0], direction = "east", to = "3/west" }]

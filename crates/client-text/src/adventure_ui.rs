@@ -526,8 +526,10 @@ fn present(connection: &Connection, session: &mut Session, message: &ServerMessa
                 println!("Older entries: history {}", safe(&before.0));
             }
         }
-        ServerMessage::Error { .. } | ServerMessage::Ack { .. } | ServerMessage::Welcome { .. } => {
-        }
+        ServerMessage::Error { .. }
+        | ServerMessage::Ack { .. }
+        | ServerMessage::Welcome { .. }
+        | ServerMessage::Palette { .. } => {}
     }
     false
 }

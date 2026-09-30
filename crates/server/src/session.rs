@@ -23,6 +23,8 @@ struct Client {
     observation_tick: u64,
     /// Last full state disclosed on this stream; the base for the next delta.
     last_state: Option<StateView>,
+    /// The palette last sent and its revision: the base for the next delta.
+    palette: Option<(u64, BTreeSet<String>)>,
     messages: mpsc::Sender<ServerMessage>,
     close: watch::Sender<bool>,
 }
@@ -127,6 +129,7 @@ impl Service {
                 sequence: 0,
                 observation_tick: 0,
                 last_state: None,
+                palette: None,
                 messages,
                 close,
             },
@@ -319,6 +322,7 @@ impl Service {
                 self.ack(id, request_id, None);
             }
             Request::Snapshot => return self.snapshot(id, request_id),
+            Request::Palette => self.palette_update(id, Some(request_id), true),
             Request::HistoryBranch {
                 branch,
                 before,
@@ -512,8 +516,45 @@ impl Service {
                     },
                 );
             }
+            self.palette_update(recipient, None, false);
         }
         Ok(())
+    }
+
+    /// Send a client its actor's palette: the whole palette when asked, or
+    /// the first time; otherwise the changes, if any, as a delta. Nothing is
+    /// acknowledged. Scenarios that name no assets send no palettes, but a
+    /// palette request still gets an (empty) answer.
+    fn palette_update(&mut self, id: u64, request_id: Option<&str>, full: bool) {
+        let Some(actor) = self.clients.get(&id).and_then(|c| c.actor) else {
+            return;
+        };
+        let assets = match self.engine.palette(actor) {
+            Some(assets) => assets,
+            None if request_id.is_some() => BTreeSet::new(),
+            None => return,
+        };
+        let client = self.clients.get_mut(&id).expect("connected client");
+        let body = match &client.palette {
+            Some((_, previous)) if !full && *previous == assets => return,
+            Some((base, previous)) if !full => PaletteBody::Delta {
+                base: *base,
+                added: assets.difference(previous).cloned().collect(),
+                removed: previous.difference(&assets).cloned().collect(),
+            },
+            _ => PaletteBody::Full {
+                assets: assets.clone(),
+            },
+        };
+        let revision = client.palette.as_ref().map_or(1, |(r, _)| r + 1);
+        client.palette = Some((revision, assets));
+        self.send(
+            id,
+            ServerMessage::Palette {
+                request_id: request_id.map(Into::into),
+                palette: PaletteUpdate { revision, body },
+            },
+        );
     }
 
     fn travel_update(&mut self, actor: ActorId, entry: Option<HistoryEntry>) {
@@ -770,6 +811,8 @@ impl Service {
                 snapshot: Box::new(snapshot),
             },
         );
+        // Attaching sends the whole palette; a later snapshot, what changed.
+        self.palette_update(id, None, false);
         Ok(())
     }
 

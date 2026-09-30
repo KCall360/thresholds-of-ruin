@@ -115,7 +115,11 @@ Merged: the structural `RegionCatalog` and horizon planner, the
 `design/region-streaming-completion`, not pushed yet), one commit per slice:
 background preloading (done), per-region package files with the package pin
 and save format 14 (done), a bounded identity directory (done), generated filler
-regions (done), the palette protocol, palettes in the clients, then docs. Run
+regions (done), the palette protocol (done, protocol 19). Still to do:
+palettes in the clients (they ignore palette messages for now; see the plan's
+slice 6: a shared palette state and asset resolver with dotted-prefix
+fallback, glyph and word tables, and the headless client reporting palettes),
+then the final docs pass, performance comparison and launcher rebuild. Run
 `scripts/verify.py quick` before each slice's commit and `full` once before
 pushing; review the whole branch for bugs and testing-policy gaps before
 pushing. **Merge only with the maintainer's approval.**
@@ -160,7 +164,7 @@ passing, along with its performance requirements.
 [three-dimensional sight](docs/sight-3d.md). 3D sight, authored door heights,
 client-derived floors and ceilings, and the scene cache are merged (PR #40).
 
-View-delta observation updates are merged too (PR #42, protocol 18): messages
+View-delta observation updates are merged too (PR #42): messages
 are 78–87% smaller in the headline `latency_bench` cases; see
 [view deltas](docs/protocol.md#view-deltas). No ledger line was added; that
 needs a raw-data upload, which the maintainer must approve.

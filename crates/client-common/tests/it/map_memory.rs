@@ -39,6 +39,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
     let mut client = ClientState::from_snapshot(snapshot(&[("a", 0, 0)], 0)).unwrap();
     let mut seen = snapshot(&[("a", 0, 0)], 1);
     seen.state.observation.visible_actors.push(ActorView {
+        asset: None,
         id: ActorId(2),
         name: "figure".into(),
         description: String::new(),
@@ -75,6 +76,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
     let mut initial = snapshot(&[("a", 0, 0), ("b", 1, 0), ("item", 3, 0)], 0);
     initial.state.observation.ground_items.push(GroundItemView {
         item: ItemView {
+            asset: None,
             quantity: 1,
             appearance: String::new(),
             identified: true,
@@ -86,6 +88,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         reachable: false,
     });
     initial.state.observation.visible_actors.push(ActorView {
+        asset: None,
         id: ActorId(2),
         position: Position { x: 3, y: 0, z: 0 },
         name: "figure".into(),

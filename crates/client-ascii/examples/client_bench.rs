@@ -29,6 +29,7 @@ fn main() {
             view.observation.visible_cells.truncate(64);
             if narration {
                 view.observation.visible_cells[0].door = Some(DoorView {
+                    asset: None,
                     id: 1,
                     name: "wooden door".into(),
                     description: String::new(),
@@ -53,6 +54,7 @@ fn main() {
                             .open = open;
                         view.observation.visible_actors = if open {
                             vec![ActorView {
+                                asset: None,
                                 id: ActorId(2),
                                 name: "figure".into(),
                                 description: String::new(),

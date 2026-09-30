@@ -476,7 +476,8 @@ base to compare them against.
 
 ### Later slices
 
-1. **Asset palettes.**
+1. **Palettes in the clients:** the server sends
+   [asset palettes](protocol.md#asset-palettes); the clients ignore them so far.
 
 ### Lifecycle verification
 

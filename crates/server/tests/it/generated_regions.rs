@@ -152,6 +152,9 @@ fn crossing_generated_caves_builds_each_when_needed_and_replays_exactly() {
     assert!(things > 0, "the walk saw a generated rat or coin");
     engine.flush().unwrap();
     let expected = engine.state(ActorId(1)).unwrap();
+    // Every command issued, including AI turns before a refused step.
+    assert!(engine.profile_counts().0 >= commands);
+    let commands = engine.profile_counts().0;
     drop(engine);
     // Replay from the start builds the caves again, exactly.
     let engine = Engine::open_with_policy(&save, Scenario::two_room(0), policy).unwrap();

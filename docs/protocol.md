@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":18,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":19,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -191,6 +191,40 @@ an AI actor, say) receives an unsolicited `error` with code `not_attached`
 and is disconnected. It may attach again once the actor is back in play.
 Messages already queued for a client, such as that error, are delivered
 before the connection closes.
+
+## Asset palettes
+
+A scenario can name assets: dotted lowercase identifiers such as
+`creature.rat` (see [scenario packages](scenario-packages.md#assets)). Two
+things then reach clients:
+
+- **Assets on disclosed things.** Cells, doors, items and actors in an
+  observation carry an optional `asset`. It's only ever attached to something
+  already disclosed, and a concealed item carries the asset shared by
+  everything that looks like it, never its archetype's.
+- **A palette per client:** the assets its actor may soon see. It's the
+  union of the asset lists of the themes of every region within one portal
+  hop beyond the load radius around the actor, plus the run's characters'
+  assets. It comes from the package's structure alone, never from what
+  regions hold: two games that differ only in hidden contents send identical
+  palettes, and because themes belong to zones, entering a room doesn't
+  signal what the next one holds.
+
+Palettes have their own revisions and are separate from the observation
+stream: `{"type":"palette","request_id":null,"palette":{"revision":1,"body":{"type":"full","assets":[...]}}}`.
+
+- Attaching (so also reconnecting) sends the whole palette, unasked.
+- When a client's palette changes, it gets
+  `{"type":"delta","base":<previous revision>,"added":[...],"removed":[...]}`.
+- The `palette` request returns the whole palette again, with the request's
+  id; spectators may send it. A client that sees an asset missing from its
+  palette, or misses a revision, should fall back to its own look and ask.
+- Nothing is acknowledged. Palettes aren't saved; they're recomputed after a
+  restart.
+- A scenario that names no assets sends no palettes (a `palette` request
+  still gets an empty one), and its observations carry no assets.
+
+The text, ASCII and headless clients ignore palettes for now.
 
 ## Annotations
 

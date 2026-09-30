@@ -109,16 +109,21 @@ fn anchor_resolution_and_zone_pools_do_not_need_loaded_regions() {
         "empty".into(),
         scenario_package::Zone {
             themes: Some(vec![]),
+            terrain: None,
         },
     );
-    package
-        .manifest
-        .zones
-        .insert("inherit".into(), scenario_package::Zone { themes: None });
+    package.manifest.zones.insert(
+        "inherit".into(),
+        scenario_package::Zone {
+            themes: None,
+            terrain: None,
+        },
+    );
     package.manifest.zones.insert(
         "replace".into(),
         scenario_package::Zone {
             themes: Some(vec!["ice".into(), "ice".into()]),
+            terrain: None,
         },
     );
     index(&mut package)[0].zone = Some("empty".into());

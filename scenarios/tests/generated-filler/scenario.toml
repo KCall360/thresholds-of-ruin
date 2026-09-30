@@ -8,11 +8,22 @@ version = "1.0"
 ruleset = "dungeon-v17"
 default_character = 1
 themes = ["stone"]
+# The caves and the far hall have their own themes, so a client's palette
+# changes as the character moves between them.
+zones = { caves = { themes = ["caves"], terrain = { floor = "terrain.floor.cave", wall = "terrain.wall.cave" } }, vault = { themes = ["vault"], terrain = { floor = "terrain.floor.marble", wall = "terrain.wall.marble" } } }
+terrain = { floor = "terrain.floor.stone", wall = "terrain.wall.stone" }
 factions = { delvers = [], vermin = [] }
 ai_profiles = { wander = { memory_ticks = 200, flee_percent = 0 } }
-characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 5, wind_up = 20, recovery = 80, damage = { keen = 5 } } } }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 20, defense = 10, faction = "delvers", attack = { bonus = 5, wind_up = 20, recovery = 80, damage = { keen = 5 } } }, asset = "creature.delver" }]
 
 [archetypes.rat]
+asset = "creature.rat"
 combat = { name = "cave rat", max_hp = 4, defense = 8, faction = "vermin", attack = { bonus = 0, wind_up = 60, recovery = 80, damage = { keen = 1 } } }
 [archetypes.coin]
 name = "copper coin"
+asset = "item.coin"
+
+[assets]
+stone = ["terrain.floor.stone", "terrain.wall.stone"]
+caves = ["terrain.floor.cave", "terrain.wall.cave", "creature.rat", "item.coin"]
+vault = ["terrain.floor.marble", "terrain.wall.marble"]

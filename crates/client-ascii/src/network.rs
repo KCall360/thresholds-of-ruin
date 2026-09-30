@@ -148,6 +148,8 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
             publish(tx, Event::Status("History loaded.".into()))
         }
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
+        // Palettes are drawn with once the window resolves assets.
+        ServerMessage::Palette { .. } => Ok(()),
     }
 }
 

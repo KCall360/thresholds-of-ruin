@@ -135,8 +135,10 @@ impl StateDelta {
                         position: _,
                         wall,
                         place_hint,
+                        asset,
                     } = was;
                     if *key != is.key
+                        || *asset != is.asset
                         || *door != is.door
                         || *material != is.material
                         || *stairs_up != is.stairs_up

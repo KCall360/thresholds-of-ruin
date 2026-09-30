@@ -140,6 +140,7 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            asset: None,
             quantity: 1,
             appearance: String::new(),
             identified: true,
@@ -215,6 +216,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     let mut first = snapshot(1, 0, 0);
     let distant = Position { x: 4, y: 1, z: 0 };
     first.state.observation.visible_cells.push(CellView {
+        asset: None,
         door: None,
         material: "stone".into(),
         key: "distant".into(),
@@ -227,6 +229,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     first.state.observation.ground_items.push(GroundItemView {
         reachable: false,
         item: ItemView {
+            asset: None,
             quantity: 1,
             appearance: String::new(),
             identified: true,
@@ -246,6 +249,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
     assert_eq!(memory.ground_items.len(), 1);
     let mut revisit = snapshot(1, 200, 2);
     revisit.state.observation.visible_cells.push(CellView {
+        asset: None,
         door: None,
         material: "stone".into(),
         key: "distant".into(),
@@ -268,6 +272,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
 fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
     let mut first = snapshot(1, 0, 0);
     first.state.observation.visible_cells[0].door = Some(DoorView {
+        asset: None,
         id: 4,
         name: "wooden door".into(),
         description: "wood".into(),

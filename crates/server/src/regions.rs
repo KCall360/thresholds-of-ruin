@@ -207,6 +207,24 @@ impl Regions {
         work
     }
 
+    /// The palette around `region`: the assets of the themes of every region
+    /// within one hop beyond the default load radius. Themes come from zones,
+    /// so entering a room never signals what the next one holds.
+    pub(crate) fn palette(&self, package: &Package, region: RegionId) -> BTreeSet<String> {
+        let roots = BTreeSet::from([region]);
+        let hops = self.streaming.load_radius as usize + 1;
+        let near = match self.catalog.plan(&roots, hops, &BTreeSet::new()) {
+            Ok(plan) => plan.required,
+            Err(_) => roots,
+        };
+        let themes: BTreeSet<&String> = near
+            .iter()
+            .filter_map(|r| self.catalog.region(*r))
+            .flat_map(|m| &m.themes)
+            .collect();
+        package.palette(themes)
+    }
+
     /// Ask the preloader for what the next transitions are likely to need.
     pub(crate) fn preload(&self, game: &Game) -> Option<PreloadWork> {
         let preload = self.preload.as_ref()?;

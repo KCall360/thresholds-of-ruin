@@ -135,6 +135,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     app.input(Input::Key { key: Key::Note });
     assert!(app.note.is_some());
     app.attack_targets.push(ActorView {
+        asset: None,
         id: ActorId(2),
         name: "guard".into(),
         description: String::new(),
@@ -222,6 +223,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
         .retain(|cell| cell.position.x != 2);
     assert_eq!(glyph_at(&other_level, 2, 1), ' ');
     other_level.visible_cells.push(CellView {
+        asset: None,
         door: None,
         material: "stone".into(),
         key: "wall".into(),
@@ -294,6 +296,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .push(GroundItemView {
             reachable: true,
             item: ItemView {
+                asset: None,
                 quantity: 1,
                 appearance: String::new(),
                 identified: true,
@@ -676,6 +679,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
     ] {
         let mut view = state().state().clone();
         view.observation.visible_actors.push(ActorView {
+            asset: None,
             id: ActorId(2),
             name: "guard".into(),
             description: String::new(),

@@ -50,6 +50,7 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
             place_hint: cell.place_hint,
             door: cell.door.clone(),
             material: cell.material.clone(),
+            asset: None,
         });
         view.ground_items.extend(cell.ground_items.iter().cloned());
     }

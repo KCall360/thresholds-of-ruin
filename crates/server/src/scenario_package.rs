@@ -36,6 +36,17 @@ fn require(ok: bool, message: impl AsRef<str>) -> Result<(), Failure> {
         Err(fail(message))
     }
 }
+/// Asset identifiers are dotted lowercase names, like `creature.rat`.
+fn asset_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 80
+        && s.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+}
 fn label(s: &str) -> bool {
     !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
 }
@@ -62,11 +73,27 @@ pub struct Manifest {
     pub appearance_pools: BTreeMap<String, AppearancePool>,
     pub characters: Vec<Character>,
     pub objective: Option<Objective>,
+    /// The asset identifiers each theme may need: a client near a region
+    /// with that theme gets them in its palette. See
+    /// `docs/protocol.md#asset-palettes`.
+    #[serde(default)]
+    pub assets: BTreeMap<String, Vec<String>>,
+    /// Terrain assets of regions outside any zone, or in a zone without its own.
+    pub terrain: Option<TerrainAssets>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Zone {
     pub themes: Option<Vec<String>>,
+    pub terrain: Option<TerrainAssets>,
+}
+/// Assets for a region's floor, walls and doors.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerrainAssets {
+    pub floor: Option<String>,
+    pub wall: Option<String>,
+    pub door: Option<String>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,6 +101,9 @@ pub struct AppearancePool {
     pub appearances: Vec<String>,
     #[serde(default)]
     pub confounding: bool,
+    /// The asset every concealed item drawing from this pool looks like, so
+    /// it never discloses which identity an item is.
+    pub asset: Option<String>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,6 +118,8 @@ pub struct Archetype {
     pub properties: BTreeMap<String, String>,
     pub name: Option<String>,
     pub turn_ticks: Option<u64>,
+    /// The asset clients draw actors and items of this archetype with.
+    pub asset: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +136,7 @@ pub struct Character {
     #[serde(default = "omit")]
     pub unselected: String,
     pub ai: Option<String>,
+    pub asset: Option<String>,
 }
 fn hundred() -> u64 {
     100
@@ -754,6 +787,17 @@ pub fn validate(root: &Path) -> Result<Certificate, Failure> {
             crate::generator::check(&def, generate)?;
         }
         package.check_region(&def)?;
+        // What a region shows must be in its palette.
+        let forecast = package.palette(package.region_themes(def.id).unwrap_or(&[]));
+        for asset in package.region_assets(&def)? {
+            require(
+                forecast.contains(&asset),
+                format!(
+                    "Region {}: asset {asset} isn't among its themes' assets",
+                    def.id
+                ),
+            )?;
+        }
     }
     for seed in [0, 1, 42] {
         let index = package.index(seed)?;
@@ -945,6 +989,70 @@ impl Package {
                 .unwrap_or(&self.manifest.themes),
         )
     }
+    /// A region's terrain assets: its zone's, or the world's.
+    pub fn region_terrain(&self, region: u64) -> Option<&TerrainAssets> {
+        let zone = self.index.region(region)?.zone.as_ref();
+        zone.and_then(|z| self.manifest.zones.get(z))
+            .and_then(|z| z.terrain.as_ref())
+            .or(self.manifest.terrain.as_ref())
+    }
+
+    /// Assets clients may need for regions with these themes, and for the
+    /// run's characters, who can be anywhere.
+    pub fn palette<'a>(&self, themes: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+        themes
+            .into_iter()
+            .flat_map(|theme| self.manifest.assets.get(theme).into_iter().flatten())
+            .chain(
+                self.manifest
+                    .characters
+                    .iter()
+                    .filter_map(|c| c.asset.as_ref()),
+            )
+            .cloned()
+            .collect()
+    }
+
+    /// Whether the scenario names assets at all; clients get palettes only then.
+    pub fn has_assets(&self) -> bool {
+        !self.manifest.assets.is_empty()
+    }
+
+    /// Assets a region's content may show: its terrain, and its actors' and
+    /// items' archetypes (a concealed item's pool asset instead). The
+    /// validator requires them in the region's themes' assets, so a
+    /// palette forecasts them.
+    fn region_assets(&self, r: &RegionDef) -> Result<BTreeSet<String>, Failure> {
+        let mut assets = BTreeSet::new();
+        if let Some(t) = self.region_terrain(r.id) {
+            assets.extend([&t.floor, &t.wall, &t.door].into_iter().flatten().cloned());
+        }
+        let generated = r.generate.iter().flat_map(|g| {
+            g.actors
+                .iter()
+                .flat_map(|p| &p.archetypes)
+                .chain(g.items.iter().flat_map(|p| &p.archetypes))
+        });
+        let named = r
+            .actors
+            .iter()
+            .filter_map(|a| a.archetype.as_ref())
+            .chain(r.items.iter().filter_map(|i| i.archetype.as_ref()))
+            .chain(generated);
+        for key in named {
+            assets.extend(self.item_asset(&self.archetype(&Some(key.clone()))?));
+        }
+        Ok(assets)
+    }
+
+    /// The asset an actor or item of this archetype shows.
+    fn item_asset(&self, archetype: &Archetype) -> Option<String> {
+        match &archetype.appearance_pool {
+            Some(pool) => self.manifest.appearance_pools.get(pool)?.asset.clone(),
+            None => archetype.asset.clone(),
+        }
+    }
+
     pub(crate) fn check_identity(&self) -> Result<(), Failure> {
         require(
             self.manifest.ruleset == RULESET
@@ -1034,6 +1142,57 @@ impl Package {
             "Invalid zone/theme identifier",
         )?;
         self.appearance_mapping(0)?;
+        let known_themes: BTreeSet<&String> = self
+            .manifest
+            .themes
+            .iter()
+            .chain(
+                self.manifest
+                    .zones
+                    .values()
+                    .flat_map(|z| z.themes.iter().flatten()),
+            )
+            .collect();
+        let terrain = self
+            .manifest
+            .zones
+            .values()
+            .filter_map(|z| z.terrain.as_ref())
+            .chain(self.manifest.terrain.as_ref())
+            .flat_map(|t| [&t.floor, &t.wall, &t.door].into_iter().flatten());
+        let named = self
+            .manifest
+            .assets
+            .values()
+            .flatten()
+            .chain(terrain)
+            .chain(
+                self.manifest
+                    .archetypes
+                    .values()
+                    .filter_map(|a| a.asset.as_ref()),
+            )
+            .chain(
+                self.manifest
+                    .appearance_pools
+                    .values()
+                    .filter_map(|p| p.asset.as_ref()),
+            )
+            .chain(
+                self.manifest
+                    .characters
+                    .iter()
+                    .filter_map(|c| c.asset.as_ref()),
+            );
+        for asset in named {
+            require(asset_id(asset), format!("Invalid asset identifier {asset}"))?;
+        }
+        for theme in self.manifest.assets.keys() {
+            require(
+                known_themes.contains(theme),
+                format!("Assets for unknown theme {theme}"),
+            )?;
+        }
         let identities: BTreeSet<_> = self
             .manifest
             .archetypes
@@ -1711,6 +1870,10 @@ impl Package {
                     game.set_actor_velocity(tor_simulation::ActorId(c.id), v)
                         .map_err(|_| fail("Invalid character velocity"))?;
                 }
+                if c.asset.is_some() {
+                    game.set_actor_asset(tor_simulation::ActorId(c.id), c.asset.clone())
+                        .map_err(|_| fail("Unknown character"))?;
+                }
             }
         }
         for r in regions {
@@ -1745,6 +1908,11 @@ impl Package {
                 if let Some(v) = a.velocity {
                     game.set_actor_velocity(tor_simulation::ActorId(a.id), v)
                         .map_err(|_| fail("Invalid actor velocity"))?;
+                }
+                let asset = self.archetype(&a.archetype)?.asset;
+                if asset.is_some() {
+                    game.set_actor_asset(tor_simulation::ActorId(a.id), asset)
+                        .map_err(|_| fail("Unknown actor"))?;
                 }
             }
         }
@@ -1799,6 +1967,7 @@ impl Package {
                 concealed,
                 stackable,
                 properties,
+                asset: self.item_asset(&archetype),
             };
             require(
                 i.quantity > 0 && (stackable || i.quantity == 1),

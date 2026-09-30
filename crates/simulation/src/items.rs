@@ -14,6 +14,11 @@ pub struct ItemSpec {
     pub concealed: bool,
     pub stackable: bool,
     pub properties: BTreeMap<String, String>,
+    /// The asset clients draw it with. For a concealed item it names only
+    /// what every identity sharing its appearances looks like, so it never
+    /// discloses the identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
 }
 
 impl ItemSpec {
@@ -26,6 +31,7 @@ impl ItemSpec {
             concealed: false,
             stackable: false,
             properties: BTreeMap::new(),
+            asset: None,
         }
     }
     pub(crate) fn valid(&self) -> bool {

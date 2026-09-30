@@ -90,6 +90,7 @@ mod tests {
 
     fn cell(x: i32, y: i32, z: i32, wall: bool, material: &str) -> CellView {
         CellView {
+            asset: None,
             door: None,
             material: material.into(),
             key: format!("{x},{y},{z}"),
