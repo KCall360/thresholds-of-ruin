@@ -22,8 +22,18 @@ Every change must be tested, and the full policy is in
   targeted release-build performance comparisons for latency-sensitive changes.
 - Keep `main` green. Don't merge ignored or known-failing tests.
 
-Run the checks listed in the [testing policy](docs/testing.md#running-the-checks)
-before pushing, and report any check you couldn't run.
+Every feature and bug fix adds its tests to the suite in the same change. The
+tiered checks run the suite faster, but they can only run tests that exist.
+
+- `python scripts/verify.py quick` while iterating: the TDD loop.
+- `python scripts/verify.py` (the `push` tier) is **required before every push**.
+- `python scripts/verify.py full` is **required** for save-format, protocol,
+  ruleset, persistence, storage, toolchain, or dependency changes, and when CI
+  can't run.
+- CI's full Windows and Linux matrix is **required before every merge**.
+
+See the [testing policy](docs/testing.md#running-the-checks) for what each tier
+runs and why. Report any check you couldn't run.
 
 ## Architecture rules
 

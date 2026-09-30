@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 use tempfile::tempdir;
 use tor_protocol::*;
 use tor_server::journal::Command;

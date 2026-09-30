@@ -20,8 +20,20 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 
 ## Test output
 
-- Run every required unit, integration, and process test. Redirect stdout and
-  stderr to log files under `.local/` (gitignored) and check exit codes.
+- **Add tests with every change.** Each feature gets tests at every layer it
+  touches, including an actual-process acceptance test. Each bug fix gets a
+  regression test that fails first. Write them in the same change, following
+  the [testing policy](docs/testing.md). Tiers only choose which existing tests
+  run; a green tier doesn't count if the tests for the change are missing.
+- Run checks through `scripts/verify.py`, and don't skip a required tier:
+  `quick` after each meaningful edit (the TDD loop), the default `push` tier
+  before **every** push, and `full` for save-format, protocol, ruleset,
+  persistence, storage, toolchain, or dependency changes, or when CI can't run.
+  CI on both platforms is required before merging. Report which tier ran, and
+  any step that failed or didn't run.
+- `verify.py` logs each step under `.local/verify/`, checks exit codes, and
+  picks build jobs from free memory. Run other commands the same way,
+  redirecting stdout and stderr to log files under `.local/` (gitignored).
 - On success, report only a compact pass/fail summary. Don't load passing test
   listings or full logs into context.
 - On failure, surface the relevant failure output, expanding log inspection only
@@ -167,6 +179,15 @@ On this machine, rustc can run out of memory when other applications use most
 of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
+
+**Faster verification (in progress, branch `tooling/faster-verification`).**
+Integration tests are now one binary per crate (`tests/it/`), and
+`scripts/verify.py` runs the checks in the `quick`, `push`, and `full` tiers
+described in the [testing policy](docs/testing.md#running-the-checks). On this
+machine, with 2 jobs, clean release test builds dropped from 23 to 16 minutes,
+and a release rebuild after a `world` change now takes about 5 minutes. A
+faster linker (`rust-lld`) made no difference, so it wasn't adopted. Next: a PR,
+CI on both platforms, and merge only with the maintainer's approval.
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the

@@ -1,4 +1,3 @@
-mod support;
 use tor_protocol::{Action, ActorId, ErrorCode};
 use tor_server::{journal::Command, Engine, Scenario};
 

@@ -68,8 +68,8 @@ operation-count regression adds unrelated regions up to 8,192 and checks that a
 one-hop query still expands one region and examines one link.
 
 ```powershell
-cargo test -p tor-server --test region_horizon --locked
-cargo test -p tor-server --test region_horizon --release --locked
+cargo test -p tor-server --test it --locked -- region_horizon::
+cargo test -p tor-server --test it --release --locked -- region_horizon::
 cargo run -p tor-server --example horizon-profile --release --locked
 ```
 
@@ -442,7 +442,7 @@ base to compare them against.
 
 ### Lifecycle verification
 
-- `crates/simulation/tests/region_lifecycle.rs` covers:
+- `crates/simulation/tests/it/region_lifecycle.rs` covers:
   - default and added reference points, and points following carriers and
     detached actors;
   - every pin kind, with rejected transitions leaving the game unchanged;
@@ -460,11 +460,11 @@ base to compare them against.
   identities stay unique across a rewind; and that unbuilt regions build
   from their source, reject a source that loses a declared identity, and
   can't declare an identity already in use.
-- `crates/world/tests/sight_cache.rs` detaches and reattaches random regions
+- `crates/world/tests/it/sight_cache.rs` detaches and reattaches random regions
   of world clones between random views and edits, and checks every cached
   scene against an uncached one. Another test checks which scenes a detach or
   attach invalidates.
-- `crates/server/tests/region_streaming.rs` plays the checked-in
+- `crates/server/tests/it/region_streaming.rs` plays the checked-in
   `streaming-corridor` package (seven halls) with radii of zero. It checks the regions built at the start,
   detaches regions behind the character, restarts from a checkpoint without
   reading a row, reattaches regions from their rows, and replays the whole
@@ -473,7 +473,7 @@ base to compare them against.
   wizard teleport reaches a region that was never built. Using
   `streaming-controlled`, an actor a client controls keeps its region in
   play, and a transition leaves an unseeing observer's revision alone.
-- `crates/server/tests/streaming_websocket.rs` detaches a spectator whose
+- `crates/server/tests/it/streaming_websocket.rs` detaches a spectator whose
   actor leaves the loaded world, over real connections, while the player's
   commands keep succeeding.
 - `scripts/test_streaming_process.py` plays across detached halls with real

@@ -5,6 +5,7 @@ import os
 import subprocess
 import shutil
 from pathlib import Path
+import time
 import unittest
 
 import test_ascii_process as ascii_support
@@ -145,6 +146,13 @@ class TravelProcesses(unittest.TestCase):
             user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
             user32.WindowFromPoint.argtypes = [wintypes.POINT]
             user32.WindowFromPoint.restype = wintypes.HWND
+            user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            def describe(hwnd):
+                name = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(hwnd, name, 256)
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                return f"window {hwnd} (class {name.value!r}, process {pid.value})"
             # Hosted desktops can be smaller than the default game window.
             # Keep the test window and click target on screen and unobscured.
             self.assertTrue(user32.SetWindowPos(handles[0], wintypes.HWND(-1), 0, 0,
@@ -156,11 +164,19 @@ class TravelProcesses(unittest.TestCase):
                 point = wintypes.POINT(int((rect.right - 1200 * scale) / 2 + 214 * scale), int((rect.bottom - 800 * scale) / 2 + 208 * scale))
                 user32.ClientToScreen(handles[0], ctypes.byref(point))
                 self.assertTrue(user32.SetCursorPos(point.x, point.y))
-                user32.SetForegroundWindow(handles[0])
                 actual = wintypes.POINT()
                 self.assertTrue(user32.GetCursorPos(ctypes.byref(actual)))
                 self.assertEqual((actual.x, actual.y), (point.x, point.y))
-                self.assertEqual(user32.WindowFromPoint(actual), handles[0], "Native click must hit the game window")
+                # The window manager can take a moment to apply the resize and
+                # z-order, so re-assert them briefly before requiring the hit.
+                for _ in range(20):
+                    user32.SetForegroundWindow(handles[0])
+                    hit = user32.WindowFromPoint(actual)
+                    if hit == handles[0]:
+                        break
+                    user32.SetWindowPos(handles[0], wintypes.HWND(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+                    time.sleep(0.05)
+                self.assertEqual(hit, handles[0], f"Native click must hit the game window, not {describe(hit)}")
                 # Use real button state: synthetic WM_LBUTTONDOWN can be undone
                 # by a queued native WM_MOUSEMOVE reporting no held button.
                 user32.mouse_event(0x0002 if down else 0x0004, 0, 0, 0, 0)
