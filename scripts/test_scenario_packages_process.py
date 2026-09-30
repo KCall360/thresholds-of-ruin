@@ -17,15 +17,26 @@ class ScenarioPackageProcesses(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         package = Path(directory.name) / 'package'
         shutil.copytree(support.ROOT / 'scenarios/two-room', package)
-        path = package / 'regions.toml'
-        path.write_text(path.read_text() + '\n# author revision\n')
         env = {k:v for k,v in os.environ.items() if k not in ('TOR_WIZARD_TOKEN','TOR_SPECTATOR_TOKEN')}
         env['TOR_SERVER_TOKEN'] = support.TOKEN
-        result = subprocess.run([self.bin / ('tor-server' + self.suffix), '--scenario', package,
-                                 '--save', Path(directory.name) / 'game.db'], env=env,
-                                capture_output=True, text=True, timeout=15)
+        def start(*args):
+            return subprocess.run([self.bin / ('tor-server' + self.suffix), *args,
+                                   '--save', Path(directory.name) / 'game.db'], env=env,
+                                  capture_output=True, text=True, timeout=15)
+        # An edited manifest is stale when the package loads; an edited region
+        # file when its region is built, which here is at the start.
+        manifest = package / 'scenario.toml'
+        original = manifest.read_bytes()
+        manifest.write_bytes(original + b'\n# author revision\n')
+        result = start('--scenario', package)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('unvalidated or stale', result.stderr)
+        manifest.write_bytes(original)
+        path = package / 'regions' / '1.toml'
+        path.write_text(path.read_text() + '\n# author revision\n')
+        result = start('--scenario', package)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('changed since', result.stderr)
         self.assertFalse((Path(directory.name) / 'game.db').exists())
         result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
                                 capture_output=True, text=True, timeout=15)
@@ -42,6 +53,20 @@ class ScenarioPackageProcesses(unittest.TestCase):
         client.until(lambda line:line=='Ready.')
         self.assertIn('Waited',client.command('wait'))
         client.stop(); server.stop()
+        # Both regions were built at the start, so the save holds both region
+        # files and resumes with the package gone.
+        moved = Path(directory.name) / 'moved'
+        package.rename(moved)
+        server = support.Process(self.bin / ('tor-server' + self.suffix),
+                                 ['--listen','127.0.0.1:0','--save',Path(directory.name)/'game.db'])
+        self.addCleanup(server.stop)
+        address = json.loads(server.until(lambda line:line.startswith('{')))['address']
+        client = support.Process(self.bin / ('tor-client-text' + self.suffix),['--connect',address,'--script'])
+        self.addCleanup(client.stop)
+        client.until(lambda line:line=='Ready.')
+        self.assertIn('Waited',client.command('wait'))
+        client.stop(); server.stop()
+        moved.rename(package)
         manifest = package / 'scenario.toml'
         manifest.write_text(manifest.read_text().replace('1/start', '1/missing'))
         invalid = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],

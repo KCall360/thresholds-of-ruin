@@ -1,9 +1,8 @@
 # Ordinary authored scenario; validate after every edit.
-format = 1
+format = 2
 id = "two-room"
 version = "1.1"
 ruleset = "dungeon-v17"
-files = ["regions.toml"]
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

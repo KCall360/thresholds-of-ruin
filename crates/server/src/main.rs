@@ -122,8 +122,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("--character requires an authored scenario".into());
     }
     let scenario = if save.exists() {
-        // Resume exclusively from immutable saved inputs, even if the source moved.
-        Scenario::two_room(seed)
+        // A save owns its inputs. Region files it hasn't copied yet come from
+        // its package directory; `--scenario` names it if it has moved.
+        match &package_path {
+            Some(path) => {
+                tor_server::scenario_package::load(path, seed, character, allow_unvalidated)?
+            }
+            None => Scenario::two_room(seed),
+        }
     } else if regions.is_none() {
         let default_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/first-dungeon");

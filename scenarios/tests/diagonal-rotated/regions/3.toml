@@ -1,0 +1,6 @@
+id = 3
+size = [3, 3, 2]
+name = "West"
+chamber = true
+anchors = { "start" = [2, 1, 0] }
+portals = [{ "at" = [2, 0, 0], "direction" = "east", "to" = "4/portal-0", "turns" = 1, "width" = 3, "height" = 2 }]

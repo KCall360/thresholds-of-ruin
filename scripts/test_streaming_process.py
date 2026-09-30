@@ -1,7 +1,10 @@
 """Actual clients play a streaming game across detached halls, save, restart,
 reconnect, spectate and rewind. See docs/region-streaming.md."""
 import json
+import os
+import shutil
 import sqlite3
+import subprocess
 import time
 import unittest
 from contextlib import closing
@@ -27,13 +30,13 @@ class StreamingProcesses(unittest.TestCase):
     act = headless.HeadlessProcesses.act
     request = headless.HeadlessProcesses.request
 
-    def server(self, wizard=False):
+    def server(self, wizard=False, scenario=SCENARIO):
         env = {"TOR_SPECTATOR_TOKEN": support.SPECTATOR_TOKEN}
         if wizard:
             env["TOR_WIZARD_TOKEN"] = headless.WIZARD_TOKEN
         server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "5", "--save", self.save,
-            "--scenario", SCENARIO, "--checkpoint-interval", "4", *(["--wizard"] if wizard else [])],
-            extra_env=env)
+            *(["--scenario", scenario] if scenario else []), "--checkpoint-interval", "4",
+            *(["--wizard"] if wizard else [])], extra_env=env)
         self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
         return server
 
@@ -105,6 +108,46 @@ class StreamingProcesses(unittest.TestCase):
         self.server()
         _, again = self.client()
         self.assertEqual(again["state"], back["state"])
+
+    def test_a_moved_package_is_named_to_resume_and_every_client_plays_on(self):
+        directory = Path(self.save).parent
+        package = directory / "package"
+        shutil.copytree(SCENARIO, package)
+        server = self.server(scenario=package)
+        player, _ = self.client()
+        # Into hall 2: halls 1-4 are built, and 5-7 aren't.
+        far = self.walk(player, "east", 20)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        moved = directory / "moved"
+        package.rename(moved)
+        env = {k: v for k, v in os.environ.items() if k not in ("TOR_WIZARD_TOKEN", "TOR_SPECTATOR_TOKEN")}
+        env["TOR_SERVER_TOKEN"] = support.TOKEN
+        before = Path(self.save).read_bytes()
+        refused = subprocess.run([self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
+            "--save", self.save], env=env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("isn't available", refused.stderr)
+        self.assertIn("--scenario", refused.stderr)
+        self.assertEqual(Path(self.save).read_bytes(), before)
+
+        self.server(scenario=moved)
+        native = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
+        shown = ascii_support.AsciiProcesses.frame(self, native, lambda f: f["state"] is not None)
+        self.assertEqual(shown["state"]["observation"], far["state"]["observation"])
+        native.stop()
+        text = self.launch("tor-client-text", ["--connect", self.address])
+        text.until(lambda line: line == "Ready.")
+        self.assertIn("Waited", text.command("wait"))
+        text.stop()
+        # Walking on builds hall 5 from the moved package.
+        player, _ = self.client()
+        self.walk(player, "east", 20)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with closing(sqlite3.connect(self.save)) as db:
+            copied = [r[0] for r in db.execute("SELECT region FROM region_sources ORDER BY region")]
+        self.assertEqual(copied, [1, 2, 3, 4, 5, 6])
 
     def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
         server = self.server(wizard=True)

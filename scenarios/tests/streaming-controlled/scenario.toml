@@ -1,11 +1,10 @@
 # Five halls for region streaming tests: an actor a client controls waits
 # far from the default character, so its own hall must stay in play, and a
 # guard stands frozen in the hall beside it.
-format = 1
+format = 2
 id = "streaming-controlled"
 version = "1.0"
 ruleset = "dungeon-v17"
-files = ["regions.toml"]
 default_character = 1
 factions = { delvers = [], wardens = [] }
 ai_profiles = { patrol = { memory_ticks = 200, flee_percent = 0 } }

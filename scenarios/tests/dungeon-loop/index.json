@@ -1,0 +1,1 @@
+{"regions":[{"id":1,"file":"regions/1.toml","hash":"0e91df7041507515ef64f0fb47b2a36298ee3e8650db8f12fc326477d259b23b","name":"Trial vault","size":[7,3,2],"chamber":true,"zone":null,"anchors":{"exit":[1,1,0]},"portals":[],"actors":[{"id":2,"at":[2,1,0],"turn_ticks":null,"archetype":null,"external":false}],"items":[{"id":100,"carried_by":null}],"doors":[]}]}

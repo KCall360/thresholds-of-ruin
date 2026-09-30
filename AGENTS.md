@@ -106,21 +106,19 @@ duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
 **Milestone 4e — region streaming, generation, and asset palettes (in progress).**
-Merged: the structural `RegionCatalog` and horizon planner, and the
+Merged: the structural `RegionCatalog` and horizon planner, the
 [region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
-(PR #44).
+(PR #44), and package games streaming through disk regions (PR #45); see
+[region streaming](docs/region-streaming.md).
 
-**In review: PR #45** (branch `design/region-streaming-engine`, save format
-13). Package games stream between memory and disk; see
-[region streaming](docs/region-streaming.md). It holds, as separate commits:
-detach/attach preparation, the record store, never-built regions, engine
-streaming with disk rows, and the fixes and tests from reviewing those.
-**Merge only with the maintainer's approval.** To resume: check its CI
-(`gh pr checks 45`) and fix any failures on that branch. `ruff`, `actionlint`
-and `cargo deny` weren't run locally (not installed here), so CI is their
-first run. The local branches `design/region-streaming-prep`,
-`design/region-record-store` and `design/region-sources` are older stages of
-the same work and aren't needed.
+**In progress: the rest of 4e as one PR** (branch
+`design/region-streaming-completion`, not pushed yet), one commit per slice:
+background preloading (done), per-region package files with the package pin
+and save format 14 (done), a bounded identity directory, generated filler
+regions, the palette protocol, palettes in the clients, then docs. Run
+`scripts/verify.py quick` before each slice's commit and `full` once before
+pushing; review the whole branch for bugs and testing-policy gaps before
+pushing. **Merge only with the maintainer's approval.**
 
 Decisions agreed with the maintainer:
 
@@ -132,26 +130,26 @@ Decisions agreed with the maintainer:
   Loaded regions stay inside the checkpoint; the in-memory world keeps its
   global tables. Per-region memory tables only if measurements need them.
 - Never-needed regions are never built; the package builds one region just
-  before it's loaded. That renumbers nothing, since authored IDs are fixed
-  (the maintainer had accepted renumbering).
-- Saves still embed their package. Pinning it by manifest hash waits for
-  per-region package files, with its own format bump.
+  before it's loaded.
+- Packages have one file per region and a generated index; package format 1
+  is gone (no compatibility readers). Saves pin their package and copy each
+  region file they build from; resuming with regions still unbuilt needs the
+  package directory.
+- Generated regions fill gaps between authored ones (rooms and corridors); palettes
+  are asset ids that clients resolve through built-in tables.
 - Performance fixes must help large maps, not just small ones; prove scaling
-  with operation counts at two sizes (16 and 256 regions).
+  with operation counts at more than one size (16, 256 and 4,096 regions).
 - The headless client is the automation client: add capabilities to it (it
   now takes `{"type":"wizard","command":...}`) rather than using another
   client.
 
-Next, after PR #45 merges: background preloading (reading rows and building
-regions ahead of need on another thread; correctness must never depend on
-it), then per-region package files with the package pin, larger scenarios
-and generation, then asset palettes. Known limits are listed in the
+Known limits are listed in the
 [guide](docs/region-streaming.md#persistence): the identity directory and
-unbuilt-region metadata grow with authored content, and reading an evicted
-record waits for any save commit in progress.
+unbuilt-region metadata grow with authored content until the directory slice
+lands.
 
-The desktop launchers now run this branch's build, so playtest saves from
-before format 13 won't resume with them.
+The desktop launchers run the PR #45 build; they need rebuilding for format 14,
+and older playtest saves won't resume with them.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

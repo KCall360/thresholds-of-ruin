@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **18**, save format **13**, ruleset
-**`dungeon-v17`**, scenario validator **`tor-scenario-5`**. The server rejects
+**Current formats:** protocol **18**, save format **14**, ruleset
+**`dungeon-v17`**, scenario validator **`tor-scenario-6`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -159,9 +159,11 @@ can also start with no region built: a scenario package builds each region
 when it's first loaded, with the same result as building everything at once.
 Package games now stream: they start with the regions their characters need,
 move to the regions their reference points ask for after every command, and
-keep detached regions on disk (save format 13), and the server builds or reads
-the regions just beyond the loaded ones in the background. Larger scenarios,
-generation and palette delivery aren't implemented; see
+keep detached regions on disk, and the server builds or reads the regions just
+beyond the loaded ones in the background. Packages keep one file per region with
+a generated index, so a game reads a region's file only when it builds it, and
+saves pin their package, copying each region file they build from. Generation
+and palette delivery aren't implemented; see
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only

@@ -314,6 +314,34 @@ fn connection(path: &Path) -> Result<Connection, Failure> {
     .map_err(|_| storage_failure())?;
     Ok(conn)
 }
+/// Copy region files into the save. Each is written once; a retry must
+/// match it exactly.
+fn write_sources(tx: &Connection, sources: &[(u64, Arc<str>)]) -> Result<(), Failure> {
+    for (region, text) in sources {
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT source FROM region_sources WHERE region=?1",
+                [*region as i64],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| storage_failure())?;
+        match existing {
+            Some(old) if *old == **text => {}
+            Some(_) => return Err(invalid_archive()),
+            None => {
+                tx.execute(
+                    "INSERT INTO region_sources(region,source) VALUES (?1,?2)",
+                    params![*region as i64, &**text],
+                )
+                .map_err(|_| storage_failure())?;
+            }
+        }
+    }
+    Ok(())
+}
+/// The package index is kept in chunks under the frame limit.
+const PACKAGE_CHUNK: usize = 512 * 1024;
 fn commit_batch(
     conn: &mut Connection,
     entries: &[Pending],
@@ -322,6 +350,12 @@ fn commit_batch(
     mut fault: impl FnMut(&Connection, &str) -> Result<(), Failure>,
 ) -> Result<(), Failure> {
     let tx = conn.transaction().map_err(|_| storage_failure())?;
+    for entry in entries {
+        write_sources(&tx, &entry.sources)?;
+    }
+    if entries.iter().any(|e| !e.sources.is_empty()) {
+        fault(&tx, "after_sources")?;
+    }
     for entry in entries {
         // Retrying an uncertain commit reconciles exact stored bytes. A conflicting
         // sequence is never overwritten and no request can execute twice.
@@ -489,10 +523,17 @@ fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure>
 
 /// Read a format-6 save for diagnostics. Gameplay uses normal strict replay too.
 pub fn inspect_save(path: impl AsRef<Path>) -> Result<serde_json::Value, Failure> {
-    let (_, archive, _, _, _) = load(path.as_ref())?;
+    let (_, archive, _, _, _, _) = load(path.as_ref())?;
     serde_json::to_value(archive).map_err(|_| invalid_archive())
 }
-type Loaded = (Connection, Archive, String, u64, Option<DiskCheckpoint>);
+type Loaded = (
+    Connection,
+    Archive,
+    String,
+    u64,
+    Option<DiskCheckpoint>,
+    BTreeSet<u64>,
+);
 fn load(path: &Path) -> Result<Loaded, Failure> {
     // Refuse JSON and other formats without letting SQLite change the input.
     let mut file = std::fs::File::open(path).map_err(|_| storage_failure())?;
@@ -517,15 +558,21 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
         .map_err(|_| invalid_archive())?;
     // Region record rows aren't checked here, so opening a save doesn't read
     // the whole world; each row's checksum is checked when it's read.
-    let integrity = ["journal", "history", "checkpoint"]
-        .iter()
-        .map(|table| {
-            conn.query_row(&format!("PRAGMA quick_check({table})"), [], |r| {
-                r.get::<_, String>(0)
-            })
+    let integrity = [
+        "journal",
+        "history",
+        "checkpoint",
+        "package",
+        "region_sources",
+    ]
+    .iter()
+    .map(|table| {
+        conn.query_row(&format!("PRAGMA quick_check({table})"), [], |r| {
+            r.get::<_, String>(0)
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| invalid_archive())?;
+    })
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|_| invalid_archive())?;
     // SQLite must get the first opportunity to recover a hot rollback journal,
     // including a partially extended database page from an interrupted write.
     if version != SAVE_FORMAT
@@ -610,19 +657,67 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
     }) {
         return Err(invalid_archive());
     }
-    Ok((
-        conn,
-        archive.ok_or_else(invalid_archive)?,
-        save_id,
-        next - 1,
-        checkpoint,
-    ))
+    let mut archive = archive.ok_or_else(invalid_archive)?;
+    let saved = attach_package(&conn, &mut archive)?;
+    Ok((conn, archive, save_id, next - 1, checkpoint, saved))
+}
+
+/// Give a loaded archive's package its index, from the `package` table, and
+/// the region files copied into the save. Returns the copied regions.
+fn attach_package(conn: &Connection, archive: &mut Archive) -> Result<BTreeSet<u64>, Failure> {
+    let chunks: Vec<(i64, Vec<u8>)> = conn
+        .prepare("SELECT chunk, bytes FROM package ORDER BY chunk")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()
+        })
+        .map_err(|_| invalid_archive())?;
+    let sources: Vec<(i64, String)> = conn
+        .prepare("SELECT region, source FROM region_sources ORDER BY region")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()
+        })
+        .map_err(|_| invalid_archive())?;
+    let Some(package) = &mut archive.scenario.package else {
+        return if chunks.is_empty() && sources.is_empty() {
+            Ok(BTreeSet::new())
+        } else {
+            Err(invalid_archive())
+        };
+    };
+    if chunks
+        .iter()
+        .enumerate()
+        .any(|(n, (chunk, _))| *chunk != n as i64)
+    {
+        return Err(invalid_archive());
+    }
+    let bytes: Vec<u8> = chunks.into_iter().flat_map(|(_, b)| b).collect();
+    let index =
+        crate::scenario_package::RegionIndex::from_bytes(&bytes).map_err(|_| invalid_archive())?;
+    let package = Arc::make_mut(package);
+    package.index = Arc::new(index);
+    package.sources = Default::default();
+    let mut saved = BTreeSet::new();
+    for (region, text) in sources {
+        let region = u64::try_from(region).map_err(|_| invalid_archive())?;
+        // Checked against the index's hash when used.
+        package.sources.insert(region, Arc::from(text));
+        saved.insert(region);
+    }
+    Ok(saved)
 }
 
 #[derive(Debug)]
 struct Pending {
     sequence: u64,
     bytes: Vec<u8>,
+    /// Region files the record's command built regions from, not yet in
+    /// the save; written in the same transaction as the record.
+    sources: Vec<(u64, Arc<str>)>,
     queued: Instant,
 }
 #[derive(Debug)]
@@ -657,17 +752,20 @@ struct Owner {
 #[derive(Clone, Debug)]
 pub(crate) struct Store(Arc<Owner>);
 impl Store {
+    /// Open a save, or create it from `initial`: the archive, and the region
+    /// files its regions so far were built from. Also returns the regions
+    /// whose files the save holds.
     pub(crate) fn open(
         path: &Path,
-        initial: impl FnOnce() -> Result<Archive, Failure>,
+        initial: impl FnOnce() -> Result<(Archive, Vec<(u64, Arc<str>)>), Failure>,
         policy: SavePolicy,
         lock: Arc<std::fs::File>,
-    ) -> Result<(Self, Archive, Option<DiskCheckpoint>), Failure> {
+    ) -> Result<(Self, Archive, Option<DiskCheckpoint>, BTreeSet<u64>), Failure> {
         policy.validate()?;
-        let (conn, archive, save_id, sequence, checkpoint) = if path.exists() {
+        let (conn, archive, save_id, sequence, checkpoint, saved) = if path.exists() {
             load(path)?
         } else {
-            let initial = initial()?;
+            let (initial, sources) = initial()?;
             let mut conn = connection(path)?;
             let save_id = uuid::Uuid::new_v4().to_string();
             let mut base = initial.clone();
@@ -682,9 +780,19 @@ impl Store {
                 },
             )?;
             let tx = conn.transaction().map_err(|_| storage_failure())?;
-            tx.execute_batch(&format!("PRAGMA application_id=1414484554; PRAGMA user_version={SAVE_FORMAT}; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT; CREATE TABLE regions(record INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT;")).map_err(|_| storage_failure())?;
+            tx.execute_batch(&format!("PRAGMA application_id=1414484554; PRAGMA user_version={SAVE_FORMAT}; CREATE TABLE journal(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE history(sequence INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY CHECK(slot=1), sequence INTEGER NOT NULL, payload BLOB NOT NULL, checksum INTEGER NOT NULL) STRICT; CREATE TABLE regions(record INTEGER PRIMARY KEY,frame BLOB NOT NULL) STRICT; CREATE TABLE package(chunk INTEGER PRIMARY KEY,bytes BLOB NOT NULL) STRICT; CREATE TABLE region_sources(region INTEGER PRIMARY KEY,source TEXT NOT NULL) STRICT;")).map_err(|_| storage_failure())?;
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
+            if let Some(package) = &initial.scenario.package {
+                for (chunk, bytes) in package.index.to_bytes()?.chunks(PACKAGE_CHUNK).enumerate() {
+                    tx.execute(
+                        "INSERT INTO package VALUES (?1,?2)",
+                        params![chunk as i64, bytes],
+                    )
+                    .map_err(|_| storage_failure())?;
+                }
+            }
+            write_sources(&tx, &sources)?;
             for (index, record) in initial.records.iter().enumerate() {
                 let seq = index as u64 + 1;
                 let bytes = frame(
@@ -704,7 +812,8 @@ impl Store {
             }
             tx.commit().map_err(|_| storage_failure())?;
             let sequence = initial.records.len() as u64;
-            (conn, initial, save_id, sequence, None)
+            let saved = sources.iter().map(|(region, _)| *region).collect();
+            (conn, initial, save_id, sequence, None, saved)
         };
         let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
         let shared = Arc::new(Shared {
@@ -748,19 +857,24 @@ impl Store {
             })),
             archive,
             checkpoint,
+            saved,
         ))
     }
+    /// Queue a record, with the region files its command built regions
+    /// from that the save doesn't have yet.
     pub(crate) fn enqueue(
         &self,
         record: &Record,
+        sources: Vec<(u64, Arc<str>)>,
         capture: impl FnOnce() -> Checkpoint,
     ) -> Result<usize, Failure> {
-        self.push(1, record, Some(capture))
+        self.push(1, record, sources, Some(capture))
     }
     fn push<T: Serialize>(
         &self,
         kind: u16,
         record: &T,
+        sources: Vec<(u64, Arc<str>)>,
         capture: Option<impl FnOnce() -> Checkpoint>,
     ) -> Result<usize, Failure> {
         let shared = &self.0.shared;
@@ -795,7 +909,7 @@ impl Store {
                 },
             )?
         };
-        let len = bytes.len();
+        let len = bytes.len() + sources.iter().map(|(_, text)| text.len()).sum::<usize>();
         if s.status.pending_bytes.saturating_add(len) > shared.policy.max_pending_bytes {
             s.force = s.status.accepted_sequence;
             shared.wake.notify_one();
@@ -817,6 +931,7 @@ impl Store {
         s.pending.push_back(Pending {
             sequence,
             bytes,
+            sources,
             queued: now,
         });
         s.status.accepted_sequence = sequence;
@@ -856,7 +971,7 @@ impl Store {
         }
     }
     pub(crate) fn wizard(&self) -> Result<(), Failure> {
-        self.push(2, &(), None::<fn() -> Checkpoint>)?;
+        self.push(2, &(), Vec::new(), None::<fn() -> Checkpoint>)?;
         Ok(())
     }
     pub(crate) fn status(&self) -> SaveStatus {
@@ -1050,7 +1165,7 @@ mod tests {
                 .unwrap();
         }
         engine.flush().unwrap();
-        let (_, _, save_id, _, _) = load(path).unwrap();
+        let (_, _, save_id, _, _, _) = load(path).unwrap();
         let bytes = encode_checkpoint(&Checkpoint::capture(&engine).encode(&save_id, 4)).unwrap();
         (bytes, engine.state(ActorId(1)).unwrap())
     }
@@ -1325,7 +1440,7 @@ mod tests {
         walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
         assert_eq!(engine.region_counts().unwrap().detached, 2);
         engine.flush().unwrap();
-        let (_, _, save_id, _, _) = load(path).unwrap();
+        let (_, _, save_id, _, _, _) = load(path).unwrap();
         let checkpoint = Checkpoint::capture(&engine);
         let bytes = encode_checkpoint(&checkpoint.encode(&save_id, TO_HALL_4 as u64)).unwrap();
         let regions = RegionWrite::encode(&checkpoint).unwrap();
@@ -1541,6 +1656,7 @@ mod tests {
         )
         .unwrap();
         let mut batch = vec![Pending {
+            sources: Vec::new(),
             sequence: 1,
             bytes: vec![1, 2, 3],
             queued: Instant::now(),
@@ -1569,5 +1685,115 @@ mod tests {
         assert!(p.due(Duration::from_secs(60), Duration::ZERO, 0, false));
         assert!(p.due(Duration::ZERO, Duration::ZERO, p.max_pending_bytes, false));
         assert!(p.due(Duration::ZERO, Duration::ZERO, 0, true));
+    }
+
+    /// A journal record at sequence 5 copying region 1's file. Its frame is
+    /// never decoded here; these tests look at the tables.
+    fn copying_record(text: &str) -> Pending {
+        Pending {
+            sequence: 5,
+            bytes: b"record".to_vec(),
+            sources: vec![(1, Arc::from(text))],
+            queued: Instant::now(),
+        }
+    }
+
+    fn copied(conn: &Connection) -> (i64, Vec<(i64, String)>) {
+        let records = conn
+            .query_row("SELECT count(*) FROM journal WHERE sequence=5", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sources = conn
+            .prepare("SELECT region,source FROM region_sources ORDER BY region")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        (records, sources)
+    }
+
+    #[test]
+    fn region_files_commit_with_the_record_that_needs_them_and_are_written_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("sources.db");
+        checkpoint_fixture(&path);
+        let mut conn = connection(&path).unwrap();
+        let commit = |conn: &mut Connection, entry: Pending, stage: &str| {
+            commit_batch(conn, &[entry], None, None, |_, at| {
+                if at == stage {
+                    Err(storage_failure())
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        // A failure anywhere in the transaction leaves neither behind.
+        for stage in ["after_sources", "after_append", "before_commit"] {
+            assert!(commit(&mut conn, copying_record("id = 1"), stage).is_err());
+            assert_eq!(copied(&conn), (0, vec![]), "{stage}");
+        }
+        commit(&mut conn, copying_record("id = 1"), "").unwrap();
+        assert_eq!(copied(&conn), (1, vec![(1, "id = 1".into())]));
+        // A retry must match exactly; a copy is never rewritten.
+        commit(&mut conn, copying_record("id = 1"), "").unwrap();
+        assert!(commit(&mut conn, copying_record("id = 1 # edited"), "").is_err());
+        assert_eq!(copied(&conn), (1, vec![(1, "id = 1".into())]));
+    }
+
+    #[test]
+    fn sources_crash_child() {
+        let Ok(path) = std::env::var("TOR_SOURCES_TEST_PATH") else {
+            return;
+        };
+        let stage = std::env::var("TOR_SOURCES_TEST_STAGE").unwrap();
+        let mut conn = connection(Path::new(&path)).unwrap();
+        conn.execute_batch("PRAGMA cache_size=1").unwrap();
+        commit_batch(
+            &mut conn,
+            &[copying_record(&"id = 1\n".repeat(4096))],
+            None,
+            None,
+            |connection, at| {
+                if at == stage {
+                    connection.cache_flush().unwrap();
+                    std::process::exit(81);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        panic!("crash stage was not reached");
+    }
+
+    #[test]
+    fn process_death_while_copying_region_files_keeps_each_record_with_its_files() {
+        for (stage, committed) in [
+            ("after_sources", false),
+            ("after_append", false),
+            ("before_commit", false),
+            ("after_commit", true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("crash.db");
+            checkpoint_fixture(&path);
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::tests::sources_crash_child",
+                    "--nocapture",
+                ])
+                .env("TOR_SOURCES_TEST_PATH", &path)
+                .env("TOR_SOURCES_TEST_STAGE", stage)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(81), "{stage}");
+            let conn = connection(&path).unwrap();
+            let (records, sources) = copied(&conn);
+            assert_eq!(records, i64::from(committed), "{stage}");
+            assert_eq!(sources.len(), usize::from(committed), "{stage}");
+        }
     }
 }

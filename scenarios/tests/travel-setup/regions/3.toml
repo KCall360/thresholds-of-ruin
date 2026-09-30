@@ -1,0 +1,5 @@
+id = 3
+size = [8, 1, 1]
+name = "Travel corridor"
+chamber = false
+anchors = { "start" = [0, 0, 0] }

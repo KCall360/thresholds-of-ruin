@@ -1,12 +1,11 @@
+use crate::support;
 use std::path::Path;
 use tor_server::{scenario_package, Engine};
 
 fn copied_package() -> tempfile::TempDir {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
     let temp = tempfile::tempdir().unwrap();
-    for name in ["scenario.toml", "regions.toml", "validation.json"] {
-        std::fs::copy(root.join(name), temp.path().join(name)).unwrap();
-    }
+    support::copy_package(&root, temp.path());
     temp
 }
 
@@ -40,7 +39,7 @@ fn selecting_character_omits_other_inventory_and_resolves_zone_theme_replacement
     );
     edit(
         temp.path(),
-        "regions.toml",
+        "regions",
         "\"archetype\" = \"tablet\"",
         "\"archetype\" = \"tablet\", carried_by = 7",
     );
@@ -78,7 +77,11 @@ fn selecting_character_omits_other_inventory_and_resolves_zone_theme_replacement
     assert_eq!(package.region_themes(2).unwrap(), &["stone"]);
 }
 
+/// Edit the manifest, or with `file` "regions", the region file holding `from`.
 fn edit(dir: &Path, file: &str, from: &str, to: &str) {
+    if file == "regions" {
+        return support::edit_region(dir, from, to);
+    }
     let path = dir.join(file);
     let before = std::fs::read_to_string(&path).unwrap();
     assert!(before.contains(from), "Missing test edit: {from}");
@@ -96,15 +99,10 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         ),
         ("scenario.toml", "dungeon-v17", "missing-v1", "dependency"),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
+        ("regions", "size = [6, 3, 2]", "size = [0, 3, 2]", "bounds"),
+        ("regions", "2/landing", "999/landing", "anchor"),
         (
-            "regions.toml",
-            "size = [6, 3, 2]",
-            "size = [0, 3, 2]",
-            "bounds",
-        ),
-        ("regions.toml", "2/landing", "999/landing", "anchor"),
-        (
-            "regions.toml",
+            "regions",
             "\"archetype\" = \"tablet\"",
             "\"archetype\" = \"missing\"",
             "archetype",
@@ -119,13 +117,13 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         ),
         // Doors fit their space and don't leave a walled doorway open above.
         (
-            "regions.toml",
+            "regions",
             "\"open\" = true, \"height\" = 2",
             "\"open\" = true, \"height\" = 3",
             "at most 2 cells tall",
         ),
         (
-            "regions.toml",
+            "regions",
             "\"open\" = true, \"height\" = 2",
             "\"open\" = true, \"height\" = 1",
             "shorter than its doorway",
@@ -252,14 +250,22 @@ fn ordinary_package_has_no_wizard_history_and_rejects_stale_validation() {
     let engine = Engine::memory(scenario).unwrap();
     assert!(!engine.state(tor_protocol::ActorId(1)).unwrap().wizard_game);
     let temp = tempfile::tempdir().unwrap();
-    for name in ["scenario.toml", "regions.toml", "validation.json"] {
-        std::fs::copy(root.join(name), temp.path().join(name)).unwrap();
-    }
-    let path = temp.path().join("regions.toml");
+    support::copy_package(&root, temp.path());
+    // A region file edited since validation is refused when its region is
+    // built, without reading the rest of the package first.
+    let path = temp.path().join("regions/1.toml");
+    let mut contents = std::fs::read_to_string(&path).unwrap();
+    contents.push_str("\n# authored edit\n");
+    std::fs::write(path, contents).unwrap();
+    let scenario = scenario_package::load(temp.path(), 42, None, false).unwrap();
+    let error = Engine::memory(scenario).unwrap_err();
+    assert!(error.message.contains("changed since"), "{error}");
+    scenario_package::validate(temp.path()).unwrap();
+    assert!(Engine::memory(scenario_package::load(temp.path(), 42, None, false).unwrap()).is_ok());
+    // An edited manifest is refused when the package loads.
+    let path = temp.path().join("scenario.toml");
     let mut contents = std::fs::read_to_string(&path).unwrap();
     contents.push_str("\n# authored edit\n");
     std::fs::write(path, contents).unwrap();
     assert!(scenario_package::load(temp.path(), 42, None, false).is_err());
-    scenario_package::validate(temp.path()).unwrap();
-    assert!(scenario_package::load(temp.path(), 42, None, false).is_ok());
 }

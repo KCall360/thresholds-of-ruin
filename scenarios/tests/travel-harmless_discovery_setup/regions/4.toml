@@ -1,0 +1,7 @@
+id = 4
+size = [20, 1, 1]
+name = "Discovery corridor"
+chamber = false
+anchors = { "start" = [0, 0, 0] }
+items = [{ "id" = 3, "at" = [9, 0, 0], "archetype" = "tablet" }]
+places = [[10, 0, 0]]

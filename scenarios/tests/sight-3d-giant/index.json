@@ -1,0 +1,1 @@
+{"regions":[{"id":1,"file":"regions/1.toml","hash":"3d2e2a7b91c9de68414c8ec2fa3e075f9809441fa64705f908b367ee818b9749","name":"Giant hall","size":[9,3,3],"chamber":true,"zone":"hall","anchors":{"start":[1,1,0]},"portals":[],"actors":[{"id":3,"at":[6,1,1],"turn_ticks":100,"archetype":null,"external":true}],"items":[],"doors":[]}]}

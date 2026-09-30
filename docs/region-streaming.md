@@ -403,9 +403,10 @@ are.
   readiness, motion, navigation), bodies against every loaded body, and the
   game-wide combat and physics checks. A record that can't be read or fails
   them fails that command with a storage error and changes nothing.
-- **Format.** Save format 13 adds the `regions` table and the scenario's
-  streaming setting. Saves still embed their package; pinning a package by
-  hash waits for per-region package files.
+- **Package.** Saves pin their package and copy each region file they build
+  from; see [saves and the package](scenario-packages.md#saves-and-the-package).
+  A region's file is read only when the region is built, so starting and
+  resuming a game read the package's index, not its regions.
 
 Per-region in-memory tables, with loaded regions also stored as rows, are
 deferred until measurements show the global tables or re-encoding the loaded
@@ -459,13 +460,10 @@ base to compare them against.
 
 ### Later slices
 
-1. **Large scenarios and generation:** per-region package files with a
-   manifest, lifting the 256-region limit; pinning the package by manifest
-   hash instead of embedding it, and copying each region's source into the
-   save when it's first built (another save-format bump); and a procedural
-   region source. A generated region's content mustn't depend on the order
-   regions were built in, so each region gets its own random seed; generated
-   identities come from the game-wide allocators, which replay reproduces.
+1. **Generation:** a procedural region source. A generated region's content
+   mustn't depend on the order regions were built in, so each region gets its
+   own random seed; generated identities come from the game-wide allocators,
+   which replay reproduces.
 2. **Asset palettes.**
 
 ### Lifecycle verification

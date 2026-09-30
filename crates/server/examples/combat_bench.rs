@@ -16,7 +16,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let hero = package.manifest.characters[0].combat.as_mut().unwrap();
                 hero.max_hp = 1_000_000;
                 hero.attack.damage.values_mut().for_each(|n| *n = 1);
-                let region = &mut package.regions[0];
+                let mut regions = package.region_defs()?;
+                let region = &mut regions[0];
                 region.size = [16, 8, 2];
                 region.items.clear();
                 let mut enemy = region.actors[0].clone();
@@ -29,16 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         enemy
                     })
                     .collect();
-                std::fs::write(
-                    directory.path().join("scenario.toml"),
-                    toml::to_string(&package.manifest)?,
-                )?;
-                std::fs::write(
-                    directory.path().join("regions.toml"),
-                    toml::to_string(&scenario_package::RegionFile {
-                        regions: package.regions,
-                    })?,
-                )?;
+                scenario_package::write_package(directory.path(), &package.manifest, &regions)?;
                 scenario_package::validate(directory.path())?;
                 let scenario = scenario_package::load(directory.path(), 42, None, false)?;
                 let path = directory.path().join("run.db");

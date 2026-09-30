@@ -8,6 +8,11 @@ fn ids(values: &[u64]) -> BTreeSet<RegionId> {
     values.iter().copied().map(RegionId).collect()
 }
 
+/// The package's region index, to change its structure.
+fn index(package: &mut scenario_package::Package) -> &mut Vec<scenario_package::IndexedRegion> {
+    &mut std::sync::Arc::make_mut(&mut package.index).regions
+}
+
 fn dungeon_package() -> scenario_package::Package {
     scenario_package::load(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/first-dungeon"),
@@ -40,23 +45,13 @@ fn horizon_uses_structure_without_constructing_entities() {
 #[test]
 fn directed_cycles_multiple_roots_and_repeated_planning_are_deterministic() {
     let mut package = dungeon_package();
-    for region in &mut package.regions {
+    for region in index(&mut package) {
         region.portals.clear();
         region.anchors.insert("entry".into(), [1, 1, 0]);
     }
-    let portal = |target: u64| scenario_package::Portal {
-        rotation: None,
-        kind: None,
-        at: [1, 1, 0],
-        direction: "east".into(),
-        to: format!("{target}/entry"),
-        turns: 0,
-        width: 1,
-        height: 1,
-    };
+    let portal = |target: u64| format!("{target}/entry");
     for (source, target) in [(1, 2), (2, 3), (3, 1), (4, 5)] {
-        package
-            .regions
+        index(&mut package)
             .iter_mut()
             .find(|r| r.id == source)
             .unwrap()
@@ -83,7 +78,7 @@ fn directed_cycles_multiple_roots_and_repeated_planning_are_deterministic() {
     );
     let repeat = catalog.plan(&ids(&[1, 4]), 1, &first.required).unwrap();
     assert!(repeat.activate.is_empty() && repeat.deactivate.is_empty());
-    package.regions.reverse();
+    index(&mut package).reverse();
     let reordered = RegionCatalog::from_package(&package).unwrap();
     assert_eq!(catalog, reordered);
     assert_eq!(
@@ -99,10 +94,11 @@ fn invalid_metadata_and_unknown_roots_fail_without_a_partial_plan() {
     assert!(catalog.plan(&ids(&[999]), 1, &ids(&[])).is_err());
     assert!(catalog.plan(&ids(&[1]), 1, &ids(&[999])).is_err());
     assert!(catalog.plan(&ids(&[]), 1, &ids(&[1])).is_err());
-    package.regions[0].portals[0].to = "999/missing".into();
+    index(&mut package)[0].portals[0] = "999/missing".into();
     assert!(RegionCatalog::from_package(&package).is_err());
     let mut package = dungeon_package();
-    package.regions.push(package.regions[0].clone());
+    let first = package.index.regions[0].clone();
+    index(&mut package).push(first);
     assert!(RegionCatalog::from_package(&package).is_err());
 }
 
@@ -125,9 +121,9 @@ fn anchor_resolution_and_zone_pools_do_not_need_loaded_regions() {
             themes: Some(vec!["ice".into(), "ice".into()]),
         },
     );
-    package.regions[0].zone = Some("empty".into());
-    package.regions[1].zone = Some("inherit".into());
-    package.regions[2].zone = Some("replace".into());
+    index(&mut package)[0].zone = Some("empty".into());
+    index(&mut package)[1].zone = Some("inherit".into());
+    index(&mut package)[2].zone = Some("replace".into());
     let catalog = RegionCatalog::from_package(&package).unwrap();
     assert!(catalog.region(RegionId(1)).unwrap().themes.is_empty());
     assert_eq!(
@@ -143,10 +139,10 @@ fn anchor_resolution_and_zone_pools_do_not_need_loaded_regions() {
     assert_eq!(anchor.position, tor_world::Position { x: 0, y: 2, z: 0 });
     assert!(catalog.resolve_anchor("05/west").is_err());
     assert!(catalog.resolve_anchor("5/missing").is_err());
-    package.regions[0].zone = Some("missing".into());
+    index(&mut package)[0].zone = Some("missing".into());
     assert!(RegionCatalog::from_package(&package).is_err());
-    package.regions[0].zone = None;
-    package.regions[0]
+    index(&mut package)[0].zone = None;
+    index(&mut package)[0]
         .anchors
         .insert("outside".into(), [999, 0, 0]);
     assert!(RegionCatalog::from_package(&package).is_err());
@@ -159,11 +155,11 @@ fn local_horizon_work_does_not_expand_with_unrelated_regions() {
         .unwrap()
         .plan(&ids(&[1]), 1, &ids(&[]))
         .unwrap();
-    let mut unrelated = package.regions[4].clone();
+    let mut unrelated = package.index.regions[4].clone();
     unrelated.portals.clear();
     for id in 6..=8192 {
         unrelated.id = id;
-        package.regions.push(unrelated.clone());
+        index(&mut package).push(unrelated.clone());
     }
     let large = RegionCatalog::from_package(&package)
         .unwrap()

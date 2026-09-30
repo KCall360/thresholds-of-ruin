@@ -12,6 +12,7 @@ mod geometry;
 mod history;
 mod items;
 mod materials;
+mod package_pin;
 mod performance_contracts;
 mod performance_workloads;
 mod physics;

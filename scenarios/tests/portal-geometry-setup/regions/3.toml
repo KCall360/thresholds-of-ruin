@@ -1,0 +1,7 @@
+id = 3
+size = [5, 5, 2]
+name = "Upper gallery"
+chamber = false
+anchors = { "portal-0" = [0, 2, 1], "portal-1" = [1, 2, 0], "portal-2" = [1, 2, 1] }
+portals = [{ "at" = [0, 2, 1], "direction" = "west", "to" = "1/portal-2", "turns" = 3 }, { "at" = [1, 2, 1], "direction" = "down", "to" = "3/portal-1", "turns" = 0 }, { "at" = [1, 2, 0], "direction" = "up", "to" = "3/portal-2", "turns" = 0 }]
+items = [{ "id" = 3, "at" = [1, 2, 1], "archetype" = "tablet" }, { "id" = 4, "at" = [4, 4, 1], "archetype" = "token" }]

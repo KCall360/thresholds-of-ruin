@@ -9,9 +9,11 @@ are rejected without migration.
 
 The default game is `scenarios/first-dungeon`; `scenarios/two-room` is a minimal
 example, and `scenarios/tests/` holds the test fixtures. A package directory contains
-`scenario.toml`, one or more explicitly listed TOML content files, and the generated
-`validation.json`. Paths must stay inside that directory, including symlink
-resolution. Files and aggregate source are bounded to 8 MiB.
+`scenario.toml`, one file per region in `regions/` (named `<region id>.toml`),
+and two files the validator generates: `index.json` and `validation.json`.
+Paths must stay inside that directory, including symlink resolution. The
+manifest is bounded to 8 MiB, each region file to 1 MiB, and a package to
+65,536 regions.
 
 ```powershell
 cargo run -p tor-server --bin tor-scenario -- validate scenarios/two-room
@@ -22,15 +24,20 @@ Set the usual server authentication token first. Omitting `--scenario` selects
 `scenarios/first-dungeon`. `--character <numeric-id>` selects a starting character;
 omitting it uses `default_character`. Connect the client using `--actor <id>`.
 `--regions` retains the independently versioned diagnostic workload and conflicts
-with `--scenario`. Existing saves own their inputs; scenario/seed arguments do
-not replace them, and resuming does not require the original package directory.
+with `--scenario`. Existing saves own their inputs; scenario and seed arguments
+don't replace them. See [saves and the package](#saves-and-the-package) for when
+resuming needs the package directory.
 
-Run validation after **every source edit**, including comments. Validation binds
-SHA-256 hashes of the manifest and each declared file, the normalized model,
-exact ruleset and validator identity, and recorded coverage. Versions are
+Run validation after **every source edit**, including comments. Validation
+writes the region index and binds SHA-256 hashes of the manifest and the index
+(which holds each region file's hash), the normalized model, exact ruleset and
+validator identity, and recorded coverage. Versions are
 author-controlled `major.minor`; changing a hash does not require a version bump.
 Validator failures produce a nonzero exit status and JSON diagnostics on stderr.
-Stale/missing validation is refused by default. `--allow-unvalidated` prints a
+Stale/missing validation is refused by default: an edited manifest when the
+package loads, and an edited region file when its region is first built, since
+a validated game reads a region file only then. `--allow-unvalidated` reads and
+indexes every region file afresh instead. It prints a
 warning and permits structurally valid development input. It does not enable
 wizard access or permit unavailable mechanics. Invalid geometry is always rejected.
 
@@ -40,13 +47,13 @@ The read-only `tor-scenario horizon <directory> <region-id> <portal-hops>` comma
 inspects a structural preload neighborhood without constructing gameplay state.
 See [region streaming foundations](region-streaming.md) for its output and limits.
 
-The manifest declares `format = 1`, `id`, `version`, `ruleset`, `files`,
-`default_character`, and `characters`. Optional `themes`, `zones`, `archetypes`,
+The manifest declares `format = 2`, `id`, `version`, `ruleset`,
+`default_character`, and `characters`. Older formats are refused. Optional `themes`, `zones`, `archetypes`,
 and `objective` describe the world. Zone theme pools replace world defaults;
 omitting a zone pool inherits the world pool. An empty pool deliberately replaces
 it with no themes. These are content identifiers, not client asset disclosures.
 
-Content files contain `[[regions]]`. Regions have stable positive numeric `id`,
+Each region file holds one region's fields at its top level. Regions have stable positive numeric `id`,
 `name`, `size = [width, depth, height]`, and optional `chamber`, `zone`,
 `anchors`, `walls`, `openings`, `places`, `portals`, `doors`, `items`, and `actors`.
 All positions are region-local integer `[x, y, z]` triples. Chambers add a finite
@@ -62,7 +69,9 @@ Actors, items, and doors have positive numeric IDs, unique within their entity
 kind. Array order does not assign identities. Doors specify `at`, `open`, and `height` (default 1). Validation rejects a door
 that doesn't fit, or that leaves its walled doorway open above it; see
 [doors](doors.md).
-Items specify `at`, `name` or an `archetype`, and optional `carried_by`. Archetype
+Items specify `at`, `name` or an `archetype`, and optional `carried_by`. A carried
+item is authored in the region file where its carrier starts, so building a
+region reads only that region's file and its neighbours'. Archetype
 names and actor `turn_ticks` are overridden by instance fields. `seed_names` is
 an explicit deterministic name pool selected by `seed % length`, used to preserve
 the original fixture's three material variants. It is not world generation.
@@ -78,17 +87,36 @@ Region gravity vectors/sparse overrides, body declarations, initial velocity,
 and full portal rotations are implemented; see [physics](physics.md).
 Objective declarations (`anchor`, optional authored item ID, `disclosed`,
 `continue_play`) are implemented; see [dungeon gameplay](dungeon.md). Generation,
-dependency registries, streaming, and equipment aren't supported yet. The current
+dependency registries and equipment aren't supported yet. The current
 package is self-contained and depends on one exact built-in ruleset; external
 content/generator dependency fields are rejected rather than silently ignored.
 
 ## Validation, persistence, and tests
 
-Validation exhaustively constructs the bounded authored world (1–256 regions,
+Validation exhaustively constructs the bounded authored world (1–65,536 regions,
 up to 32×32×8 interior cells each), checking IDs, geometry, references, anchors,
 placements, inventory, and all character selections. It repeats construction at
 seeds 0, 1, and 42 to check determinism. The certificate records this coverage;
 it is neither a gameplay/winnability proof nor a cryptographic trust signature.
+
+### Saves and the package
+
+A save pins its package by the certificate's model hash. It keeps the manifest
+and the region index, and copies each region file into its `region_sources`
+table the first time a region is built from it (with the neighbours whose walls
+that build reads), in the same transaction as the journal record of the command
+that built it. Replay rebuilds regions from these copies, and each copy is
+checked against the index's hash when it's used; a damaged copy fails closed.
+So a save's size grows with the regions played, not the package.
+
+Regions not built yet are read from the package directory, checked against the
+index. A save remembers where its package was. If regions remain unbuilt and
+that directory is gone or holds a different package, the server refuses to
+resume and asks for `--scenario` naming the same package, rather than failing
+when play reaches them. Once every region the game can build has been copied,
+it resumes without the package.
+
+### Runtime changes
 
 Saved inputs are immutable snapshots with exact identities and hashes. Runtime
 wizard mutations remain journaled, and each wizard entry records resulting

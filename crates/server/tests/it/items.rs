@@ -168,8 +168,9 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
 fn package_validation_rejects_bad_counts_properties_and_objective_stacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
     let manifest = std::fs::read_to_string(root.join("scenario.toml")).unwrap();
-    let regions = std::fs::read_to_string(root.join("regions.toml")).unwrap();
+    let regions = std::fs::read_to_string(root.join("regions/1.toml")).unwrap();
     let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("regions")).unwrap();
     for (m, r) in [
         (manifest.clone(), regions.replacen("quantity = 10", "quantity = 0", 1)),
         (manifest.replacen("stackable = true", "stackable = false", 1), regions.clone()),
@@ -177,7 +178,7 @@ fn package_validation_rejects_bad_counts_properties_and_objective_stacks() {
         (manifest.clone(), regions.replace("quality = \"fine\"", "\"\" = \"fine\"")),
     ] {
         std::fs::write(dir.path().join("scenario.toml"), m).unwrap();
-        std::fs::write(dir.path().join("regions.toml"), r).unwrap();
+        std::fs::write(dir.path().join("regions/1.toml"), r).unwrap();
         assert!(scenario_package::validate(dir.path()).is_err());
     }
 }
@@ -212,9 +213,7 @@ fn selected_character_knowledge_and_seed_mapping_are_deterministic() {
     );
     let dir = tempfile::tempdir().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
-    for file in ["scenario.toml", "regions.toml"] {
-        std::fs::copy(root.join(file), dir.path().join(file)).unwrap();
-    }
+    crate::support::copy_package(&root, dir.path());
     let manifest = dir.path().join("scenario.toml");
     let content = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(

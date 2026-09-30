@@ -1,0 +1,6 @@
+id = 1
+name = "Hall 1"
+size = [20, 3, 1]
+anchors = { west = [0, 0, 0], east = [19, 0, 0], start = [2, 1, 0] }
+portals = [{ at = [19, 0, 0], direction = "east", to = "2/west", width = 3 }]
+items = [{ id = 10, at = [8, 1, 0], name = "pebble" }]

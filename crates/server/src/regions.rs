@@ -76,6 +76,13 @@ pub(crate) struct Regions {
     preload: Option<Arc<Preloader>>,
     /// Builds and reads taken ready from the preloader.
     pub(crate) prepared: usize,
+    /// Regions whose files the save holds, and those built regions (or
+    /// their neighbours, whose walls a build reads) need that it doesn't
+    /// yet. Replay rebuilds regions from these copies.
+    saved: BTreeSet<u64>,
+    unsaved: BTreeSet<u64>,
+    /// Why the last build failed, to report instead of a generic failure.
+    failure: Option<Failure>,
 }
 
 /// What the preloader was asked for, and the deterministic work of choosing it.
@@ -104,7 +111,36 @@ impl Regions {
             reads: 0,
             preload: None,
             prepared: 0,
+            saved: BTreeSet::new(),
+            unsaved: BTreeSet::new(),
+            failure: None,
         })
+    }
+
+    /// The region files the save needs and doesn't hold yet.
+    pub(crate) fn unsaved_sources(&self) -> Result<Vec<(u64, Arc<str>)>, Failure> {
+        self.unsaved
+            .iter()
+            .map(|region| Ok((*region, self.package.region_text(*region)?)))
+            .collect()
+    }
+
+    /// These regions' files are queued with a published command.
+    pub(crate) fn mark_saved(&mut self, copied: Vec<u64>) {
+        for region in copied {
+            self.unsaved.remove(&region);
+            self.saved.insert(region);
+        }
+    }
+
+    /// The regions whose files a save holds, when it's opened.
+    pub(crate) fn set_saved(&mut self, saved: BTreeSet<u64>) {
+        self.unsaved.retain(|region| !saved.contains(region));
+        self.saved = saved;
+    }
+
+    pub(crate) fn saved_count(&self) -> usize {
+        self.saved.len()
     }
 
     pub(crate) fn attach_disk(&mut self, disk: crate::storage::Store) {
@@ -248,9 +284,9 @@ impl Regions {
             regions: self,
             made,
         };
-        let (_, report, _) = game
-            .transition_regions_counted(&settled, &mut store)
-            .map_err(|_| storage_failure())?;
+        let result = game.transition_regions_counted(&settled, &mut store);
+        let failure = self.failure.take();
+        let (_, report, _) = result.map_err(|_| failure.unwrap_or_else(storage_failure))?;
         work.report = report;
         work.records_read = self.reads - reads;
         work.prepared = self.prepared - prepared;
@@ -327,17 +363,31 @@ impl RecordStore for Regions {
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
-        if let Some(record) = self
+        let record = match self
             .preload
             .as_ref()
             .and_then(|p| p.take(Job::Build(region)))
         {
-            self.prepared += 1;
-            return Some(record.into_inner());
+            Some(record) => {
+                self.prepared += 1;
+                record.into_inner()
+            }
+            None => match self.package.build_region(self.seed, &self.index, region.0) {
+                Ok(record) => record,
+                Err(failure) => {
+                    self.failure = Some(failure);
+                    return None;
+                }
+            },
+        };
+        // Replaying this build needs the region's file and its neighbours'.
+        let neighbours = self.catalog.region(region).map(|m| m.outgoing.clone());
+        for needed in std::iter::once(region).chain(neighbours.into_iter().flatten()) {
+            if !self.saved.contains(&needed.0) {
+                self.unsaved.insert(needed.0);
+            }
         }
-        self.package
-            .build_region(self.seed, &self.index, region.0)
-            .ok()
+        Some(record)
     }
 }
 
