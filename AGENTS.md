@@ -114,7 +114,7 @@ Merged: the structural `RegionCatalog` and horizon planner, the
 **In progress: the rest of 4e as one PR** (branch
 `design/region-streaming-completion`, not pushed yet), one commit per slice:
 background preloading (done), per-region package files with the package pin
-and save format 14 (done), a bounded identity directory, generated filler
+and save format 14 (done), a bounded identity directory (done), generated filler
 regions, the palette protocol, palettes in the clients, then docs. Run
 `scripts/verify.py quick` before each slice's commit and `full` once before
 pushing; review the whole branch for bugs and testing-policy gaps before
@@ -143,10 +143,9 @@ Decisions agreed with the maintainer:
   now takes `{"type":"wizard","command":...}`) rather than using another
   client.
 
-Known limits are listed in the
-[guide](docs/region-streaming.md#persistence): the identity directory and
-unbuilt-region metadata grow with authored content until the directory slice
-lands.
+The server reads a package's index, which is proportional to its region
+count, and saves keep a copy of it; everything else a game holds or saves
+grows with the regions played.
 
 The desktop launchers run the PR #45 build; they need rebuilding for format 14,
 and older playtest saves won't resume with them.

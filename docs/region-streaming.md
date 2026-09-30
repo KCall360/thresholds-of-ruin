@@ -203,14 +203,25 @@ deterministic; it isn't required to match an unstreamed game exactly.
 
 ### Never-built regions and region sources
 
-A game can start knowing every region without building any. An unbuilt
-region has metadata (name and bounds) and the identities it will hold, and
-nothing else. Loading it for the first time builds it:
+A game can start without building any region, and without even knowing
+most of them. An unbuilt region the game knows has metadata (name and
+bounds) and the identities it will hold, and nothing else. Loading it for
+the first time builds it:
 
 - `Game::add_unbuilt_region` declares a region with the actors, items and
   doors it will hold. Those identities go into the identity directory, so
   references to them (the objective's item, a character) are checkable, and
   the id allocators move past them.
+- A game declares a region only when it's needed: when a transition is
+  asked to load a region the game doesn't know, and when a region is built
+  whose links lead to regions the game doesn't know. The declaration comes
+  from the record store's source (`RecordStore::unbuilt`). A store without
+  one fails the transition with `UnknownRegion`, changing nothing. So game
+  state, checkpoints and saves hold the regions played and those next to
+  them, however large the source.
+- `Game::reserve_identities` starts new identities above everything the
+  source authored, so identities allocated later (a wizard's, say) never
+  collide with those in regions the game hasn't declared.
 - A transition that loads an unbuilt region asks its record store to build
   the region's starting record (`RecordStore::build`), then attaches it like
   a detached record, frozen. Attaching checks that the record holds exactly
@@ -223,8 +234,9 @@ nothing else. Loading it for the first time builds it:
 - Run characters and actors awaiting input may be unbuilt or detached; pins
   make an actor awaiting input active before it acts.
 
-For scenario packages, `Package::start` declares every region unbuilt and
-configures the run; `Package::build_region` builds one region's record. It
+For scenario packages, `Package::start` reserves the authored identities,
+declares only the regions where the run's characters and client-controlled
+actors start and where its objective is, and configures the run; `Package::build_region` builds one region's record. It
 builds the region in a scratch game that holds the region and its
 neighbours' geometry, so links and entities are checked exactly as building
 the whole package checks them, then takes the record with
@@ -235,7 +247,11 @@ doesn't renumber anything.
 
 A server test builds every checked-in package region by region, for two
 seeds and three build orders, and checks that the result equals building
-the whole package at once.
+the whole package at once. Another checks that a game's checkpoints encode
+exactly the same bytes, at the start and after the same walk, whether the
+corridor has 16, 256 or 4,096 halls. The engine parks a client's revision for
+an actor only once that actor has left the loaded world; an actor never
+loaded is at revision zero.
 
 ### Region records and identity
 

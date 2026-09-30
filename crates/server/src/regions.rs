@@ -265,7 +265,7 @@ impl Regions {
         let mut t = self.horizon(game, &mut work);
         let known: Vec<_> = extra
             .into_iter()
-            .filter(|r| game.region_state(*r).is_some())
+            .filter(|r| game.region_state(*r).is_some() || self.catalog.region(*r).is_some())
             .collect();
         t.active.extend(known.iter().copied());
         t.loaded.extend(known);
@@ -389,6 +389,9 @@ impl RecordStore for Regions {
         }
         Some(record)
     }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.package.unbuilt_region(&self.index, region.0).ok()
+    }
 }
 
 /// A candidate command's view of the store: records it makes stay here
@@ -410,5 +413,8 @@ impl RecordStore for Pending<'_> {
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
         self.regions.build(region)
+    }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.regions.unbuilt(region)
     }
 }

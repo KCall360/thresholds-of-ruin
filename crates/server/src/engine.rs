@@ -383,20 +383,18 @@ impl Revisions {
                 .loaded_actor_ids()
                 .map(|id| (ActorId(id.0), 0))
                 .collect(),
-            parked: tor_world::Shared::new(
-                game.unloaded_actor_ids()
-                    .map(|id| (ActorId(id.0), 0))
-                    .collect(),
-            ),
+            parked: Default::default(),
         }
     }
 
-    /// Any known actor's revision, loaded or not.
-    fn any(&self, actor: ActorId) -> Option<u64> {
+    /// Any known actor's revision, loaded or not. An actor is parked once it
+    /// leaves the loaded world; one never loaded is at revision zero.
+    fn any(&self, actor: ActorId, game: &Game) -> Option<u64> {
         self.loaded
             .get(&actor)
             .or_else(|| self.parked.get(&actor))
             .copied()
+            .or_else(|| game.known_actor_region(SimActor(actor.0)).map(|_| 0))
     }
 
     /// Follow actors into and out of loaded regions after a transition.
@@ -430,11 +428,10 @@ impl Revisions {
             .keys()
             .map(|a| a.0)
             .eq(game.loaded_actor_ids().map(|a| a.0))
-            && self
-                .parked
-                .keys()
-                .map(|a| a.0)
-                .eq(game.unloaded_actor_ids().map(|a| a.0))
+            && self.parked.keys().all(|a| {
+                let id = SimActor(a.0);
+                !game.has_actor(id) && game.known_actor_region(id).is_some()
+            })
     }
 }
 
@@ -832,8 +829,8 @@ impl Engine {
                 Some(tor_simulation::RegionState::Active) => counts.active += 1,
                 Some(tor_simulation::RegionState::Frozen) => counts.frozen += 1,
                 Some(tor_simulation::RegionState::Detached) => counts.detached += 1,
-                Some(tor_simulation::RegionState::Unbuilt) => counts.unbuilt += 1,
-                None => {}
+                // Regions the game hasn't needed yet aren't even declared.
+                Some(tor_simulation::RegionState::Unbuilt) | None => counts.unbuilt += 1,
             }
         }
         Some(counts)
@@ -1009,7 +1006,7 @@ impl Engine {
     }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
-            .any(actor)
+            .any(actor, &self.game)
             .ok_or_else(|| Failure::new(ErrorCode::Unauthorized, "Actor is unavailable"))
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
@@ -2249,7 +2246,11 @@ impl Candidate {
                     .find(|b| &b.id == target)
                     .cloned()
                     .ok_or_else(invalid)?;
-                if boundary.revisions.any(receipt.actor).is_none() {
+                if boundary
+                    .revisions
+                    .any(receipt.actor, &boundary.game)
+                    .is_none()
+                {
                     return Err(invalid());
                 }
                 let later = std::mem::replace(&mut self.game, boundary.game.clone());

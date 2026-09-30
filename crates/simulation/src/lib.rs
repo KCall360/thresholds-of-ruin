@@ -20,7 +20,7 @@ mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
     ReferenceTarget, RegionIdentities, RegionRecord, RegionRoot, RegionState, RegionTransition,
-    TransitionError, TransitionReport,
+    TransitionError, TransitionReport, UnbuiltRegion,
 };
 mod travel;
 pub use travel::TravelStep;

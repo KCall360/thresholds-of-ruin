@@ -321,9 +321,11 @@ mod tests {
             load_radius: 0,
         });
         let engine = Engine::memory(scenario).unwrap();
-        // The guard is in an unbuilt hall: known, parked, not loaded.
+        // The guard's hall hasn't been needed, so the game doesn't know the
+        // guard yet; nothing is parked until an actor leaves the loaded world.
         assert_eq!(engine.revisions.keys().collect::<Vec<_>>(), [&ActorId(1)]);
-        assert_eq!(engine.revision(ActorId(2)).unwrap(), 0);
+        assert!(engine.revision(ActorId(2)).is_err());
+        assert!(engine.revisions.parked.is_empty());
         let candidate = Candidate::capture(&engine);
         assert!(candidate
             .revisions

@@ -140,6 +140,23 @@ pub trait RecordStore {
         let _ = region;
         None
     }
+    /// A region this store's source can build that the game doesn't know
+    /// yet, so a transition can declare it: a region it's asked to load, or
+    /// one a newly built region links to. Declaring only what's needed keeps
+    /// game state proportional to the regions played, not the source.
+    /// `None` if this store has no source, or the source has no such region.
+    fn unbuilt(&mut self, region: RegionId) -> Option<UnbuiltRegion> {
+        let _ = region;
+        None
+    }
+}
+
+/// A region a source can build, as [`Game::add_unbuilt_region`] declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnbuiltRegion {
+    pub region: Region,
+    pub chamber: bool,
+    pub identities: RegionIdentities,
 }
 
 /// The identities an unbuilt region will hold once built, declared by its
@@ -887,15 +904,17 @@ impl Game {
         t: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<TransitionReport, TransitionError> {
-        for region in t.loaded.iter().chain(&t.active) {
-            if !self.world.knows_region(*region) {
-                return Err(TransitionError::UnknownRegion(*region));
-            }
-        }
         if let Some(region) = t.active.difference(&t.loaded).next() {
             return Err(TransitionError::ActiveNotLoaded(*region));
         }
         let mut next = self.clone();
+        // Regions the game doesn't know yet are declared from the store's
+        // source, if it has them.
+        for region in t.loaded.iter().chain(&t.active) {
+            if !next.world.knows_region(*region) {
+                next.declare_unbuilt(*region, records)?;
+            }
+        }
         let mut report = TransitionReport::default();
         let attach: Vec<_> = t
             .loaded
@@ -1066,6 +1085,29 @@ impl Game {
         Ok(())
     }
 
+    /// Declare a region the store's source can build.
+    fn declare_unbuilt(
+        &mut self,
+        region: RegionId,
+        records: &mut dyn RecordStore,
+    ) -> Result<(), TransitionError> {
+        let unbuilt = records
+            .unbuilt(region)
+            .filter(|u| u.region.id == region)
+            .ok_or(TransitionError::UnknownRegion(region))?;
+        self.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
+            .map_err(|_| TransitionError::InvalidRecord(region))
+    }
+
+    /// Allocate new actor, item and door identities from at least these, so
+    /// they never collide with identities a region source authored for
+    /// regions the game hasn't declared yet.
+    pub fn reserve_identities(&mut self, actors: u64, items: u64, doors: u64) {
+        self.next_actor_id = self.next_actor_id.max(actors);
+        self.next_item_id = self.next_item_id.max(items);
+        self.next_door_id = self.next_door_id.max(doors);
+    }
+
     /// Turn a loaded region of this game into a starting record for
     /// [`RecordStore::build`]. A region source builds the region in a
     /// scratch game (with its neighbours' geometry, so its links check) at
@@ -1215,7 +1257,14 @@ impl Game {
         let invalid = TransitionError::InvalidRecord(region);
         let unavailable = TransitionError::RecordUnavailable(region);
         let record = if self.lifecycle.unbuilt.remove(&region) {
-            Shared::new(records.build(region).ok_or(unavailable)?)
+            let record = records.build(region).ok_or(unavailable)?;
+            // Its links may lead to regions the game doesn't know yet.
+            for target in record.world.linked_regions() {
+                if target != region && !self.world.knows_region(target) {
+                    self.declare_unbuilt(target, records).map_err(|_| invalid)?;
+                }
+            }
+            Shared::new(record)
         } else {
             let id = self.lifecycle.detached.remove(&region).ok_or(invalid)?;
             records.get(id).ok_or(unavailable)?
@@ -1539,6 +1588,18 @@ mod tests {
             }
             Some(record)
         }
+        fn unbuilt(&mut self, region: RegionId) -> Option<UnbuiltRegion> {
+            Some(UnbuiltRegion {
+                region: self.template.world.region(region)?.clone(),
+                chamber: false,
+                identities: self
+                    .template
+                    .clone()
+                    .into_region_record(region)
+                    .ok()?
+                    .identities(),
+            })
+        }
     }
 
     /// A four-region corridor with an actor in region 3, and the same game
@@ -1564,6 +1625,61 @@ mod tests {
             game.add_unbuilt_region(region, false, identities).unwrap();
         }
         (template, game, far)
+    }
+
+    /// A game that knows no regions declares each from the source only when
+    /// a transition loads it or a built region links to it, so game state
+    /// grows with the regions played, not the source.
+    #[test]
+    fn transitions_declare_regions_from_their_source_only_as_needed() {
+        let (template, _, _) = unbuilt_corridor();
+        let mut game = Game::new(tor_world::World::new(vec![], vec![]).unwrap(), 1);
+        game.reserve_identities(
+            template.next_actor_id,
+            template.next_item_id,
+            template.next_door_id,
+        );
+        let before = game.clone();
+        let error = game
+            .clone()
+            .transition_regions(&sets(&[1], &[1]), &mut MemoryRecords::default())
+            .unwrap_err();
+        assert_eq!(error, TransitionError::UnknownRegion(RegionId(1)));
+        assert_eq!(game, before);
+
+        let mut source = TemplateSource {
+            template: template.clone(),
+            records: MemoryRecords::default(),
+            lose: None,
+        };
+        game.transition_regions(&sets(&[1], &[1]), &mut source)
+            .unwrap();
+        // Region 1 is active; pins keep region 2, which it links to, loaded;
+        // region 2's build declared region 3; region 4 isn't known at all.
+        assert_eq!(game.region_state(RegionId(1)), Some(RegionState::Active));
+        assert_eq!(game.region_state(RegionId(2)), Some(RegionState::Frozen));
+        assert_eq!(game.region_state(RegionId(3)), Some(RegionState::Unbuilt));
+        assert_eq!(game.region_state(RegionId(4)), None);
+        assert!(game.lifecycle_state_valid());
+        game.transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut source)
+            .unwrap();
+        assert_eq!(game, template);
+    }
+
+    #[test]
+    fn reserved_identities_are_never_allocated() {
+        let mut game = Game::region_corridor(1, 2);
+        game.reserve_identities(50, 60, 70);
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 2, y: 1, z: 0 },
+        };
+        let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        assert_eq!(actor, ActorId(50));
+        assert_eq!((game.next_item_id, game.next_door_id), (60, 70));
+        // Reserving less never moves allocation back.
+        game.reserve_identities(1, 1, 1);
+        assert_eq!(game.next_actor_id, 51);
     }
 
     #[test]

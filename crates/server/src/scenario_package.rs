@@ -1241,11 +1241,31 @@ impl Package {
                 .or_default()
                 .push((*id, *at, *ticks));
         }
+        let ceiling = |ids: &mut dyn Iterator<Item = u64>| {
+            ids.max()
+                .map_or(Some(1), |max| max.checked_add(1))
+                .ok_or_else(|| fail("Authored identity too large"))
+        };
+        let regions = &self.index.regions;
+        // Identities that spawn, as building the whole package allocates them:
+        // omitted characters and what they carry don't.
+        let ceilings = (
+            ceiling(&mut homes.keys().copied())?,
+            ceiling(
+                &mut regions
+                    .iter()
+                    .flat_map(|r| r.items.iter())
+                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .map(|i| i.id),
+            )?,
+            ceiling(&mut regions.iter().flat_map(|r| r.doors.iter().copied()))?,
+        );
         Ok(PackageIndex {
             anchors,
             anchors_by_region,
             homes,
             spawns: spawns_by_region,
+            ceilings,
             appearances: self.appearance_mapping(seed)?,
             lookups: std::cell::Cell::new(0),
         })
@@ -1258,46 +1278,82 @@ impl Package {
         self.check()?;
         self.supported()?;
         let index = self.index(seed)?;
-        let mut identities: BTreeMap<u64, tor_simulation::RegionIdentities> = BTreeMap::new();
-        for (id, home) in &index.homes {
-            identities
-                .entry(home.region.0)
-                .or_default()
-                .actors
-                .insert(tor_simulation::ActorId(*id));
-        }
-        for r in &self.index.regions {
-            for i in r
-                .items
-                .iter()
-                .filter(|i| !self.omitted_carrier(i.carried_by))
-            {
-                identities
-                    .entry(r.id)
-                    .or_default()
-                    .items
-                    .insert(tor_simulation::ItemId(i.id));
-            }
-            identities
-                .entry(r.id)
-                .or_default()
-                .doors
-                .extend(r.doors.iter().copied());
-        }
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
+        let (actors, items, doors) = index.ceilings;
+        game.reserve_identities(actors, items, doors);
+        // Only regions the run refers to are declared now: where its
+        // characters and client-controlled actors start, and its objective.
+        // Transitions declare the rest as they're needed.
+        let mut needed = BTreeSet::new();
+        for c in &self.manifest.characters {
+            if let Some(home) = index.homes.get(&c.id) {
+                needed.insert(home.region.0);
+            }
+        }
         for r in &self.index.regions {
-            game.add_unbuilt_region(
-                region_of(r.id, &r.name, r.size)?,
-                r.chamber,
-                identities.remove(&r.id).unwrap_or_default(),
-            )
-            .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
+            if r.actors.iter().any(|a| a.external) {
+                needed.insert(r.id);
+            }
+        }
+        if let Some(o) = &self.manifest.objective {
+            let at = index
+                .anchors
+                .get(&o.anchor)
+                .ok_or_else(|| fail("Missing objective anchor"))?;
+            needed.insert(at.region.0);
+            if let Some(item) = o.item {
+                let holder = self
+                    .index
+                    .regions
+                    .iter()
+                    .find(|r| r.items.iter().any(|i| i.id == item))
+                    .ok_or_else(|| fail("Missing objective item"))?;
+                needed.insert(holder.id);
+            }
+        }
+        for region in needed {
+            let unbuilt = self.unbuilt_region(&index, region)?;
+            game.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
+                .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
         }
         self.configure_run(&mut game, &index.anchors)?;
         Ok(game)
+    }
+
+    /// A region as a game declares it before building it: its metadata and
+    /// the identities it will hold. Reads only the index.
+    pub(crate) fn unbuilt_region(
+        &self,
+        index: &PackageIndex,
+        region: u64,
+    ) -> Result<tor_simulation::UnbuiltRegion, Failure> {
+        let r = self
+            .index
+            .region(region)
+            .ok_or_else(|| fail(format!("Unknown region {region}")))?;
+        Ok(tor_simulation::UnbuiltRegion {
+            region: region_of(r.id, &r.name, r.size)?,
+            chamber: r.chamber,
+            identities: tor_simulation::RegionIdentities {
+                actors: index
+                    .spawns
+                    .get(&region)
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, _, _)| tor_simulation::ActorId(*id))
+                    .collect(),
+                items: r
+                    .items
+                    .iter()
+                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .map(|i| tor_simulation::ItemId(i.id))
+                    .collect(),
+                doors: r.doors.iter().copied().collect(),
+            },
+        })
     }
 
     /// One region's starting record, built in a scratch game holding it and
@@ -1726,6 +1782,8 @@ pub(crate) struct PackageIndex {
     homes: BTreeMap<u64, Location>,
     /// Actors by the region they start in: identity, start, turn length.
     spawns: BTreeMap<u64, Vec<(u64, Location, u64)>>,
+    /// One more than the largest authored actor, item and door identity.
+    ceilings: (u64, u64, u64),
     appearances: BTreeMap<String, String>,
     /// Region definitions handed out, for scaling contracts.
     lookups: std::cell::Cell<usize>,
@@ -1790,6 +1848,9 @@ impl tor_simulation::RecordStore for PackageRecords {
         self.package
             .build_region(self.seed, &self.index, region.0)
             .ok()
+    }
+    fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
+        self.package.unbuilt_region(&self.index, region.0).ok()
     }
 }
 
@@ -1888,9 +1949,12 @@ mod region_lifecycle_tests {
                 for order in [&all, &reversed, &rotated] {
                     let context = format!("{} seed {seed} order {order:?}", path.display());
                     let mut game = package.start(seed).unwrap();
+                    // Regions are declared only when needed, and none is built.
                     assert!(
-                        all.iter()
-                            .all(|r| game.region_state(*r) == Some(RegionState::Unbuilt)),
+                        all.iter().all(|r| matches!(
+                            game.region_state(*r),
+                            Some(RegionState::Unbuilt) | None
+                        )),
                         "{context}"
                     );
                     let mut records = PackageRecords::new(package.clone(), seed);
