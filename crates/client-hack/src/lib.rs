@@ -5,8 +5,10 @@ mod chart;
 mod column;
 mod config;
 mod glyphs;
+mod log;
 
 pub use chart::{chart_shift, shift_origin};
 pub use column::{column_glyph, map_columns, ColumnGlyph, DrawnColumn};
 pub use config::{load_config, parse_config, BumpAttacks, Click, SessionConfig};
 pub use glyphs::{resolve, Glyph, Structure, REMEMBERED_COLOR};
+pub use log::{wrap, MessageLog, MORE, SCROLLBACK_CAP, SKIPPED, UNACKED_CAP};

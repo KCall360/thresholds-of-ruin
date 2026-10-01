@@ -28,6 +28,8 @@ class TravelProcesses(unittest.TestCase):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
 
     def key(self, client, key):
+        if key in ("escape", "enter"):
+            ascii_support.clear_more(client, lambda process, predicate: self.ascii_frame(process, predicate))
         client.child.stdin.write(json.dumps({"type": "key", "key": key}) + "\n")
         client.child.stdin.flush()
         return self.ascii_frame(client, lambda f: f.get("input_done") == key and not f["busy"])

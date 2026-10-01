@@ -5,6 +5,7 @@ after the real native window successfully presents its pixel buffer.
 """
 import json
 import os
+import queue
 import subprocess
 import unittest
 
@@ -45,6 +46,8 @@ class AsciiProcesses(unittest.TestCase):
         return found[-1]
 
     def key(self, process, key):
+        if key in ("escape", "enter"):
+            clear_more(process, self.frame)
         process.child.stdin.write(json.dumps({"type":"key", "key":key}) + "\n")
         process.child.stdin.flush()
         return self.frame(process, lambda f: f.get("input_done") == key and not f["busy"])
@@ -207,6 +210,43 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)
 
+    def test_message_log_pages_a_server_note_without_an_action(self):
+        client, initial = self.ascii(observe=False)
+        self.assertIn("messages", initial)
+        self.assertIn("more", initial)
+        self.assertNotIn("queued", initial)
+        self.assertEqual(initial["profile"]["version"], 1)
+        self.assertFalse(initial["more"])
+        self.assertFalse(initial["busy"])
+        self.assertEqual(initial["narration"], [])
+        # "Note: " plus this body wraps to three rows, so the marker sits past the first page.
+        body = "Q" * 145 + "ENDMARK"
+        self.key(client, "note")
+        client.child.stdin.write(json.dumps({"type": "text", "text": body}) + "\n")
+        client.child.stdin.flush()
+        noted = self.key(client, "enter")
+        self.assertTrue(noted["more"])
+        self.assertFalse(noted["busy"])
+        self.assertEqual(noted["messages"][-1], "--More--")
+        self.assertNotIn("ENDMARK", "\n".join(noted["messages"]))
+        self.assertEqual(noted["narration"], initial["narration"])
+        self.assertNotIn("queued", noted)
+        self.assertEqual(noted["profile"]["version"], 1)
+        revealed = self.key(client, "space")
+        self.assertIn("ENDMARK", "\n".join(revealed["messages"]))
+        self.assertFalse(revealed["more"])
+        self.assertFalse(revealed["busy"])
+        self.assertEqual(revealed["state"], noted["state"])
+        self.assertEqual(revealed["history"], noted["history"])
+        self.assertEqual(revealed["narration"], noted["narration"])
+        self.assertNotIn("queued", revealed)
+        self.assertNotIn("inventory_letters", revealed)
+        self.assertNotIn("look_cursor", revealed)
+        self.assertNotIn("palette", revealed)
+        self.assertNotIn("plane", revealed)
+        self.assertNotIn("join", revealed)
+        client.stop()
+
     def start_package(self, name):
         self.server.stop()
         self.save = self.save.with_name(f"{name}.json")
@@ -267,6 +307,61 @@ class AsciiProcesses(unittest.TestCase):
                 self.assertEqual(tile["glyph"], "^", (x, y))
             if lower is None:
                 self.assertNotEqual(tile["glyph"], "^", (x, y))
+
+
+def drain_ready(process):
+    """Move frames already printed, but not yet waited for, into the transcript."""
+    while True:
+        try:
+            line = process.lines.get_nowait()
+        except queue.Empty:
+            return
+        if line is None:
+            process.lines.put(None)
+            return
+        process.transcript.append(line)
+
+
+def newest_frame(process):
+    for line in reversed(process.transcript):
+        if not line.startswith("{"):
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if value.get("type") == "frame":
+            return value
+    return None
+
+
+def clear_more(process, read_frame):
+    """Acknowledge --More-- before Escape or Enter, which those keys would otherwise consume."""
+    for _ in range(40):
+        drain_ready(process)
+        last = newest_frame(process)
+        if not last or not last.get("more") or last.get("busy"):
+            return
+        process.child.stdin.write(json.dumps({"type": "key", "key": "space"}) + "\n")
+        process.child.stdin.flush()
+        last = read_frame(process, lambda frame: frame.get("input_done") == "space" and not frame["busy"])
+        if not last.get("more"):
+            return
+    raise AssertionError("message prompt did not clear")
+
+
+def page_native(process, read_frame, key):
+    """Page with a real Space key. Native input does not set input_done."""
+    for _ in range(40):
+        drain_ready(process)
+        last = newest_frame(process)
+        if not last or not last.get("more"):
+            return
+        before = last.get("messages")
+        key("space", True)
+        read_frame(process, lambda frame: frame.get("messages") != before)
+        key("space", False)
+    raise AssertionError("message prompt did not clear")
 
 
 if __name__ == "__main__":

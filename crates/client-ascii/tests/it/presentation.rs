@@ -560,6 +560,10 @@ fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
         })
         .unwrap();
     app.set_state(current);
+    app.busy = true;
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert!(app.busy);
+    app.ready();
     assert_eq!(
         app.input(Input::Key { key: Key::Escape }),
         Effect::Request(Request::CancelTravel {
@@ -741,14 +745,186 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
 
 #[test]
 fn prose_dashes_render_as_supported_bitmap_glyphs() {
-    let mut app = App::new();
+    let mut prose_app = App::new();
+    prose_app.accept_status("HP 20/20 — Victory!".into());
+    let mut plain = App::new();
+    plain.accept_status("HP 20/20 - Victory!".into());
     let mut canvas = tor_client_ascii::render::Canvas::default();
-    app.status = "HP 20/20 — Victory!".into();
-    canvas.draw(&app);
+    canvas.draw(&prose_app);
     let prose = canvas.pixels.clone();
-    app.status = "HP 20/20 - Victory!".into();
-    canvas.draw(&app);
+    canvas.draw(&plain);
     assert_eq!(canvas.pixels, prose);
+}
+
+#[test]
+fn annotation_control_character_and_invalid_action_append_once() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    let current = state();
+    app.set_state(current.clone());
+    app.ready();
+    let busy_before = app.busy;
+    app.update(StreamUpdate {
+        actor: ActorId(1),
+        branch: BranchId("test".into()),
+        cursor: StreamCursor {
+            sequence: 1,
+            tick: 100,
+        },
+        body: UpdateBody::Observation {
+            state: Box::new(StateView {
+                revision: 4,
+                observation: Observation {
+                    tick: 100,
+                    ..current.state().observation.clone()
+                },
+                ..current.state().clone()
+            }),
+            event: Some(Box::new(HistoryEntry {
+                id: EntryId("move".into()),
+                branch: BranchId("test".into()),
+                actor: ActorId(1),
+                tick: 100,
+                author: Author::User {
+                    user: "tester".into(),
+                },
+                audience: Audience::Actor,
+                content: HistoryContent::Action {
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                    event: Event::Moved {
+                        direction: Direction::East,
+                    },
+                },
+            })),
+        },
+    })
+    .unwrap();
+    app.update(StreamUpdate {
+        actor: ActorId(1),
+        branch: BranchId("test".into()),
+        cursor: StreamCursor {
+            sequence: 2,
+            tick: 100,
+        },
+        body: UpdateBody::Annotation {
+            entry: Box::new(HistoryEntry {
+                id: EntryId("note".into()),
+                branch: BranchId("test".into()),
+                actor: ActorId(1),
+                tick: 100,
+                author: Author::User {
+                    user: "tester".into(),
+                },
+                audience: Audience::Private,
+                content: HistoryContent::Annotation {
+                    anchor: Anchor::State { revision: 4 },
+                    category: AnnotationCategory::Note,
+                    text: "A\u{1}note".into(),
+                },
+            }),
+        },
+    })
+    .unwrap();
+    app.accept_status("InvalidAction: Action is unavailable".into());
+    assert_eq!(app.busy, busy_before);
+    let narration = app.state.as_ref().unwrap().narration();
+    assert_eq!(narration, &["You move east.".to_owned()]);
+    let messages = app.message_lines();
+    let joined = messages.join("\n");
+    assert_eq!(joined.matches("Note: A note").count(), 1);
+    assert!(!joined.contains('\u{1}'));
+    assert_eq!(
+        joined
+            .matches("InvalidAction: Action is unavailable")
+            .count(),
+        1
+    );
+    assert_eq!(joined.matches("Action is unavailable").count(), 1);
+    assert_eq!(narration, &["You move east.".to_owned()]);
+    let before = app.message_lines();
+    let mut canvas = tor_client_ascii::render::Canvas::default();
+    canvas.draw(&app);
+    canvas.draw(&app);
+    assert_eq!(app.message_lines(), before);
+
+    app.replace_snapshot(state().snapshot()).unwrap();
+    assert!(app.message_lines().is_empty());
+    assert!(app.state.as_ref().unwrap().narration().is_empty());
+    app.accept_status("still here".into());
+    let mut other = state().snapshot();
+    other.branch = BranchId("other".into());
+    app.replace_snapshot(other).unwrap();
+    assert!(app.message_lines().is_empty());
+    assert_eq!(app.status, "Timeline changed; pending selections cleared.");
+}
+
+#[test]
+fn more_pages_without_a_command_and_scrollback_does_not_quit() {
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(state());
+    app.ready();
+    for line in ["one", "two", "three", "four"] {
+        app.accept_status(line.into());
+    }
+    assert!(app.more());
+    assert!(!app.busy);
+    assert_eq!(
+        app.message_lines(),
+        vec!["one".to_owned(), "two".into(), "--More--".into()]
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Space }), Effect::None);
+    assert!(!app.busy);
+    assert_eq!(app.message_lines(), vec!["three".to_owned(), "four".into()]);
+    assert_eq!(
+        app.input(Input::Key { key: Key::Space }),
+        Effect::Request(Request::Command {
+            branch: BranchId("test".into()),
+            command: Command::Act {
+                expected_revision: 3,
+                action: Action::Wait,
+            },
+        })
+    );
+
+    let mut paging = App::new();
+    paging.role = AccessRole::Player;
+    paging.set_state(state());
+    paging.ready();
+    for line in ["one", "two", "three", "four"] {
+        paging.accept_status(line.into());
+    }
+    paging.busy = true;
+    assert_eq!(paging.input(Input::Key { key: Key::Right }), Effect::None);
+    assert!(paging.busy);
+    assert_eq!(
+        paging.message_lines(),
+        vec!["three".to_owned(), "four".into()]
+    );
+
+    let mut reading = App::new();
+    reading.role = AccessRole::Player;
+    reading.set_state(state());
+    reading.ready();
+    reading.accept_status("kept".into());
+    for _ in 0..4 {
+        reading.accept_status("page".into());
+    }
+    assert!(reading.more());
+    assert_eq!(reading.input(Input::Key { key: Key::Space }), Effect::None);
+    assert_eq!(
+        reading.input(Input::Key {
+            key: Key::Scrollback
+        }),
+        Effect::None
+    );
+    assert!(reading.scrollback_open());
+    assert!(reading.scrollback_lines().iter().any(|line| line == "kept"));
+    assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert!(!reading.scrollback_open());
+    assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::Quit);
 }
 
 fn room(width: i32, height: i32) -> ClientState {

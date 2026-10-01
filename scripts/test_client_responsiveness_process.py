@@ -59,6 +59,7 @@ class ClientResponsivenessProcesses(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], sequence + 1)
             else:
                 self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], sequence + 1)
+        ascii_support.page_native(window, self.ascii_frame, key)
         key("Escape", True)
         self.ascii_frame(window, lambda f: f["note"] is None)
         key("Escape", False)

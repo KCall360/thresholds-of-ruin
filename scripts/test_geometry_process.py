@@ -50,6 +50,8 @@ class GeometryProcesses(unittest.TestCase):
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["inventory"][0]["name"], "stone tablet")
         self.assertEqual(arrived["state"]["observation"]["tick"], 650)
+        # Read the window through the walk so --More-- is current before Escape quits.
+        self.ascii_frame(ascii_client, lambda f: f["state"]["observation"]["tick"] == 650 and not f["busy"])
         ascii_support.AsciiProcesses.key(self, ascii_client, "escape")
         ascii_client.child.wait(timeout=10)
         self.assertTrue((self.save.parent / "wide.ppm").exists())
