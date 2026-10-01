@@ -80,27 +80,21 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
     });
     loop {
         tokio::select! {
-            biased;
-            ready = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
-                match ready {
-                    tor_client_common::FirstReady::Server(message) => {
-                        let message = message?;
-                        let terminal = present(&connection, &mut session, &message);
-                        finish_journey(&mut connection, &mut session).await?;
-                        if terminal && session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
-                    }
-                    tor_client_common::FirstReady::Local(line) => {
-                        let Some(line) = line else { break; };
-                        let line = line?;
-                        if line.trim().is_empty() { if session.journey.is_none() { prompt()?; } continue; }
-                        // Interpretation stamps expected_revision from the state now in hand.
-                        let intent = session.dialogue.interpret(&line, connection.state.state());
-                        if matches!(intent, Intent::Tools(Input::Quit)) { break; }
-                        dispatch(&mut connection, &mut session, intent).await?;
-                        finish_journey(&mut connection, &mut session).await?;
-                        if session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
-                    }
-                }
+            message = connection.next() => {
+                let message = message?;
+                let terminal = present(&connection, &mut session, &message);
+                finish_journey(&mut connection, &mut session).await?;
+                if terminal && session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
+            }
+            line = rx.recv() => {
+                let Some(line) = line else { break; };
+                let line = line?;
+                if line.trim().is_empty() { if session.journey.is_none() { prompt()?; } continue; }
+                let intent = session.dialogue.interpret(&line, connection.state.state());
+                if matches!(intent, Intent::Tools(Input::Quit)) { break; }
+                dispatch(&mut connection, &mut session, intent).await?;
+                finish_journey(&mut connection, &mut session).await?;
+                if session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
             }
             _ = tokio::signal::ctrl_c() => break,
         }

@@ -71,43 +71,37 @@ async fn run() -> Result<(), Error> {
     });
     loop {
         tokio::select! {
-            biased;
-            first = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
-                match first {
-                    tor_client_common::FirstReady::Server(message) => {
-                        present(&connection, &message?);
-                        io::stdout().flush()?;
-                    }
-                    tor_client_common::FirstReady::Local(line) => {
-                        let Some(line) = line else { break; };
-                        let line = line?;
-                        if line.trim().is_empty() { ready()?; continue; }
-                        // `parse` stamps expected_revision from the state now in hand.
-                        match parse(&line, connection.state.state()) {
-                            Ok(Input::Quit) => break,
-                            Ok(Input::Look) => println!("{}", describe(connection.state.state())),
-                            Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
-                            Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
-                            Ok(Input::Help) => println!("{HELP}"),
-                            Ok(Input::Request(request)) => transact(&mut connection, request).await?,
-                            Ok(Input::Command(command)) => {
-                                if connection.role() == AccessRole::Spectator {
-                                    println!("Spectator access is read-only.");
-                                } else if matches!(command, Command::Wizard { .. }) && connection.role() != AccessRole::Wizard {
-                                    println!("Wizard authority is required.");
-                                } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
-                                    println!("You are observing. Use control to request control.");
-                                } else {
-                                    let request = Request::Command { branch: connection.state.branch().clone(), command };
-                                    transact(&mut connection, request).await?;
-                                }
-                            },
-                            Err(error) => println!("{}", safe(&error)),
+            message = connection.next() => {
+                present(&connection, &message?);
+                io::stdout().flush()?;
+            },
+            line = rx.recv() => {
+                let Some(line) = line else { break; };
+                let line = line?;
+                if line.trim().is_empty() { ready()?; continue; }
+                match parse(&line, connection.state.state()) {
+                    Ok(Input::Quit) => break,
+                    Ok(Input::Look) => println!("{}", describe(connection.state.state())),
+                    Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
+                    Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
+                    Ok(Input::Help) => println!("{HELP}"),
+                    Ok(Input::Request(request)) => transact(&mut connection, request).await?,
+                    Ok(Input::Command(command)) => {
+                        if connection.role() == AccessRole::Spectator {
+                            println!("Spectator access is read-only.");
+                        } else if matches!(command, Command::Wizard { .. }) && connection.role() != AccessRole::Wizard {
+                            println!("Wizard authority is required.");
+                        } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
+                            println!("You are observing. Use control to request control.");
+                        } else {
+                            let request = Request::Command { branch: connection.state.branch().clone(), command };
+                            transact(&mut connection, request).await?;
                         }
-                        ready()?;
-                    }
+                    },
+                    Err(error) => println!("{}", safe(&error)),
                 }
-            }
+                ready()?;
+            },
             _ = tokio::signal::ctrl_c() => break,
         }
     }

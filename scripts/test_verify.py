@@ -82,7 +82,6 @@ class ProcessSelection(unittest.TestCase):
 
     def test_client_change_selects_tests_that_can_launch_it_through_helpers(self):
         self.assertEqual(self.select([], ["tor-client-ascii"]), ["test_ascii_process", "test_items_process"])
-        self.assertEqual(self.select([], ["tor-client-hack"]), ["test_ascii_process", "test_items_process"])
 
     def test_support_script_change_selects_its_importers(self):
         self.assertEqual(

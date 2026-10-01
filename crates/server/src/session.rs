@@ -598,18 +598,6 @@ impl Service {
         }
     }
 
-    /// One step of the session loop. A request already read from a socket is
-    /// applied before autonomous work. That work moves the revision, and the
-    /// server would otherwise reject the waiting command as stale.
-    pub(crate) fn deliver_or_advance(&mut self, ready: Option<(u64, String, Request)>) {
-        if let Some((id, request_id, request)) = ready {
-            self.handle(id, request_id, request);
-        } else {
-            self.advance_travel();
-            self.poll_saves();
-        }
-    }
-
     /// At most one ordinary action per actor per pump; never hold the service lock
     /// for a whole route. Network delivery/cancellation runs between boundaries.
     pub(crate) fn advance_travel(&mut self) {
@@ -1196,97 +1184,6 @@ mod tests {
         assert_eq!(snapshot.cursor.sequence, 0);
         service.handle(replacement.id, "control".into(), Request::AcquireControl);
         assert_eq!(service.controllers.get(&ActorId(1)), Some(&replacement.id));
-    }
-
-    /// A dungeon where, after the character waits, the guard is the next actor.
-    fn character_waiting_on_a_guard() -> (Service, Connection) {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/tests/dungeon-loop");
-        let mut engine =
-            Engine::memory(crate::scenario_package::load(&root, 1, None, false).unwrap()).unwrap();
-        engine.enable_wizard().unwrap();
-        let mut service = Service::new(engine);
-        let account = Account {
-            role: AccessRole::Wizard,
-            user: "wizard".into(),
-            token: "test".into(),
-            actors: BTreeSet::from([ActorId(1)]),
-        };
-        let mut client = service.connect(&account, "headless".into()).unwrap();
-        client.messages.try_recv().unwrap();
-        service.handle(
-            client.id,
-            "attach".into(),
-            Request::Attach { actor: ActorId(1) },
-        );
-        while client.messages.try_recv().is_ok() {}
-        service.handle(client.id, "control".into(), Request::AcquireControl);
-        while client.messages.try_recv().is_ok() {}
-        let revision = service.engine.revision(ActorId(1)).unwrap();
-        service.handle(
-            client.id,
-            "wait".into(),
-            Request::Command {
-                branch: service.engine.branch().clone(),
-                command: Command::Act {
-                    expected_revision: revision,
-                    action: Action::Wait,
-                },
-            },
-        );
-        while client.messages.try_recv().is_ok() {}
-        assert!(
-            service.engine.next_ai_action().is_some(),
-            "the guard must be next, so the pump would move the revision"
-        );
-        (service, client)
-    }
-
-    #[test]
-    fn the_autonomous_pump_moves_the_revision_when_nothing_is_waiting() {
-        let (mut service, _client) = character_waiting_on_a_guard();
-        let before = service.engine.revision(ActorId(1)).unwrap();
-        service.deliver_or_advance(None);
-        assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
-    }
-
-    #[test]
-    fn an_already_read_wizard_command_is_applied_before_the_autonomous_pump() {
-        let (mut service, mut client) = character_waiting_on_a_guard();
-        let revision = service.engine.revision(ActorId(1)).unwrap();
-        let branch = service.engine.branch().clone();
-        service.deliver_or_advance(Some((
-            client.id,
-            "rewind".into(),
-            Request::Command {
-                branch: branch.clone(),
-                command: Command::Wizard {
-                    expected_revision: revision,
-                    operation: "rewind initial".into(),
-                },
-            },
-        )));
-        let mut messages = Vec::new();
-        while let Ok(message) = client.messages.try_recv() {
-            messages.push(message);
-        }
-        assert!(
-            messages.iter().all(|message| !matches!(
-                message,
-                ServerMessage::Error {
-                    code: ErrorCode::StaleRevision,
-                    ..
-                }
-            )),
-            "waiting command was rejected: {messages:?}"
-        );
-        assert!(
-            messages.iter().any(|message| matches!(
-                message,
-                ServerMessage::Snapshot { snapshot, .. } if snapshot.branch != branch
-            )),
-            "rewind did not fork: {messages:?}"
-        );
     }
 }
 
