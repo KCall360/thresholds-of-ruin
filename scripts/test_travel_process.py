@@ -28,8 +28,6 @@ class TravelProcesses(unittest.TestCase):
         ascii_support.AsciiProcesses.setUpClass.__func__(cls)
 
     def key(self, client, key):
-        if key in ("escape", "enter"):
-            ascii_support.clear_more(client, lambda process, predicate: self.ascii_frame(process, predicate))
         client.child.stdin.write(json.dumps({"type": "key", "key": key}) + "\n")
         client.child.stdin.flush()
         return self.ascii_frame(client, lambda f: f.get("input_done") == key and not f["busy"])
@@ -62,8 +60,8 @@ class TravelProcesses(unittest.TestCase):
         watched = self.terminal(spectator)
         self.assertEqual(watched["state"], arrived["state"])
         self.assertEqual(watched["travel"], arrived["travel"])
-        # Eight cells centered on the 75×45 map: click the westmost cell (world corridor x=0).
-        ascii_client.child.stdin.write(json.dumps({"type": "click", "x": 536, "y": 408}) + "\n")
+        # Eight cells centered in the map: click the first cell (world corridor x=0).
+        ascii_client.child.stdin.write(json.dumps({"type": "click", "x": 214, "y": 208}) + "\n")
         ascii_client.child.stdin.flush()
         returned = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived")
         self.assertEqual(returned["state"]["observation"]["tick"], 1000)
@@ -163,7 +161,7 @@ class TravelProcesses(unittest.TestCase):
                 rect = wintypes.RECT()
                 user32.GetClientRect(handles[0], ctypes.byref(rect))
                 scale = min(rect.right / 1200, rect.bottom / 800)
-                point = wintypes.POINT(int((rect.right - 1200 * scale) / 2 + 536 * scale), int((rect.bottom - 800 * scale) / 2 + 408 * scale))
+                point = wintypes.POINT(int((rect.right - 1200 * scale) / 2 + 214 * scale), int((rect.bottom - 800 * scale) / 2 + 208 * scale))
                 user32.ClientToScreen(handles[0], ctypes.byref(point))
                 self.assertTrue(user32.SetCursorPos(point.x, point.y))
                 actual = wintypes.POINT()
@@ -190,7 +188,7 @@ class TravelProcesses(unittest.TestCase):
             def key(key, down):
                 subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], key], check=True, timeout=10)
             def mouse(down):
-                subprocess.run(["xdotool", "mousemove", "--window", windows[0], "536", "408", "mousedown" if down else "mouseup", "1"], check=True, timeout=10)
+                subprocess.run(["xdotool", "mousemove", "--window", windows[0], "214", "208", "mousedown" if down else "mouseup", "1"], check=True, timeout=10)
         underscore()
         selected = self.ascii_frame(client, lambda f: f.get("travel_cursor") is not None)
         self.assertEqual(selected["state"]["observation"]["tick"], 0)

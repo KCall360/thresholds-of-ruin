@@ -1,4 +1,4 @@
-use tor_client_ascii::{column_glyph, App, Effect, Input, Key};
+use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
@@ -116,8 +116,11 @@ fn travel_clicks_ignore_unknown_cells_and_spectators() {
     assert_eq!(app.input(Input::Click { x: 400, y: 220 }), Effect::None);
     app.role = AccessRole::Player;
     assert_eq!(app.input(Input::Click { x: 800, y: 500 }), Effect::None);
-    let (x, y) =
-        tor_client_ascii::render::cell_center(&app, Position { x: 3, y: 1, z: 0 }).unwrap();
+    let (x, y) = tor_client_ascii::render::cell_center(
+        &state().state().observation,
+        Position { x: 3, y: 1, z: 0 },
+    )
+    .unwrap();
     assert!(
         matches!(app.input(Input::Click { x, y }), Effect::Request(Request::Command { command: Command::Travel { destination, .. }, .. }) if destination == "3:1")
     );
@@ -205,20 +208,20 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
 }
 
 #[test]
-fn an_item_above_an_open_cell_is_drawn_and_a_standing_wall_stays_a_wall() {
+fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
     let state = state();
     let o = &state.state().observation;
-    assert_eq!(column_glyph(o, &[], 1, 1).unwrap().ch, '@');
-    assert_eq!(column_glyph(o, &[], 4, 1).unwrap().ch, '.');
-    assert!(column_glyph(o, &[], 99, 1).is_none());
+    assert_eq!(glyph_at(o, 1, 1), '@');
+    assert_eq!(glyph_at(o, 4, 1), '.');
+    assert_eq!(glyph_at(o, 2, 1), '.');
+    assert_eq!(glyph_at(o, 99, 1), ' ');
     let mut other_level = o.clone();
     other_level.ground_items[0].position = Position { x: 2, y: 1, z: 1 };
-    assert_eq!(column_glyph(&other_level, &[], 2, 1).unwrap().ch, '!');
+    assert_eq!(glyph_at(&other_level, 2, 1), '.');
     other_level
         .visible_cells
         .retain(|cell| cell.position.x != 2);
-    other_level.ground_items.clear();
-    assert!(column_glyph(&other_level, &[], 2, 1).is_none());
+    assert_eq!(glyph_at(&other_level, 2, 1), ' ');
     other_level.visible_cells.push(CellView {
         asset: None,
         door: None,
@@ -230,7 +233,9 @@ fn an_item_above_an_open_cell_is_drawn_and_a_standing_wall_stays_a_wall() {
         wall: true,
         place_hint: false,
     });
-    assert_eq!(column_glyph(&other_level, &[], 2, 1).unwrap().ch, '#');
+    assert_eq!(glyph_at(&other_level, 2, 1), '#');
+    other_level.ground_items[0].position = Position { x: 3, y: 1, z: 0 };
+    assert_eq!(glyph_at(&other_level, 3, 1), '!');
 }
 
 #[test]
@@ -467,32 +472,26 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
 }
 
 #[test]
-fn resized_clicks_use_the_one_drawn_column() {
+fn resized_clicks_and_stair_panels_use_the_rendered_cell_layout() {
     use tor_client_ascii::render::{cell_at, cell_center, logical_mouse};
-    let mut snapshot = state().snapshot();
-    let mut landing = snapshot.state.observation.visible_cells[0].clone();
+    let mut view = state().state().observation.clone();
+    let mut landing = view.visible_cells[0].clone();
     landing.key = "landing".into();
     landing.position.z = 1;
-    snapshot
-        .state
-        .observation
-        .visible_cells
-        .push(landing.clone());
-    let mut app = App::new();
-    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
-    let player = app.state.as_ref().unwrap().state().observation.position;
-    assert!(cell_center(&app, landing.position).is_none());
-    let (x, y) = cell_center(&app, player).unwrap();
-    assert_eq!(cell_at(&app, x, y), Some(player));
-    // 1600x800 has 200 pixels of letterboxing on either side.
-    assert_eq!(
-        logical_mouse((x + 200) as f32, y as f32, 1600, 800),
-        Some((x, y))
-    );
-    assert_eq!(
-        logical_mouse(x as f32 / 2.0, y as f32 / 2.0, 600, 400),
-        Some((x, y))
-    );
+    view.visible_cells.push(landing.clone());
+    for position in [view.position, landing.position] {
+        let (x, y) = cell_center(&view, position).unwrap();
+        assert_eq!(cell_at(&view, x, y), Some(position));
+        // 1600x800 has 200 pixels of letterboxing on either side.
+        assert_eq!(
+            logical_mouse((x + 200) as f32, y as f32, 1600, 800),
+            Some((x, y))
+        );
+        assert_eq!(
+            logical_mouse(x as f32 / 2.0, y as f32 / 2.0, 600, 400),
+            Some((x, y))
+        );
+    }
     assert_eq!(logical_mouse(10.0, 100.0, 1600, 800), None);
 }
 
@@ -560,10 +559,6 @@ fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
         })
         .unwrap();
     app.set_state(current);
-    app.busy = true;
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
-    assert!(app.busy);
-    app.ready();
     assert_eq!(
         app.input(Input::Key { key: Key::Escape }),
         Effect::Request(Request::CancelTravel {
@@ -587,12 +582,7 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
         cells[index]["door"] = serde_json::json!({"id":id,"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
     }
     let state = ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap();
-    assert_eq!(
-        column_glyph(&state.state().observation, &[], 2, 1)
-            .unwrap()
-            .ch,
-        '+'
-    );
+    assert_eq!(glyph_at(&state.state().observation, 2, 1), '+');
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(state);
@@ -715,7 +705,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,"history":{"entries":[],"older_before":null},"state":view})).unwrap();
         let mut app = App::new();
         app.role = AccessRole::Player;
-        app.config.bump_attacks = mode;
+        app.bump_attacks = mode;
         app.set_state(ClientState::from_snapshot(snapshot).unwrap());
         app.ready();
         let Effect::Request(Request::Command {
@@ -745,431 +735,12 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
 
 #[test]
 fn prose_dashes_render_as_supported_bitmap_glyphs() {
-    let mut prose_app = App::new();
-    prose_app.accept_status("HP 20/20 — Victory!".into());
-    let mut plain = App::new();
-    plain.accept_status("HP 20/20 - Victory!".into());
+    let mut app = App::new();
     let mut canvas = tor_client_ascii::render::Canvas::default();
-    canvas.draw(&prose_app);
+    app.status = "HP 20/20 — Victory!".into();
+    canvas.draw(&app);
     let prose = canvas.pixels.clone();
-    canvas.draw(&plain);
+    app.status = "HP 20/20 - Victory!".into();
+    canvas.draw(&app);
     assert_eq!(canvas.pixels, prose);
-}
-
-#[test]
-fn annotation_control_character_and_invalid_action_append_once() {
-    let mut app = App::new();
-    app.role = AccessRole::Player;
-    let current = state();
-    app.set_state(current.clone());
-    app.ready();
-    let busy_before = app.busy;
-    app.update(StreamUpdate {
-        actor: ActorId(1),
-        branch: BranchId("test".into()),
-        cursor: StreamCursor {
-            sequence: 1,
-            tick: 100,
-        },
-        body: UpdateBody::Observation {
-            state: Box::new(StateView {
-                revision: 4,
-                observation: Observation {
-                    tick: 100,
-                    ..current.state().observation.clone()
-                },
-                ..current.state().clone()
-            }),
-            event: Some(Box::new(HistoryEntry {
-                id: EntryId("move".into()),
-                branch: BranchId("test".into()),
-                actor: ActorId(1),
-                tick: 100,
-                author: Author::User {
-                    user: "tester".into(),
-                },
-                audience: Audience::Actor,
-                content: HistoryContent::Action {
-                    action: Action::Move {
-                        direction: Direction::East,
-                    },
-                    event: Event::Moved {
-                        direction: Direction::East,
-                    },
-                },
-            })),
-        },
-    })
-    .unwrap();
-    app.update(StreamUpdate {
-        actor: ActorId(1),
-        branch: BranchId("test".into()),
-        cursor: StreamCursor {
-            sequence: 2,
-            tick: 100,
-        },
-        body: UpdateBody::Annotation {
-            entry: Box::new(HistoryEntry {
-                id: EntryId("note".into()),
-                branch: BranchId("test".into()),
-                actor: ActorId(1),
-                tick: 100,
-                author: Author::User {
-                    user: "tester".into(),
-                },
-                audience: Audience::Private,
-                content: HistoryContent::Annotation {
-                    anchor: Anchor::State { revision: 4 },
-                    category: AnnotationCategory::Note,
-                    text: "A\u{1}note".into(),
-                },
-            }),
-        },
-    })
-    .unwrap();
-    app.accept_status("InvalidAction: Action is unavailable".into());
-    assert_eq!(app.busy, busy_before);
-    let narration = app.state.as_ref().unwrap().narration();
-    assert_eq!(narration, &["You move east.".to_owned()]);
-    let messages = app.message_lines();
-    let joined = messages.join("\n");
-    assert_eq!(joined.matches("Note: A note").count(), 1);
-    assert!(!joined.contains('\u{1}'));
-    assert_eq!(
-        joined
-            .matches("InvalidAction: Action is unavailable")
-            .count(),
-        1
-    );
-    assert_eq!(joined.matches("Action is unavailable").count(), 1);
-    assert_eq!(narration, &["You move east.".to_owned()]);
-    let before = app.message_lines();
-    let mut canvas = tor_client_ascii::render::Canvas::default();
-    canvas.draw(&app);
-    canvas.draw(&app);
-    assert_eq!(app.message_lines(), before);
-
-    app.replace_snapshot(state().snapshot()).unwrap();
-    assert!(app.message_lines().is_empty());
-    assert!(app.state.as_ref().unwrap().narration().is_empty());
-    app.accept_status("still here".into());
-    let mut other = state().snapshot();
-    other.branch = BranchId("other".into());
-    app.replace_snapshot(other).unwrap();
-    assert!(app.message_lines().is_empty());
-    assert_eq!(app.status, "Timeline changed; pending selections cleared.");
-}
-
-#[test]
-fn more_pages_without_a_command_and_scrollback_does_not_quit() {
-    let mut app = App::new();
-    app.role = AccessRole::Player;
-    app.set_state(state());
-    app.ready();
-    for line in ["one", "two", "three", "four"] {
-        app.accept_status(line.into());
-    }
-    assert!(app.more());
-    assert!(!app.busy);
-    assert_eq!(
-        app.message_lines(),
-        vec!["one".to_owned(), "two".into(), "--More--".into()]
-    );
-    assert_eq!(app.input(Input::Key { key: Key::Space }), Effect::None);
-    assert!(!app.busy);
-    assert_eq!(app.message_lines(), vec!["three".to_owned(), "four".into()]);
-    assert_eq!(
-        app.input(Input::Key { key: Key::Space }),
-        Effect::Request(Request::Command {
-            branch: BranchId("test".into()),
-            command: Command::Act {
-                expected_revision: 3,
-                action: Action::Wait,
-            },
-        })
-    );
-
-    let mut paging = App::new();
-    paging.role = AccessRole::Player;
-    paging.set_state(state());
-    paging.ready();
-    for line in ["one", "two", "three", "four"] {
-        paging.accept_status(line.into());
-    }
-    paging.busy = true;
-    assert_eq!(paging.input(Input::Key { key: Key::Right }), Effect::None);
-    assert!(paging.busy);
-    assert_eq!(
-        paging.message_lines(),
-        vec!["three".to_owned(), "four".into()]
-    );
-
-    let mut reading = App::new();
-    reading.role = AccessRole::Player;
-    reading.set_state(state());
-    reading.ready();
-    reading.accept_status("kept".into());
-    for _ in 0..4 {
-        reading.accept_status("page".into());
-    }
-    assert!(reading.more());
-    assert_eq!(reading.input(Input::Key { key: Key::Space }), Effect::None);
-    assert_eq!(
-        reading.input(Input::Key {
-            key: Key::Scrollback
-        }),
-        Effect::None
-    );
-    assert!(reading.scrollback_open());
-    assert!(reading.scrollback_lines().iter().any(|line| line == "kept"));
-    assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::None);
-    assert!(!reading.scrollback_open());
-    assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::Quit);
-}
-
-fn room(width: i32, height: i32) -> ClientState {
-    let mut snapshot = state().snapshot();
-    snapshot.state.observation.position = Position { x: 0, y: 0, z: 0 };
-    snapshot.state.observation.visible_cells = (0..width)
-        .flat_map(|x| {
-            (0..height).map(move |y| {
-                serde_json::json!({
-                    "key": format!("{x}:{y}"),
-                    "stairs_up": false,
-                    "stairs_down": false,
-                    "position": {"x": x, "y": y, "z": 0},
-                    "wall": false,
-                    "place_hint": false
-                })
-            })
-        })
-        .map(|cell| serde_json::from_value(cell).unwrap())
-        .collect();
-    snapshot.state.observation.ground_items.clear();
-    let mut above = snapshot.state.observation.visible_cells[0].clone();
-    above.key = "above".into();
-    above.position.z = 1;
-    snapshot.state.observation.visible_cells.push(above);
-    ClientState::from_snapshot(snapshot).unwrap()
-}
-
-#[test]
-fn fitting_rooms_use_one_sixteen_pixel_step_and_one_plane() {
-    use tor_client_ascii::render::map_tiles;
-    for (width, height) in [(3, 3), (40, 40)] {
-        let mut app = App::new();
-        app.set_state(room(width, height));
-        let tiles = map_tiles(&app);
-        assert!(tiles.iter().all(|tile| tile.position.z == 0));
-        assert_eq!(
-            tiles
-                .iter()
-                .filter(|tile| tile.position.x == 0 && tile.position.y == 0)
-                .count(),
-            1
-        );
-        let here = tiles.iter().find(|tile| tile.glyph == '@').unwrap();
-        let east = tiles
-            .iter()
-            .find(|tile| {
-                tile.position.x == here.position.x + 1 && tile.position.y == here.position.y
-            })
-            .unwrap();
-        let south = tiles
-            .iter()
-            .find(|tile| {
-                tile.position.y == here.position.y + 1 && tile.position.x == here.position.x
-            })
-            .unwrap();
-        assert_eq!(east.center.0 - here.center.0, 16);
-        assert_eq!(south.center.1 - here.center.1, 16);
-    }
-}
-
-#[test]
-fn look_clicks_do_not_travel() {
-    use tor_client_ascii::render::cell_center;
-    use tor_client_ascii::Click;
-    let mut app = App::new();
-    app.role = AccessRole::Player;
-    app.config.click = Click::Look;
-    app.set_state(state());
-    app.ready();
-    let (x, y) = cell_center(&app, Position { x: 3, y: 1, z: 0 }).unwrap();
-    assert_eq!(app.input(Input::Click { x, y }), Effect::None);
-}
-
-#[test]
-fn an_eight_cell_corridor_centers_its_west_cell() {
-    use tor_client_ascii::render::cell_center;
-    let mut snapshot = state().snapshot();
-    snapshot.state.observation.position = Position { x: 0, y: 0, z: 0 };
-    snapshot.state.observation.ground_items.clear();
-    snapshot.state.observation.visible_cells = (-5..=2)
-        .map(|x| {
-            serde_json::json!({
-                "key": format!("{x}"),
-                "stairs_up": false,
-                "stairs_down": false,
-                "position": {"x": x, "y": 0, "z": 0},
-                "wall": false,
-                "place_hint": false
-            })
-        })
-        .map(|cell| serde_json::from_value(cell).unwrap())
-        .collect();
-    let mut app = App::new();
-    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
-    assert_eq!(
-        cell_center(&app, Position { x: -5, y: 0, z: 0 }),
-        Some((536, 408))
-    );
-}
-
-#[test]
-fn a_scrolling_chart_shift_moves_the_origin_once() {
-    use tor_client_ascii::render::map_tiles;
-    fn band(shift: i32, omit: Option<i32>, revision: u64) -> Snapshot {
-        let cells: Vec<_> = (-40..=40)
-            .filter(|x| Some(*x) != omit)
-            .map(|x| {
-                serde_json::json!({
-                    "key": format!("{x}"),
-                    "stairs_up": false,
-                    "stairs_down": false,
-                    "position": {"x": x + shift, "y": 0, "z": 0},
-                    "wall": false,
-                    "place_hint": false
-                })
-            })
-            .collect();
-        serde_json::from_value(serde_json::json!({
-            "actor": 1,
-            "branch": "scroll",
-            "cursor": {"sequence": 0, "tick": revision},
-            "has_control": true,
-            "history": {"entries": [], "older_before": null},
-            "state": {
-                "wizard_game": false,
-                "revision": revision,
-                "observation": {
-                    "actor": 1,
-                    "tick": revision,
-                    "position": {"x": 0, "y": 0, "z": 0},
-                    "places": [],
-                    "visible_cells": cells,
-                    "ground_items": [],
-                    "inventory": [],
-                    "visible_actors": [],
-                    "ready": true
-                }
-            }
-        }))
-        .unwrap()
-    }
-    let mut app = App::new();
-    app.replace_snapshot(band(0, None, 0)).unwrap();
-    let first = map_tiles(&app);
-    assert!(first.iter().all(|tile| tile.position.z == 0));
-    let tracked = first.iter().find(|tile| tile.position.x == 20).unwrap();
-    let player = first.iter().find(|tile| tile.glyph == '@').unwrap();
-    assert_eq!(tracked.center.0 / 16, 57);
-    assert_eq!(player.center.0 / 16, 37);
-    app.replace_snapshot(band(-1, Some(20), 1)).unwrap();
-    let shifted = map_tiles(&app);
-    let tracked = shifted.iter().find(|tile| tile.position.x == 19).unwrap();
-    let player = shifted.iter().find(|tile| tile.glyph == '@').unwrap();
-    assert!(tracked.remembered);
-    assert_eq!(tracked.center.0 / 16, 57);
-    assert_eq!(player.center.0 / 16, 38);
-    app.replace_snapshot(band(-1, Some(20), 1)).unwrap();
-    let again = map_tiles(&app);
-    let tracked = again.iter().find(|tile| tile.position.x == 19).unwrap();
-    let player = again.iter().find(|tile| tile.glyph == '@').unwrap();
-    assert_eq!(tracked.center.0 / 16, 57);
-    assert_eq!(player.center.0 / 16, 38);
-}
-
-#[test]
-fn asset_rows_draw_a_rat_and_a_coin_and_a_remembered_wall_stays_grey() {
-    use tor_client_ascii::render::{map_tiles, MEMORY_COLOR};
-
-    fn snapshot(wall: bool, revision: u64) -> Snapshot {
-        let mut cells = vec![
-            serde_json::json!({"key":"0","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}),
-            serde_json::json!({"key":"1","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}),
-            serde_json::json!({"key":"2","position":{"x":2,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}),
-        ];
-        if wall {
-            cells.push(serde_json::json!({
-                "key": "wall",
-                "asset": "terrain.wall.marble",
-                "position": {"x": 3, "y": 0, "z": 0},
-                "wall": true,
-                "stairs_up": false,
-                "stairs_down": false,
-                "place_hint": false
-            }));
-        }
-        serde_json::from_value(serde_json::json!({
-            "actor": 1,
-            "branch": "glyphs",
-            "cursor": {"sequence": 0, "tick": 0},
-            "has_control": true,
-            "history": {"entries": [], "older_before": null},
-            "state": {
-                "wizard_game": false,
-                "revision": revision,
-                "observation": {
-                    "actor": 1,
-                    "tick": 0,
-                    "position": {"x": 0, "y": 0, "z": 0},
-                    "places": [],
-                    "visible_cells": cells,
-                    "ground_items": [{
-                        "reachable": true,
-                        "position": {"x": 2, "y": 0, "z": 0},
-                        "item": {"quantity": 1, "appearance": "coin", "identified": true, "id": 4, "name": "copper coin", "asset": "item.coin"}
-                    }],
-                    "visible_actors": [{
-                        "id": 2,
-                        "position": {"x": 1, "y": 0, "z": 0},
-                        "asset": "creature.rat"
-                    }],
-                    "inventory": [],
-                    "ready": true
-                }
-            }
-        }))
-        .unwrap()
-    }
-
-    let mut app = App::new();
-    app.replace_snapshot(snapshot(true, 0)).unwrap();
-    let tiles = map_tiles(&app);
-    let at = |x: i32| tiles.iter().find(|tile| tile.position.x == x).unwrap();
-    assert_eq!(at(0).glyph, '@');
-    assert_eq!(at(1).glyph, 'r');
-    assert_eq!(at(1).color, 0xC4A574);
-    assert!(!at(1).remembered);
-    assert_eq!(at(2).glyph, '$');
-    assert_eq!(at(2).color, 0xE6C34A);
-    assert_eq!(at(3).glyph, '#');
-    assert_eq!(at(3).color, 0xE6E6E6);
-    assert!(!at(3).remembered);
-
-    app.replace_snapshot(snapshot(false, 1)).unwrap();
-    let tiles = map_tiles(&app);
-    let wall = tiles.iter().find(|tile| tile.position.x == 3).unwrap();
-    assert_eq!(wall.glyph, '#');
-    assert_eq!(wall.color, MEMORY_COLOR);
-    assert!(wall.remembered);
-    assert_eq!(
-        tiles
-            .iter()
-            .find(|tile| tile.position.x == 1)
-            .unwrap()
-            .glyph,
-        'r'
-    );
 }

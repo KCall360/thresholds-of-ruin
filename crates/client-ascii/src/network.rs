@@ -92,59 +92,14 @@ async fn run(
     }
     publish(tx, Event::Ready)?;
     loop {
-        // The window stamps expected_revision before queueing the request.
-        // Apply a message that is already here first, and do not send a
-        // command whose revision that message has already replaced.
         tokio::select! {
-            biased;
-            ready = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
-                match ready {
-                    tor_client_common::FirstReady::Server(message) => present(message?, tx)?,
-                    tor_client_common::FirstReady::Local(request) => {
-                        let Some(request) = request else {
-                            connection.close().await?;
-                            return Ok(());
-                        };
-                        if still_current(&request, connection.state.branch(), connection.state.state().revision) {
-                            transact(&mut connection, request, tx).await?;
-                        } else {
-                            publish(tx, Event::Status("Things have changed. Look around and try again.".into()))?;
-                        }
-                        publish(tx, Event::Ready)?;
-                    }
-                }
-            }
+            message=connection.next()=>{present(message?,tx)?;},
+            request=rx.recv()=>{
+                let Some(request)=request else {connection.close().await?;return Ok(());};
+                transact(&mut connection,request,tx).await?;
+                publish(tx,Event::Ready)?;
+            },
         }
-    }
-}
-
-/// A command stamped from an older observation must not be sent after a
-/// newer message has already been applied on this connection.
-fn still_current(request: &Request, branch: &BranchId, revision: u64) -> bool {
-    let Request::Command {
-        branch: stamped,
-        command,
-    } = request
-    else {
-        return true;
-    };
-    if stamped != branch {
-        return false;
-    }
-    match command {
-        Command::RenamePlace {
-            expected_revision, ..
-        }
-        | Command::Travel {
-            expected_revision, ..
-        }
-        | Command::Wizard {
-            expected_revision, ..
-        }
-        | Command::Act {
-            expected_revision, ..
-        } => *expected_revision == revision,
-        Command::Annotate { .. } => true,
     }
 }
 
@@ -227,35 +182,5 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(1);
         drop(rx);
         assert!(publish(&tx, Event::Ready).is_err());
-    }
-
-    #[test]
-    fn a_command_stamped_before_a_delivered_update_is_not_sent() {
-        let command = Request::Command {
-            branch: BranchId("branch".into()),
-            command: Command::Act {
-                expected_revision: 3,
-                action: Action::Wait,
-            },
-        };
-        assert!(still_current(&command, &BranchId("branch".into()), 3));
-        assert!(!still_current(&command, &BranchId("branch".into()), 4));
-        assert!(!still_current(&command, &BranchId("other".into()), 3));
-        let note = Request::Command {
-            branch: BranchId("branch".into()),
-            command: Command::Annotate {
-                anchor: Anchor::State { revision: 1 },
-                text: "mark".into(),
-                source: ClientSource::User,
-                audience: Audience::Private,
-                category: AnnotationCategory::Note,
-            },
-        };
-        assert!(still_current(&note, &BranchId("branch".into()), 9));
-        assert!(still_current(
-            &Request::Snapshot,
-            &BranchId("branch".into()),
-            9
-        ));
     }
 }

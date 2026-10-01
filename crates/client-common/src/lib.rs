@@ -8,32 +8,7 @@ pub mod surfaces;
 pub use connection::Connection;
 pub use state::{ClientState, RememberedCell};
 
-use std::future::Future;
-
 use tor_protocol::{ActorId, StreamCursor};
-
-/// The first of a server message and a local input to act on.
-#[derive(Debug, PartialEq, Eq)]
-pub enum FirstReady<S, L> {
-    Server(S),
-    Local(L),
-}
-
-/// A revision-checked command is built from local state at the moment input
-/// is taken. A server message that has already arrived has to be applied
-/// before that, or the command names a revision the client has already been
-/// told is old. `tokio::select!` without `biased` can take the input when
-/// both are ready and leave the message unread.
-pub async fn server_before_local<S, L>(
-    server: impl Future<Output = S>,
-    local: impl Future<Output = L>,
-) -> FirstReady<S, L> {
-    tokio::select! {
-        biased;
-        message = server => FirstReady::Server(message),
-        value = local => FirstReady::Local(value),
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamError {
@@ -77,6 +52,31 @@ impl ObservationStream {
         }
         self.cursor = next;
         Ok(())
+    }
+}
+
+use std::future::Future;
+
+/// The first of a server message and a local input to act on.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FirstReady<S, L> {
+    Server(S),
+    Local(L),
+}
+
+/// A revision-checked command is built from local state at the moment input
+/// is taken. A server message that has already arrived has to be applied
+/// before that, or the command names a revision the client has already been
+/// told is old. `tokio::select!` without `biased` can take the input when
+/// both are ready and leave the message unread.
+pub async fn server_before_local<S, L>(
+    server: impl Future<Output = S>,
+    local: impl Future<Output = L>,
+) -> FirstReady<S, L> {
+    tokio::select! {
+        biased;
+        message = server => FirstReady::Server(message),
+        value = local => FirstReady::Local(value),
     }
 }
 

@@ -30,10 +30,7 @@ impl InputCallback for TextInput {
     }
 }
 
-fn native_key_with_shift(key: NativeKey, shift: bool, ctrl: bool) -> Option<Key> {
-    if ctrl && key == NativeKey::P {
-        return Some(Key::Scrollback);
-    }
+fn native_key_with_shift(key: NativeKey, shift: bool) -> Option<Key> {
     match (key, shift) {
         (NativeKey::Comma, true) => Some(Key::Ascend),
         (NativeKey::Period, true) => Some(Key::Descend),
@@ -52,8 +49,7 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::U => Key::NorthEast,
         NativeKey::B => Key::SouthWest,
         NativeKey::N => Key::SouthEast,
-        NativeKey::Space => Key::Space,
-        NativeKey::Period => Key::Wait,
+        NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
         NativeKey::D => Key::Drop,
         NativeKey::O => Key::OpenDoor,
@@ -67,6 +63,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::Backspace => Key::Backspace,
         NativeKey::Tab => Key::Tab,
         NativeKey::F2 => Key::History,
+        NativeKey::F6 => Key::MapLower,
+        NativeKey::F7 => Key::MapHigher,
         NativeKey::PageUp => Key::OlderHistory,
         NativeKey::PageDown => Key::RecentHistory,
         _ => return None,
@@ -91,7 +89,7 @@ fn run() -> Result<(), Error> {
     let mut address: SocketAddr = "127.0.0.1:4000".parse()?;
     let mut actor = ActorId(1);
     let mut observe = false;
-    let mut config = tor_client_ascii::SessionConfig::default();
+    let mut bump_attacks = tor_client_ascii::BumpAttacks::Hostile;
     let mut automation = false;
     let mut report = false;
     let mut capture = None;
@@ -99,15 +97,19 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--config file.toml]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\n--config reads autopickup, click (travel|look), and bump_attacks (hostile|any|off). Omitted, those default to on, travel, and hostile.\nA: select attack target. Arrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel or look from the config file; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
             "--actor" => actor = ActorId(args.next().ok_or("Missing --actor ID")?.parse()?),
             "--observe" => observe = true,
-            "--config" => {
-                let path = args.next().ok_or("Missing --config path")?;
-                config = tor_client_hack::load_config(std::path::Path::new(&path))?;
+            "--bump-attacks" => {
+                bump_attacks = match args.next().as_deref() {
+                    Some("hostile") => tor_client_ascii::BumpAttacks::Hostile,
+                    Some("any") => tor_client_ascii::BumpAttacks::Any,
+                    Some("off") => tor_client_ascii::BumpAttacks::Off,
+                    _ => return Err("Use --bump-attacks hostile|any|off".into()),
+                }
             }
             "--automation" => {
                 automation = true;
@@ -143,7 +145,15 @@ fn run() -> Result<(), Error> {
     window.set_input_callback(Box::new(TextInput(text.clone())));
     let input = automation.then(automation_input);
     let network = Network::start(address, token, actor, observe);
-    let result = window_loop(&mut window, &network, &text, input, report, capture, config);
+    let result = window_loop(
+        &mut window,
+        &network,
+        &text,
+        input,
+        report,
+        capture,
+        bump_attacks,
+    );
     network.shutdown()?;
     result
 }
@@ -170,10 +180,10 @@ fn window_loop(
     input: Option<mpsc::Receiver<Result<Input, String>>>,
     report: bool,
     capture: Option<PathBuf>,
-    config: tor_client_ascii::SessionConfig,
+    bump_attacks: tor_client_ascii::BumpAttacks,
 ) -> Result<(), Error> {
     let mut app = App::new();
-    app.config = config;
+    app.bump_attacks = bump_attacks;
     let mut canvas = Canvas::default();
     let mut frame = 0u64;
     let mut pending_input = None;
@@ -206,7 +216,7 @@ fn window_loop(
                         Event::Update(update) => app
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
-                        Event::Status(status) => app.accept_status(status),
+                        Event::Status(status) => app.status = status,
                         Event::Ready => app.ready(),
                         Event::History(page) => {
                             app.history_scroll = 0;
@@ -263,8 +273,6 @@ fn window_loop(
                             key,
                             window.is_key_down(NativeKey::LeftShift)
                                 || window.is_key_down(NativeKey::RightShift),
-                            window.is_key_down(NativeKey::LeftCtrl)
-                                || window.is_key_down(NativeKey::RightCtrl),
                         )
                     })
                     .map(|key| Input::Key { key }),
@@ -347,13 +355,11 @@ fn window_loop(
                 "previous_report_encode_ms":previous_report_encode_ms,"previous_report_write_ms":previous_report_write_ms,
                 "native_ms":native_ms,"capture_ms":capture_ms,"previous_report_ms":previous_report_ms,"turn_interval_ms":turn_interval_ms},"window_open":window.is_open(),
                 "state":state.map(|s|s.state()),"branch":state.map(|s|s.branch()),"history":state.map(|s|s.history()),
-                "map_tiles":tor_client_ascii::render::map_tiles(&app),
-                "status_lines":tor_client_ascii::render::status_lines(&app),
+                "map_tiles":state.map(|s| tor_client_ascii::render::map_tiles_at_level(s,app.map_level)),
                 "role":app.role,"travel":state.and_then(|s|s.travel()),"travel_cursor":app.travel_cursor,"door_direction":app.door_direction,
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration()),
-                "messages":app.message_lines(),"more":app.more(),
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
@@ -396,12 +402,6 @@ mod tests {
         assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::P), None);
-        assert_eq!(native_key(NativeKey::Space), Some(Key::Space));
-        assert_eq!(
-            native_key_with_shift(NativeKey::P, false, true),
-            Some(Key::Scrollback)
-        );
-        assert_eq!(native_key_with_shift(NativeKey::P, false, false), None);
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
@@ -413,15 +413,15 @@ mod tests {
         assert_eq!(native_key(NativeKey::U), Some(Key::NorthEast));
         assert_eq!(native_key(NativeKey::B), Some(Key::SouthWest));
         assert_eq!(
-            native_key_with_shift(NativeKey::Comma, true, false),
+            native_key_with_shift(NativeKey::Comma, true),
             Some(Key::Ascend)
         );
         assert_eq!(
-            native_key_with_shift(NativeKey::Period, true, false),
+            native_key_with_shift(NativeKey::Period, true),
             Some(Key::Descend)
         );
         assert_eq!(
-            native_key_with_shift(NativeKey::Period, false, false),
+            native_key_with_shift(NativeKey::Period, false),
             Some(Key::Wait)
         );
     }

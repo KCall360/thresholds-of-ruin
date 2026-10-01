@@ -101,14 +101,16 @@ async fn run() -> Result<(), Error> {
                                     let request = Request::Command {
                                         branch: connection.state.branch().clone(),
                                         command: Command::Act {
-                                            expected_revision: connection.state.state().revision, action,
+                                            expected_revision: connection.state.state().revision,
+                                            action,
                                         },
                                     };
                                     transact(&mut connection, request).await?
                                 }
-                            },
+                            }
                             Ok(Input::Wizard { command }) => {
-                                // The server rejects a stale wizard command before
+                                // A developer command must not run into StaleRevision if an
+                                // autonomous actor moved between observation delivery and
                                 // applying it. Rats and travel can move the revision
                                 // between this client's last look and the packet
                                 // arriving, so resubmit that same unapplied operation
@@ -128,9 +130,12 @@ async fn run() -> Result<(), Error> {
                                     }
                                 }
                                 result
-                            },
+                            }
                             Ok(Input::Request { request }) => transact(&mut connection, request).await?,
-                            Err(_) => Some("Invalid input; expected a JSON act, wizard, request, inspect or quit".into()),
+                            Err(_) => Some(
+                                "Invalid input; expected a JSON act, wizard, request, inspect or quit"
+                                    .into(),
+                            ),
                         };
                         emit(&connection, "ready", None, result.as_deref())?;
                     }
@@ -141,6 +146,12 @@ async fn run() -> Result<(), Error> {
     }
     connection.close().await?;
     Ok(())
+}
+
+/// True only when the wizard operation was rejected and not applied.
+/// A committed rewind, or any other error, must not be sent again.
+fn wizard_still_unapplied(error: Option<&str>) -> bool {
+    error.is_some_and(|error| error.starts_with("StaleRevision"))
 }
 
 async fn transact(connection: &mut Connection, request: Request) -> Result<Option<String>, Error> {
@@ -162,12 +173,6 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<Optio
             }
         }
     }).await.map_err(|_| "Server response timed out; outcome may be unknown. Inspect history after reconnecting before retrying.")?
-}
-
-/// True only when the wizard operation was rejected and not applied.
-/// A committed rewind, or any other error, must not be sent again.
-fn wizard_still_unapplied(error: Option<&str>) -> bool {
-    error.is_some_and(|error| error.starts_with("StaleRevision"))
 }
 
 fn emit(

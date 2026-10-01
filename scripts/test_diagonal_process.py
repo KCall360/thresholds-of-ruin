@@ -50,7 +50,6 @@ class DiagonalProcesses(unittest.TestCase):
         note = self.frame(window, lambda f: f.get("note") == "")
         key("F4", False)
         self.assertEqual(note["state"], current["state"])
-        ascii_support.page_native(window, lambda process, predicate: ascii_support.AsciiProcesses.frame(self, process, predicate), key)
         key("Escape", True)
         self.frame(window, lambda f: f.get("note") is None)
         key("Escape", False)

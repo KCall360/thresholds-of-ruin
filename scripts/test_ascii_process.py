@@ -5,7 +5,6 @@ after the real native window successfully presents its pixel buffer.
 """
 import json
 import os
-import queue
 import subprocess
 import unittest
 
@@ -46,8 +45,6 @@ class AsciiProcesses(unittest.TestCase):
         return found[-1]
 
     def key(self, process, key):
-        if key in ("escape", "enter"):
-            clear_more(process, self.frame)
         process.child.stdin.write(json.dumps({"type":"key", "key":key}) + "\n")
         process.child.stdin.flush()
         return self.frame(process, lambda f: f.get("input_done") == key and not f["busy"])
@@ -209,174 +206,6 @@ class AsciiProcesses(unittest.TestCase):
         pixels = data.split(b"\n", 3)[3]
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)
-
-    def test_message_log_pages_a_server_note_without_an_action(self):
-        client, initial = self.ascii(observe=False)
-        self.assertIn("messages", initial)
-        self.assertIn("more", initial)
-        self.assertNotIn("queued", initial)
-        self.assertEqual(initial["profile"]["version"], 1)
-        self.assertFalse(initial["more"])
-        self.assertFalse(initial["busy"])
-        self.assertEqual(initial["narration"], [])
-        # "Note: " plus this body wraps to three rows, so the marker sits past the first page.
-        body = "Q" * 145 + "ENDMARK"
-        self.key(client, "note")
-        client.child.stdin.write(json.dumps({"type": "text", "text": body}) + "\n")
-        client.child.stdin.flush()
-        noted = self.key(client, "enter")
-        self.assertTrue(noted["more"])
-        self.assertFalse(noted["busy"])
-        self.assertEqual(noted["messages"][-1], "--More--")
-        self.assertNotIn("ENDMARK", "\n".join(noted["messages"]))
-        self.assertEqual(noted["narration"], initial["narration"])
-        self.assertNotIn("queued", noted)
-        self.assertEqual(noted["profile"]["version"], 1)
-        revealed = self.key(client, "space")
-        self.assertIn("ENDMARK", "\n".join(revealed["messages"]))
-        self.assertFalse(revealed["more"])
-        self.assertFalse(revealed["busy"])
-        self.assertEqual(revealed["state"], noted["state"])
-        self.assertEqual(revealed["history"], noted["history"])
-        self.assertEqual(revealed["narration"], noted["narration"])
-        self.assertNotIn("queued", revealed)
-        self.assertNotIn("inventory_letters", revealed)
-        self.assertNotIn("look_cursor", revealed)
-        self.assertNotIn("palette", revealed)
-        self.assertNotIn("plane", revealed)
-        self.assertNotIn("join", revealed)
-        client.stop()
-
-    def test_package_without_asset_rows_draws_floor_and_wall_and_reaches_ready(self):
-        # two-room names no assets. generated-filler's rats are not in the opening view.
-        client, frame = self.ascii(observe=False)
-        self.assertIn("Ready", frame["status"])
-        glyphs = {tile["glyph"] for tile in frame["map_tiles"]}
-        self.assertIn(".", glyphs)
-        self.assertIn("#", glyphs)
-        self.assertNotIn("palette", frame)
-        for tile in frame["map_tiles"]:
-            if tile["glyph"] == ".":
-                self.assertEqual(tile["color"], 0x6A7A72)
-            if tile["glyph"] == "#":
-                self.assertEqual(tile["color"], 0xC8C8C8)
-        client.stop()
-
-    def start_package(self, name):
-        self.server.stop()
-        self.save = self.save.with_name(f"{name}.json")
-        scenario = text_support.ROOT / "scenarios" / "tests" / name
-        self.server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42", "--save", self.save, "--scenario", scenario])
-        self.address = json.loads(self.server.until(lambda line: line.startswith("{")))["address"]
-
-    def test_flat_map_status_and_pits(self):
-        client, _ = self.ascii(observe=False)
-        stepped = self.key(client, "right")
-        observation = stepped["state"]["observation"]
-        tiles = stepped["map_tiles"]
-        self.assertEqual({tile["position"]["z"] for tile in tiles}, {observation["position"]["z"]})
-        player = next(tile for tile in tiles if tile["glyph"] == "@")
-        x, y = player["center"]
-        self.assertTrue(0 <= x < 1200 and 48 <= y < 768)
-        lines = stepped["status_lines"]
-        self.assertEqual(len(lines), 2)
-        self.assertEqual(lines[0], f"T:{observation['tick']}  Ready  IN CONTROL")
-        self.assertEqual(lines[1], "FLOOR: stone / CEILING: stone (10 ft above feet)")
-        self.assert_pit_columns(stepped)
-        client.stop()
-
-        self.start_package("physics")
-        _, shaft = self.ascii(observe=False)
-        self.assertEqual(shaft["state"]["observation"]["tick"], 0)
-        self.assertTrue(any(tile["glyph"] == "^" for tile in shaft["map_tiles"]))
-        self.assert_pit_columns(shaft)
-
-        self.start_package("travel-setup")
-        _, corridor = self.ascii(observe=False)
-        self.assertTrue(corridor["status_lines"])
-        self.assertNotIn("FLOOR", corridor["status_lines"][1])
-        self.assertNotIn("CEILING", corridor["status_lines"][1])
-        self.assertFalse(any(tile["glyph"] == "^" for tile in corridor["map_tiles"]))
-        self.assert_pit_columns(corridor)
-
-    def assert_pit_columns(self, frame):
-        observation = frame["state"]["observation"]
-        z0 = observation["position"]["z"]
-        here = (observation["position"]["x"], observation["position"]["y"])
-        cells = {}
-        for cell in observation["visible_cells"]:
-            position = cell["position"]
-            cells[(position["x"], position["y"], position["z"])] = cell
-        tiles = {(tile["position"]["x"], tile["position"]["y"]): tile for tile in frame["map_tiles"]}
-
-        def open_cell(cell):
-            if cell is None or cell["wall"]:
-                return False
-            door = cell.get("door")
-            return door is None or door["open"]
-
-        for (x, y), tile in tiles.items():
-            standing = cells.get((x, y, z0))
-            lower = cells.get((x, y, z0 - 1))
-            if (x, y) != here and open_cell(standing) and open_cell(lower):
-                self.assertEqual(tile["glyph"], "^", (x, y))
-            if lower is None:
-                self.assertNotEqual(tile["glyph"], "^", (x, y))
-
-
-def drain_ready(process):
-    """Move frames already printed, but not yet waited for, into the transcript."""
-    while True:
-        try:
-            line = process.lines.get_nowait()
-        except queue.Empty:
-            return
-        if line is None:
-            process.lines.put(None)
-            return
-        process.transcript.append(line)
-
-
-def newest_frame(process):
-    for line in reversed(process.transcript):
-        if not line.startswith("{"):
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if value.get("type") == "frame":
-            return value
-    return None
-
-
-def clear_more(process, read_frame):
-    """Acknowledge --More-- before Escape or Enter, which those keys would otherwise consume."""
-    for _ in range(40):
-        drain_ready(process)
-        last = newest_frame(process)
-        if not last or not last.get("more") or last.get("busy"):
-            return
-        process.child.stdin.write(json.dumps({"type": "key", "key": "space"}) + "\n")
-        process.child.stdin.flush()
-        last = read_frame(process, lambda frame: frame.get("input_done") == "space" and not frame["busy"])
-        if not last.get("more"):
-            return
-    raise AssertionError("message prompt did not clear")
-
-
-def page_native(process, read_frame, key):
-    """Page with a real Space key. Native input does not set input_done."""
-    for _ in range(40):
-        drain_ready(process)
-        last = newest_frame(process)
-        if not last or not last.get("more"):
-            return
-        before = last.get("messages")
-        key("space", True)
-        read_frame(process, lambda frame: frame.get("messages") != before)
-        key("space", False)
-    raise AssertionError("message prompt did not clear")
 
 
 if __name__ == "__main__":

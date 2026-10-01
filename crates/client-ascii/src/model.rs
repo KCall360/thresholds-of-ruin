@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
-pub use tor_client_hack::{column_glyph, BumpAttacks, Click, SessionConfig};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Key {
     Attack,
+    MapHigher,
+    MapLower,
     Places,
     Travel,
     Up,
@@ -21,7 +21,6 @@ pub enum Key {
     Ascend,
     Descend,
     Wait,
-    Space,
     Pickup,
     Drop,
     OpenDoor,
@@ -36,7 +35,6 @@ pub enum Key {
     History,
     OlderHistory,
     RecentHistory,
-    Scrollback,
 }
 
 /// The native keyboard and opt-in process-test driver share this input boundary.
@@ -62,9 +60,9 @@ pub struct NoteDraft {
 }
 
 pub struct App {
-    pub config: SessionConfig,
+    pub bump_attacks: BumpAttacks,
     pub attack_targets: Vec<ActorView>,
-    viewport: Viewport,
+    pub map_level: i32,
     pub places_open: bool,
     pub place_selected: usize,
     pub place_name: Option<String>,
@@ -82,13 +80,6 @@ pub struct App {
     pub selected: usize,
     pub history_page: Option<HistoryPage>,
     pub history_scroll: usize,
-    log: tor_client_hack::MessageLog,
-}
-
-enum LogAppend {
-    Narration,
-    Line(String),
-    Nothing,
 }
 
 impl Default for App {
@@ -100,9 +91,9 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
-            config: SessionConfig::default(),
+            bump_attacks: BumpAttacks::Hostile,
             attack_targets: Vec::new(),
-            viewport: Viewport::default(),
+            map_level: 0,
             places_open: false,
             place_selected: 0,
             place_name: None,
@@ -120,7 +111,6 @@ impl App {
             selected: 0,
             history_page: None,
             history_scroll: 0,
-            log: tor_client_hack::MessageLog::default(),
         }
     }
 
@@ -129,45 +119,19 @@ impl App {
             .state
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
-        let reset = self
-            .state
-            .as_ref()
-            .is_none_or(|current| current.branch() != state.branch());
         self.state = Some(state);
-        if reset {
-            self.viewport.clear();
-        }
         self.state_changed(old);
-        self.follow();
     }
 
     /// Apply every disclosed boundary, even when several updates share a frame.
     pub fn update(&mut self, update: StreamUpdate) -> Result<(), tor_client_common::StreamError> {
-        let appended = match &update.body {
-            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
-                LogAppend::Narration
-            }
-            UpdateBody::Annotation { entry } => match &entry.content {
-                HistoryContent::Annotation { text, .. } => LogAppend::Line(format!("Note: {text}")),
-                _ => LogAppend::Nothing,
-            },
-            _ => LogAppend::Nothing,
-        };
-        let (before_branch, before, old) = {
-            let state = self
-                .state
-                .as_mut()
-                .ok_or(tor_client_common::StreamError::InconsistentState)?;
-            let old = Some((state.branch().clone(), state.state().revision));
-            let before_branch = state.branch().clone();
-            let before = state.state().observation.clone();
-            state.apply(update)?;
-            (before_branch, before, old)
-        };
-        self.shift_chart(&before_branch, &before);
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(tor_client_common::StreamError::InconsistentState)?;
+        let old = Some((state.branch().clone(), state.state().revision));
+        state.apply(update)?;
         self.state_changed(old);
-        self.follow();
-        self.append_logged(appended);
         Ok(())
     }
 
@@ -179,99 +143,13 @@ impl App {
             .state
             .as_ref()
             .map(|s| (s.branch().clone(), s.state().revision));
-        if self.state.is_none() {
-            self.state = Some(ClientState::from_snapshot(snapshot)?);
-            self.viewport.clear();
+        if let Some(state) = &mut self.state {
+            state.replace_snapshot(snapshot)?;
         } else {
-            let before_branch = self.state.as_ref().unwrap().branch().clone();
-            let before = self.state.as_ref().unwrap().state().observation.clone();
-            self.state.as_mut().unwrap().replace_snapshot(snapshot)?;
-            self.shift_chart(&before_branch, &before);
+            self.state = Some(ClientState::from_snapshot(snapshot)?);
         }
-        self.log.clear_for_snapshot();
         self.state_changed(old);
-        self.follow();
         Ok(())
-    }
-
-    /// `None` from `chart_shift` leaves the origin where it is: the old chart was cleared.
-    fn shift_chart(&mut self, before_branch: &BranchId, before: &Observation) {
-        let (same_branch, after) = {
-            let Some(state) = &self.state else {
-                return;
-            };
-            (
-                state.branch() == before_branch,
-                state.state().observation.clone(),
-            )
-        };
-        if !same_branch {
-            self.viewport.clear();
-            return;
-        }
-        let Some((dx, dy, _)) = tor_client_hack::chart_shift(before, &after) else {
-            return;
-        };
-        if self.viewport.x.placed && self.viewport.y.placed {
-            if let Some((x, y)) = tor_client_hack::shift_origin(
-                self.viewport.x.origin,
-                self.viewport.y.origin,
-                dx,
-                dy,
-            ) {
-                self.viewport.x.origin = x;
-                self.viewport.y.origin = y;
-            }
-        }
-    }
-
-    pub(crate) fn map_origin(&self) -> Option<(i32, i32)> {
-        (self.viewport.x.placed && self.viewport.y.placed)
-            .then_some((self.viewport.x.origin, self.viewport.y.origin))
-    }
-
-    fn follow(&mut self) {
-        let cursor = self.travel_cursor;
-        let spans = self.state.as_ref().map(|state| {
-            let observation = &state.state().observation;
-            let chart: Vec<_> = state.map_memory().collect();
-            let columns = tor_client_hack::map_columns(observation, &chart);
-            let focus = cursor
-                .map(|cursor| (cursor.x, cursor.y))
-                .unwrap_or((observation.position.x, observation.position.y));
-            (
-                span(columns.iter().map(|column| column.x), focus.0),
-                span(columns.iter().map(|column| column.y), focus.1),
-                focus,
-            )
-        });
-        let Some(((min_x, max_x), (min_y, max_y), focus)) = spans else {
-            return;
-        };
-        follow_axis(
-            &mut self.viewport.x,
-            min_x,
-            max_x,
-            focus.0,
-            AxisWindow {
-                length: 75,
-                center: 37,
-                margin: 4,
-                margin_end: 70,
-            },
-        );
-        follow_axis(
-            &mut self.viewport.y,
-            min_y,
-            max_y,
-            focus.1,
-            AxisWindow {
-                length: 45,
-                center: 22,
-                margin: 4,
-                margin_end: 40,
-            },
-        );
     }
 
     fn state_changed(&mut self, old: Option<(BranchId, u64)>) {
@@ -280,7 +158,6 @@ impl App {
             .as_ref()
             .is_some_and(|(branch, _)| branch != state.branch())
         {
-            self.log.clear_for_branch_change();
             self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
@@ -290,6 +167,7 @@ impl App {
             self.place_name = None;
             self.history_page = None;
             self.history_scroll = 0;
+            self.map_level = 0;
             self.status = "Timeline changed; pending selections cleared.".into();
         }
         if old.is_some_and(|(_, revision)| revision != state.state().revision) {
@@ -315,74 +193,6 @@ impl App {
         self.busy = false;
     }
 
-    pub fn accept_status(&mut self, status: String) {
-        self.log.append(&status);
-        self.status = status;
-    }
-
-    pub fn message_lines(&self) -> Vec<String> {
-        self.log.display()
-    }
-
-    pub fn more(&self) -> bool {
-        self.log.more()
-    }
-
-    pub fn scrollback_open(&self) -> bool {
-        self.log.scrollback_open()
-    }
-
-    pub fn scrollback_lines(&self) -> &[String] {
-        self.log.scrollback()
-    }
-
-    fn append_logged(&mut self, appended: LogAppend) {
-        match appended {
-            LogAppend::Narration => {
-                let lines = self
-                    .state
-                    .as_ref()
-                    .map(|state| state.narration().to_vec())
-                    .unwrap_or_default();
-                self.log.append_narration(lines.iter().map(String::as_str));
-            }
-            LogAppend::Line(text) => self.log.append(&text),
-            LogAppend::Nothing => {}
-        }
-    }
-
-    /// Page `--More--` and local scrollback before any command, including while busy.
-    fn begin_input(&mut self, input: Input) -> Option<Input> {
-        if self.log.scrollback_open() {
-            if matches!(input, Input::Key { key: Key::Escape }) {
-                self.log.close_scrollback();
-            }
-            return None;
-        }
-        if self.log.more() {
-            if let Input::Key { key } = input {
-                self.log.acknowledge();
-                if matches!(key, Key::Space | Key::Enter | Key::Escape) {
-                    return None;
-                }
-                if key == Key::Scrollback {
-                    self.log.open_scrollback();
-                    return None;
-                }
-                return Some(Input::Key { key });
-            }
-        } else if matches!(
-            input,
-            Input::Key {
-                key: Key::Scrollback
-            }
-        ) {
-            self.log.open_scrollback();
-            return None;
-        }
-        Some(input)
-    }
-
     pub fn disconnect(&mut self, message: String) {
         self.travel_cursor = None;
         self.place_name = None;
@@ -397,9 +207,6 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
-        let Some(input) = self.begin_input(input) else {
-            return Effect::None;
-        };
         if !self.attack_targets.is_empty() {
             match input {
                 Input::Key { key: Key::Escape } => {
@@ -445,7 +252,6 @@ impl App {
             }
             if self.travel_cursor.take().is_some() {
                 self.status = "Travel selection cancelled.".into();
-                self.follow();
                 return Effect::None;
             }
             if self.connected
@@ -577,15 +383,14 @@ impl App {
             if self.history_page.is_some()
                 || !self.pickup.is_empty()
                 || self.door_direction.is_some()
-                || self.places_open
-                || self.note.is_some()
             {
                 return Effect::None;
             }
-            if self.config.click == Click::Look {
-                return Effect::None;
-            }
-            if let Some(position) = crate::render::cell_at(self, x, y) {
+            if let Some(position) = self
+                .state
+                .as_ref()
+                .and_then(|s| crate::render::visible_cell_at_level(s, x, y, self.map_level))
+            {
                 return self.travel_to(position);
             }
             return Effect::None;
@@ -611,7 +416,12 @@ impl App {
         if self.role == AccessRole::Spectator
             && !matches!(
                 key,
-                Key::Places | Key::History | Key::OlderHistory | Key::RecentHistory
+                Key::Places
+                    | Key::History
+                    | Key::OlderHistory
+                    | Key::RecentHistory
+                    | Key::MapHigher
+                    | Key::MapLower
             )
         {
             self.status = "Spectator access is read-only.".into();
@@ -728,10 +538,39 @@ impl App {
             cursor.y = cursor.y.clamp(-16, 16);
             cursor.z = cursor.z.clamp(-16, 16);
             self.travel_cursor = Some(cursor);
-            self.follow();
             return Effect::None;
         }
         match key {
+            Key::MapHigher | Key::MapLower => {
+                if let Some(state) = &self.state {
+                    let levels: std::collections::BTreeSet<_> = state
+                        .state()
+                        .observation
+                        .visible_cells
+                        .iter()
+                        .map(|c| c.position.z)
+                        .collect();
+                    let next = if matches!(key, Key::MapHigher) {
+                        levels
+                            .range((
+                                std::ops::Bound::Excluded(self.map_level),
+                                std::ops::Bound::Unbounded,
+                            ))
+                            .next()
+                            .copied()
+                    } else {
+                        levels.range(..self.map_level).next_back().copied()
+                    };
+                    if let Some(level) = next {
+                        self.map_level = level;
+                    }
+                    self.status = format!(
+                        "Viewing height {:+}. F6/F7 browse disclosed heights.",
+                        self.map_level
+                    );
+                }
+                Effect::None
+            }
             Key::Travel => {
                 if self
                     .state
@@ -746,7 +585,6 @@ impl App {
                     self.travel_cursor = Some(state.state().observation.position);
                     self.status =
                         "Travel: HJKL/YUBN select, </> height, Enter confirms, Esc cancels.".into();
-                    self.follow();
                 } else {
                     self.status = "Acquire control before travelling.".into();
                 }
@@ -807,7 +645,7 @@ impl App {
             Key::Descend => self.act(Action::Move {
                 direction: Direction::Down,
             }),
-            Key::Wait | Key::Space => self.act(Action::Wait),
+            Key::Wait => self.act(Action::Wait),
             Key::Control => self.request(Request::AcquireControl),
             Key::Release => self.request(Request::ReleaseControl),
             Key::OpenDoor | Key::CloseDoor => {
@@ -950,7 +788,6 @@ impl App {
             destination: cell.key.clone(),
         };
         self.travel_cursor = None;
-        self.follow();
         self.command(command)
     }
 
@@ -996,7 +833,7 @@ impl App {
             if let Some(target) = view.visible_actors.iter().find(|a| {
                 a.id != view.actor
                     && a.position == (Position { x, y, z })
-                    && match self.config.bump_attacks {
+                    && match self.bump_attacks {
                         BumpAttacks::Any => true,
                         BumpAttacks::Off => false,
                         BumpAttacks::Hostile => view.combat.as_ref().is_some_and(|c| {
@@ -1032,85 +869,50 @@ impl App {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct Axis {
-    origin: i32,
-    placed: bool,
-    fitting: bool,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BumpAttacks {
+    #[default]
+    Hostile,
+    Any,
+    Off,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct Viewport {
-    x: Axis,
-    y: Axis,
+/// Render only cells disclosed in the observer's scene.
+pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
+    glyph_at_level(o, x, y, 0)
 }
 
-impl Viewport {
-    fn clear(&mut self) {
-        *self = Self::default();
-    }
-}
-
-fn span(coords: impl Iterator<Item = i32>, focus: i32) -> (i32, i32) {
-    let mut min = None;
-    let mut max = None;
-    for value in coords {
-        min = Some(min.map_or(value, |current: i32| current.min(value)));
-        max = Some(max.map_or(value, |current: i32| current.max(value)));
-    }
-    (min.unwrap_or(focus), max.unwrap_or(focus))
-}
-
-struct AxisWindow {
-    length: i64,
-    center: i64,
-    margin: i64,
-    margin_end: i64,
-}
-
-fn follow_axis(axis: &mut Axis, min: i32, max: i32, focus: i32, window: AxisWindow) {
-    let AxisWindow {
-        length: view,
-        center,
-        margin,
-        margin_end,
-    } = window;
-    let length = i64::from(max) - i64::from(min) + 1;
-    if length <= view {
-        let pad = (view - length) / 2;
-        if let Ok(origin) = i32::try_from(i64::from(min) - pad) {
-            axis.origin = origin;
-            axis.placed = true;
-            axis.fitting = true;
-        }
-        return;
-    }
-    let was_fitting = axis.fitting;
-    let placed = axis.placed;
-    axis.fitting = false;
-    if !placed || was_fitting {
-        if let Ok(origin) = i32::try_from(i64::from(focus) - center) {
-            axis.origin = origin;
-            axis.placed = true;
-        }
-        return;
-    }
-    let screen = i64::from(focus) - i64::from(axis.origin);
-    let delta = if screen > margin_end {
-        screen - margin_end
-    } else if screen < margin {
-        screen - margin
-    } else {
-        0
+pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
+    let position = Position { x, y, z };
+    let Some(cell) = o
+        .visible_cells
+        .iter()
+        .find(|cell| cell.position == position)
+    else {
+        return ' ';
     };
-    if delta != 0 {
-        if let Some(origin) = i64::from(axis.origin)
-            .checked_add(delta)
-            .and_then(|value| i32::try_from(value).ok())
-        {
-            axis.origin = origin;
-        }
+    if cell.wall {
+        return '#';
     }
+    if position == o.position {
+        return '@';
+    }
+    if o.visible_actors.iter().any(|a| a.position == position) {
+        return '&';
+    }
+    if o.ground_items.iter().any(|i| i.position == position) {
+        return '!';
+    }
+    if let Some(door) = &cell.door {
+        return if door.open { '/' } else { '+' };
+    }
+    if cell.stairs_up {
+        return '<';
+    }
+    if cell.stairs_down {
+        return '>';
+    }
+    '.'
 }
 
 pub fn history_text(entry: &HistoryEntry) -> String {
@@ -1140,7 +942,14 @@ pub fn history_text(entry: &HistoryEntry) -> String {
 }
 
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
-    tor_client_hack::wrap(text, width)
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    chars
+        .chunks(width.max(1))
+        .map(|line| line.iter().collect())
+        .collect()
 }
 
 pub fn history_lines(entries: &[HistoryEntry]) -> Vec<String> {
