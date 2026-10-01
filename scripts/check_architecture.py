@@ -13,7 +13,8 @@ ALLOWED = {
     "tor-protocol": set(),
     "tor-server": {"tor-world", "tor-simulation", "tor-protocol"},
     "tor-client-common": {"tor-protocol"},
-    "tor-client-ascii": {"tor-client-common", "tor-protocol"},
+    "tor-client-hack": {"tor-client-common", "tor-protocol"},
+    "tor-client-ascii": {"tor-client-hack", "tor-client-common", "tor-protocol"},
     "tor-client-text": {"tor-client-common", "tor-protocol"},
     "tor-client-headless": {"tor-client-common", "tor-protocol"},
     "tor-test-support": {

@@ -1,5 +1,4 @@
 use tor_client_ascii::{render, App, Effect, Input};
-use tor_client_common::ClientState;
 use tor_protocol::*;
 
 fn snapshot(hidden: bool) -> Snapshot {
@@ -21,33 +20,47 @@ fn snapshot(hidden: bool) -> Snapshot {
 
 #[test]
 fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_visible_cells_only() {
-    let mut state = ClientState::from_snapshot(snapshot(false)).unwrap();
-    state.replace_snapshot(snapshot(true)).unwrap();
-    let tiles = render::map_tiles(&state);
-    for (x, glyph) in [(0, '@'), (1, '!'), (2, '<'), (3, '#')] {
-        let tile = tiles.iter().find(|t| t.position.x == x).unwrap();
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.replace_snapshot(snapshot(false)).unwrap();
+    let before = render::map_tiles(&app);
+    let origin = before
+        .iter()
+        .find(|tile| tile.position.x == 0)
+        .unwrap()
+        .center;
+    app.replace_snapshot(snapshot(true)).unwrap();
+    let tiles = render::map_tiles(&app);
+    assert_eq!(
+        tiles
+            .iter()
+            .find(|tile| tile.position.x == 0)
+            .unwrap()
+            .center,
+        origin
+    );
+    for (x, glyph) in [(0, '@'), (1, '.'), (2, '<'), (3, '#')] {
+        let tile = tiles.iter().find(|tile| tile.position.x == x).unwrap();
         assert_eq!(tile.glyph, glyph);
+        assert_eq!(tile.position.z, 0);
         assert_eq!(tile.remembered, x != 0);
         if x != 0 {
             assert_eq!(tile.color, render::MEMORY_COLOR);
         }
     }
-    let mut app = App::new();
-    app.role = AccessRole::Player;
-    app.set_state(state);
     app.ready();
-    let tile = &tiles[1];
+    let grey = tiles.iter().find(|tile| tile.position.x == 1).unwrap();
     assert_eq!(
         app.input(Input::Click {
-            x: tile.center.0,
-            y: tile.center.1
+            x: grey.center.0,
+            y: grey.center.1
         }),
         Effect::None
     );
     let mut canvas = render::Canvas::default();
     canvas.draw(&app);
     assert!(canvas.pixels.contains(&render::MEMORY_COLOR));
-    let here = &tiles[0];
+    let here = tiles.iter().find(|tile| tile.position.x == 0).unwrap();
     assert!(matches!(
         app.input(Input::Click {
             x: here.center.0,
@@ -73,14 +86,40 @@ fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
             }
         }
     }
-    let mut state = ClientState::from_snapshot(first).unwrap();
-    state.replace_snapshot(snapshot(true)).unwrap();
-    let tiles = render::map_tiles(&state);
-    assert!(tiles.iter().any(|t| t.remembered && t.position.z != 0));
+    let mut app = App::new();
+    app.replace_snapshot(first).unwrap();
+    app.replace_snapshot(snapshot(true)).unwrap();
+    let tiles = render::map_tiles(&app);
+    let state = app.state.as_ref().unwrap();
+    let standing: std::collections::BTreeSet<_> = state
+        .map_memory()
+        .filter(|cell| cell.position.z == 0)
+        .map(|cell| (cell.position.x, cell.position.y))
+        .chain(
+            state
+                .state()
+                .observation
+                .visible_cells
+                .iter()
+                .filter(|cell| cell.position.z == 0)
+                .map(|cell| (cell.position.x, cell.position.y)),
+        )
+        .collect();
+    assert!(tiles.iter().all(|tile| tile.position.z == 0));
+    assert_eq!(
+        tiles
+            .iter()
+            .map(|tile| (tile.position.x, tile.position.y))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        tiles.len()
+    );
     assert!(tiles
         .iter()
-        .all(|t| (44..748).contains(&t.center.0) && (166..458).contains(&t.center.1)));
-    let mut app = App::new();
-    app.set_state(state);
+        .all(|tile| standing.contains(&(tile.position.x, tile.position.y))));
+    assert!(tiles.iter().all(|tile| {
+        let (x, y) = tile.center;
+        x < 1200 && (48..768).contains(&y) && x % 16 == 8 && (y - 48) % 16 == 8
+    }));
     render::Canvas::default().draw(&app);
 }

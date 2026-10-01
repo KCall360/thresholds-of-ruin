@@ -39,6 +39,7 @@ SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/",
 INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", "ruff.toml", ".gitignore")
 # Clients launched by process tests. Any other runtime package change selects every process test.
 CLIENT_BINARIES = {
+    "tor-client-hack": "tor-client-ascii",
     "tor-client-ascii": "tor-client-ascii",
     "tor-client-text": "tor-client-text",
     "tor-client-headless": "tor-client-headless",

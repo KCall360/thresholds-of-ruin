@@ -71,6 +71,29 @@ class ArchitectureTests(unittest.TestCase):
             ])
             self.assertEqual(violations(graph), [f"tor-client-headless -> {backend} is forbidden"])
 
+    def test_ascii_may_depend_on_hack_and_hack_stays_off_text_and_the_server(self):
+        graph = metadata([
+            package("tor-client-hack", [dependency("tor-client-common"), dependency("tor-protocol")]),
+            package("tor-client-ascii", [
+                dependency("tor-client-hack"),
+                dependency("tor-client-common"),
+                dependency("tor-protocol"),
+            ]),
+            package("tor-client-common", [dependency("tor-protocol")]),
+            package("tor-protocol"),
+        ])
+        self.assertEqual(violations(graph), [])
+        text = metadata([
+            package("tor-client-text", [dependency("tor-client-hack")]),
+            package("tor-client-hack"),
+        ])
+        self.assertEqual(violations(text), ["tor-client-text -> tor-client-hack is forbidden"])
+        server = metadata([
+            package("tor-client-hack", [dependency("tor-server")]),
+            package("tor-server"),
+        ])
+        self.assertEqual(violations(server), ["tor-client-hack -> tor-server is forbidden"])
+
     def test_unreviewed_local_dependency_is_rejected_but_registry_crates_are_not(self):
         graph = metadata([
             package("tor-protocol", [
