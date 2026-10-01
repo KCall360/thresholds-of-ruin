@@ -48,10 +48,13 @@ class ScenarioPackageProcesses(unittest.TestCase):
                                  ['--listen','127.0.0.1:0','--scenario',package,'--save',Path(directory.name)/'game.db'])
         self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = support.Process(self.bin / ('tor-client-text' + self.suffix),['--connect',address,'--script'])
+        client = support.Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
         self.addCleanup(client.stop)
-        client.until(lambda line:line=='Ready.')
-        self.assertIn('Waited',client.command('wait'))
+        client.until(lambda line: '"type":"ready"' in line)
+        client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")
+        client.child.stdin.flush()
+        ready = client.until(lambda line: '"type":"ready"' in line)
+        self.assertIn('"type":"ready"', ready)
         client.stop(); server.stop()
         # Both regions were built at the start, so the save holds both region
         # files and resumes with the package gone.
@@ -61,10 +64,13 @@ class ScenarioPackageProcesses(unittest.TestCase):
                                  ['--listen','127.0.0.1:0','--save',Path(directory.name)/'game.db'])
         self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = support.Process(self.bin / ('tor-client-text' + self.suffix),['--connect',address,'--script'])
+        client = support.Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
         self.addCleanup(client.stop)
-        client.until(lambda line:line=='Ready.')
-        self.assertIn('Waited',client.command('wait'))
+        client.until(lambda line: '"type":"ready"' in line)
+        client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")
+        client.child.stdin.flush()
+        ready = client.until(lambda line: '"type":"ready"' in line)
+        self.assertIn('"type":"ready"', ready)
         client.stop(); server.stop()
         moved.rename(package)
         manifest = package / 'scenario.toml'
