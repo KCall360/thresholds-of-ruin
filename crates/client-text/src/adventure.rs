@@ -49,6 +49,7 @@ pub struct Dialogue {
     pub queue: VecDeque<String>,
     pub verbosity: Verbosity,
     pub visited_places: BTreeSet<String>,
+    pub last_command: Option<String>,
 }
 
 impl Dialogue {
@@ -66,6 +67,18 @@ impl Dialogue {
     /// Interpret a line against the state in hand. Surfaces are described by
     /// their asset words where the palette holds their assets.
     pub fn interpret_with(&mut self, line: &str, state: &StateView, palette: &Palette) -> Intent {
+        let trimmed = line.trim();
+        let normalized = trimmed.to_lowercase();
+        if normalized == "again" || normalized == "g" {
+            if let Some(prev) = self.last_command.clone() {
+                return self.interpret_with(&prev, state, palette);
+            } else {
+                return Intent::Say("There is no previous command to repeat.".into());
+            }
+        }
+        if !trimmed.is_empty() {
+            self.last_command = Some(trimmed.to_string());
+        }
         let tokens = crate::parser::tokenize(line);
         let sentences = crate::parser::split_sentences(&tokens);
         if sentences.len() > 1 {
@@ -116,7 +129,20 @@ impl Dialogue {
                     crate::parser::Verb::Wait => return Intent::Action(Action::Wait),
                     crate::parser::Verb::Quit => return Intent::Tools(Input::Quit),
                     crate::parser::Verb::Stop => return Intent::Stop,
+                    crate::parser::Verb::Again => {
+                        if let Some(prev) = self.last_command.clone() {
+                            return self.interpret_single(&prev, state);
+                        } else {
+                            return Intent::Say("There is no previous command to repeat.".into());
+                        }
+                    }
                     crate::parser::Verb::Help => return Intent::Say(HELP.into()),
+                    crate::parser::Verb::Diagnose => {
+                        return Intent::Say(crate::narrative::diagnose(state));
+                    }
+                    crate::parser::Verb::Talk => {
+                        return Intent::Say("Who do you want to talk to?".into());
+                    }
                     crate::parser::Verb::Listen => {
                         return Intent::Say(
                             crate::narrative::examine_scenery("sound", state)
@@ -172,6 +198,13 @@ impl Dialogue {
                     return Intent::Action(Action::Move { direction });
                 }
                 crate::parser::ParsedCommand::Stop => return Intent::Stop,
+                crate::parser::ParsedCommand::Again => {
+                    if let Some(prev) = self.last_command.clone() {
+                        return self.interpret_single(&prev, state);
+                    } else {
+                        return Intent::Say("There is no previous command to repeat.".into());
+                    }
+                }
                 crate::parser::ParsedCommand::Help { topic } => {
                     if topic.as_deref() == Some("session") {
                         return Intent::Say(SESSION_HELP.into());
@@ -256,9 +289,92 @@ impl Dialogue {
                         }
                         return self.object(&direct.raw, state, palette, "open");
                     } else if verb == crate::parser::Verb::Take
-                        && preposition == crate::parser::Preposition::From
+                        && (preposition == crate::parser::Preposition::From
+                            || preposition == crate::parser::Preposition::Off)
                     {
                         return self.object(&direct.raw, state, palette, "take");
+                    } else if verb == crate::parser::Verb::Put
+                        && matches!(
+                            preposition,
+                            crate::parser::Preposition::In | crate::parser::Preposition::On
+                        )
+                    {
+                        let carried = state.observation.inventory.iter().find(|item| {
+                            crate::item_matches(&direct.raw, item)
+                                || noun_matches(&direct.raw, &item.name)
+                                || direct
+                                    .head
+                                    .as_deref()
+                                    .is_some_and(|h| noun_matches(h, &item.name))
+                        });
+                        let Some(item) = carried else {
+                            return Intent::Say(format!(
+                                "You don't have the {}.",
+                                safe(&direct.raw)
+                            ));
+                        };
+                        let ind_str = indirect.raw.to_lowercase();
+                        if ind_str.contains("floor") || ind_str.contains("ground") {
+                            return Intent::Action(Action::Drop {
+                                item: item.id,
+                                quantity: direct.quantity,
+                            });
+                        }
+                        return Intent::Say(format!(
+                            "You cannot put the {} {} the {}.",
+                            safe(&item.name),
+                            preposition.as_str(),
+                            safe(&indirect.raw)
+                        ));
+                    } else if verb == crate::parser::Verb::Give
+                        && preposition == crate::parser::Preposition::To
+                    {
+                        let carried = state.observation.inventory.iter().find(|item| {
+                            crate::item_matches(&direct.raw, item)
+                                || noun_matches(&direct.raw, &item.name)
+                                || direct
+                                    .head
+                                    .as_deref()
+                                    .is_some_and(|h| noun_matches(h, &item.name))
+                        });
+                        let Some(item) = carried else {
+                            return Intent::Say(format!(
+                                "You don't have the {}.",
+                                safe(&direct.raw)
+                            ));
+                        };
+                        let target_noun = &indirect.raw;
+                        let actors: Vec<_> = state
+                            .observation
+                            .visible_actors
+                            .iter()
+                            .filter(|a| {
+                                a.id != state.observation.actor
+                                    && (noun_matches(target_noun, &a.name)
+                                        || indirect
+                                            .head
+                                            .as_deref()
+                                            .is_some_and(|h| noun_matches(h, &a.name))
+                                        || target_noun
+                                            .strip_prefix('#')
+                                            .and_then(|s| s.parse::<u64>().ok())
+                                            == Some(a.id.0))
+                            })
+                            .collect();
+                        if actors.is_empty() {
+                            return Intent::Say("No matching actor is visible.".into());
+                        }
+                        return Intent::Say(format!(
+                            "The {} does not seem interested in the {}.",
+                            safe(&actors[0].name),
+                            safe(&item.name)
+                        ));
+                    } else if verb == crate::parser::Verb::Talk
+                        && (preposition == crate::parser::Preposition::About
+                            || preposition == crate::parser::Preposition::At
+                            || preposition == crate::parser::Preposition::To)
+                    {
+                        return self.talk_to(&direct.raw, Some(&indirect.raw), state);
                     }
                 }
                 crate::parser::ParsedCommand::MultiTransitive { verb, direct_list } => {
@@ -326,6 +442,70 @@ impl Dialogue {
                         }
                         crate::parser::Verb::Search => {
                             return Intent::Say(crate::narrative::search(state))
+                        }
+                        crate::parser::Verb::Read => {
+                            return self.object(&direct.raw, state, "read")
+                        }
+                        crate::parser::Verb::Drink => {
+                            return self.object(&direct.raw, state, "drink")
+                        }
+                        crate::parser::Verb::Eat => return self.object(&direct.raw, state, "eat"),
+                        crate::parser::Verb::Wear => {
+                            return self.object(&direct.raw, state, "wear")
+                        }
+                        crate::parser::Verb::Wield => {
+                            return self.object(&direct.raw, state, "wield")
+                        }
+                        crate::parser::Verb::Remove => {
+                            return self.object(&direct.raw, state, "remove")
+                        }
+                        crate::parser::Verb::Push => {
+                            return self.object(&direct.raw, state, "push")
+                        }
+                        crate::parser::Verb::Pull => {
+                            return self.object(&direct.raw, state, "pull")
+                        }
+                        crate::parser::Verb::Turn => {
+                            return self.object(&direct.raw, state, "turn")
+                        }
+                        crate::parser::Verb::Talk => return self.talk_to(&direct.raw, None, state),
+                        crate::parser::Verb::Diagnose => {
+                            if direct.raw == "me"
+                                || direct.raw == "myself"
+                                || direct.raw == "player"
+                            {
+                                return Intent::Say(crate::narrative::diagnose(state));
+                            }
+                            let target_noun = &direct.raw;
+                            if let Some(actor) = state.observation.visible_actors.iter().find(|a| {
+                                noun_matches(target_noun, &a.name)
+                                    || direct
+                                        .head
+                                        .as_deref()
+                                        .is_some_and(|h| noun_matches(h, &a.name))
+                                    || target_noun
+                                        .strip_prefix('#')
+                                        .and_then(|s| s.parse::<u64>().ok())
+                                        == Some(a.id.0)
+                            }) {
+                                if let Some(injury) =
+                                    state.observation.combat.as_ref().and_then(|c| {
+                                        c.actors.iter().find(|ca| ca.actor == actor.id)
+                                    })
+                                {
+                                    return Intent::Say(format!(
+                                        "{} looks {}.",
+                                        safe(&actor.name),
+                                        injury.injury
+                                    ));
+                                } else {
+                                    return Intent::Say(format!(
+                                        "{} appears uninjured.",
+                                        safe(&actor.name)
+                                    ));
+                                }
+                            }
+                            return Intent::Say("No matching actor is visible.".into());
                         }
                         _ => {}
                     }
@@ -402,6 +582,119 @@ impl Dialogue {
             ("superbrief", "") => {
                 self.verbosity = Verbosity::Superbrief;
                 Intent::Say("Superbrief descriptions.".into())
+            }
+            ("diagnose", _) => {
+                if rest.is_empty() || matches!(rest, "me" | "myself" | "player") {
+                    Intent::Say(crate::narrative::diagnose(state))
+                } else {
+                    let mut actors: Vec<_> = state
+                        .observation
+                        .visible_actors
+                        .iter()
+                        .filter(|a| {
+                            noun_matches(rest, &a.name)
+                                || rest.strip_prefix('#').and_then(|s| s.parse::<u64>().ok())
+                                    == Some(a.id.0)
+                        })
+                        .collect();
+                    actors.sort_by_key(|a| a.id);
+                    actors.dedup_by_key(|a| a.id);
+                    if let Some(actor) = actors.first() {
+                        if let Some(injury) = state
+                            .observation
+                            .combat
+                            .as_ref()
+                            .and_then(|c| c.actors.iter().find(|ca| ca.actor == actor.id))
+                        {
+                            Intent::Say(format!("{} looks {}.", safe(&actor.name), injury.injury))
+                        } else {
+                            Intent::Say(format!("{} appears uninjured.", safe(&actor.name)))
+                        }
+                    } else {
+                        Intent::Say("No matching actor is visible.".into())
+                    }
+                }
+            }
+            ("read", noun) => self.object(noun, state, "read"),
+            ("drink" | "quaff" | "sip", noun) => self.object(noun, state, "drink"),
+            ("eat" | "taste" | "consume", noun) => self.object(noun, state, "eat"),
+            ("wear" | "don", noun) => self.object(noun, state, "wear"),
+            ("wield" | "equip" | "brandish", noun) => self.object(noun, state, "wield"),
+            ("remove" | "doff" | "unequip", noun) => self.object(noun, state, "remove"),
+            ("push" | "shove" | "press", noun) => self.object(noun, state, "push"),
+            ("pull" | "drag" | "tug", noun) => self.object(noun, state, "pull"),
+            ("turn" | "rotate" | "twist", noun) => self.object(noun, state, "turn"),
+            ("talk" | "speak", noun) => {
+                let target = noun.strip_prefix("to ").unwrap_or(noun);
+                self.talk_to(target, None, state)
+            }
+            ("ask", rest) => {
+                if let Some((target, topic)) = rest.split_once(" about ") {
+                    self.talk_to(target, Some(topic), state)
+                } else {
+                    self.talk_to(rest, None, state)
+                }
+            }
+            ("put", rest) => {
+                if let Some(item_name) = rest.strip_prefix("on ") {
+                    self.object(item_name, state, "wear")
+                } else if let Some(item_name) = rest.strip_prefix("down ") {
+                    self.object(item_name, state, "drop")
+                } else if let Some((obj, target)) = rest.split_once(" on ") {
+                    if target.contains("floor") || target.contains("ground") {
+                        self.object(obj, state, "drop")
+                    } else {
+                        Intent::Say(format!(
+                            "You cannot put the {} on the {}.",
+                            safe(obj),
+                            safe(target)
+                        ))
+                    }
+                } else if let Some((obj, target)) = rest.split_once(" in ") {
+                    if target.contains("floor") || target.contains("ground") {
+                        self.object(obj, state, "drop")
+                    } else {
+                        Intent::Say(format!(
+                            "You cannot put the {} in the {}.",
+                            safe(obj),
+                            safe(target)
+                        ))
+                    }
+                } else {
+                    self.object(rest, state, "drop")
+                }
+            }
+            ("give", rest) => {
+                if let Some((obj, target)) = rest.split_once(" to ") {
+                    let carried = state.observation.inventory.iter().find(|item| {
+                        crate::item_matches(obj, item) || noun_matches(obj, &item.name)
+                    });
+                    let Some(item) = carried else {
+                        return Intent::Say(format!("You don't have the {}.", safe(obj)));
+                    };
+                    let actors: Vec<_> = state
+                        .observation
+                        .visible_actors
+                        .iter()
+                        .filter(|a| {
+                            a.id != state.observation.actor
+                                && (noun_matches(target, &a.name)
+                                    || target.strip_prefix('#').and_then(|s| s.parse::<u64>().ok())
+                                        == Some(a.id.0))
+                        })
+                        .collect();
+                    if actors.is_empty() {
+                        Intent::Say("No matching actor is visible.".into())
+                    } else {
+                        Intent::Say(format!(
+                            "The {} does not seem interested in the {}.",
+                            safe(&actors[0].name),
+                            safe(&item.name)
+                        ))
+                    }
+                } else {
+                    Intent::Say("What do you want to give?".into())
+                }
             }
             ("name", rest) => {
                 let (target, _) = crate::word(rest);
@@ -509,6 +802,54 @@ impl Dialogue {
         }
     }
 
+    fn talk_to(&mut self, direct_noun: &str, topic: Option<&str>, state: &StateView) -> Intent {
+        let noun = direct_noun.trim();
+        if noun.is_empty() {
+            return Intent::Say("Who do you want to talk to?".into());
+        }
+        if noun == "myself" || noun == "me" || noun == "self" {
+            return Intent::Say("Talking to yourself is a sure sign of madness.".into());
+        }
+        let mut actors: Vec<_> = state
+            .observation
+            .visible_actors
+            .iter()
+            .filter(|a| {
+                noun_matches(noun, &a.name)
+                    || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok()) == Some(a.id.0)
+            })
+            .collect();
+        actors.sort_by_key(|a| a.id);
+        actors.dedup_by_key(|a| a.id);
+        if actors.is_empty() {
+            return Intent::Say("No matching actor is visible.".into());
+        }
+        let choices: Vec<_> = actors
+            .into_iter()
+            .map(|a| {
+                let label = format!("{} (#{})", a.name, a.id.0);
+                let response = if a.id == state.observation.actor {
+                    "Talking to yourself is a sure sign of madness.".into()
+                } else if let Some(t) = topic {
+                    format!(
+                        "The {} remains silent, offering no response about the {}.",
+                        safe(&a.name),
+                        safe(t)
+                    )
+                } else {
+                    format!("The {} glares warily and offers no reply.", safe(&a.name))
+                };
+                Choice {
+                    label,
+                    intent: Intent::Say(response),
+                    item: None,
+                    door: None,
+                }
+            })
+            .collect();
+        self.choose(choices, state.revision, "No matching actor is visible.")
+    }
+
     fn object(&mut self, noun: &str, state: &StateView, palette: &Palette, verb: &str) -> Intent {
         let (quantity, noun) = if matches!(verb, "take" | "drop") {
             match crate::item_quantity(noun) {
@@ -522,6 +863,24 @@ impl Dialogue {
             if let Some(desc) = crate::narrative::examine_scenery(noun, state) {
                 return Intent::Say(desc);
             }
+        } else if verb == "read"
+            && matches!(
+                noun,
+                "wall"
+                    | "walls"
+                    | "floor"
+                    | "the walls"
+                    | "the floor"
+                    | "ceiling"
+                    | "the ceiling"
+                    | "air"
+                    | "room"
+                    | "chamber"
+                    | "place"
+                    | "here"
+            )
+        {
+            return Intent::Say("There is nothing written there.".into());
         }
         if verb == "examine"
             && matches!(
@@ -595,7 +954,93 @@ impl Dialogue {
                 } else {
                     safe(&item.description)
                 })
-            } else if state.observation.inventory.iter().any(|i| i.id == id) {
+            } else if verb == "read" {
+                Intent::Say(if item.description.is_empty() {
+                    format!("There is nothing written on the {}.", safe(&item.name))
+                } else {
+                    safe(&item.description)
+                })
+            } else if verb == "drink" {
+                if !carried {
+                    Intent::Say("You must take it first.".into())
+                } else {
+                    let lower = item.name.to_lowercase();
+                    if lower.contains("potion")
+                        || lower.contains("flask")
+                        || lower.contains("elixir")
+                        || lower.contains("brew")
+                        || lower.contains("water")
+                        || lower.contains("ale")
+                        || lower.contains("wine")
+                        || lower.contains("draught")
+                        || lower.contains("bottle")
+                    {
+                        Intent::Say(format!(
+                            "You take a sip of the {}. It is refreshing, though it has no further effect right now.",
+                            safe(&item.name)
+                        ))
+                    } else {
+                        Intent::Say(format!("You cannot drink the {}.", safe(&item.name)))
+                    }
+                }
+            } else if verb == "eat" {
+                if !carried {
+                    Intent::Say("You must take it first.".into())
+                } else {
+                    let lower = item.name.to_lowercase();
+                    if lower.contains("ration")
+                        || lower.contains("bread")
+                        || lower.contains("food")
+                        || lower.contains("meat")
+                        || lower.contains("fruit")
+                        || lower.contains("apple")
+                        || lower.contains("berry")
+                        || lower.contains("herb")
+                        || lower.contains("mushroom")
+                        || lower.contains("leaf")
+                    {
+                        Intent::Say(format!(
+                            "You sample the {}. It sustains you, though it has no further effect right now.",
+                            safe(&item.name)
+                        ))
+                    } else {
+                        Intent::Say(format!("The {} is not edible.", safe(&item.name)))
+                    }
+                }
+            } else if verb == "wear" {
+                if !carried {
+                    Intent::Say("You don't have that.".into())
+                } else {
+                    Intent::Say(format!("You put on the {}.", safe(&item.name)))
+                }
+            } else if verb == "wield" {
+                if !carried {
+                    Intent::Say("You don't have that.".into())
+                } else {
+                    Intent::Say(format!("You ready the {} for combat.", safe(&item.name)))
+                }
+            } else if verb == "remove" {
+                if !carried {
+                    Intent::Say("You are not wearing that.".into())
+                } else {
+                    Intent::Say(format!("You take off the {}.", safe(&item.name)))
+                }
+            } else if verb == "push" {
+                Intent::Say(format!(
+                    "Pushing the {} achieves nothing.",
+                    safe(&item.name)
+                ))
+            } else if verb == "pull" {
+                Intent::Say(format!(
+                    "Pulling the {} achieves nothing.",
+                    safe(&item.name)
+                ))
+            } else if verb == "turn" {
+                Intent::Say(format!(
+                    "Turning the {} achieves nothing.",
+                    safe(&item.name)
+                ))
+            } else if carried {
                 Intent::Say("You are already carrying that.".into())
             } else {
                 let ground = state
@@ -651,22 +1096,43 @@ impl Dialogue {
             {
                 continue;
             }
-            let target_open = verb == "open";
+            let target_open = match verb {
+                "open" | "push" => true,
+                "close" | "pull" => false,
+                _ => verb == "open",
+            };
             let intent = match verb {
                 "examine" => Intent::Say(format!(
                     "{} It is {}.",
                     safe(&door.description),
                     if door.open { "open" } else { "closed" }
                 )),
-                "take" => Intent::Say("You cannot pick up a door.".into()),
-                "open" | "close" if door.open == target_open => Intent::Say(format!(
-                    "It is already {}.",
-                    if target_open { "open" } else { "closed" }
-                )),
-                "open" | "close" if door.reachable => Intent::Action(Action::SetDoor {
-                    door: door.id,
-                    open: target_open,
+                "read" => Intent::Say(if door.description.is_empty() {
+                    format!(
+                        "There are no markings or inscriptions on the {}.",
+                        safe(&door.name)
+                    )
+                } else {
+                    safe(&door.description)
                 }),
+                "take" => Intent::Say("You cannot pick up a door.".into()),
+                "turn" => Intent::Say("Turning the handle does nothing unusual.".into()),
+                "drink" | "eat" => Intent::Say("That is not edible!".into()),
+                "wear" | "wield" | "remove" => {
+                    Intent::Say("You cannot wear or wield a door.".into())
+                }
+                "open" | "close" | "push" | "pull" if door.open == target_open => {
+                    Intent::Say(format!(
+                        "It is already {}.",
+                        if target_open { "open" } else { "closed" }
+                    ))
+                }
+                "open" | "close" | "push" | "pull" if door.reachable => {
+                    Intent::Action(Action::SetDoor {
+                        door: door.id,
+                        open: target_open,
+                    })
+                }
                 "go" if door.reachable => Intent::Say("You are already beside it.".into()),
                 _ => {
                     let destination = state
@@ -683,7 +1149,7 @@ impl Dialogue {
                         Some(c) => Intent::Travel {
                             destination: c.key.clone(),
                             take: None,
-                            door: matches!(verb, "open" | "close")
+                            door: matches!(verb, "open" | "close" | "push" | "pull")
                                 .then_some((door.id, target_open)),
                             label: format!("the {}", safe(&door.name)),
                             direction: None,
@@ -706,6 +1172,42 @@ impl Dialogue {
                     choices.push(Choice {
                         label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
                         intent: Intent::Say(safe(&actor.description)),
+                        item: None,
+                        door: None,
+                    });
+                }
+            }
+        } else if verb == "read" {
+            let mut actors = BTreeSet::new();
+            for actor in &state.observation.visible_actors {
+                if noun_matches(noun, &actor.name) && actors.insert(actor.id) {
+                    choices.push(Choice {
+                        label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
+                        intent: Intent::Say("There is nothing written on them.".into()),
+                        item: None,
+                        door: None,
+                    });
+                }
+            }
+        } else if matches!(verb, "push" | "pull") {
+            let mut actors = BTreeSet::new();
+            for actor in &state.observation.visible_actors {
+                if noun_matches(noun, &actor.name) && actors.insert(actor.id) {
+                    choices.push(Choice {
+                        label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
+                        intent: Intent::Say("They wouldn't appreciate that.".into()),
+                        item: None,
+                        door: None,
+                    });
+                }
+            }
+        } else if verb == "turn" {
+            let mut actors = BTreeSet::new();
+            for actor in &state.observation.visible_actors {
+                if noun_matches(noun, &actor.name) && actors.insert(actor.id) {
+                    choices.push(Choice {
+                        label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
+                        intent: Intent::Say("They stare back at you.".into()),
                         item: None,
                         door: None,
                     });

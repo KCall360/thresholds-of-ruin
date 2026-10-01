@@ -111,6 +111,15 @@ pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
                     direction: Direction::Down,
                 });
             }
+            ("put", "on") => {
+                return parse_transitive_or_ditransitive(Verb::Wear, &tokens[2..]);
+            }
+            ("take", "off") => {
+                return parse_transitive_or_ditransitive(Verb::Remove, &tokens[2..]);
+            }
+            ("talk", "to") | ("speak", "to") => {
+                return parse_transitive_or_ditransitive(Verb::Talk, &tokens[2..]);
+            }
             ("go", "to" | "toward" | "towards") => {
                 let np = parse_noun_phrase(&tokens[2..])?;
                 return Ok(ParsedCommand::Transitive {
@@ -141,6 +150,20 @@ pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
                 Verb::Stop => Ok(ParsedCommand::Stop),
                 Verb::Again => Ok(ParsedCommand::Again),
                 Verb::Help => Ok(ParsedCommand::Help { topic: None }),
+                Verb::Diagnose => Ok(ParsedCommand::Intransitive {
+                    verb: Verb::Diagnose,
+                }),
+                Verb::Talk => Ok(ParsedCommand::Intransitive { verb: Verb::Talk }),
+                Verb::Listen => Ok(ParsedCommand::Intransitive { verb: Verb::Listen }),
+                Verb::Smell => Ok(ParsedCommand::Intransitive { verb: Verb::Smell }),
+                Verb::Search => Ok(ParsedCommand::Intransitive { verb: Verb::Search }),
+                Verb::Verbose => Ok(ParsedCommand::Intransitive {
+                    verb: Verb::Verbose,
+                }),
+                Verb::Brief => Ok(ParsedCommand::Intransitive { verb: Verb::Brief }),
+                Verb::Superbrief => Ok(ParsedCommand::Intransitive {
+                    verb: Verb::Superbrief,
+                }),
                 _ => Err(format!(
                     "What do you want to {}?",
                     first_token.as_word().unwrap_or("act on")
@@ -372,6 +395,92 @@ mod tests {
             ParsedCommand::Clarification(np) => {
                 assert_eq!(np.adjectives, vec!["copper"]);
                 assert!(np.is_one);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_expanded_verbs() {
+        let tokens = tokenize("put on the iron ring");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Wear);
+                assert_eq!(direct.head.as_deref(), Some("ring"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("take off cloak");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Remove);
+                assert_eq!(direct.head.as_deref(), Some("cloak"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("talk to goblin");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Talk);
+                assert_eq!(direct.head.as_deref(), Some("goblin"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("ask goblin about key");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Ditransitive {
+                verb,
+                direct,
+                preposition,
+                indirect,
+            } => {
+                assert_eq!(verb, Verb::Talk);
+                assert_eq!(direct.head.as_deref(), Some("goblin"));
+                assert_eq!(preposition, Preposition::About);
+                assert_eq!(indirect.head.as_deref(), Some("key"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("diagnose");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Intransitive {
+                verb: Verb::Diagnose
+            }
+        );
+
+        let tokens = tokenize("give sword to goblin");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Ditransitive {
+                verb,
+                direct,
+                preposition,
+                indirect,
+            } => {
+                assert_eq!(verb, Verb::Give);
+                assert_eq!(direct.head.as_deref(), Some("sword"));
+                assert_eq!(preposition, Preposition::To);
+                assert_eq!(indirect.head.as_deref(), Some("goblin"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("put sword on floor");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Ditransitive {
+                verb,
+                direct,
+                preposition,
+                indirect,
+            } => {
+                assert_eq!(verb, Verb::Put);
+                assert_eq!(direct.head.as_deref(), Some("sword"));
+                assert_eq!(preposition, Preposition::On);
+                assert_eq!(indirect.head.as_deref(), Some("floor"));
             }
             other => panic!("Unexpected: {other:?}"),
         }

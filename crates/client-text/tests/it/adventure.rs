@@ -632,3 +632,210 @@ fn narrative_place_title_sensory_and_verbosity() {
         }))
     );
 }
+
+#[test]
+fn test_expanded_if_interactions() {
+    let mut s = state();
+    let mut dialogue = Dialogue::default();
+
+    // 1. again / g
+    assert_eq!(
+        dialogue.interpret("again", &s),
+        Intent::Say("There is no previous command to repeat.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("g", &s),
+        Intent::Say("There is no previous command to repeat.".into())
+    );
+    assert_eq!(dialogue.interpret("wait", &s), Intent::Action(Action::Wait));
+    assert_eq!(
+        dialogue.interpret("again", &s),
+        Intent::Action(Action::Wait)
+    );
+    assert_eq!(dialogue.interpret("g", &s), Intent::Action(Action::Wait));
+
+    // 2. diagnose
+    assert_eq!(
+        dialogue.interpret("diagnose", &s),
+        Intent::Say("You are in good health, with no apparent injuries or afflictions.".into())
+    );
+    s.observation.combat = Some(CombatView {
+        hp: 18,
+        max_hp: 20,
+        preparation_remaining: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        actors: vec![],
+        messages: vec![],
+        objective: None,
+        victory: false,
+        dead: false,
+        terminal: false,
+    });
+    assert!(matches!(
+        dialogue.interpret("diagnose", &s),
+        Intent::Say(text) if text.contains("minor cuts") && text.contains("18/20")
+    ));
+    s.observation.combat = None;
+
+    // 3. read
+    assert_eq!(
+        dialogue.interpret("read copper token", &s),
+        Intent::Say("A small copper disc.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("read floor", &s),
+        Intent::Say("There is nothing written there.".into())
+    );
+
+    // Give player an inventory
+    s.observation.inventory.push(ItemView {
+        id: 10,
+        name: "healing potion".into(),
+        appearance: "item".into(),
+        identified: true,
+        description: "A vial of bubbling red draught.".into(),
+        quantity: 1,
+        asset: None,
+    });
+    s.observation.inventory.push(ItemView {
+        id: 11,
+        name: "iron ration".into(),
+        appearance: "item".into(),
+        identified: true,
+        description: "Hard tack and dried meat.".into(),
+        quantity: 1,
+        asset: None,
+    });
+    s.observation.inventory.push(ItemView {
+        id: 12,
+        name: "iron ring".into(),
+        appearance: "item".into(),
+        identified: true,
+        description: "A band of cold wrought iron.".into(),
+        quantity: 1,
+        asset: None,
+    });
+    s.observation.inventory.push(ItemView {
+        id: 13,
+        name: "iron sword".into(),
+        appearance: "item".into(),
+        identified: true,
+        description: "A sharp steel blade.".into(),
+        quantity: 1,
+        asset: None,
+    });
+
+    // 4. drink and eat
+    assert!(matches!(
+        dialogue.interpret("drink healing potion", &s),
+        Intent::Say(text) if text.contains("refreshing")
+    ));
+    assert_eq!(
+        dialogue.interpret("drink iron sword", &s),
+        Intent::Say("You cannot drink the iron sword.".into())
+    );
+    assert!(matches!(
+        dialogue.interpret("eat iron ration", &s),
+        Intent::Say(text) if text.contains("sustains you")
+    ));
+    assert_eq!(
+        dialogue.interpret("eat iron sword", &s),
+        Intent::Say("The iron sword is not edible.".into())
+    );
+
+    // 5. wear, wield, remove
+    assert_eq!(
+        dialogue.interpret("wear iron ring", &s),
+        Intent::Say("You put on the iron ring.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("put on iron ring", &s),
+        Intent::Say("You put on the iron ring.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("remove iron ring", &s),
+        Intent::Say("You take off the iron ring.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("take off iron ring", &s),
+        Intent::Say("You take off the iron ring.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("wield iron sword", &s),
+        Intent::Say("You ready the iron sword for combat.".into())
+    );
+
+    // 6. put <item> on floor / ground
+    assert_eq!(
+        dialogue.interpret("put iron sword on floor", &s),
+        Intent::Action(Action::Drop {
+            item: 13,
+            quantity: None,
+        })
+    );
+    assert_eq!(
+        dialogue.interpret("put iron sword in chest", &s),
+        Intent::Say("You cannot put the iron sword in the chest.".into())
+    );
+
+    // 7. give and talk with actor
+    s.observation.visible_actors.push(ActorView {
+        id: ActorId(42),
+        name: "goblin sentry".into(),
+        position: Position { x: 1, y: 0, z: 0 },
+        description: "A small, snarling goblin.".into(),
+        asset: None,
+    });
+
+    assert_eq!(
+        dialogue.interpret("give iron ring to goblin", &s),
+        Intent::Say("The goblin sentry does not seem interested in the iron ring.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("talk to goblin", &s),
+        Intent::Say("The goblin sentry glares warily and offers no reply.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("ask goblin about dungeon", &s),
+        Intent::Say(
+            "The goblin sentry remains silent, offering no response about the dungeon.".into()
+        )
+    );
+    assert_eq!(
+        dialogue.interpret("talk to myself", &s),
+        Intent::Say("Talking to yourself is a sure sign of madness.".into())
+    );
+
+    // 8. push, pull, turn on door
+    s.observation.visible_cells[1].door = Some(DoorView {
+        id: 99,
+        open: false,
+        name: "oak door".into(),
+        description: "A heavy timber door.".into(),
+        reachable: true,
+        approaches: vec!["cell-0".into()],
+        asset: None,
+    });
+
+    assert_eq!(
+        dialogue.interpret("push oak door", &s),
+        Intent::Action(Action::SetDoor {
+            door: 99,
+            open: true,
+        })
+    );
+    assert_eq!(
+        dialogue.interpret("turn oak door", &s),
+        Intent::Say("Turning the handle does nothing unusual.".into())
+    );
+
+    s.observation.visible_cells[1].door.as_mut().unwrap().open = true;
+    assert_eq!(
+        dialogue.interpret("pull oak door", &s),
+        Intent::Action(Action::SetDoor {
+            door: 99,
+            open: false,
+        })
+    );
+}

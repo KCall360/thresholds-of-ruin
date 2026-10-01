@@ -32,6 +32,18 @@ pub enum Verb {
     Verbose,
     Brief,
     Superbrief,
+    Read,
+    Drink,
+    Eat,
+    Wear,
+    Wield,
+    Remove,
+    Give,
+    Push,
+    Pull,
+    Turn,
+    Talk,
+    Diagnose,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +58,7 @@ pub enum Preposition {
     To,
     Through,
     Off,
+    About,
 }
 
 impl Preposition {
@@ -61,6 +74,7 @@ impl Preposition {
             Preposition::To => "to",
             Preposition::Through => "through",
             Preposition::Off => "off",
+            Preposition::About => "about",
         }
     }
 }
@@ -76,7 +90,7 @@ pub enum Pronoun {
 pub fn parse_verb(word: &str) -> Option<Verb> {
     match word {
         "look" | "l" => Some(Verb::Look),
-        "examine" | "x" | "inspect" | "read" | "study" | "check" => Some(Verb::Examine),
+        "examine" | "x" | "inspect" | "study" | "check" => Some(Verb::Examine),
         "inventory" | "i" => Some(Verb::Inventory),
         "take" | "get" | "grab" | "carry" | "acquire" => Some(Verb::Take),
         "drop" | "discard" | "leave" => Some(Verb::Drop),
@@ -105,6 +119,18 @@ pub fn parse_verb(word: &str) -> Option<Verb> {
         "verbose" => Some(Verb::Verbose),
         "brief" => Some(Verb::Brief),
         "superbrief" => Some(Verb::Superbrief),
+        "read" => Some(Verb::Read),
+        "drink" | "quaff" | "sip" => Some(Verb::Drink),
+        "eat" | "taste" | "consume" => Some(Verb::Eat),
+        "wear" | "don" => Some(Verb::Wear),
+        "wield" | "equip" | "brandish" => Some(Verb::Wield),
+        "remove" | "doff" | "unequip" => Some(Verb::Remove),
+        "give" | "offer" | "hand" => Some(Verb::Give),
+        "push" | "shove" | "press" => Some(Verb::Push),
+        "pull" | "drag" | "tug" => Some(Verb::Pull),
+        "turn" | "rotate" | "twist" => Some(Verb::Turn),
+        "talk" | "speak" | "ask" => Some(Verb::Talk),
+        "diagnose" => Some(Verb::Diagnose),
         _ => None,
     }
 }
@@ -137,6 +163,7 @@ pub fn parse_preposition(word: &str) -> Option<Preposition> {
         "to" | "toward" | "towards" => Some(Preposition::To),
         "through" => Some(Preposition::Through),
         "off" => Some(Preposition::Off),
+        "about" => Some(Preposition::About),
         _ => None,
     }
 }

@@ -232,3 +232,41 @@ pub fn search(state: &StateView) -> String {
         format!("Searching carefully reveals {}.", items.join(" and "))
     }
 }
+
+/// Assesses the player's physical condition, wounds, and active combat state.
+pub fn diagnose(state: &StateView) -> String {
+    if let Some(c) = &state.observation.combat {
+        let condition = if c.dead {
+            "You are dead."
+        } else if c.hp == c.max_hp {
+            "You are in peak physical condition, without a scratch."
+        } else if c.hp >= (c.max_hp * 3) / 4 {
+            "You have sustained minor cuts and bruises."
+        } else if c.hp >= c.max_hp / 2 {
+            "You are moderately wounded."
+        } else if c.hp >= c.max_hp / 4 {
+            "You are heavily wounded and bleeding noticeably."
+        } else {
+            "You are grievously wounded and on the verge of collapse."
+        };
+        let mut report = format!("{condition} (HP {}/{})", c.hp, c.max_hp);
+        if let Some(ticks) = c.preparation_remaining {
+            report.push_str(&format!(
+                "\nYou are preparing an attack ({ticks} ticks remaining{}).",
+                if c.preparation_active {
+                    ""
+                } else {
+                    " - interrupted"
+                }
+            ));
+        } else if c.recovery_remaining > 0 {
+            report.push_str(&format!(
+                "\nYou are recovering from your last exertion ({} ticks remaining).",
+                c.recovery_remaining
+            ));
+        }
+        report
+    } else {
+        "You are in good health, with no apparent injuries or afflictions.".into()
+    }
+}

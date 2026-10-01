@@ -209,6 +209,25 @@ class AdventureProcesses(unittest.TestCase):
         self.assertIn("You pick up the copper token.", response)
         self.assertIn("You walk east.", response)
 
+    def test_expanded_if_interactions_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        # Diagnose
+        self.assertIn("good health", self.say(player, "diagnose"))
+        # Read
+        self.assertIn("worn spiral", self.say(player, "read copper token"))
+        self.assertIn("There is nothing written there.", self.say(player, "read floor"))
+        # Command repetition with again and g
+        self.assertIn("Time passes.", self.say(player, "wait"))
+        self.assertIn("Time passes.", self.say(player, "again"))
+        self.assertIn("Time passes.", self.say(player, "g"))
+        # Ditransitive put on floor
+        self.assertIn("You pick up the copper token.", self.say(player, "take copper token"))
+        self.assertIn("You drop 1 x copper token.", self.say(player, "put copper token on floor"))
+        # Conversational interaction with self
+        self.assertIn("madness", self.say(player, "talk to myself"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
