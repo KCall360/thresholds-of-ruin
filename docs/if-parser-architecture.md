@@ -87,21 +87,25 @@ rules.
     - *Open / Close*: `open`, `close`, `shut`.
     - *Combat*: `attack`, `kill`, `hit`, `fight`, `strike`, `slay`.
     - *Movement*: `go`, `walk`, `head`, `run`, `climb`, `enter`, `exit`.
-    - *Intransitive*: `look`/`l`, `inventory`/`i`, `wait`/`z`, `quit`/`q`, `help`.
-    - *Manipulation*: `put`, `insert`, `unlock`, `lock`.
+    - *Intransitive*: `look`/`l`, `inventory`/`i`, `wait`/`z`, `quit`/`q`, `again`/`g`, `diagnose`, `help`.
+    - *Sensory & Environment*: `listen`/`hear`, `smell`/`sniff`, `search`.
+    - *Consumables*: `drink`/`quaff`/`sip`, `eat`/`taste`/`consume`.
+    - *Equipment*: `wear`/`don`/`put on`, `wield`/`equip`/`brandish`, `remove`/`doff`/`take off`.
+    - *Manipulation*: `put`, `give`, `insert`, `push`/`shove`, `pull`/`drag`, `turn`/`rotate`, `unlock`, `lock`.
+    - *Social*: `talk to`/`speak to`, `ask <actor> about <topic>`.
   - **Prepositions**: Words defining spatial and instrumental relations:
-    `with`, `using`, `in`, `into`, `on`, `onto`, `under`, `behind`, `from`, `to`, `at`, `through`, `off`.
+    `with`, `using`, `in`, `into`, `inside`, `on`, `onto`, `upon`, `under`, `behind`, `from`, `to`, `at`, `through`, `off`, `about`.
   - **Determiners**: Noise words ignored during matching: `the`, `a`, `an`, `some`, `this`, `that`.
   - **Conjunctions**: `and`, `,`, `except`, `but`.
   - **Pronouns**: `it`, `them`, `him`, `her`, `that`.
   - **Ordinals**: `first`, `1st`, `second`, `2nd`, `third`, `3rd`, `last`.
 
 - **Syntax Rule Types**:
-  1. `Intransitive(Verb)`: E.g., `look`, `inventory`, `wait`.
+  1. `Intransitive(Verb)`: E.g., `look`, `inventory`, `wait`, `again` / `g`, `diagnose`, `search`.
   2. `Directional(Direction)`: E.g., `north`, `ne`, `climb up`, `go south`.
-  3. `Transitive(Verb, NounPhrase)`: E.g., `take brass lantern`, `open wooden door`.
+  3. `Transitive(Verb, NounPhrase)`: E.g., `take brass lantern`, `read tablet`, `drink potion`, `wear ring`, `wield sword`, `talk to goblin`.
   4. `Ditransitive(Verb, NounPhrase, Preposition, NounPhrase)`:
-     E.g., `hit goblin with iron sword`, `take gold coin from table`, `put key in lock`.
+     E.g., `hit goblin with iron sword`, `take coin from floor`, `put sword on floor`, `give ring to goblin`, `ask goblin about key`.
   5. `CompoundTransitive(Verb, Vec<NounPhrase>)`: E.g., `take sword and shield`.
 
 ### 3.3 Noun Phrases and Scope Binding (`parser::resolver`)
