@@ -471,8 +471,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn table_characters_are_in_the_bitmap_font() {
-        for ch in ['#', '.', '+', '/', '<', '>', '!', '&', '^', '@', 'r', '$'] {
+    fn structural_characters_are_in_the_bitmap_font() {
+        for ch in ['#', '.', '+', '/', '<', '>', '!', '&', '^', '@'] {
             assert!(BASIC_FONTS.get(ch).is_some(), "{ch}");
         }
     }

@@ -1,5 +1,5 @@
-//! Static glyph and word table. Lookup is a binary search of the full id, then
-//! each shorter dotted prefix, then the structural default. No palette.
+//! Structural glyph defaults. Asset rows are added later; stairs, doors, and pits
+//! already force their characters so a floor-asset row cannot replace them.
 
 /// Grey for a fact that is only in the remembered chart.
 pub const REMEMBERED_COLOR: u32 = 0x626262;
@@ -29,51 +29,8 @@ struct Row {
     glyph: Glyph,
 }
 
-/// Sorted by id. These are the ids `scenarios/tests/generated-filler` sends.
-static ROWS: &[Row] = &[
-    row("creature.rat", 'r', 0xC4A574, "rat"),
-    row("item.coin", '$', 0xE6C34A, "coin"),
-    row("terrain.floor.cave", '.', 0x6E7A55, "cave floor"),
-    row("terrain.floor.marble", '.', 0xD9E2EA, "marble floor"),
-    row("terrain.floor.stone", '.', 0x9AA7A0, "stone floor"),
-    row("terrain.wall.cave", '#', 0x7D6B52, "cave wall"),
-    row("terrain.wall.marble", '#', 0xE6E6E6, "marble wall"),
-    row("terrain.wall.stone", '#', 0xB7B7B7, "stone wall"),
-];
-
-const fn row(id: &'static str, ch: char, color: u32, word: &'static str) -> Row {
-    Row {
-        id,
-        glyph: Glyph { ch, color, word },
-    }
-}
-
-const fn rows_are_sorted() -> bool {
-    let mut index = 1;
-    while index < ROWS.len() {
-        let previous = ROWS[index - 1].id.as_bytes();
-        let current = ROWS[index].id.as_bytes();
-        let mut byte = 0;
-        let mut ordered = false;
-        while byte < previous.len() && byte < current.len() {
-            if previous[byte] < current[byte] {
-                ordered = true;
-                break;
-            }
-            if previous[byte] > current[byte] {
-                return false;
-            }
-            byte += 1;
-        }
-        if !ordered && previous.len() >= current.len() {
-            return false;
-        }
-        index += 1;
-    }
-    true
-}
-
-const _: () = assert!(rows_are_sorted());
+/// Sorted by id. Empty until asset rows are added; lookup still walks prefixes.
+static ROWS: &[Row] = &[];
 
 /// Same predicate as the private `scenario_package::asset_id` in `tor-server`.
 /// Clients do not depend on that crate. A rejected string is not drawn as text.
