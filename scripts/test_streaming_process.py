@@ -210,6 +210,46 @@ class StreamingProcesses(unittest.TestCase):
         _, resumed = self.client(headless.WIZARD_TOKEN)
         self.assertEqual(resumed["state"]["observation"], settled)
 
+    def palette_of(self, client):
+        """The next palette message a headless client printed."""
+        frame = self.frame(client, lambda f: (f.get("message") or {}).get("type") == "palette")
+        return frame["message"]
+
+    def test_palettes_reach_real_clients_whole_on_attach_and_on_request(self):
+        """Delta palettes, which need regions farther apart than this
+        fixture's default radii reach, are covered over WebSocket in
+        crates/server/tests/it/palettes.rs."""
+        self.server(scenario=GENERATED)
+        everything = {"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
+            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
+            "terrain.wall.marble", "creature.delver"}
+        # Observing sends no control request, so the palette that follows
+        # attaching comes after the ready line rather than inside it.
+        player = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
+        first = self.frame(player, lambda f: f["type"] == "ready")
+        palette = self.palette_of(player)
+        self.assertIsNone(palette["request_id"])
+        self.assertEqual(palette["palette"]["revision"], 1)
+        self.assertEqual(palette["palette"]["body"]["type"], "full")
+        self.assertEqual(set(palette["palette"]["body"]["assets"]), everything)
+        cells = first["state"]["observation"]["visible_cells"]
+        self.assertTrue(any(c.get("asset") == "terrain.floor.stone" for c in cells))
+        # Spectators get the palette too, and may ask for it again.
+        spectator, _ = self.client(support.SPECTATOR_TOKEN)
+        self.assertEqual(self.palette_of(spectator)["palette"]["body"]["type"], "full")
+        spectator.child.stdin.write(json.dumps({"type": "request", "request": {"type": "palette"}}) + "\n")
+        spectator.child.stdin.flush()
+        answered = self.palette_of(spectator)
+        self.assertIsNotNone(answered["request_id"])
+        self.assertEqual(answered["palette"]["revision"], 2)
+        self.assertEqual(set(answered["palette"]["body"]["assets"]), everything)
+        done = self.frame(spectator, lambda f: f["type"] == "ready")
+        self.assertIsNone(done["error"])
+        # Reconnecting starts over with the whole palette.
+        spectator.stop()
+        again, _ = self.client(support.SPECTATOR_TOKEN)
+        self.assertEqual(self.palette_of(again)["palette"]["revision"], 1)
+
     def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
         server = self.server(wizard=True)
         wizard, initial = self.client(headless.WIZARD_TOKEN)

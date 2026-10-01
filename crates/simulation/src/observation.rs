@@ -96,6 +96,8 @@ pub struct Observation {
     pub tick: u64,
     pub location: Location,
     pub region: Region,
+    /// The observer's own asset, for views of itself from another angle.
+    pub asset: Option<String>,
     pub visible_cells: Vec<CellView>,
     pub ground_items: Vec<GroundItemView>,
     pub inventory: Vec<ItemView>,
@@ -195,6 +197,7 @@ impl Game {
             actor: id,
             tick: self.tick,
             location: actor.location,
+            asset: actor.asset.clone(),
             region: self
                 .world
                 .region(actor.location.region)

@@ -843,6 +843,11 @@ impl Game {
         self.current_regions() == *t
     }
 
+    /// Regions declared but not built yet, in region order.
+    pub fn unbuilt_regions(&self) -> impl Iterator<Item = RegionId> + '_ {
+        self.lifecycle.unbuilt.iter().copied()
+    }
+
     /// Loaded regions (active or frozen), in region order.
     pub fn loaded_regions(&self) -> impl Iterator<Item = RegionId> + '_ {
         self.world.loaded_regions()

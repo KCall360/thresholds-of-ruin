@@ -222,9 +222,15 @@ stream: `{"type":"palette","request_id":null,"palette":{"revision":1,"body":{"ty
 - Nothing is acknowledged. Palettes aren't saved; they're recomputed after a
   restart.
 - A scenario that names no assets sends no palettes (a `palette` request
-  still gets an empty one), and its observations carry no assets.
+  still gets an empty one), and its observations carry no assets. A game
+  that doesn't stream keeps every region loaded, so its palette covers the
+  whole package.
+- The server recomputes a client's palette only when its actor's region
+  changes, since a palette depends on nothing else.
 
-The text, ASCII and headless clients ignore palettes for now.
+The headless client prints palette messages as they arrive and answers a
+`palette` request with the palette; the text and ASCII clients ignore
+palettes for now.
 
 ## Annotations
 

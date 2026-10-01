@@ -183,6 +183,33 @@ fn rewinding_before_a_generated_build_builds_the_same_cave_again() {
 }
 
 #[test]
+fn generated_caves_replay_from_the_saves_copies_without_the_package() {
+    let directory = tempfile::tempdir().unwrap();
+    let package = directory.path().join("package");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
+    crate::support::copy_package(&root, &package);
+    let mut scenario = scenario_package::load(&package, 5, None, false).unwrap();
+    scenario.streaming = Some(Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    let save = directory.path().join("game.db");
+    let policy = SavePolicy {
+        checkpoint_interval: 0,
+        ..SavePolicy::default()
+    };
+    let mut engine = Engine::open_with_policy(&save, scenario, policy.clone()).unwrap();
+    walk_east(&mut engine, INTO_CAVE + ACROSS_CAVE);
+    assert_eq!(engine.region_counts().unwrap().unbuilt, 0);
+    engine.flush().unwrap();
+    let expected = engine.state(ActorId(1)).unwrap();
+    drop(engine);
+    std::fs::remove_dir_all(&package).unwrap();
+    let engine = Engine::open_with_policy(&save, Scenario::two_room(0), policy).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+}
+
+#[test]
 fn each_game_seed_generates_its_own_caves() {
     let walls = |seed: u64| {
         let mut engine = Engine::memory(caves(seed)).unwrap();

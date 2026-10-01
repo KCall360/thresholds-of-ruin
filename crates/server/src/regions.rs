@@ -139,8 +139,26 @@ impl Regions {
         self.saved = saved;
     }
 
-    pub(crate) fn saved_count(&self) -> usize {
-        self.saved.len()
+    /// Whether building a region the game has declared could need a file
+    /// the save doesn't hold: each declared region's own, and its
+    /// neighbours', whose walls a build reads. Bounded by the declared
+    /// frontier, not the package.
+    pub(crate) fn needs_package_files(&self, game: &Game) -> bool {
+        game.unbuilt_regions().any(|region| {
+            let neighbours = self.catalog.region(region).map(|m| m.outgoing.clone());
+            std::iter::once(region)
+                .chain(neighbours.into_iter().flatten())
+                .any(|r| !self.saved.contains(&r.0))
+        })
+    }
+
+    /// Files replay will need that the save may not hold yet.
+    pub(crate) fn need_files(&mut self, files: impl IntoIterator<Item = u64>) {
+        for file in files {
+            if !self.saved.contains(&file) {
+                self.unsaved.insert(file);
+            }
+        }
     }
 
     pub(crate) fn attach_disk(&mut self, disk: crate::storage::Store) {
@@ -371,7 +389,7 @@ impl RecordStore for Regions {
         if let Some(record) = self.resident.get(&id) {
             return Some(record.clone());
         }
-        if let Some(record) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
+        if let Some((record, _)) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
             self.reads += 1;
             self.prepared += 1;
             return Some(record);
@@ -381,34 +399,34 @@ impl RecordStore for Regions {
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
-        let record = match self
+        let (record, files) = match self
             .preload
             .as_ref()
             .and_then(|p| p.take(Job::Build(region)))
         {
-            Some(record) => {
+            Some((record, files)) => {
                 self.prepared += 1;
-                record.into_inner()
+                (record.into_inner(), files)
             }
             None => match self.package.build_region(self.seed, &self.index, region.0) {
-                Ok(record) => record,
+                Ok(built) => built,
                 Err(failure) => {
                     self.failure = Some(failure);
                     return None;
                 }
             },
         };
-        // Replaying this build needs the region's file and its neighbours'.
-        let neighbours = self.catalog.region(region).map(|m| m.outgoing.clone());
-        for needed in std::iter::once(region).chain(neighbours.into_iter().flatten()) {
-            if !self.saved.contains(&needed.0) {
-                self.unsaved.insert(needed.0);
-            }
-        }
+        // Replaying this build needs exactly the files it read.
+        self.need_files(files);
         Some(record)
     }
     fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
-        self.package.unbuilt_region(&self.index, region.0).ok()
+        let unbuilt = self.package.unbuilt_region(&self.index, region.0).ok()?;
+        // Declaring a generated region read its file; replay needs it too.
+        if self.package.declaring_reads_file(region.0) {
+            self.need_files([region.0]);
+        }
+        Some(unbuilt)
     }
 }
 

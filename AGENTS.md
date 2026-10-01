@@ -111,18 +111,26 @@ Merged: the structural `RegionCatalog` and horizon planner, the
 (PR #44), and package games streaming through disk regions (PR #45); see
 [region streaming](docs/region-streaming.md).
 
-**In progress: the rest of 4e as one PR** (branch
-`design/region-streaming-completion`, not pushed yet), one commit per slice:
-background preloading (done), per-region package files with the package pin
-and save format 14 (done), a bounded identity directory (done), generated filler
-regions (done), the palette protocol (done, protocol 19). Still to do:
-palettes in the clients (they ignore palette messages for now; see the plan's
-slice 6: a shared palette state and asset resolver with dotted-prefix
-fallback, glyph and word tables, and the headless client reporting palettes),
-then the final docs pass, performance comparison and launcher rebuild. Run
-`scripts/verify.py quick` before each slice's commit and `full` once before
-pushing; review the whole branch for bugs and testing-policy gaps before
-pushing. **Merge only with the maintainer's approval.**
+**Merged in PR #47:** background preloading, per-region package files with
+the package pin (save format 14), regions declared only when needed,
+generated filler regions, and server-side asset palettes (protocol 19). A
+review of it found ten issues; branch `fix/review-4e` fixes them with
+regression tests, including the palette process test.
+
+**Still to do for 4e:** palettes in the clients (plan slice 6: a shared
+palette state and asset resolver in `client-common` with dotted-prefix
+fallback, word tables in the text client, the headless client reporting the
+current palette). The ASCII glyph table belongs with the ASCII redesign,
+which stays deferred until after 3s. Then the performance comparison
+(`perf_compare.py` on the streaming cases against the pre-4e `main`), the
+launcher rebuild for format 14, and closing 4e in the roadmap. Run
+`scripts/verify.py quick` before each commit and `full` before pushing.
+**Merge only with the maintainer's approval.**
+
+**ASCII redesign attempt:** PRs #48-#50 (flat map, message log, glyph table)
+were merged and then reverted by PR #52, which also fixed a race where the
+autonomous pump could stale a command's revision. Their code is kept on
+branch `archive/ascii-hack-prs-48-51`.
 
 Decisions agreed with the maintainer:
 

@@ -712,6 +712,11 @@ impl Engine {
         // directory: the one supplied, or where the save was created, if
         // it's still the same package.
         if let Some(package) = &archive.scenario.package {
+            if !saved.is_empty() {
+                package
+                    .sources
+                    .attach_saved(store.source_reader(), saved.clone());
+            }
             if !package.sources.has_directory() {
                 if let Some(directory) =
                     crate::scenario_package::locate(package, supplied.as_deref())
@@ -756,17 +761,10 @@ impl Engine {
     /// the save, or in the package directory. Refuse to resume without them
     /// rather than fail when play reaches them.
     fn require_region_sources(&self) -> Result<(), Failure> {
-        let (Some(package), Some(counts)) = (&self.archive.scenario.package, self.region_counts())
-        else {
+        let (Some(package), Some(regions)) = (&self.archive.scenario.package, &self.regions) else {
             return Ok(());
         };
-        let Some(regions) = &self.regions else {
-            return Ok(());
-        };
-        if counts.unbuilt == 0
-            || package.sources.has_directory()
-            || regions.saved_count() == package.index.regions.len()
-        {
+        if package.sources.has_directory() || !regions.needs_package_files(&self.game) {
             return Ok(());
         }
         Err(Failure::new(
@@ -1039,7 +1037,9 @@ impl Engine {
     /// The assets an actor's client may soon need: those of the themes of
     /// every region within one portal hop beyond what's kept loaded around
     /// it, from the package's structure alone, never from what the regions
-    /// hold. `None` when the scenario names no assets.
+    /// hold. A game that doesn't stream keeps every region loaded, so its
+    /// palette covers the whole package. `None` when the scenario names no
+    /// assets.
     pub fn palette(&self, actor: ActorId) -> Option<std::collections::BTreeSet<String>> {
         let package = self
             .archive
@@ -1047,8 +1047,25 @@ impl Engine {
             .package
             .as_deref()
             .filter(|p| p.has_assets())?;
-        let region = self.game.known_actor_region(SimActor(actor.0))?;
-        Some(self.regions.as_ref()?.palette(package, region))
+        let region = self.palette_region(actor)?;
+        Some(match &self.regions {
+            Some(regions) => regions.palette(package, tor_world::RegionId(region)),
+            None => package.palette(
+                package
+                    .index
+                    .regions
+                    .iter()
+                    .flat_map(|r| package.region_themes(r.id).unwrap_or(&[])),
+            ),
+        })
+    }
+
+    /// The region an actor's palette is forecast from. A palette depends on
+    /// nothing else, so clients recompute it only when this changes.
+    pub fn palette_region(&self, actor: ActorId) -> Option<u64> {
+        self.game
+            .known_actor_region(SimActor(actor.0))
+            .map(|region| region.0)
     }
 
     pub fn travel_route(
@@ -1982,6 +1999,12 @@ fn start_streaming(
                 .map_err(|_| invalid_archive())?;
         }
     }
+    // Declaring a generated region read its file, so replay needs it.
+    regions.need_files(
+        game.unbuilt_regions()
+            .map(|r| r.0)
+            .filter(|r| package.declaring_reads_file(*r)),
+    );
     let mut made = Vec::new();
     regions.transition(&mut game, &mut made)?;
     regions.publish(made);
