@@ -30,7 +30,10 @@ impl InputCallback for TextInput {
     }
 }
 
-fn native_key_with_shift(key: NativeKey, shift: bool) -> Option<Key> {
+fn native_key_with_shift(key: NativeKey, shift: bool, ctrl: bool) -> Option<Key> {
+    if ctrl && key == NativeKey::P {
+        return Some(Key::Scrollback);
+    }
     match (key, shift) {
         (NativeKey::Comma, true) => Some(Key::Ascend),
         (NativeKey::Period, true) => Some(Key::Descend),
@@ -49,7 +52,8 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::U => Key::NorthEast,
         NativeKey::B => Key::SouthWest,
         NativeKey::N => Key::SouthEast,
-        NativeKey::Space | NativeKey::Period => Key::Wait,
+        NativeKey::Space => Key::Space,
+        NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
         NativeKey::D => Key::Drop,
         NativeKey::O => Key::OpenDoor,
@@ -202,7 +206,7 @@ fn window_loop(
                         Event::Update(update) => app
                             .update(*update)
                             .map_err(|e| format!("Invalid presentation update: {e:?}"))?,
-                        Event::Status(status) => app.status = status,
+                        Event::Status(status) => app.accept_status(status),
                         Event::Ready => app.ready(),
                         Event::History(page) => {
                             app.history_scroll = 0;
@@ -259,6 +263,8 @@ fn window_loop(
                             key,
                             window.is_key_down(NativeKey::LeftShift)
                                 || window.is_key_down(NativeKey::RightShift),
+                            window.is_key_down(NativeKey::LeftCtrl)
+                                || window.is_key_down(NativeKey::RightCtrl),
                         )
                     })
                     .map(|key| Input::Key { key }),
@@ -347,6 +353,7 @@ fn window_loop(
                 "has_control":state.is_some_and(|s|s.has_control()),"connected":app.connected,"busy":app.busy,
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration()),
+                "messages":app.message_lines(),"more":app.more(),
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
@@ -389,6 +396,12 @@ mod tests {
         assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
         assert_eq!(native_key(NativeKey::P), None);
+        assert_eq!(native_key(NativeKey::Space), Some(Key::Space));
+        assert_eq!(
+            native_key_with_shift(NativeKey::P, false, true),
+            Some(Key::Scrollback)
+        );
+        assert_eq!(native_key_with_shift(NativeKey::P, false, false), None);
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
@@ -400,15 +413,15 @@ mod tests {
         assert_eq!(native_key(NativeKey::U), Some(Key::NorthEast));
         assert_eq!(native_key(NativeKey::B), Some(Key::SouthWest));
         assert_eq!(
-            native_key_with_shift(NativeKey::Comma, true),
+            native_key_with_shift(NativeKey::Comma, true, false),
             Some(Key::Ascend)
         );
         assert_eq!(
-            native_key_with_shift(NativeKey::Period, true),
+            native_key_with_shift(NativeKey::Period, true, false),
             Some(Key::Descend)
         );
         assert_eq!(
-            native_key_with_shift(NativeKey::Period, false),
+            native_key_with_shift(NativeKey::Period, false, false),
             Some(Key::Wait)
         );
     }

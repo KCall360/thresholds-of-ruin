@@ -88,6 +88,7 @@ class DoorProcesses(unittest.TestCase):
         watched = self.request(observer, {"type":"snapshot"})
         self.assertEqual(watched["state"], closed_again["state"])
         self.assertEqual(watched["history"][-1]["content"]["event"]["type"], "door_changed")
+        ascii_support.page_native(window, self.ascii_frame, key)
         key("Escape", True)
         self.assertEqual(window.child.wait(timeout=15), 0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
@@ -213,7 +214,7 @@ class DoorProcesses(unittest.TestCase):
             user32.EnumWindows(find, 0)
             self.assertEqual(len(handles), 1)
             def key(name, down):
-                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B,"y":0x59,"u":0x55,"b":0x42,"n":0x4E,"F4":0x73,"Shift_L":0x10,"comma":0xBC,"period":0xBE}[name]
+                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B,"y":0x59,"u":0x55,"b":0x42,"n":0x4E,"F4":0x73,"Shift_L":0x10,"comma":0xBC,"period":0xBE,"space":0x20}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, 1 | (scan << 16) | (0x01000000 if name in ("Up", "Right") else 0) | (0 if down else 0xC0000000)))
             return key
