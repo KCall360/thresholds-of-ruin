@@ -1,5 +1,5 @@
 //! Adventure presentation and intentions, using only the disclosed observer scene.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use tor_client_common::{surfaces, AssetTable, Palette};
 use tor_protocol::*;
@@ -38,6 +38,7 @@ pub struct Dialogue {
     choices: Option<(u64, Vec<Choice>)>,
     item: Option<u64>,
     door: Option<u64>,
+    pub queue: VecDeque<String>,
 }
 
 impl Dialogue {
@@ -55,14 +56,36 @@ impl Dialogue {
     /// Interpret a line against the state in hand. Surfaces are described by
     /// their asset words where the palette holds their assets.
     pub fn interpret_with(&mut self, line: &str, state: &StateView, palette: &Palette) -> Intent {
+        let tokens = crate::parser::tokenize(line);
+        let sentences = crate::parser::split_sentences(&tokens);
+        if sentences.len() > 1 {
+            for s in &sentences[1..] {
+                let cmd = s.iter().map(|t| t.text()).collect::<Vec<_>>().join(" ");
+                if !cmd.trim().is_empty() {
+                    self.queue.push_back(cmd);
+                }
+            }
+            let first = sentences[0]
+                .iter()
+                .map(|t| t.text())
+                .collect::<Vec<_>>()
+                .join(" ");
+            return self.interpret_single(&first, state, palette);
+        }
+        self.interpret_single(line, state, palette)
+    }
+
+    pub fn interpret_single(&mut self, line: &str, state: &StateView, palette: &Palette) -> Intent {
         let normalized = line.trim().to_lowercase();
         if let Some((revision, choices)) = self.choices.take() {
             if revision == state.revision {
+                let ordinal = crate::parser::lexicon::parse_ordinal(&normalized);
                 let matches: Vec<_> = choices
                     .iter()
                     .enumerate()
                     .filter(|(i, c)| {
                         normalized.parse::<usize>() == Ok(i + 1)
+                            || ordinal == Some(i + 1)
                             || noun_matches(&normalized, &c.label)
                     })
                     .map(|(_, c)| c.clone())
@@ -72,6 +95,202 @@ impl Dialogue {
                     self.door = matches[0].door;
                     return matches[0].intent.clone();
                 }
+            }
+        }
+        let tokens = crate::parser::tokenize(line);
+        if let Ok(cmd) = crate::parser::match_sentence(&tokens) {
+            match cmd {
+                crate::parser::ParsedCommand::Intransitive { verb } => match verb {
+                    crate::parser::Verb::Look => return Intent::Look,
+                    crate::parser::Verb::Inventory => return Intent::Say(inventory(state)),
+                    crate::parser::Verb::Wait => return Intent::Action(Action::Wait),
+                    crate::parser::Verb::Quit => return Intent::Tools(Input::Quit),
+                    crate::parser::Verb::Stop => return Intent::Stop,
+                    crate::parser::Verb::Help => return Intent::Say(HELP.into()),
+                    _ => {}
+                },
+                crate::parser::ParsedCommand::Directional { direction } => {
+                    let choices = destinations(state, direction)
+                        .into_iter()
+                        .map(|d| Choice {
+                            label: d.label.clone(),
+                            item: None,
+                            door: None,
+                            intent: Intent::Travel {
+                                destination: d.key,
+                                take: None,
+                                door: None,
+                                label: d.label,
+                                direction: Some(direction),
+                            },
+                        })
+                        .collect();
+                    return self.choose(
+                        choices,
+                        state.revision,
+                        &format!("You can't see a way {}.", direction_name(direction)),
+                    );
+                }
+                crate::parser::ParsedCommand::Step { direction } => {
+                    return Intent::Action(Action::Move { direction });
+                }
+                crate::parser::ParsedCommand::Stop => return Intent::Stop,
+                crate::parser::ParsedCommand::Help { topic } => {
+                    if topic.as_deref() == Some("session") {
+                        return Intent::Say(SESSION_HELP.into());
+                    }
+                    return Intent::Say(HELP.into());
+                }
+                crate::parser::ParsedCommand::Say { text } => return Intent::Say(text),
+                crate::parser::ParsedCommand::Ditransitive {
+                    verb,
+                    direct,
+                    preposition,
+                    indirect,
+                } => {
+                    if verb == crate::parser::Verb::Attack
+                        && preposition == crate::parser::Preposition::With
+                    {
+                        let carried = state.observation.inventory.iter().any(|item| {
+                            crate::item_matches(&indirect.raw, item)
+                                || noun_matches(&indirect.raw, &item.name)
+                                || indirect
+                                    .head
+                                    .as_deref()
+                                    .is_some_and(|h| noun_matches(h, &item.name))
+                        });
+                        if !carried {
+                            return Intent::Say(format!(
+                                "You don't have the {}.",
+                                safe(&indirect.raw)
+                            ));
+                        }
+                        let target_noun = &direct.raw;
+                        let mut actors: Vec<_> = state
+                            .observation
+                            .visible_actors
+                            .iter()
+                            .filter(|a| {
+                                a.id != state.observation.actor
+                                    && (noun_matches(target_noun, &a.name)
+                                        || direct
+                                            .head
+                                            .as_deref()
+                                            .is_some_and(|h| noun_matches(h, &a.name))
+                                        || target_noun
+                                            .strip_prefix('#')
+                                            .and_then(|s| s.parse::<u64>().ok())
+                                            == Some(a.id.0))
+                            })
+                            .collect();
+                        actors.sort_by_key(|a| a.id);
+                        actors.dedup_by_key(|a| a.id);
+                        let choices = actors
+                            .into_iter()
+                            .map(|a| Choice {
+                                label: format!("{} (#{})", a.name, a.id.0),
+                                intent: Intent::Action(Action::Attack { target: a.id }),
+                                item: None,
+                                door: None,
+                            })
+                            .collect();
+                        return self.choose(
+                            choices,
+                            state.revision,
+                            "No matching actor is visible.",
+                        );
+                    } else if (verb == crate::parser::Verb::Open
+                        || verb == crate::parser::Verb::Unlock)
+                        && preposition == crate::parser::Preposition::With
+                    {
+                        let has_key = state.observation.inventory.iter().any(|item| {
+                            crate::item_matches(&indirect.raw, item)
+                                || noun_matches(&indirect.raw, &item.name)
+                                || indirect
+                                    .head
+                                    .as_deref()
+                                    .is_some_and(|h| noun_matches(h, &item.name))
+                        });
+                        if !has_key {
+                            return Intent::Say(format!(
+                                "You don't have the {}.",
+                                safe(&indirect.raw)
+                            ));
+                        }
+                        return self.object(&direct.raw, state, palette, "open");
+                    } else if verb == crate::parser::Verb::Take
+                        && preposition == crate::parser::Preposition::From
+                    {
+                        return self.object(&direct.raw, state, palette, "take");
+                    }
+                }
+                crate::parser::ParsedCommand::MultiTransitive { verb, direct_list } => {
+                    if verb == crate::parser::Verb::Take && !direct_list.is_empty() {
+                        for d in &direct_list[1..] {
+                            self.queue.push_back(format!("take {}", d.raw));
+                        }
+                        return self.object(&direct_list[0].raw, state, palette, "take");
+                    } else if verb == crate::parser::Verb::Drop && !direct_list.is_empty() {
+                        for d in &direct_list[1..] {
+                            self.queue.push_back(format!("drop {}", d.raw));
+                        }
+                        return self.object(&direct_list[0].raw, state, palette, "drop");
+                    }
+                }
+                crate::parser::ParsedCommand::Transitive { verb, direct } => {
+                    if direct.all {
+                        if verb == crate::parser::Verb::Take {
+                            let items: Vec<_> = state
+                                .observation
+                                .ground_items
+                                .iter()
+                                .filter(|g| in_current_place(state, g.position))
+                                .collect();
+                            if items.is_empty() {
+                                return Intent::Say("There is nothing here to take.".into());
+                            }
+                            for g in &items[1..] {
+                                self.queue.push_back(format!("take {}", g.item.name));
+                            }
+                            return self.object(&items[0].item.name, state, palette, "take");
+                        } else if verb == crate::parser::Verb::Drop {
+                            if state.observation.inventory.is_empty() {
+                                return Intent::Say("You are not carrying anything.".into());
+                            }
+                            for item in &state.observation.inventory[1..] {
+                                self.queue.push_back(format!("drop {}", item.name));
+                            }
+                            return self.object(
+                                &state.observation.inventory[0].name,
+                                state,
+                                palette,
+                                "drop",
+                            );
+                        }
+                    }
+                    match verb {
+                        crate::parser::Verb::Examine => {
+                            return self.object(&direct.raw, state, palette, "examine")
+                        }
+                        crate::parser::Verb::Take => {
+                            return self.object(&direct.raw, state, palette, "take")
+                        }
+                        crate::parser::Verb::Drop => {
+                            return self.object(&direct.raw, state, palette, "drop")
+                        }
+                        crate::parser::Verb::Open => {
+                            return self.object(&direct.raw, state, palette, "open")
+                        }
+                        crate::parser::Verb::Close => {
+                            return self.object(&direct.raw, state, palette, "close")
+                        }
+                        crate::parser::Verb::Go => {
+                            return self.object(&direct.raw, state, palette, "go")
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
         }
         let (verb, rest) = crate::word(&normalized);
@@ -166,13 +385,17 @@ impl Dialogue {
 
     fn choose(&mut self, choices: Vec<Choice>, revision: u64, missing: &str) -> Intent {
         match choices.as_slice() {
-            [] => Intent::Say(missing.into()),
+            [] => {
+                self.queue.clear();
+                Intent::Say(missing.into())
+            }
             [choice] => {
                 self.item = choice.item;
                 self.door = choice.door;
                 choice.intent.clone()
             }
             _ => {
+                self.queue.clear();
                 let question = format!(
                     "Which do you mean? {}",
                     choices

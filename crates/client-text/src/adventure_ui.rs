@@ -90,17 +90,24 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
                         let message = message?;
                         let terminal = present(&connection, &mut session, &message);
                         finish_journey(&mut connection, &mut session).await?;
+                        if session.journey.is_none() && drain_queue(&mut connection, &mut session).await? {
+                            break;
+                        }
                         if terminal && session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
                     }
                     tor_client_common::FirstReady::Local(line) => {
                         let Some(line) = line else { break; };
                         let line = line?;
                         if line.trim().is_empty() { if session.journey.is_none() { prompt()?; } continue; }
+                        session.dialogue.queue.clear();
                         // Interpretation stamps expected_revision from the state now in hand.
                         let intent = session.dialogue.interpret_with(&line, connection.state.state(), &connection.palette);
                         if matches!(intent, Intent::Tools(Input::Quit)) { break; }
                         dispatch(&mut connection, &mut session, intent).await?;
                         finish_journey(&mut connection, &mut session).await?;
+                        if session.journey.is_none() && drain_queue(&mut connection, &mut session).await? {
+                            break;
+                        }
                         if session.journey.is_none() { prompt()?; } else { io::stdout().flush()?; }
                     }
                 }
@@ -111,6 +118,24 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
     connection.close().await?;
     println!("Goodbye.");
     Ok(())
+}
+
+async fn drain_queue(connection: &mut Connection, session: &mut Session) -> Result<bool, Error> {
+    while session.journey.is_none() {
+        let Some(cmd) = session.dialogue.queue.pop_front() else {
+            break;
+        };
+        let intent =
+            session
+                .dialogue
+                .interpret_with(&cmd, connection.state.state(), &connection.palette);
+        if matches!(intent, Intent::Tools(Input::Quit)) {
+            return Ok(true);
+        }
+        dispatch(connection, session, intent).await?;
+        finish_journey(connection, session).await?;
+    }
+    Ok(false)
 }
 
 fn prompt() -> io::Result<()> {
@@ -163,6 +188,7 @@ async fn dispatch(
         ),
         Intent::Say(text) => println!("{text}"),
         Intent::Stop => {
+            session.dialogue.queue.clear();
             if can_act(connection) {
                 let moving = session.journey.is_some();
                 stop(connection, session).await?;
@@ -297,10 +323,12 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
     let phase = status.phase;
     let journey = session.journey.take().expect("active intention");
     if journey.cancelled {
+        session.dialogue.queue.clear();
         println!("{}", journey.interrupted("stop before going any farther."));
         return Ok(());
     }
     if phase != TravelPhase::Arrived {
+        session.dialogue.queue.clear();
         println!(
             "{}",
             journey.interrupted(&interruption(
@@ -315,6 +343,7 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
     // Arrival wins over hazards in backend travel, but never authorizes another
     // automatic action. Keep this check even while combining the narration.
     if !hazards(state).is_subset(&journey.hazards) {
+        session.dialogue.queue.clear();
         println!(
             "{}",
             journey.interrupted(&interruption(TravelPhase::Hazard, state, &journey.hazards))
@@ -450,6 +479,7 @@ async fn transact(
                 ServerMessage::Ack { request_id, entry_id } if request_id == id => return Ok(Some(entry_id)),
                 ServerMessage::Snapshot { request_id, .. } | ServerMessage::History { request_id, .. } if request_id == id => return Ok(Some(None)),
                 ServerMessage::Error {request_id, code, ..} if request_id.as_ref() == Some(&id) => {
+                    session.dialogue.queue.clear();
                     println!("{}", match code {
                         ErrorCode::InvalidAction => invalid,
                         ErrorCode::NotController | ErrorCode::ControlTaken => "Another player has control. You are observing.",

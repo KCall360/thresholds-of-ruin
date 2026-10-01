@@ -440,3 +440,114 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     ));
     assert_eq!(describe_with(&s, &held), plain);
 }
+
+#[test]
+fn multi_command_sentence_chains_and_queues_remaining_commands() {
+    let s = state();
+    let mut dialogue = Dialogue::default();
+    let first = dialogue.interpret("take token. east. take tablet", &s);
+    assert_eq!(
+        first,
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None,
+        })
+    );
+    assert_eq!(dialogue.queue.len(), 2);
+    assert_eq!(dialogue.queue[0], "east");
+    assert_eq!(dialogue.queue[1], "take tablet");
+}
+
+#[test]
+fn ditransitive_attack_and_unlock_with_carried_items() {
+    let mut s = state();
+    s.observation.visible_actors.push(ActorView {
+        asset: None,
+        id: ActorId(2),
+        name: "goblin scout".into(),
+        description: "A goblin.".into(),
+        position: Position { x: 1, y: 0, z: 0 },
+    });
+    let mut dialogue = Dialogue::default();
+
+    // Weapon not carried
+    assert_eq!(
+        dialogue.interpret("attack goblin with iron sword", &s),
+        Intent::Say("You don't have the iron sword.".into())
+    );
+
+    // Carry weapon
+    s.observation.inventory.push(ItemView {
+        asset: None,
+        id: 10,
+        name: "iron sword".into(),
+        description: "A sword.".into(),
+        quantity: 1,
+        appearance: "sword".into(),
+        identified: true,
+    });
+
+    // Weapon carried -> attacks goblin
+    assert_eq!(
+        dialogue.interpret("attack goblin with iron sword", &s),
+        Intent::Action(Action::Attack { target: ActorId(2) })
+    );
+
+    // Door and key
+    s.observation.visible_cells[1].door = Some(DoorView {
+        asset: None,
+        id: 101,
+        name: "oak door".into(),
+        description: "A wooden door.".into(),
+        open: false,
+        reachable: true,
+        approaches: vec!["cell-0".into()],
+    });
+
+    // Key not carried
+    assert_eq!(
+        dialogue.interpret("unlock door with brass key", &s),
+        Intent::Say("You don't have the brass key.".into())
+    );
+
+    // Carry key
+    s.observation.inventory.push(ItemView {
+        asset: None,
+        id: 11,
+        name: "brass key".into(),
+        description: "A key.".into(),
+        quantity: 1,
+        appearance: "key".into(),
+        identified: true,
+    });
+
+    // Key carried -> opens door
+    assert_eq!(
+        dialogue.interpret("unlock door with brass key", &s),
+        Intent::Action(Action::SetDoor {
+            door: 101,
+            open: true,
+        })
+    );
+}
+
+#[test]
+fn take_all_queues_remaining_place_items() {
+    let mut s = state();
+    let mut second = s.observation.ground_items[0].clone();
+    second.item.id = 5;
+    second.item.name = "silver coin".into();
+    s.observation.ground_items.push(second);
+
+    let mut dialogue = Dialogue::default();
+    let first = dialogue.interpret("take all", &s);
+    assert_eq!(
+        first,
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None,
+        })
+    );
+    assert_eq!(dialogue.queue.len(), 1);
+    assert_eq!(dialogue.queue[0], "take silver coin");
+}

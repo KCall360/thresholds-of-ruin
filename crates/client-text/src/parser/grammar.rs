@@ -1,0 +1,379 @@
+//! Sentence-level grammar and syntax pattern matching.
+
+use tor_protocol::Direction;
+
+use super::{
+    lexicon::{parse_direction, parse_preposition, parse_verb, Preposition, Verb},
+    noun_phrase::{parse_noun_phrase, split_conjunction_phrases, NounPhrase},
+    token::Token,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParsedCommand {
+    Intransitive {
+        verb: Verb,
+    },
+    Directional {
+        direction: Direction,
+    },
+    Transitive {
+        verb: Verb,
+        direct: NounPhrase,
+    },
+    Ditransitive {
+        verb: Verb,
+        direct: NounPhrase,
+        preposition: Preposition,
+        indirect: NounPhrase,
+    },
+    MultiTransitive {
+        verb: Verb,
+        direct_list: Vec<NounPhrase>,
+    },
+    Step {
+        direction: Direction,
+    },
+    Say {
+        text: String,
+    },
+    Stop,
+    Again,
+    Help {
+        topic: Option<String>,
+    },
+    /// A conversational follow-up (e.g. "the copper one", "copper", "first")
+    /// answering a previous disambiguation question.
+    Clarification(NounPhrase),
+}
+
+/// Matches a sentence of tokens to a ParsedCommand.
+pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
+    if tokens.is_empty() {
+        return Err("Please say what you want to do.".into());
+    }
+
+    // 1. Check for single direction (e.g. "north", "ne", "up")
+    if tokens.len() == 1 {
+        if let Some(word) = tokens[0].as_word() {
+            if let Some(dir) = parse_direction(word) {
+                return Ok(ParsedCommand::Directional { direction: dir });
+            }
+        }
+    }
+
+    // 2. Multi-word verb phrases at the beginning of the sentence
+    let words: Vec<&str> = tokens.iter().filter_map(|t| t.as_word()).collect();
+    if words.len() >= 2 {
+        match (words[0], words[1]) {
+            ("pick", "up") => {
+                return parse_transitive_or_ditransitive(Verb::Take, &tokens[2..]);
+            }
+            ("put", "down") => {
+                return parse_transitive_or_ditransitive(Verb::Drop, &tokens[2..]);
+            }
+            ("look", "at") => {
+                return parse_transitive_or_ditransitive(Verb::Examine, &tokens[2..]);
+            }
+            ("look", "in" | "inside") => {
+                let rest_np = parse_noun_phrase(&tokens[2..])?;
+                return Ok(ParsedCommand::Ditransitive {
+                    verb: Verb::Examine,
+                    direct: rest_np,
+                    preposition: Preposition::In,
+                    indirect: NounPhrase::empty(),
+                });
+            }
+            ("look", "under") => {
+                let rest_np = parse_noun_phrase(&tokens[2..])?;
+                return Ok(ParsedCommand::Ditransitive {
+                    verb: Verb::Examine,
+                    direct: rest_np,
+                    preposition: Preposition::Under,
+                    indirect: NounPhrase::empty(),
+                });
+            }
+            ("look", "behind") => {
+                let rest_np = parse_noun_phrase(&tokens[2..])?;
+                return Ok(ParsedCommand::Ditransitive {
+                    verb: Verb::Examine,
+                    direct: rest_np,
+                    preposition: Preposition::Behind,
+                    indirect: NounPhrase::empty(),
+                });
+            }
+            ("climb", "up") => {
+                return Ok(ParsedCommand::Directional {
+                    direction: Direction::Up,
+                });
+            }
+            ("climb", "down") => {
+                return Ok(ParsedCommand::Directional {
+                    direction: Direction::Down,
+                });
+            }
+            ("go", "to" | "toward" | "towards") => {
+                let np = parse_noun_phrase(&tokens[2..])?;
+                return Ok(ParsedCommand::Transitive {
+                    verb: Verb::Go,
+                    direct: np,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    // 3. Match leading verb
+    let first_token = &tokens[0];
+    let leading_verb = first_token.as_word().and_then(parse_verb);
+
+    if let Some(verb) = leading_verb {
+        let rest = &tokens[1..];
+
+        // Intransitive cases
+        if rest.is_empty() {
+            return match verb {
+                Verb::Look => Ok(ParsedCommand::Intransitive { verb: Verb::Look }),
+                Verb::Inventory => Ok(ParsedCommand::Intransitive {
+                    verb: Verb::Inventory,
+                }),
+                Verb::Wait => Ok(ParsedCommand::Intransitive { verb: Verb::Wait }),
+                Verb::Quit => Ok(ParsedCommand::Intransitive { verb: Verb::Quit }),
+                Verb::Stop => Ok(ParsedCommand::Stop),
+                Verb::Again => Ok(ParsedCommand::Again),
+                Verb::Help => Ok(ParsedCommand::Help { topic: None }),
+                _ => Err(format!(
+                    "What do you want to {}?",
+                    first_token.as_word().unwrap_or("act on")
+                )),
+            };
+        }
+
+        // Special handling for Help with topic
+        if verb == Verb::Help {
+            let topic = rest.iter().map(|t| t.text()).collect::<Vec<_>>().join(" ");
+            return Ok(ParsedCommand::Help { topic: Some(topic) });
+        }
+
+        // Special handling for Step <direction>
+        if verb == Verb::Step {
+            if rest.len() == 1 {
+                if let Some(w) = rest[0].as_word() {
+                    if let Some(dir) = parse_direction(w) {
+                        return Ok(ParsedCommand::Step { direction: dir });
+                    }
+                }
+            }
+            return Err("Which direction would you like to step?".into());
+        }
+
+        // Special handling for Go <direction> or Go <place/noun>
+        if verb == Verb::Go {
+            if rest.len() == 1 {
+                if let Some(w) = rest[0].as_word() {
+                    if let Some(dir) = parse_direction(w) {
+                        return Ok(ParsedCommand::Directional { direction: dir });
+                    }
+                }
+            }
+            let np = parse_noun_phrase(rest)?;
+            return Ok(ParsedCommand::Transitive {
+                verb: Verb::Go,
+                direct: np,
+            });
+        }
+
+        // Say <text>
+        if verb == Verb::Say {
+            let text = rest.iter().map(|t| t.text()).collect::<Vec<_>>().join(" ");
+            return Ok(ParsedCommand::Say { text });
+        }
+
+        // General transitive / ditransitive / multi-transitive
+        return parse_transitive_or_ditransitive(verb, rest);
+    }
+
+    // 4. If no leading verb, check if it's a noun phrase answering a clarification question
+    if let Ok(np) = parse_noun_phrase(tokens) {
+        return Ok(ParsedCommand::Clarification(np));
+    }
+
+    Err("I don't understand that sentence. Type help for things you can try.".into())
+}
+
+/// Helper to parse the remainder of a command as either:
+/// 1. Ditransitive: <direct> <prep> <indirect> (e.g. "goblin with iron sword")
+/// 2. MultiTransitive: <noun1> and <noun2> (e.g. "copper token and stone tablet")
+/// 3. Transitive: <noun> (e.g. "brass lantern")
+fn parse_transitive_or_ditransitive(verb: Verb, tokens: &[Token]) -> Result<ParsedCommand, String> {
+    if tokens.is_empty() {
+        return Err(format!("What do you want to {verb:?}?"));
+    }
+
+    // Search for a preposition that separates direct and indirect objects
+    // We scan from index 1 to tokens.len() - 1 so both sides are non-empty
+    let mut prep_split = None;
+    for (i, token) in tokens.iter().enumerate().skip(1) {
+        if let Some(word) = token.as_word() {
+            if let Some(prep) = parse_preposition(word) {
+                prep_split = Some((i, prep));
+                break;
+            }
+        }
+    }
+
+    if let Some((idx, prep)) = prep_split {
+        let direct_tokens = &tokens[..idx];
+        let indirect_tokens = &tokens[idx + 1..];
+
+        let direct = parse_noun_phrase(direct_tokens)?;
+        let indirect = parse_noun_phrase(indirect_tokens)?;
+
+        return Ok(ParsedCommand::Ditransitive {
+            verb,
+            direct,
+            preposition: prep,
+            indirect,
+        });
+    }
+
+    // Check for conjunctions in the direct object (e.g. "sword and shield")
+    let conjunction_groups = split_conjunction_phrases(tokens);
+    if conjunction_groups.len() > 1 {
+        let mut direct_list = Vec::new();
+        for group in conjunction_groups {
+            direct_list.push(parse_noun_phrase(&group)?);
+        }
+        return Ok(ParsedCommand::MultiTransitive { verb, direct_list });
+    }
+
+    // Ordinary transitive command
+    let direct = parse_noun_phrase(tokens)?;
+    Ok(ParsedCommand::Transitive { verb, direct })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::token::tokenize;
+
+    #[test]
+    fn test_directional() {
+        let tokens = tokenize("north");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Directional {
+                direction: Direction::North
+            }
+        );
+
+        let tokens = tokenize("go east");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Directional {
+                direction: Direction::East
+            }
+        );
+    }
+
+    #[test]
+    fn test_transitive() {
+        let tokens = tokenize("take the copper token");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Take);
+                assert_eq!(direct.head.as_deref(), Some("token"));
+                assert_eq!(direct.adjectives, vec!["copper"]);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_multiword_verbs() {
+        let tokens = tokenize("pick up 3 arrows");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Take);
+                assert_eq!(direct.quantity, Some(3));
+                assert_eq!(direct.head.as_deref(), Some("arrows"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+
+        let tokens = tokenize("look at weathered stone tablet");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Transitive { verb, direct } => {
+                assert_eq!(verb, Verb::Examine);
+                assert_eq!(direct.head.as_deref(), Some("tablet"));
+                assert_eq!(direct.adjectives, vec!["weathered", "stone"]);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_ditransitive_combat() {
+        let tokens = tokenize("attack the goblin with iron sword");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Ditransitive {
+                verb,
+                direct,
+                preposition,
+                indirect,
+            } => {
+                assert_eq!(verb, Verb::Attack);
+                assert_eq!(direct.head.as_deref(), Some("goblin"));
+                assert_eq!(preposition, Preposition::With);
+                assert_eq!(indirect.head.as_deref(), Some("sword"));
+                assert_eq!(indirect.adjectives, vec!["iron"]);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_ditransitive_manipulation() {
+        let tokens = tokenize("take copper token from stone floor");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Ditransitive {
+                verb,
+                direct,
+                preposition,
+                indirect,
+            } => {
+                assert_eq!(verb, Verb::Take);
+                assert_eq!(direct.head.as_deref(), Some("token"));
+                assert_eq!(preposition, Preposition::From);
+                assert_eq!(indirect.head.as_deref(), Some("floor"));
+                assert_eq!(indirect.adjectives, vec!["stone"]);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_multi_transitive() {
+        let tokens = tokenize("take sword and shield");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::MultiTransitive { verb, direct_list } => {
+                assert_eq!(verb, Verb::Take);
+                assert_eq!(direct_list.len(), 2);
+                assert_eq!(direct_list[0].head.as_deref(), Some("sword"));
+                assert_eq!(direct_list[1].head.as_deref(), Some("shield"));
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_clarification_noun_phrase() {
+        let tokens = tokenize("the copper one");
+        match match_sentence(&tokens).unwrap() {
+            ParsedCommand::Clarification(np) => {
+                assert_eq!(np.adjectives, vec!["copper"]);
+                assert!(np.is_one);
+            }
+            other => panic!("Unexpected: {other:?}"),
+        }
+    }
+}

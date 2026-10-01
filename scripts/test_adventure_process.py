@@ -201,6 +201,14 @@ class AdventureProcesses(unittest.TestCase):
         resumed, _ = self.adventure()
         self.assertIn("empty-handed", self.say(resumed, "inventory"))
 
+    def test_multi_command_sentence_chains_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        response = self.say(player, "examine token. take it. east")
+        self.assertIn("worn spiral", response)
+        self.assertIn("You pick up the copper token.", response)
+        self.assertIn("You walk east.", response)
+
 
 if __name__ == "__main__":
     unittest.main()
