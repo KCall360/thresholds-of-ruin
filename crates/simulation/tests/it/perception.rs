@@ -127,3 +127,25 @@ fn movement_keeps_the_observers_axes_when_crossing_a_rotated_join() {
     game.act(actor, Action::Move(Direction::South)).unwrap();
     assert_eq!(game.observe(actor).unwrap().location, cell(3, 1, 2, 1));
 }
+
+/// An actor's asset is in its own observation (for views of itself from
+/// another angle) and in every view of it others get.
+#[test]
+fn an_actors_asset_is_disclosed_with_it_and_to_itself() {
+    let mut game = Game::two_room_in_stone(1);
+    let ticks = NonZeroU64::new(100).unwrap();
+    let me = game.spawn_actor(cell(1, 1, 1, 0), ticks).unwrap();
+    let other = game.spawn_actor(cell(1, 3, 1, 0), ticks).unwrap();
+    game.set_actor_asset(me, Some("creature.delver".into()))
+        .unwrap();
+    game.set_actor_asset(other, Some("creature.rat".into()))
+        .unwrap();
+    let mine = game.observe(me).unwrap();
+    assert_eq!(mine.asset.as_deref(), Some("creature.delver"));
+    let seen = mine.visible_actors.iter().find(|a| a.id == other).unwrap();
+    assert_eq!(seen.asset.as_deref(), Some("creature.rat"));
+    assert_eq!(
+        game.set_actor_asset(tor_simulation::ActorId(999), None),
+        Err(GameError::UnknownActor)
+    );
+}

@@ -287,6 +287,31 @@ fn read_region_row(
         .map_err(|_| storage_failure())?;
     bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
 }
+/// Reads the save's copies of region files, on a connection of its own
+/// opened on first use. A copy is checked against the package index's hash
+/// when it's used, so a damaged copy fails closed.
+#[derive(Debug)]
+pub(crate) struct SourceReader {
+    path: PathBuf,
+    conn: Option<Connection>,
+}
+impl SourceReader {
+    pub(crate) fn read(&mut self, region: u64) -> Result<Option<String>, Failure> {
+        if self.conn.is_none() {
+            self.conn = Some(connection(&self.path)?);
+        }
+        self.conn
+            .as_ref()
+            .unwrap()
+            .query_row(
+                "SELECT source FROM region_sources WHERE region=?1",
+                [region as i64],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| storage_failure())
+    }
+}
 /// Reads region rows on a connection of its own, opened on first use.
 #[derive(Debug)]
 pub(crate) struct RegionReader {
@@ -339,6 +364,15 @@ fn write_sources(tx: &Connection, sources: &[(u64, Arc<str>)]) -> Result<(), Fai
         }
     }
     Ok(())
+}
+/// Whether a record of `record` bytes, copying region files of `copied`
+/// bytes, may join a queue already holding `pending`. The record itself must
+/// fit. The files it copies may take it over the limit only in an empty
+/// queue, which saving then drains at once: otherwise a command whose build
+/// copies many large region files could never be saved.
+fn fits_queue(pending: usize, record: usize, copied: usize, max: usize) -> bool {
+    let with_record = pending.saturating_add(record);
+    with_record <= max && (pending == 0 || with_record.saturating_add(copied) <= max)
 }
 /// The package index is kept in chunks under the frame limit.
 const PACKAGE_CHUNK: usize = 512 * 1024;
@@ -673,11 +707,12 @@ fn attach_package(conn: &Connection, archive: &mut Archive) -> Result<BTreeSet<u
                 .collect::<Result<_, _>>()
         })
         .map_err(|_| invalid_archive())?;
-    let sources: Vec<(i64, String)> = conn
-        .prepare("SELECT region, source FROM region_sources ORDER BY region")
+    // Only which regions have copies: each copy is read when first needed.
+    let sources: Vec<i64> = conn
+        .prepare("SELECT region FROM region_sources ORDER BY region")
         .and_then(|mut statement| {
             statement
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .query_map([], |r| r.get(0))?
                 .collect::<Result<_, _>>()
         })
         .map_err(|_| invalid_archive())?;
@@ -701,14 +736,10 @@ fn attach_package(conn: &Connection, archive: &mut Archive) -> Result<BTreeSet<u
     let package = Arc::make_mut(package);
     package.index = Arc::new(index);
     package.sources = Default::default();
-    let mut saved = BTreeSet::new();
-    for (region, text) in sources {
-        let region = u64::try_from(region).map_err(|_| invalid_archive())?;
-        // Checked against the index's hash when used.
-        package.sources.insert(region, Arc::from(text));
-        saved.insert(region);
-    }
-    Ok(saved)
+    sources
+        .into_iter()
+        .map(|region| u64::try_from(region).map_err(|_| invalid_archive()))
+        .collect()
 }
 
 #[derive(Debug)]
@@ -909,8 +940,14 @@ impl Store {
                 },
             )?
         };
-        let len = bytes.len() + sources.iter().map(|(_, text)| text.len()).sum::<usize>();
-        if s.status.pending_bytes.saturating_add(len) > shared.policy.max_pending_bytes {
+        let copied = sources.iter().map(|(_, text)| text.len()).sum::<usize>();
+        let len = bytes.len() + copied;
+        if !fits_queue(
+            s.status.pending_bytes,
+            bytes.len(),
+            copied,
+            shared.policy.max_pending_bytes,
+        ) {
             s.force = s.status.accepted_sequence;
             shared.wake.notify_one();
             return Err(Failure::new(
@@ -958,6 +995,13 @@ impl Store {
             *reader = Some(connection(&self.0.path)?);
         }
         read_region_row(reader.as_ref().unwrap(), id)
+    }
+    /// A reader of the save's region file copies, on a connection of its own.
+    pub(crate) fn source_reader(&self) -> SourceReader {
+        SourceReader {
+            path: self.0.path.clone(),
+            conn: None,
+        }
     }
     /// Whether both handles are the same open save.
     pub(crate) fn same(&self, other: &Store) -> bool {
@@ -1178,7 +1222,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
         let package = crate::scenario_package::read_package(&root).unwrap();
         let index = package.index(0).unwrap();
-        let record = package.build_region(0, &index, 1).unwrap();
+        let (record, _) = package.build_region(0, &index, 1).unwrap();
         let row = region_frame(7, &record).unwrap();
         let write = |keep: &[u64], rows: Vec<(u64, Vec<u8>)>| RegionWrite {
             rows,
@@ -1217,7 +1261,7 @@ mod tests {
         assert_eq!(stored(&conn), [(7, row.clone())]);
         // A retry must match the stored row exactly; a row is never rewritten.
         commit(&mut conn, &first, "").unwrap();
-        let other = region_frame(7, &package.build_region(0, &index, 2).unwrap()).unwrap();
+        let other = region_frame(7, &package.build_region(0, &index, 2).unwrap().0).unwrap();
         assert!(commit(&mut conn, &write(&[7], vec![(7, other)]), "").is_err());
         assert_eq!(stored(&conn), [(7, row.clone())]);
         // Rows decode to their record, and only under their own identity.
@@ -1712,6 +1756,30 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         (records, sources)
+    }
+
+    #[test]
+    fn region_files_over_the_queue_limit_still_fit_an_empty_queue() {
+        let max = 8 * MAX_PAYLOAD;
+        // Region files over the limit still fit an empty queue...
+        assert!(fits_queue(0, 100, 9 * MAX_PAYLOAD, max));
+        // ...but not one that holds anything.
+        assert!(!fits_queue(1, 100, 9 * MAX_PAYLOAD, max));
+        assert!(fits_queue(MAX_PAYLOAD, 100, MAX_PAYLOAD, max));
+        // The record itself must always fit.
+        assert!(!fits_queue(0, max + 1, 0, max));
+        assert!(!fits_queue(max, 1, 0, max));
+    }
+
+    #[test]
+    fn opening_a_save_reads_no_region_file_copies_until_needed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("copies.db");
+        streaming_fixture(&path);
+        let (_, archive, _, _, _, saved) = load(&path).unwrap();
+        assert!(saved.len() >= 4, "{saved:?}");
+        let package = archive.scenario.package.unwrap();
+        assert_eq!(package.sources.texts_in_memory(), 0);
     }
 
     #[test]

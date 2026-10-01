@@ -165,16 +165,21 @@ A save pins its package by the certificate's model hash. It keeps the manifest
 and the region index, and copies each region file into its `region_sources`
 table the first time a region is built from it (with the neighbours whose walls
 that build reads), in the same transaction as the journal record of the command
-that built it. Replay rebuilds regions from these copies, and each copy is
-checked against the index's hash when it's used; a damaged copy fails closed.
+that built it. A build reports exactly the files it read, and those are
+the ones copied; declaring a generated region reads its file too, so that's
+copied as well. Replay rebuilds regions from these copies, read from the save
+only when first needed, and each copy is checked against the index's hash when
+it's used; a damaged copy fails closed. A command whose build copies more than
+the save queue's limit is still accepted when nothing else is queued.
 So a save's size grows with the regions played, not the package.
 
 Regions not built yet are read from the package directory, checked against the
-index. A save remembers where its package was. If regions remain unbuilt and
-that directory is gone or holds a different package, the server refuses to
-resume and asks for `--scenario` naming the same package, rather than failing
-when play reaches them. Once every region the game can build has been copied,
-it resumes without the package.
+index. A save remembers where its package was. If a region the game has
+declared could still need a file the save doesn't hold (its own, or a
+neighbour's), and that directory is gone or holds a different package, the
+server refuses to resume and asks for `--scenario` naming the same package,
+rather than failing when play reaches it. Otherwise it resumes without the
+package, even if the package has regions nothing leads to.
 
 ### Runtime changes
 

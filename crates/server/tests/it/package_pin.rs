@@ -280,6 +280,35 @@ fn a_fully_built_game_replays_from_its_own_copies_without_the_package() {
 }
 
 #[test]
+fn a_region_nothing_links_to_doesnt_block_resuming_without_the_package() {
+    let temp = tempfile::tempdir().unwrap();
+    let package = temp.path().join("package");
+    support::copy_package(&corridor_root(), &package);
+    // An eighth hall that no portal reaches: no build can ever need it.
+    std::fs::write(
+        package.join("regions/8.toml"),
+        "id = 8\nname = \"Sealed hall\"\nsize = [4, 3, 1]\nanchors = { start = [1, 1, 0] }\n",
+    )
+    .unwrap();
+    scenario_package::validate(&package).unwrap();
+    let mut scenario = scenario_package::load(&package, 5, None, false).unwrap();
+    scenario.streaming = Some(Streaming {
+        active_radius: 0,
+        load_radius: 6,
+    });
+    let save = temp.path().join("game.db");
+    let mut engine = Engine::open_with_policy(&save, scenario, replay_everything()).unwrap();
+    walk(&mut engine, Direction::East, 4);
+    engine.flush().unwrap();
+    let expected = engine.state(ActorId(1)).unwrap();
+    drop(engine);
+    std::fs::remove_dir_all(&package).unwrap();
+    let engine =
+        Engine::open_with_policy(&save, Scenario::two_room(0), replay_everything()).unwrap();
+    assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+}
+
+#[test]
 fn a_damaged_region_file_copy_fails_closed() {
     let temp = tempfile::tempdir().unwrap();
     let package = temp.path().join("package");

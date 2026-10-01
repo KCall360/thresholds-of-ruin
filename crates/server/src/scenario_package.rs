@@ -391,7 +391,14 @@ pub struct RegionSources(Arc<std::sync::Mutex<SourceState>>);
 #[derive(Debug, Default)]
 struct SourceState {
     directory: Option<std::path::PathBuf>,
+    /// Texts held in memory: every region's for a package read whole, and
+    /// none otherwise.
     texts: BTreeMap<u64, Arc<str>>,
+    /// The save's copies, read when first needed, and which regions have one.
+    saved: Option<(crate::storage::SourceReader, BTreeSet<u64>)>,
+    /// Recently read texts, so a region's file is read once for its build
+    /// and the save's copy of it.
+    recent: std::collections::VecDeque<(u64, Arc<str>)>,
     /// Recently parsed regions, so building a region and then its neighbour
     /// doesn't parse shared neighbours twice.
     parsed: std::collections::VecDeque<(u64, Arc<RegionDef>)>,
@@ -407,9 +414,23 @@ impl RegionSources {
         Self(Arc::new(std::sync::Mutex::new(SourceState {
             directory: directory.map(Path::to_path_buf),
             texts,
+            saved: None,
+            recent: Default::default(),
             parsed: Default::default(),
             files_read: 0,
         })))
+    }
+    /// Read these regions' files from the save's copies, when first needed.
+    pub(crate) fn attach_saved(
+        &self,
+        reader: crate::storage::SourceReader,
+        regions: BTreeSet<u64>,
+    ) {
+        self.0.lock().unwrap().saved = Some((reader, regions));
+    }
+    /// Region file texts held in memory, other than a few recent ones.
+    pub fn texts_in_memory(&self) -> usize {
+        self.0.lock().unwrap().texts.len()
     }
     /// Region files read from the package directory so far.
     pub fn files_read(&self) -> usize {
@@ -422,15 +443,26 @@ impl RegionSources {
     pub(crate) fn has_directory(&self) -> bool {
         self.0.lock().unwrap().directory.is_some()
     }
-    /// Keep a region's text in memory, as the save's copy.
-    pub(crate) fn insert(&self, region: u64, text: Arc<str>) {
-        self.0.lock().unwrap().texts.insert(region, text);
-    }
     /// A region file's text, checked against the index.
     pub(crate) fn text(&self, entry: &IndexedRegion) -> Result<Arc<str>, Failure> {
         let (text, directory) = {
-            let s = self.0.lock().unwrap();
-            (s.texts.get(&entry.id).cloned(), s.directory.clone())
+            let mut s = self.0.lock().unwrap();
+            let held = s.texts.get(&entry.id).cloned().or_else(|| {
+                s.recent
+                    .iter()
+                    .find(|(id, _)| *id == entry.id)
+                    .map(|(_, text)| text.clone())
+            });
+            let held = match (held, &mut s.saved) {
+                (Some(text), _) => Some(text),
+                (None, Some((reader, regions))) if regions.contains(&entry.id) => {
+                    Some(Arc::from(reader.read(entry.id)?.ok_or_else(|| {
+                        fail(format!("The save's copy of region {} is missing", entry.id))
+                    })?))
+                }
+                _ => None,
+            };
+            (held, s.directory.clone())
         };
         let text = match (text, directory) {
             (Some(text), _) => text,
@@ -446,6 +478,15 @@ impl RegionSources {
                 )))
             }
         };
+        {
+            let mut s = self.0.lock().unwrap();
+            if !s.texts.contains_key(&entry.id) && !s.recent.iter().any(|(id, _)| *id == entry.id) {
+                if s.recent.len() >= PARSED_REGIONS {
+                    s.recent.pop_front();
+                }
+                s.recent.push_back((entry.id, text.clone()));
+            }
+        }
         require(
             digest(text.as_bytes()) == entry.hash,
             format!(
@@ -1027,19 +1068,23 @@ impl Package {
         if let Some(t) = self.region_terrain(r.id) {
             assets.extend([&t.floor, &t.wall, &t.door].into_iter().flatten().cloned());
         }
-        let generated = r.generate.iter().flat_map(|g| {
-            g.actors
-                .iter()
-                .flat_map(|p| &p.archetypes)
-                .chain(g.items.iter().flat_map(|p| &p.archetypes))
-        });
-        let named = r
-            .actors
+        // Each asset exactly as building the region assigns it: an actor
+        // its archetype's, an item its item asset.
+        let generated = r.generate.iter();
+        let actors = r.actors.iter().filter_map(|a| a.archetype.as_ref()).chain(
+            generated
+                .clone()
+                .flat_map(|g| g.actors.iter().flat_map(|p| &p.archetypes)),
+        );
+        let items = r
+            .items
             .iter()
-            .filter_map(|a| a.archetype.as_ref())
-            .chain(r.items.iter().filter_map(|i| i.archetype.as_ref()))
-            .chain(generated);
-        for key in named {
+            .filter_map(|i| i.archetype.as_ref())
+            .chain(generated.flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes)));
+        for key in actors {
+            assets.extend(self.archetype(&Some(key.clone()))?.asset);
+        }
+        for key in items {
             assets.extend(self.item_asset(&self.archetype(&Some(key.clone()))?));
         }
         Ok(assets)
@@ -1661,12 +1706,15 @@ impl Package {
     /// its neighbours (through `index`), so the result doesn't depend on
     /// which regions were built before, and the cost doesn't depend on the
     /// package's size.
+    ///
+    /// Also returns the regions whose files the build read: a save copies
+    /// exactly these, so replaying the build never needs the package.
     pub(crate) fn build_region(
         &self,
         seed: u64,
         index: &PackageIndex,
         region: u64,
-    ) -> Result<tor_simulation::RegionRecord, Failure> {
+    ) -> Result<(tor_simulation::RegionRecord, BTreeSet<u64>), Failure> {
         let r = index.region(self, region)?;
         self.check_region(&r)?;
         let mut shell: Vec<Arc<RegionDef>> = vec![r.clone()];
@@ -1676,6 +1724,7 @@ impl Package {
             }
         }
         shell.sort_by_key(|s| s.id);
+        let files = shell.iter().map(|s| s.id).collect();
         let shell: Vec<&RegionDef> = shell.iter().map(|s| &**s).collect();
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
@@ -1690,8 +1739,16 @@ impl Package {
             )?;
         }
         self.add_entities(&mut game, seed, index, &[&r])?;
-        game.into_region_record(RegionId(region))
-            .map_err(|e| fail(format!("Region {region}: {e:?}")))
+        let record = game
+            .into_region_record(RegionId(region))
+            .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
+        Ok((record, files))
+    }
+
+    /// Whether declaring `region` reads its file: a generated region's
+    /// generator runs to learn its identities.
+    pub(crate) fn declaring_reads_file(&self, region: u64) -> bool {
+        self.index.region(region).is_some_and(|r| r.generated)
     }
 
     /// These regions, in package order, with their walls and openings.
@@ -2201,6 +2258,7 @@ impl tor_simulation::RecordStore for PackageRecords {
         self.package
             .build_region(self.seed, &self.index, region.0)
             .ok()
+            .map(|(record, _)| record)
     }
     fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
         self.package.unbuilt_region(&self.index, region.0).ok()
@@ -2351,6 +2409,21 @@ mod region_lifecycle_tests {
     /// Building one region reads only it and its neighbours, however many
     /// regions the package has.
     #[test]
+    fn copying_a_built_regions_file_doesnt_read_it_again() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
+        let package = load(&root, 5, None, false).unwrap().package.unwrap();
+        let index = package.index(5).unwrap();
+        let (_, files) = package.build_region(5, &index, 3).unwrap();
+        let read = package.sources.files_read();
+        assert_eq!(read, files.len());
+        for region in files {
+            package.region_text(region).unwrap();
+        }
+        assert_eq!(package.sources.files_read(), read);
+    }
+
+    #[test]
     fn building_a_region_reads_only_it_and_its_neighbours() {
         let root =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor");
@@ -2360,7 +2433,13 @@ mod region_lifecycle_tests {
         let index = package.index(5).unwrap();
         for region in 1..=256 {
             let before = index.lookups();
-            package.build_region(5, &index, region).unwrap();
+            let (_, files) = package.build_region(5, &index, region).unwrap();
+            // Itself and the halls on either side, whose walls it reads.
+            let expected: BTreeSet<u64> = [region - 1, region, region + 1]
+                .into_iter()
+                .filter(|r| (1..=256).contains(r))
+                .collect();
+            assert_eq!(files, expected, "region {region}");
             let read = index.lookups() - before;
             assert!(read <= 3, "region {region} read {read} region definitions");
         }

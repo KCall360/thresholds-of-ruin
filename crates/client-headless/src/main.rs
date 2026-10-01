@@ -167,6 +167,9 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<Optio
                 ServerMessage::Ack { request_id, .. }
                 | ServerMessage::Snapshot { request_id, .. }
                 | ServerMessage::History { request_id, .. } if request_id == id => return Ok(None),
+                // A palette request is answered by the palette itself.
+                ServerMessage::Palette { request_id: Some(request_id), .. }
+                    if request_id == id => return Ok(None),
                 ServerMessage::Error { request_id: Some(request_id), code, message }
                     if request_id == id => return Ok(Some(format!("{code:?}: {message}"))),
                 _ => {}

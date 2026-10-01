@@ -25,6 +25,8 @@ struct Client {
     last_state: Option<StateView>,
     /// The palette last sent and its revision: the base for the next delta.
     palette: Option<(u64, BTreeSet<String>)>,
+    /// The region that palette was forecast from.
+    palette_region: Option<u64>,
     messages: mpsc::Sender<ServerMessage>,
     close: watch::Sender<bool>,
 }
@@ -130,6 +132,7 @@ impl Service {
                 observation_tick: 0,
                 last_state: None,
                 palette: None,
+                palette_region: None,
                 messages,
                 close,
             },
@@ -526,17 +529,34 @@ impl Service {
     /// acknowledged. Scenarios that name no assets send no palettes, but a
     /// palette request still gets an (empty) answer.
     fn palette_update(&mut self, id: u64, request_id: Option<&str>, full: bool) {
-        let Some(actor) = self.clients.get(&id).and_then(|c| c.actor) else {
+        let Some(client) = self.clients.get(&id) else {
             return;
         };
+        let Some(actor) = client.actor else {
+            return;
+        };
+        // A palette depends only on the actor's region: skip recomputing it
+        // while that stays the same.
+        let region = self.engine.palette_region(actor);
+        if !full && client.palette.is_some() && client.palette_region == region {
+            return;
+        }
         let assets = match self.engine.palette(actor) {
             Some(assets) => assets,
             None if request_id.is_some() => BTreeSet::new(),
             None => return,
         };
         let client = self.clients.get_mut(&id).expect("connected client");
+        if !full
+            && client
+                .palette
+                .as_ref()
+                .is_some_and(|(_, previous)| *previous == assets)
+        {
+            client.palette_region = region;
+            return;
+        }
         let body = match &client.palette {
-            Some((_, previous)) if !full && *previous == assets => return,
             Some((base, previous)) if !full => PaletteBody::Delta {
                 base: *base,
                 added: assets.difference(previous).cloned().collect(),
@@ -548,6 +568,7 @@ impl Service {
         };
         let revision = client.palette.as_ref().map_or(1, |(r, _)| r + 1);
         client.palette = Some((revision, assets));
+        client.palette_region = region;
         self.send(
             id,
             ServerMessage::Palette {

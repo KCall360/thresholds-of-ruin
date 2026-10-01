@@ -180,6 +180,41 @@ fn a_palette_forecasts_nearby_themes_never_what_regions_hold() {
 }
 
 #[test]
+fn a_game_that_doesnt_stream_gets_the_whole_packages_palette() {
+    let mut scenario = caves();
+    scenario.streaming = None;
+    let engine = Engine::memory(scenario).unwrap();
+    assert_eq!(
+        engine.palette(ActorId(1)),
+        Some(union(&[stone(), cave(), vault()]))
+    );
+}
+
+#[test]
+fn an_actor_shows_its_archetypes_asset_and_validation_checks_that_one() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(ROOT);
+    let temp = tempfile::tempdir().unwrap();
+    crate::support::copy_package(&root, temp.path());
+    let manifest = temp.path().join("scenario.toml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    // The rat's appearance pool names a forecast asset, but the rat itself
+    // shows creature.bat, which no theme names.
+    let edited = text
+        .replace(
+            "[archetypes.rat]\nasset = \"creature.rat\"",
+            "[archetypes.rat]\nasset = \"creature.bat\"\nname = \"rat\"\nappearance_pool = \"furs\"",
+        )
+        .replace(
+            "[assets]",
+            "[appearance_pools.furs]\nappearances = [\"grey fur\"]\nasset = \"creature.rat\"\n\n[assets]",
+        );
+    assert_ne!(edited, text);
+    std::fs::write(&manifest, edited).unwrap();
+    let error = scenario_package::validate(temp.path()).unwrap_err();
+    assert!(error.message.contains("creature.bat"), "{error}");
+}
+
+#[test]
 fn scenarios_without_assets_have_no_palette() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
     let engine = Engine::memory(scenario_package::load(&root, 5, None, false).unwrap()).unwrap();

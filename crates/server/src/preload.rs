@@ -24,6 +24,10 @@ pub(crate) enum Job {
     Read(RecordId),
 }
 
+/// A finished job: the record, and for a build, the regions whose files it
+/// read.
+pub(crate) type Prepared = (Shared<RegionRecord>, BTreeSet<u64>);
+
 /// Prepared results kept at most, so a preloader can't hold more than a
 /// horizon's worth of records however the reference points move.
 pub(crate) const PREPARED_LIMIT: usize = 32;
@@ -35,7 +39,7 @@ struct State {
     /// The job the thread is doing now.
     running: Option<Job>,
     /// Finished jobs not yet taken.
-    ready: BTreeMap<Job, Shared<RegionRecord>>,
+    ready: BTreeMap<Job, Prepared>,
     /// The save to read rows from, once the game has one.
     disk: Option<Store>,
     stop: bool,
@@ -89,7 +93,7 @@ impl Preloader {
     }
 
     /// A prepared result, taken so it's used once.
-    pub(crate) fn take(&self, job: Job) -> Option<Shared<RegionRecord>> {
+    pub(crate) fn take(&self, job: Job) -> Option<Prepared> {
         self.inner.state.lock().unwrap().ready.remove(&job)
     }
 
@@ -138,16 +142,17 @@ fn run(inner: &Inner, package: &Package, index: &PackageIndex, seed: u64) {
                     let fresh = disk.region_reader();
                     reader = Some((disk, fresh));
                 }
-                reader.as_mut()?.1.read(id).ok().flatten()
+                let record = reader.as_mut()?.1.read(id).ok().flatten()?;
+                Some((record, BTreeSet::new()))
             }),
         };
         let mut s = inner.state.lock().unwrap();
         s.running = None;
         // A failed job leaves nothing: the command does it itself, and
         // reports the failure if it recurs.
-        if let Some(record) = record {
+        if let Some((record, files)) = record {
             if s.ready.len() < PREPARED_LIMIT {
-                s.ready.insert(job, Shared::new(record));
+                s.ready.insert(job, (Shared::new(record), files));
             }
         }
         inner.wake.notify_all();
@@ -176,8 +181,10 @@ mod tests {
         let (preload, package, index) = preloader();
         preload.want(&[Job::Build(RegionId(3))]);
         preload.settle();
-        let prepared = preload.take(Job::Build(RegionId(3))).expect("prepared");
-        assert_eq!(*prepared, package.build_region(5, &index, 3).unwrap());
+        let (prepared, files) = preload.take(Job::Build(RegionId(3))).expect("prepared");
+        let (built, read) = package.build_region(5, &index, 3).unwrap();
+        assert_eq!(*prepared, built);
+        assert_eq!(files, read);
         assert!(preload.take(Job::Build(RegionId(3))).is_none());
     }
 

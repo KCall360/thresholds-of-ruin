@@ -191,7 +191,7 @@ pub fn observation(
                 description: "You recognize your own appearance from another angle.".into(),
                 id: p::ActorId(view.actor.0),
                 position: offset(cell.offset),
-                asset: None,
+                asset: view.asset.clone(),
             });
         }
     }
