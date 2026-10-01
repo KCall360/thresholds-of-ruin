@@ -6,7 +6,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_tungstenite::{
@@ -22,6 +22,8 @@ use tokio_tungstenite::{
 use tor_protocol::*;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+type IncomingRequest = (u64, String, Request, Option<std::time::Instant>);
 
 /// Native clients authenticate over a loopback-only WebSocket listener.
 /// Remote deployments and browser origins are deliberately not enabled yet.
@@ -61,19 +63,43 @@ pub async fn serve(
     let accounts = Arc::new(accounts);
     let capacity = Arc::new(Semaphore::new(128));
     let mut tasks = JoinSet::new();
+    let (request_tx, mut request_rx) = mpsc::channel::<IncomingRequest>(64);
     tokio::pin!(shutdown);
     // Delivery pacing only: simulation time still advances solely through actions.
     let mut travel_pump = tokio::time::interval(Duration::from_millis(75));
     travel_pump.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         tokio::select! {
+            biased;
             _ = &mut shutdown => break Ok(()),
-            _ = travel_pump.tick() => { let mut session = service.lock().await; session.advance_travel(); session.poll_saves(); },
+            Some((client_id, request_id, request, started)) = request_rx.recv() => {
+                if let Some(started) = started {
+                    let mut session = service.lock().await;
+                    let lock_ms = started.elapsed().as_secs_f64() * 1000.;
+                    let handle_started = std::time::Instant::now();
+                    session.deliver_or_advance(Some((client_id, request_id.clone(), request)));
+                    let handle_ms = handle_started.elapsed().as_secs_f64() * 1000.;
+                    drop(session);
+                    timing_event("server_handled", client_id, &request_id, lock_ms, handle_ms);
+                } else {
+                    let mut session = service.lock().await;
+                    session.deliver_or_advance(Some((client_id, request_id, request)));
+                }
+            }
+            _ = travel_pump.tick() => {
+                let mut session = service.lock().await;
+                session.deliver_or_advance(None);
+            }
             accepted = listener.accept() => {
                 let (socket, _) = match accepted { Ok(value) => value, Err(error) => break Err(error) };
                 if let Ok(permit) = capacity.clone().try_acquire_owned() {
-                    let service = service.clone(); let accounts = accounts.clone();
-                    tasks.spawn(async move { let _permit = permit; connection(socket, service, accounts).await; });
+                    let service = service.clone();
+                    let accounts = accounts.clone();
+                    let request_tx = request_tx.clone();
+                    tasks.spawn(async move {
+                        let _permit = permit;
+                        connection(socket, service, accounts, request_tx).await;
+                    });
                 }
             }
             _ = tasks.join_next(), if !tasks.is_empty() => {}
@@ -92,7 +118,12 @@ pub async fn serve(
     result
 }
 
-async fn connection(socket: TcpStream, service: Arc<Mutex<Service>>, accounts: Arc<Vec<Account>>) {
+async fn connection(
+    socket: TcpStream,
+    service: Arc<Mutex<Service>>,
+    accounts: Arc<Vec<Account>>,
+    request_tx: mpsc::Sender<IncomingRequest>,
+) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(16 * 1024))
         .max_frame_size(Some(16 * 1024));
@@ -164,17 +195,9 @@ async fn connection(socket: TcpStream, service: Arc<Mutex<Service>>, accounts: A
                 match incoming {
                     Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
                         Ok(ClientMessage::Request { request_id, request }) => {
-                            if timing {
-                                let started = std::time::Instant::now();
-                                let mut session = service.lock().await;
-                                let lock_ms = started.elapsed().as_secs_f64()*1000.;
-                                let handle_started = std::time::Instant::now();
-                                session.handle(client.id, request_id.clone(), request);
-                                let handle_ms = handle_started.elapsed().as_secs_f64()*1000.;
-                                drop(session);
-                                timing_event("server_handled", client.id, &request_id, lock_ms, handle_ms);
-                            } else {
-                                service.lock().await.handle(client.id, request_id, request);
+                            let started = timing.then(std::time::Instant::now);
+                            if request_tx.send((client.id, request_id, request, started)).await.is_err() {
+                                break;
                             }
                         },
                         _ => { send_error(&mut socket, ErrorCode::InvalidRequest, "Invalid request message").await; break; }
