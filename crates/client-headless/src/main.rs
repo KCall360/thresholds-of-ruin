@@ -79,48 +79,63 @@ async fn run() -> Result<(), Error> {
     });
     loop {
         tokio::select! {
-            message = connection.next() => {
-                emit(&connection, "update", Some(&message?), None)?;
-            },
-            line = rx.recv() => {
-                let Some(line) = line else { break; };
-                let line = line?;
-                let input = serde_json::from_str::<Input>(&line);
-                let result = match input {
-                    Ok(Input::Quit) => break,
-                    Ok(Input::Inspect) => None,
-                    Ok(Input::Act { action }) => {
-                        if connection.role() == AccessRole::Spectator {
-                            Some("Spectator access is read-only".into())
-                        } else if !connection.state.has_control() {
-                            Some("Actor control is required".into())
-                        } else {
-                            let request = Request::Command {
-                                branch: connection.state.branch().clone(),
-                                command: Command::Act {
-                                    expected_revision: connection.state.state().revision, action,
-                                },
-                            };
-                            transact(&mut connection, request).await?
-                        }
-                    },
-                    Ok(Input::Wizard { command }) => {
-                        // The server decides whether this account may use
-                        // wizard commands; spectators never can.
-                        let request = Request::Command {
-                            branch: connection.state.branch().clone(),
-                            command: Command::Wizard {
-                                expected_revision: connection.state.state().revision,
-                                operation: command,
+            biased;
+            ready = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
+                match ready {
+                    tor_client_common::FirstReady::Server(message) => {
+                        emit(&connection, "update", Some(&message?), None)?;
+                    }
+                    tor_client_common::FirstReady::Local(line) => {
+                        let Some(line) = line else { break; };
+                        let line = line?;
+                        let input = serde_json::from_str::<Input>(&line);
+                        let result = match input {
+                            Ok(Input::Quit) => break,
+                            Ok(Input::Inspect) => None,
+                            Ok(Input::Act { action }) => {
+                                if connection.role() == AccessRole::Spectator {
+                                    Some("Spectator access is read-only".into())
+                                } else if !connection.state.has_control() {
+                                    Some("Actor control is required".into())
+                                } else {
+                                    let request = Request::Command {
+                                        branch: connection.state.branch().clone(),
+                                        command: Command::Act {
+                                            expected_revision: connection.state.state().revision, action,
+                                        },
+                                    };
+                                    transact(&mut connection, request).await?
+                                }
                             },
+                            Ok(Input::Wizard { command }) => {
+                                // The server rejects a stale wizard command before
+                                // applying it. Rats and travel can move the revision
+                                // between this client's last look and the packet
+                                // arriving, so resubmit that same unapplied operation
+                                // at the revision the rejection disclosed.
+                                let mut result = None;
+                                for _ in 0..32 {
+                                    let request = Request::Command {
+                                        branch: connection.state.branch().clone(),
+                                        command: Command::Wizard {
+                                            expected_revision: connection.state.state().revision,
+                                            operation: command.clone(),
+                                        },
+                                    };
+                                    result = transact(&mut connection, request).await?;
+                                    if !wizard_still_unapplied(result.as_deref()) {
+                                        break;
+                                    }
+                                }
+                                result
+                            },
+                            Ok(Input::Request { request }) => transact(&mut connection, request).await?,
+                            Err(_) => Some("Invalid input; expected a JSON act, wizard, request, inspect or quit".into()),
                         };
-                        transact(&mut connection, request).await?
-                    },
-                    Ok(Input::Request { request }) => transact(&mut connection, request).await?,
-                    Err(_) => Some("Invalid input; expected a JSON act, wizard, request, inspect or quit".into()),
-                };
-                emit(&connection, "ready", None, result.as_deref())?;
-            },
+                        emit(&connection, "ready", None, result.as_deref())?;
+                    }
+                }
+            }
             _ = tokio::signal::ctrl_c() => break,
         }
     }
@@ -147,6 +162,12 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<Optio
             }
         }
     }).await.map_err(|_| "Server response timed out; outcome may be unknown. Inspect history after reconnecting before retrying.")?
+}
+
+/// True only when the wizard operation was rejected and not applied.
+/// A committed rewind, or any other error, must not be sent again.
+fn wizard_still_unapplied(error: Option<&str>) -> bool {
+    error.is_some_and(|error| error.starts_with("StaleRevision"))
 }
 
 fn emit(
@@ -194,6 +215,20 @@ fn emit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rejected_wizard_command_is_unapplied_and_other_results_are_final() {
+        assert!(wizard_still_unapplied(Some(
+            "StaleRevision: Refresh before a wizard operation"
+        )));
+        assert!(!wizard_still_unapplied(None));
+        assert!(!wizard_still_unapplied(Some(
+            "NotController: Acquire control before acting"
+        )));
+        assert!(!wizard_still_unapplied(Some(
+            "InvalidAction: Unknown wizard operation"
+        )));
+    }
 
     #[test]
     fn wizard_input_carries_a_developer_command() {
