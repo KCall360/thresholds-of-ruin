@@ -10,6 +10,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
+import test_adventure_process as adventure
 import test_ascii_process as ascii_support
 import test_headless_process as headless
 import test_text_process as support
@@ -249,6 +250,34 @@ class StreamingProcesses(unittest.TestCase):
         spectator.stop()
         again, _ = self.client(support.SPECTATOR_TOKEN)
         self.assertEqual(self.palette_of(again)["palette"]["revision"], 1)
+
+    def test_real_clients_describe_and_report_from_their_palettes(self):
+        self.server(scenario=GENERATED)
+        everything = sorted({"terrain.floor.stone", "terrain.wall.stone", "terrain.floor.cave",
+            "terrain.wall.cave", "creature.rat", "item.coin", "terrain.floor.marble",
+            "terrain.wall.marble", "creature.delver"})
+        # The text client takes control first, and the attach palette arrives
+        # before that's acknowledged, so even the first description uses it.
+        # The hall's stone floor has no word of its own: terrain.floor's.
+        player = adventure.AdventureProcess(self.bin / ("tor-client-text" + self.suffix),
+            ["--connect", self.address], token=support.TOKEN)
+        self.addCleanup(player.stop)
+        welcome = player.until(lambda line: line == "> ")
+        self.assertIn("You stand in a space with a flagstone floor.", welcome)
+        player.child.stdin.write("examine floor\n")
+        player.child.stdin.flush()
+        examined = player.until(lambda line: line == "> ")
+        self.assertIn("The visible floor is made of flagstone.", examined)
+        # The headless client reports the palette it holds, not just messages.
+        observer = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
+        before = self.frame(observer, lambda f: f["type"] == "ready")
+        self.assertIsNone(before["palette"]["revision"])
+        held = self.frame(observer, lambda f: f["palette"]["revision"] == 1)
+        self.assertEqual(held["palette"], {"revision": 1, "assets": everything, "stale": False})
+        self.assertEqual(held["message"]["type"], "palette")
+        # Asking again replaces it with the answer's revision.
+        answered = self.request(observer, {"type": "palette"})
+        self.assertEqual(answered["palette"], {"revision": 2, "assets": everything, "stale": False})
 
     def test_rewind_past_a_detach_then_a_different_future_survives_restart(self):
         server = self.server(wizard=True)

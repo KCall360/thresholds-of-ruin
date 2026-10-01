@@ -228,9 +228,40 @@ stream: `{"type":"palette","request_id":null,"palette":{"revision":1,"body":{"ty
 - The server recomputes a client's palette only when its actor's region
   changes, since a palette depends on nothing else.
 
-The headless client prints palette messages as they arrive and answers a
-`palette` request with the palette; the text and ASCII clients ignore
-palettes for now.
+### Palettes in the clients
+
+Every client's connection (`tor_client_common::Connection`) keeps a
+`Palette`: the revision and assets it last heard, applied from full palettes
+and deltas. It asks for the whole palette itself when:
+
+- a delta doesn't follow the revision it holds (or arrives before any full
+  palette). The palette is then *stale*, and nothing is drawn from it until a
+  full palette replaces it. While a request is outstanding, nothing more is
+  asked.
+- an observation names an asset the palette lacks. Each such asset is asked
+  about once per connection, so an asset the answer still lacks can't cause a
+  loop. Nothing is asked before the first palette, since attaching sends one.
+
+Clients resolve assets through their own built-in `AssetTable`, falling back
+through dotted prefixes: `terrain.floor.cave`, then `terrain.floor`, then
+`terrain`, then the client's own look. An asset the palette doesn't currently
+hold always gets the client's own look, even when the table knows it.
+
+- **Text:** the adventure interface describes floors, walls and ceilings, and
+  figures that have no disclosed name, by its asset words
+  (`tor_client_text::adventure::words`), so a `terrain.floor.cave` floor is
+  "packed earth". Disclosed names of actors, items and doors stay as they are,
+  since commands match them. The `--script` interface doesn't use assets.
+- **Headless:** every output line reports the palette held; see the
+  [headless client](headless-client.md).
+- **ASCII:** keeps the palette but doesn't draw with it yet; its glyph table
+  belongs with the ASCII redesign.
+
+`crates/client-common/tests/it/palette.rs` drives a `Connection` against a
+scripted server through a missed revision and a missing asset; real servers
+with the checked-in fixtures send neither, so the process test
+(`test_streaming_process.py`) covers the attach palette, a request, and the
+text client's words.
 
 ## Annotations
 

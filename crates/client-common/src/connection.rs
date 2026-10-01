@@ -1,4 +1,4 @@
-use crate::ClientState;
+use crate::{observation_assets, ClientState, Palette};
 use futures_util::{SinkExt, StreamExt};
 use std::{error::Error, net::SocketAddr, time::Duration};
 use tokio::{net::TcpStream, time::timeout};
@@ -14,6 +14,8 @@ const DEADLINE: Duration = Duration::from_secs(10);
 pub struct Connection {
     socket: Socket,
     pub state: ClientState,
+    /// The asset palette as last heard; [`Connection::next`] keeps it current.
+    pub palette: Palette,
     role: AccessRole,
     timing: bool,
     previous_timing_write_ms: f64,
@@ -71,6 +73,7 @@ impl Connection {
         Ok(Self {
             socket,
             state,
+            palette: Palette::default(),
             role,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
             previous_timing_write_ms: 0.,
@@ -105,8 +108,11 @@ impl Connection {
         Ok(request_id)
     }
 
-    /// Apply ordered updates before presentation. Waiting for a frame is safe
-    /// to cancel when terminal input becomes available.
+    /// Apply ordered updates and palettes before presentation. A palette that
+    /// misses a revision, or an observation naming an asset the palette
+    /// lacks, sends a `palette` request; its answer is an ordinary palette
+    /// message. Waiting for a frame is safe to cancel when terminal input
+    /// becomes available.
     pub async fn next(&mut self) -> Result<ServerMessage, ConnectionError> {
         let message = receive(&mut self.socket).await?;
         if self.timing {
@@ -128,6 +134,23 @@ impl Connection {
                     .map_err(|e| format!("Invalid snapshot: {e:?}"))?;
             }
             _ => {}
+        }
+        let ask = match &message {
+            ServerMessage::Update { .. } | ServerMessage::Snapshot { .. } => self
+                .palette
+                .notice(observation_assets(&self.state.state().observation)),
+            // A full palette may still lack what's already in view.
+            ServerMessage::Palette { palette, .. } => {
+                let gap = self.palette.apply(palette);
+                let missing = self
+                    .palette
+                    .notice(observation_assets(&self.state.state().observation));
+                gap || missing
+            }
+            _ => false,
+        };
+        if ask {
+            self.request(Request::Palette).await?;
         }
         Ok(message)
     }

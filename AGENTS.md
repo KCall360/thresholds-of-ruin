@@ -117,11 +117,17 @@ generated filler regions, and server-side asset palettes (protocol 19). A
 review of it found ten issues; branch `fix/review-4e` fixes them with
 regression tests, including the palette process test.
 
-**Still to do for 4e:** palettes in the clients (plan slice 6: a shared
-palette state and asset resolver in `client-common` with dotted-prefix
-fallback, word tables in the text client, the headless client reporting the
-current palette). The ASCII glyph table belongs with the ASCII redesign,
-which stays deferred until after 3s. Then the performance comparison
+**Palettes in the clients (slice 6)** are on branch `client/palettes`: a
+shared `Palette` and `AssetTable` in `client-common` (the connection asks for
+the palette again after a missed revision, and once per unexpected asset),
+asset words for surfaces and unnamed figures in the text client, and the
+palette in every headless output line; see
+[palettes in the clients](docs/protocol.md#palettes-in-the-clients). It needs
+a PR, CI on both platforms, and the maintainer's approval to merge. The ASCII
+glyph table belongs with the ASCII redesign, which stays deferred until after
+3s.
+
+**Still to do for 4e:** the performance comparison
 (`perf_compare.py` on the streaming cases against the pre-4e `main`), the
 launcher rebuild for format 14, and closing 4e in the roadmap. Run
 `scripts/verify.py quick` before each commit and `full` before pushing.

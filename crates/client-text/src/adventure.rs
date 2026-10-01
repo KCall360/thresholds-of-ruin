@@ -1,7 +1,7 @@
 //! Adventure presentation and intentions, using only the disclosed observer scene.
 use std::collections::{BTreeMap, BTreeSet};
 
-use tor_client_common::surfaces;
+use tor_client_common::{surfaces, AssetTable, Palette};
 use tor_protocol::*;
 
 use crate::{parse, parse_direction, safe, Input};
@@ -46,7 +46,15 @@ impl Dialogue {
         *self = Self::default();
     }
 
+    /// [`Dialogue::interpret_with`] without a palette: every thing keeps its
+    /// disclosed material or name.
     pub fn interpret(&mut self, line: &str, state: &StateView) -> Intent {
+        self.interpret_with(line, state, &Palette::default())
+    }
+
+    /// Interpret a line against the state in hand. Surfaces are described by
+    /// their asset words where the palette holds their assets.
+    pub fn interpret_with(&mut self, line: &str, state: &StateView, palette: &Palette) -> Intent {
         let normalized = line.trim().to_lowercase();
         if let Some((revision, choices)) = self.choices.take() {
             if revision == state.revision {
@@ -102,14 +110,19 @@ impl Dialogue {
                 Ok(direction) => Intent::Action(Action::Move { direction }),
                 Err(_) => Intent::Say("Which direction would you like to step?".into()),
             },
-            ("examine" | "x" | "inspect", noun) => self.object(noun, state, "examine"),
-            ("look", noun) if noun.starts_with("at ") => self.object(&noun[3..], state, "examine"),
-            ("open" | "close", noun) => self.object(noun, state, verb),
-            ("take" | "get", noun) => self.object(noun, state, "take"),
-            ("drop", noun) => self.object(noun, state, "drop"),
-            ("go" | "approach", noun) if parse_direction(noun).is_err() => {
-                self.object(noun.strip_prefix("to ").unwrap_or(noun), state, "go")
+            ("examine" | "x" | "inspect", noun) => self.object(noun, state, palette, "examine"),
+            ("look", noun) if noun.starts_with("at ") => {
+                self.object(&noun[3..], state, palette, "examine")
             }
+            ("open" | "close", noun) => self.object(noun, state, palette, verb),
+            ("take" | "get", noun) => self.object(noun, state, palette, "take"),
+            ("drop", noun) => self.object(noun, state, palette, "drop"),
+            ("go" | "approach", noun) if parse_direction(noun).is_err() => self.object(
+                noun.strip_prefix("to ").unwrap_or(noun),
+                state,
+                palette,
+                "go",
+            ),
             _ => {
                 let direction = if verb == "go" {
                     parse_direction(rest)
@@ -175,7 +188,7 @@ impl Dialogue {
         }
     }
 
-    fn object(&mut self, noun: &str, state: &StateView, verb: &str) -> Intent {
+    fn object(&mut self, noun: &str, state: &StateView, palette: &Palette, verb: &str) -> Intent {
         let (quantity, noun) = if matches!(verb, "take" | "drop") {
             match crate::item_quantity(noun) {
                 Ok(value) => value,
@@ -193,7 +206,7 @@ impl Dialogue {
             let walls = noun.contains("wall");
             let ceiling = noun.contains("ceiling");
             let cells = &state.observation.visible_cells;
-            let roles = surfaces::roles(cells);
+            let roles = surfaces::roles_by(cells, |cell| surface(palette, cell));
             let materials = if walls {
                 roles.walls
             } else if ceiling {
@@ -203,8 +216,7 @@ impl Dialogue {
                 // carry a cosmetic material instead.
                 cells
                     .iter()
-                    .filter(|c| !c.wall && !c.material.is_empty())
-                    .map(|c| c.material.as_str())
+                    .filter_map(|c| open_surface(palette, c))
                     .collect()
             } else {
                 roles.floors
@@ -551,12 +563,56 @@ fn destinations(state: &StateView, direction: Direction) -> Vec<Destination> {
     vec![]
 }
 
-/// The floor under an open cell: the seen solid cell below it, or, in raw
-/// diagnostic regions without one, the open cell's cosmetic material.
-fn floor_material<'a>(cells: &'a [CellView], cell: &'a CellView) -> Option<&'a str> {
-    surfaces::floor_below(cells, cell.position)
-        .map(surfaces::material)
+/// Words for the assets this client knows. A lookup falls back through dotted
+/// prefixes, so `terrain.floor.stone`, which has no entry, reads as
+/// `terrain.floor`. A thing whose asset has no word, or isn't in the palette,
+/// keeps its disclosed material or name.
+pub fn words() -> &'static AssetTable<&'static str> {
+    static WORDS: std::sync::OnceLock<AssetTable<&'static str>> = std::sync::OnceLock::new();
+    WORDS.get_or_init(|| {
+        AssetTable::new([
+            ("terrain.floor", "flagstone"),
+            ("terrain.floor.cave", "packed earth"),
+            ("terrain.floor.marble", "polished marble"),
+            ("terrain.wall", "dressed stone"),
+            ("terrain.wall.cave", "rough cave rock"),
+            ("terrain.wall.marble", "polished marble"),
+            ("creature", "creature"),
+            ("creature.rat", "rat"),
+        ])
+    })
+}
+
+/// A solid cell's word: its asset's, or its material.
+fn surface<'a>(palette: &Palette, cell: &'a CellView) -> &'a str {
+    palette
+        .resolve(words(), cell.asset.as_deref())
+        .copied()
+        .unwrap_or_else(|| surfaces::material(cell))
+}
+
+/// What an open cell itself shows underfoot in raw diagnostic regions, which
+/// have no solid floor: its asset's word, or its cosmetic material.
+fn open_surface<'a>(palette: &Palette, cell: &'a CellView) -> Option<&'a str> {
+    if cell.wall {
+        return None;
+    }
+    palette
+        .resolve(words(), cell.asset.as_deref())
+        .copied()
         .or_else(|| (!cell.material.is_empty()).then_some(cell.material.as_str()))
+}
+
+/// The floor under an open cell: the seen solid cell below it, or, in raw
+/// diagnostic regions without one, what the open cell itself shows.
+fn floor_material<'a>(
+    palette: &Palette,
+    cells: &'a [CellView],
+    cell: &'a CellView,
+) -> Option<&'a str> {
+    surfaces::floor_below(cells, cell.position)
+        .map(|floor| surface(palette, floor))
+        .or_else(|| open_surface(palette, cell))
 }
 
 fn indefinite(name: &str) -> String {
@@ -568,7 +624,15 @@ fn indefinite(name: &str) -> String {
     format!("{article} {}", safe(name))
 }
 
+/// [`describe_with`] without a palette: every thing keeps its disclosed
+/// material or name.
 pub fn describe(state: &StateView) -> String {
+    describe_with(state, &Palette::default())
+}
+
+/// The scene in prose. Floors, walls and unnamed figures are described by
+/// their asset words where the palette holds their assets.
+pub fn describe_with(state: &StateView, palette: &Palette) -> String {
     let o = &state.observation;
     let mut lines = Vec::new();
     if let Some(c) = &o.combat {
@@ -585,13 +649,13 @@ pub fn describe(state: &StateView) -> String {
     lines.push(floor.map_or_else(
         || "Your surroundings".into(),
         |c| {
-            floor_material(&o.visible_cells, c).map_or_else(
+            floor_material(palette, &o.visible_cells, c).map_or_else(
                 || "You stand in an open space.".into(),
                 |m| format!("You stand in a space with a {} floor.", safe(m)),
             )
         },
     ));
-    let walls: BTreeSet<_> = surfaces::roles(&o.visible_cells)
+    let walls: BTreeSet<_> = surfaces::roles_by(&o.visible_cells, |cell| surface(palette, cell))
         .walls
         .into_iter()
         .map(safe)
@@ -647,7 +711,10 @@ pub fn describe(state: &StateView) -> String {
                     "yourself".into()
                 } else {
                     indefinite(if actor.name.is_empty() {
-                        "figure"
+                        palette
+                            .resolve(words(), actor.asset.as_deref())
+                            .copied()
+                            .unwrap_or("figure")
                     } else {
                         &actor.name
                     })

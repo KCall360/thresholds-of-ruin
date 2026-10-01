@@ -67,7 +67,10 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
         transact(&mut connection, &mut session, Request::AcquireControl).await?;
     }
     session.quiet_control = false;
-    println!("{}", adventure::describe(connection.state.state()));
+    println!(
+        "{}",
+        adventure::describe_with(connection.state.state(), &connection.palette)
+    );
     prompt()?;
     let (tx, mut rx) = mpsc::channel(16);
     std::thread::spawn(move || {
@@ -94,7 +97,7 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
                         let line = line?;
                         if line.trim().is_empty() { if session.journey.is_none() { prompt()?; } continue; }
                         // Interpretation stamps expected_revision from the state now in hand.
-                        let intent = session.dialogue.interpret(&line, connection.state.state());
+                        let intent = session.dialogue.interpret_with(&line, connection.state.state(), &connection.palette);
                         if matches!(intent, Intent::Tools(Input::Quit)) { break; }
                         dispatch(&mut connection, &mut session, intent).await?;
                         finish_journey(&mut connection, &mut session).await?;
@@ -154,7 +157,10 @@ async fn dispatch(
     intent: Intent,
 ) -> Result<(), Error> {
     match intent {
-        Intent::Look => println!("{}", adventure::describe(connection.state.state())),
+        Intent::Look => println!(
+            "{}",
+            adventure::describe_with(connection.state.state(), &connection.palette)
+        ),
         Intent::Say(text) => println!("{text}"),
         Intent::Stop => {
             if can_act(connection) {
@@ -218,7 +224,10 @@ async fn dispatch(
                     command,
                 },
                 Input::Look => {
-                    println!("{}", adventure::describe(connection.state.state()));
+                    println!(
+                        "{}",
+                        adventure::describe_with(connection.state.state(), &connection.palette)
+                    );
                     return Ok(());
                 }
                 Input::Places => {
@@ -367,7 +376,10 @@ async fn finish_journey(connection: &mut Connection, session: &mut Session) -> R
     } else {
         println!("You walk {}.", journey.walking());
         if journey.direction.is_some() {
-            println!("{}", adventure::describe(connection.state.state()));
+            println!(
+                "{}",
+                adventure::describe_with(connection.state.state(), &connection.palette)
+            );
         }
     }
     Ok(())
@@ -478,7 +490,10 @@ fn present(connection: &Connection, session: &mut Session, message: &ServerMessa
                 if session.journey.is_none() {
                     if status.phase == TravelPhase::Arrived {
                         println!("You finish walking.");
-                        println!("{}", adventure::describe(connection.state.state()));
+                        println!(
+                            "{}",
+                            adventure::describe_with(connection.state.state(), &connection.palette)
+                        );
                     } else {
                         println!(
                             "You {}",
@@ -517,7 +532,10 @@ fn present(connection: &Connection, session: &mut Session, message: &ServerMessa
             }
             session.epoch += 1;
             session.dialogue.reset();
-            println!("{}", adventure::describe(connection.state.state()));
+            println!(
+                "{}",
+                adventure::describe_with(connection.state.state(), &connection.palette)
+            );
             return true;
         }
         ServerMessage::History { page, .. } => {

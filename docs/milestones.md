@@ -166,8 +166,11 @@ saves pin their package, copying each region file they build from. Regions can
 be generated between authored ones, the same in any build order; see
 [generated regions](scenario-packages.md#generated-regions). The server names
 each disclosed thing's asset and sends each client an
-[asset palette](protocol.md#asset-palettes); the clients don't draw from
-palettes yet. See
+[asset palette](protocol.md#asset-palettes). Clients keep it current, ask for
+it again after a missed revision or an unexpected asset, and resolve assets
+with dotted-prefix fallback; the text client describes surfaces by asset words
+and the headless client reports the palette. The ASCII client doesn't draw from
+it yet. See
 [later slices](region-streaming.md#later-slices).
 
 **Streaming.** Generate regions and zones on demand, depending on neighbors only

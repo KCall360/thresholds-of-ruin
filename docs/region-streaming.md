@@ -476,8 +476,9 @@ base to compare them against.
 
 ### Later slices
 
-1. **Palettes in the clients:** the server sends
-   [asset palettes](protocol.md#asset-palettes); the clients ignore them so far.
+1. **Palettes in the ASCII client:** the text and headless clients use
+   [asset palettes](protocol.md#palettes-in-the-clients); the ASCII client's
+   glyph table waits for the ASCII redesign.
 
 ### Lifecycle verification
 

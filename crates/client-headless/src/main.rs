@@ -197,6 +197,7 @@ fn emit(
         "history": connection.state.history(),
         "travel": connection.state.travel(),
         "memory": connection.state.memory().collect::<Vec<_>>(),
+        "palette": &connection.palette,
         "message": message,
         "error": error,
     });

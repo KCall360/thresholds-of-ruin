@@ -193,7 +193,7 @@ permitted history. They receive live actor-perspective actions/results but canno
 control, act, annotate, or invoke future wizard mutations. A player's `--observe`
 startup option is separate from this enforced permission boundary.
 
-Planned asset palettes are separate, independently revisioned messages on this
+Asset palettes are separate, independently revisioned messages on this
 same connection. They forecast top-level asset IDs from broad themes within the
 player's preload horizon, without disclosing entity instances. Attachment and
 reconnect send a full palette; subsequent deltas and independently requested
