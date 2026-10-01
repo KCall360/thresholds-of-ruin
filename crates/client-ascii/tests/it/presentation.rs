@@ -11,29 +11,112 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
         .observation
         .inventory
         .push(snapshot.state.observation.ground_items[0].item.clone());
-    for key in [Key::Pickup, Key::Drop] {
-        let mut app = App::new();
-        app.role = AccessRole::Player;
-        app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
-        app.ready();
-        assert_eq!(app.input(Input::Key { key }), Effect::None);
-        app.input(Input::Text { text: "3".into() });
-        let effect = app.input(Input::Key { key: Key::Enter });
-        let expected = if key == Key::Pickup {
-            Action::Take {
-                item: 3,
-                quantity: Some(3),
-            }
-        } else {
-            Action::Drop {
-                item: 3,
-                quantity: Some(3),
-            }
-        };
-        assert!(
-            matches!(effect, Effect::Request(Request::Command { command: Command::Act { action, .. }, .. }) if action == expected)
-        );
-    }
+    let mut pickup = App::new();
+    pickup.role = AccessRole::Player;
+    pickup.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    pickup.ready();
+    assert_eq!(pickup.input(Input::Key { key: Key::Key3 }), Effect::None);
+    assert!(matches!(
+        pickup.input(Input::Key { key: Key::Pickup }),
+        Effect::Request(Request::Command {
+            command: Command::Act {
+                action: Action::Take {
+                    item: 3,
+                    quantity: Some(3)
+                },
+                ..
+            },
+            ..
+        })
+    ));
+    let mut drop = App::new();
+    drop.role = AccessRole::Player;
+    drop.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    drop.ready();
+    assert_eq!(drop.input(Input::Key { key: Key::Drop }), Effect::None);
+    assert_eq!(drop.input(Input::Key { key: Key::Key3 }), Effect::None);
+    assert!(matches!(
+        drop.input(Input::Key {
+            key: Key::Letter('a')
+        }),
+        Effect::Request(Request::Command {
+            command: Command::Act {
+                action: Action::Drop {
+                    item: 3,
+                    quantity: Some(3)
+                },
+                ..
+            },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn wait_after_death_is_sent_and_a_living_windup_still_continues() {
+    let mut dead = state().state().clone();
+    dead.observation.ready = false;
+    dead.observation.combat = Some(CombatView {
+        hp: 0,
+        max_hp: 20,
+        preparation_remaining: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        actors: vec![],
+        messages: vec!["You died.".into()],
+        objective: None,
+        victory: false,
+        dead: true,
+        terminal: true,
+    });
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(client_state(dead));
+    app.ready();
+    assert!(matches!(
+        app.input(Input::Key { key: Key::Wait }),
+        Effect::Request(Request::Command {
+            command: Command::Act {
+                action: Action::Wait,
+                ..
+            },
+            ..
+        })
+    ));
+    assert_eq!(app.queued(), 0);
+
+    let mut windup = state().state().clone();
+    windup.observation.ready = false;
+    windup.observation.combat = Some(CombatView {
+        hp: 20,
+        max_hp: 20,
+        preparation_remaining: Some(20),
+        preparation_active: true,
+        recovery_remaining: 0,
+        actors: vec![],
+        messages: vec![],
+        objective: None,
+        victory: false,
+        dead: false,
+        terminal: false,
+    });
+    let mut living = App::new();
+    living.role = AccessRole::Player;
+    living.set_state(client_state(windup));
+    living.ready();
+    assert!(matches!(
+        living.input(Input::Key { key: Key::Wait }),
+        Effect::Request(Request::Continue)
+    ));
+}
+
+fn client_state(view: StateView) -> ClientState {
+    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
+        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "history":{"entries":[],"older_before":null},"state":view
+    }))
+    .unwrap();
+    ClientState::from_snapshot(snapshot).unwrap()
 }
 
 #[test]
@@ -170,7 +253,7 @@ fn state() -> ClientState {
 }
 
 #[test]
-fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
+fn input_queues_the_next_step_while_busy_and_sends_the_new_revision() {
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(state());
@@ -188,20 +271,42 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
         })
     );
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+    assert_eq!(app.queued(), 1);
+    let moved = state();
+    let mut observation = moved.state().observation.clone();
+    observation.position = Position { x: 2, y: 1, z: 0 };
+    observation.ground_items.clear();
+    observation.tick = 100;
+    app.update(StreamUpdate {
+        actor: ActorId(1),
+        branch: BranchId("test".into()),
+        cursor: StreamCursor {
+            sequence: 1,
+            tick: 100,
+        },
+        body: UpdateBody::Observation {
+            state: Box::new(StateView {
+                revision: 4,
+                observation,
+                ..moved.state().clone()
+            }),
+            event: None,
+        },
+    })
+    .unwrap();
     app.ready();
-    assert!(matches!(
-        app.input(Input::Key { key: Key::Pickup }),
+    assert_eq!(
+        app.pump(),
         Effect::Request(Request::Command {
+            branch: BranchId("test".into()),
             command: Command::Act {
-                action: Action::Take {
-                    item: 3,
-                    quantity: None
-                },
-                ..
-            },
-            ..
+                expected_revision: 4,
+                action: Action::Move {
+                    direction: Direction::East
+                }
+            }
         })
-    ));
+    );
 }
 
 #[test]
@@ -274,7 +379,7 @@ fn losing_control_or_disconnect_prevents_actions() {
     assert!(app.status.contains("observing"));
     app.disconnect("Lost connection".into());
     assert_eq!(app.input(Input::Key { key: Key::Control }), Effect::None);
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
+    assert_eq!(app.input(Input::Key { key: Key::Quit }), Effect::Quit);
 }
 
 #[test]
@@ -308,9 +413,14 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     assert_eq!(app.input(Input::Key { key: Key::Pickup }), Effect::None);
     assert_eq!(app.pickup.len(), 2);
     assert!(!app.busy);
-    assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
+    assert_eq!(
+        app.input(Input::Key {
+            key: Key::Letter('b')
+        }),
+        Effect::None
+    );
     assert!(matches!(
-        app.input(Input::Key { key: Key::Enter }),
+        app.input(Input::Key { key: Key::Space }),
         Effect::Request(Request::Command {
             command: Command::Act {
                 action: Action::Take {
@@ -462,8 +572,15 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
     });
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
+    assert!(app.history_page.is_some());
+    assert_eq!(app.input(Input::Key { key: Key::Quit }), Effect::Quit);
+    assert!(app.history_page.is_some());
+    app.history_page = Some(HistoryPage {
+        entries: vec![],
+        older_before: None,
+    });
     assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Quit);
+    assert!(app.history_page.is_none());
 }
 
 #[test]
@@ -561,11 +678,12 @@ fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
         .unwrap();
     app.set_state(current);
     app.busy = true;
-    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::Enqueued);
     assert!(app.busy);
+    assert_eq!(app.queued(), 1);
     app.ready();
     assert_eq!(
-        app.input(Input::Key { key: Key::Escape }),
+        app.pump(),
         Effect::Request(Request::CancelTravel {
             branch: BranchId("test".into()),
             travel_id: EntryId("trip".into())
@@ -693,7 +811,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             id: ActorId(2),
             name: "guard".into(),
             description: String::new(),
-            position: Position { x: 1, y: 0, z: 0 },
+            position: Position { x: 2, y: 1, z: 1 },
         });
         view.observation.combat = Some(CombatView {
             hp: 30,
@@ -736,8 +854,22 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             }
         );
         app.ready();
-        app.input(Input::Key { key: Key::Attack });
-        assert!(!app.attack_targets.is_empty());
+        assert_eq!(app.input(Input::Key { key: Key::Fight }), Effect::None);
+        let Effect::Request(Request::Command {
+            command: Command::Act { action, .. },
+            ..
+        }) = app.input(Input::Key { key: Key::Right })
+        else {
+            panic!("fight")
+        };
+        assert_eq!(action, Action::Attack { target: ActorId(2) });
+        app.attack_targets.push(ActorView {
+            asset: None,
+            id: ActorId(9),
+            name: "marker".into(),
+            description: String::new(),
+            position: Position { x: 0, y: 0, z: 0 },
+        });
         app.disconnect("lost connection".into());
         assert!(app.attack_targets.is_empty());
     }
@@ -878,16 +1010,7 @@ fn more_pages_without_a_command_and_scrollback_does_not_quit() {
     assert_eq!(app.input(Input::Key { key: Key::Space }), Effect::None);
     assert!(!app.busy);
     assert_eq!(app.message_lines(), vec!["three".to_owned(), "four".into()]);
-    assert_eq!(
-        app.input(Input::Key { key: Key::Space }),
-        Effect::Request(Request::Command {
-            branch: BranchId("test".into()),
-            command: Command::Act {
-                expected_revision: 3,
-                action: Action::Wait,
-            },
-        })
-    );
+    assert_eq!(app.input(Input::Key { key: Key::Space }), Effect::None);
 
     let mut paging = App::new();
     paging.role = AccessRole::Player;
@@ -924,7 +1047,7 @@ fn more_pages_without_a_command_and_scrollback_does_not_quit() {
     assert!(reading.scrollback_lines().iter().any(|line| line == "kept"));
     assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::None);
     assert!(!reading.scrollback_open());
-    assert_eq!(reading.input(Input::Key { key: Key::Escape }), Effect::Quit);
+    assert_eq!(reading.input(Input::Key { key: Key::Quit }), Effect::Quit);
 }
 
 fn room(width: i32, height: i32) -> ClientState {

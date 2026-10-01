@@ -52,7 +52,7 @@ class ShadowcastingProcesses(unittest.TestCase):
         # Hidden objects remain only in explicitly stale client memory.
         self.assertNotIn("stone tablet",json.dumps(watched["state"]))
         self.assertIn("stone tablet",json.dumps(watched["memory"]))
-        self.key(window,"escape")
+        self.key(window,"f9")
         self.assertEqual(window.child.wait(timeout=10),0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         text.stop(); observer.stop(); wizard.stop(); server.stop()

@@ -247,6 +247,11 @@ def verify(step, action, before, after):
             "up":(0,0,1),"down":(0,0,-1)}[action["direction"]]
         target = next(c for c in old["visible_cells"] if c["position"] == dict(zip(("x","y","z"),delta)))
         assert target["key"] == center(new), "Move did not reach disclosed destination"
+        # Autopickup of one stack at the destination follows the move before
+        # the client reports the key finished. The actor is still on that cell.
+        last = after["history"][-1]["content"]["event"]["type"]
+        assert last == step["expected"] or last == "taken", last
+        return
     elif action["type"] == "wait":
         assert old["visible_cells"] == new["visible_cells"]
     else:

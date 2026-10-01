@@ -32,8 +32,19 @@ def validate(result):
         assert sample["profile"]["network_events"] <= 16
     assert result["disclosed_cells"] == {8:1243, 256:41419}[result["regions"]]
     assert result["checkpoint_bytes"] < 16 * 1024 * 1024
-    assert 0 < result["checkpoint_sequence"] <= result["actions"]
-    assert result["tail_records"] == result["actions"] - result["checkpoint_sequence"]
+    committed = result["actions"] + result.get("autopickups", 0)
+    assert 0 < result["checkpoint_sequence"] <= committed, (
+        result["checkpoint_sequence"],
+        committed,
+        result.get("autopickups", 0),
+    )
+    # Each autopickup is its own journal row after the move that reached the item.
+    assert result["tail_records"] == committed - result["checkpoint_sequence"], (
+        result["tail_records"],
+        result["actions"],
+        result.get("autopickups", 0),
+        result["checkpoint_sequence"],
+    )
     assert result["tail_records"] < result["checkpoint_interval"]
     assert result["restart_equal"] and result["continued_after_restart"]
 
@@ -97,6 +108,8 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
             if correlate:
                 sample.update(input_unix_ns=window.input_unix_ns, line_unix_ns=window.last_line_unix_ns, reader_work_ms=window.last_reader_work_ms,
                               queue_delay_ms=window.last_queue_delay_ms, intermediate_profiles=window.last_frame_profiles)
+            if after["history"][-1]["content"].get("event", {}).get("type") == "taken":
+                result["autopickups"] = result.get("autopickups", 0) + 1
             result["samples"].append(sample)
             before = after
         result.update(disclosed_cells=len(disclosed), actions=len(result["samples"]))

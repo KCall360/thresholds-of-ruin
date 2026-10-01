@@ -87,7 +87,7 @@ class AsciiProcesses(unittest.TestCase):
         self.assertIn("Public progress", str(history))
         self.assertNotIn("Secret", str(history))
         self.key(spectator, "escape")
-        self.key(spectator, "escape")
+        self.key(spectator, "f9")
         self.assertEqual(spectator.child.wait(timeout=10), 0)
         self.assertEqual(self.save.read_bytes(), before)
         player.stop()
@@ -124,7 +124,7 @@ class AsciiProcesses(unittest.TestCase):
         before = moved["state"]
         self.key(ascii_client, "release")
         self.assertIn("Control: yours", text.command("control"))
-        self.key(ascii_client, "escape")
+        self.key(ascii_client, "f9")
         self.assertEqual(ascii_client.child.wait(timeout=10), 0)
         text.stop()
         self.server.stop()
@@ -189,7 +189,7 @@ class AsciiProcesses(unittest.TestCase):
             user32.EnumWindows(find_window, 0)
             self.assertTrue(handles, "Actual native window must exist")
             def key_event(key, down):
-                vk = {"g":0x47, "Escape":0x1B}[key]
+                vk = {"comma":0xBC, "F9":0x78}[key]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 lparam = 1 | (scan << 16) | (0 if down else 0xC0000000)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, lparam))
@@ -198,11 +198,11 @@ class AsciiProcesses(unittest.TestCase):
             self.assertEqual(len(windows), 1)
             def key_event(key, down):
                 subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], key], check=True, timeout=10)
-        key_event("g", True)
+        key_event("comma", True)
         picked = self.frame(client, lambda f: f["state"]["revision"] == 1 and not f["busy"])
-        key_event("g", False)
+        key_event("comma", False)
         self.assertIn("token", str(picked["state"]["observation"]["inventory"]))
-        key_event("Escape", True)
+        key_event("F9", True)
         self.assertEqual(client.child.wait(timeout=15), 0)
         data = capture.read_bytes()
         self.assertTrue(data.startswith(b"P6\n1200 800\n255\n"))
@@ -214,7 +214,9 @@ class AsciiProcesses(unittest.TestCase):
         client, initial = self.ascii(observe=False)
         self.assertIn("messages", initial)
         self.assertIn("more", initial)
-        self.assertNotIn("queued", initial)
+        self.assertEqual(initial["queued"], 0)
+        self.assertEqual(initial["inventory_letters"], {})
+        self.assertIsNone(initial["look_cursor"])
         self.assertEqual(initial["profile"]["version"], 1)
         self.assertFalse(initial["more"])
         self.assertFalse(initial["busy"])
@@ -230,7 +232,9 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(noted["messages"][-1], "--More--")
         self.assertNotIn("ENDMARK", "\n".join(noted["messages"]))
         self.assertEqual(noted["narration"], initial["narration"])
-        self.assertNotIn("queued", noted)
+        self.assertEqual(noted["queued"], 0)
+        self.assertIn("inventory_letters", noted)
+        self.assertIn("look_cursor", noted)
         self.assertEqual(noted["profile"]["version"], 1)
         revealed = self.key(client, "space")
         self.assertIn("ENDMARK", "\n".join(revealed["messages"]))
@@ -239,12 +243,43 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(revealed["state"], noted["state"])
         self.assertEqual(revealed["history"], noted["history"])
         self.assertEqual(revealed["narration"], noted["narration"])
-        self.assertNotIn("queued", revealed)
-        self.assertNotIn("inventory_letters", revealed)
-        self.assertNotIn("look_cursor", revealed)
+        self.assertEqual(revealed["queued"], 0)
+        self.assertIn("inventory_letters", revealed)
+        self.assertIn("look_cursor", revealed)
         self.assertNotIn("palette", revealed)
         self.assertNotIn("plane", revealed)
         self.assertNotIn("join", revealed)
+        client.stop()
+
+    def test_numpad_step_and_typeahead_commit_in_order(self):
+        client, initial = self.ascii(observe=False)
+        start = initial["state"]["revision"]
+        cells = {
+            (cell["position"]["x"], cell["position"]["y"], cell["position"]["z"]): cell["key"]
+            for cell in initial["state"]["observation"]["visible_cells"]
+        }
+
+        def center(frame):
+            return next(
+                cell["key"]
+                for cell in frame["state"]["observation"]["visible_cells"]
+                if cell["position"] == {"x": 0, "y": 0, "z": 0}
+            )
+
+        stepped = self.key(client, "numpad6")
+        self.assertEqual(stepped["state"]["revision"], start + 1)
+        self.assertEqual(center(stepped), cells[(1, 0, 0)])
+        self.assertEqual(stepped["queued"], 0)
+        for key in ("right", "right"):
+            client.child.stdin.write(json.dumps({"type": "key", "key": key}) + "\n")
+        client.child.stdin.flush()
+        done = self.frame(
+            client,
+            lambda frame: frame["state"]["revision"] == start + 3
+            and frame["queued"] == 0
+            and not frame["busy"],
+        )
+        self.assertEqual(center(done), cells[(3, 0, 0)])
         client.stop()
 
     def test_package_without_asset_rows_draws_floor_and_wall_and_reaches_ready(self):

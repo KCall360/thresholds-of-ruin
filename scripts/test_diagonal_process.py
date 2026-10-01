@@ -43,8 +43,14 @@ class DiagonalProcesses(unittest.TestCase):
             key(name, True)
             current = self.frame(window, lambda f: f.get("state",{}).get("revision",0) > revision and not f["busy"])
             key(name, False)
-            self.assertEqual(current["state"]["observation"]["tick"], tick + 142)
-            self.assertEqual(current["history"][-1]["content"]["event"]["direction"], direction)
+            # Landing on the token also picks it up, which costs half a turn.
+            self.assertIn(current["state"]["observation"]["tick"] - tick, (142, 192))
+            moved = next(
+                entry["content"]["event"]
+                for entry in reversed(current["history"])
+                if entry["content"].get("event", {}).get("direction")
+            )
+            self.assertEqual(moved["direction"], direction)
             self.assertIsNone(current["note"])
         key("F4", True)
         note = self.frame(window, lambda f: f.get("note") == "")

@@ -108,7 +108,7 @@ class WizardProcesses(unittest.TestCase):
         player.stop()
         wizard.stop()
         text_spectator.stop()
-        self.key(spectator, "escape")
+        self.key(spectator, "f9")
         spectator.child.wait(timeout=10)
         self.assertTrue(capture.exists())
         server.stop()

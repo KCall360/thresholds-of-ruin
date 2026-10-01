@@ -69,7 +69,11 @@ def correlate_native(directory, result):
     directory = Path(directory)
     server = {(r['request_id'],r['event']):r for r in events(directory/'server.stderr.log')}
     client = events(directory/'ascii.stderr.log')
-    requests = {r['revision']:r for r in client if r['event']=='client_request'}
+    # A key that lands on one stack sends the move and then a take, so the
+    # sample index is not the command revision. Pair the key with the first
+    # request at or after it. Door selection is not a sample and sends nothing.
+    requests = sorted((r for r in client if r['event']=='client_request' and 'unix_ns' in r),
+                      key=lambda r: r['unix_ns'])
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}
     sends = {r['request_id']:r for r in client if r['event']=='client_request_sent'}
     write_cost = diagnostic_write_costs(client)
@@ -97,14 +101,14 @@ def correlate_native(directory, result):
                 action_frames[frame['state']['revision']-1] = frame['frame']
     output = []
     for sample in result['samples']:
-        # The complete single-actor traversal advances exactly one revision per
-        # ordinary action. Modal door selection sends no request.
-        request = requests[sample['index']]
+        request = next((r for r in requests if r['unix_ns'] >= sample['input_unix_ns']), None)
+        if request is None:
+            raise KeyError(sample['index'])
         request_id = request['request_id']
         handled = server[(request_id,'server_handled')]
         sent = server[(request_id,'server_ack_sent')]
         ack = acknowledgements[request_id]
-        frame_id = sample.get('presented_frame',action_frames[sample['index']])
+        frame_id = sample['presented_frame'] if 'presented_frame' in sample else action_frames[sample['index']]
         presented = frame_times.get(frame_id)
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],

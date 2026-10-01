@@ -39,6 +39,40 @@ class DoorProcesses(unittest.TestCase):
         wizard.command("release")
         return wizard
 
+    def test_bump_opens_a_closed_adjacent_door_without_selecting_open(self):
+        server = self.server()
+        player, _ = self.adventure()
+        self.assertIn("close", self.say(player, "close door"))
+        self.say(player, "release")
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
+        initial = self.ascii_frame(window, lambda frame: frame["has_control"] and not frame["busy"])
+        view = initial["state"]["observation"]
+        door = next(
+            cell for cell in view["visible_cells"] if cell.get("door") and not cell["door"]["open"]
+        )
+        origin = view["position"]
+        delta = (
+            door["position"]["x"] - origin["x"],
+            door["position"]["y"] - origin["y"],
+        )
+        key = {
+            (1, 0): "right",
+            (-1, 0): "left",
+            (0, -1): "up",
+            (0, 1): "down",
+            (1, -1): "north_east",
+            (1, 1): "south_east",
+            (-1, 1): "south_west",
+            (-1, -1): "north_west",
+        }[delta]
+        opened = self.key(window, key)
+        self.assertEqual(opened["state"]["revision"], initial["state"]["revision"] + 1)
+        self.assertTrue(self.door(opened)["open"])
+        self.assertIsNone(opened["door_direction"])
+        player.stop()
+        window.stop()
+        server.stop()
+
     def test_normal_text_intention_native_ascii_actions_spectators_and_restart(self):
         server = self.server()
         player, welcome = self.adventure()
@@ -89,7 +123,7 @@ class DoorProcesses(unittest.TestCase):
         self.assertEqual(watched["state"], closed_again["state"])
         self.assertEqual(watched["history"][-1]["content"]["event"]["type"], "door_changed")
         ascii_support.page_native(window, self.ascii_frame, key)
-        key("Escape", True)
+        key("F9", True)
         self.assertEqual(window.child.wait(timeout=15), 0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         player.stop(); observer.stop(); server.stop()
@@ -214,7 +248,7 @@ class DoorProcesses(unittest.TestCase):
             user32.EnumWindows(find, 0)
             self.assertEqual(len(handles), 1)
             def key(name, down):
-                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B,"y":0x59,"u":0x55,"b":0x42,"n":0x4E,"F4":0x73,"Shift_L":0x10,"comma":0xBC,"period":0xBE,"space":0x20}[name]
+                vk = {"o":0x4F,"c":0x43,"Right":0x27,"Up":0x26,"Escape":0x1B,"y":0x59,"u":0x55,"b":0x42,"n":0x4E,"F4":0x73,"Shift_L":0x10,"comma":0xBC,"period":0xBE,"space":0x20,"F9":0x78}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, 1 | (scan << 16) | (0x01000000 if name in ("Up", "Right") else 0) | (0 if down else 0xC0000000)))
             return key

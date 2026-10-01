@@ -100,7 +100,7 @@ class DungeonProcesses(unittest.TestCase):
     def test_native_death_is_terminal_and_persistent(self):
         self.start('dungeon-death')
         player, _ = self.native()
-        self.key(player,'attack'); result = self.key(player,'enter')
+        self.key(player,'fight'); result = self.key(player,'right')
         dead = self.settled(player,0,result)
         self.assertTrue(dead['state']['observation']['combat']['dead'])
         unchanged = self.key(player,'wait')

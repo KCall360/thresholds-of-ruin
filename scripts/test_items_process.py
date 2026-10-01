@@ -59,15 +59,23 @@ class ItemProcesses(unittest.TestCase):
 
     def test_ascii_quantity_picker_and_drop_present_authoritative_counts(self):
         p = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
-        self.frame(p, lambda f: f['state'] is not None and not f['busy'])
-        self.key(p, 'pickup')
-        p.child.stdin.write(json.dumps({'type':'text','text':'3'}) + '\n'); p.child.stdin.flush()
-        taken = self.key(p, 'enter')
-        self.assertEqual(taken['state']['observation']['inventory'][0]['quantity'], 3)
+        initial = self.frame(p, lambda f: f['state'] is not None and not f['busy'])
+        opened = self.key(p, 'pickup')
+        self.assertEqual(opened['state']['revision'], initial['state']['revision'])
+        self.assertEqual(opened['state']['observation']['inventory'], [])
+        self.key(p, 'key3')
+        self.key(p, 'a')
+        taken = self.key(p, 'space')
+        stack = taken['state']['observation']['inventory'][0]
+        self.assertEqual(stack['quantity'], 3)
+        self.assertEqual(taken['inventory_letters'][str(stack['id'])], 'a')
         self.key(p, 'drop')
-        p.child.stdin.write(json.dumps({'type':'text','text':'2'}) + '\n'); p.child.stdin.flush()
-        dropped = self.key(p, 'enter')
-        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], 1)
+        self.key(p, 'key2')
+        dropped = self.key(p, 'a')
+        kept = dropped['state']['observation']['inventory'][0]
+        self.assertEqual(kept['id'], stack['id'])
+        self.assertEqual(kept['quantity'], 1)
+        self.assertEqual(dropped['inventory_letters'][str(kept['id'])], 'a')
         self.assertNotIn('healing', json.dumps(dropped))
         self.assertTrue(dropped['window_open'])
 

@@ -231,10 +231,15 @@ impl Canvas {
                     && cursor.y == tile.position.y
                     && cursor.z == tile.position.z
             });
+            let looked = app
+                .look_cursor()
+                .is_some_and(|cursor| cursor.x == tile.position.x && cursor.y == tile.position.y);
             let x = tile.center.0 - CELL / 2;
             let y = tile.center.1 - CELL / 2;
             if selected {
                 self.rect(x, y, CELL, CELL, GOLD);
+            } else if looked {
+                self.rect(x, y, CELL, CELL, ACCENT);
             }
             self.text(
                 x,
@@ -291,37 +296,78 @@ impl Canvas {
         }
         if !app.pickup.is_empty() {
             self.panel(160, 176, 880, 428);
-            self.text(188, 204, "CHOOSE AN ITEM", ACCENT, 2, 50);
+            self.text(
+                188,
+                204,
+                if app.dropping {
+                    "DROP WHICH ITEMS"
+                } else {
+                    "PICK UP WHICH ITEMS"
+                },
+                ACCENT,
+                2,
+                50,
+            );
             self.text(
                 188,
                 239,
                 &format!(
-                    "UP/DOWN select  ENTER {}  Count: {}  ESC cancel",
-                    if app.dropping { "drop" } else { "take" },
+                    "letter toggles  SPACE {}  count {}  ESC cancel",
+                    if app.dropping { "drops" } else { "takes" },
                     if app.quantity.is_empty() {
                         "all"
                     } else {
-                        &app.quantity
+                        app.quantity.as_str()
                     }
                 ),
                 MUTED,
                 1,
                 80,
             );
-            let start = app.selected.saturating_sub(8);
-            for (i, item) in app.pickup.iter().enumerate().skip(start).take(9) {
+            for (i, item) in app.pickup.iter().enumerate().take(9) {
+                let letter = tor_client_hack::temporary_letter(i).unwrap_or('#');
+                let on = app.row_on.get(i).copied().unwrap_or(false);
+                let count = app.row_count.get(i).copied().flatten();
+                let count = count.map(|count| format!(" x{count}")).unwrap_or_default();
                 self.text(
                     188,
-                    272 + (i - start) * 32,
+                    272 + i * 32,
                     &format!(
-                        "{} {}",
-                        if i == app.selected { ">" } else { " " },
-                        format_args!("{} x {}", item.quantity, item.name)
+                        "{}{letter}  {} x {}{count}",
+                        if on { "+" } else { " " },
+                        item.quantity,
+                        item.name
                     ),
-                    if i == app.selected { GOLD } else { TEXT },
+                    if on { GOLD } else { TEXT },
                     2,
                     50,
                 );
+            }
+        }
+        if app.inventory_open() {
+            self.panel(160, 120, 880, 520);
+            self.text(188, 148, "INVENTORY", ACCENT, 2, 50);
+            self.text(188, 182, "ESC closes", MUTED, 1, 40);
+            if let Some(state) = &app.state {
+                let mut items = state.state().observation.inventory.clone();
+                items.sort_by_key(|item| item.id);
+                let letters = app.inventory_letters();
+                for (i, item) in items.iter().enumerate().take(16) {
+                    let letter = letters
+                        .get(&item.id)
+                        .copied()
+                        .map(|letter| letter.to_string())
+                        .unwrap_or_else(|| format!("#{}", item.id));
+                    let line = if item.identified {
+                        format!("{letter}  {}  {}", item.quantity, item.name)
+                    } else {
+                        format!(
+                            "{letter}  {}  {} ({})",
+                            item.quantity, item.name, item.appearance
+                        )
+                    };
+                    self.text(188, 214 + i * 24, &line, TEXT, 1, 80);
+                }
             }
         }
         if app.places_open {

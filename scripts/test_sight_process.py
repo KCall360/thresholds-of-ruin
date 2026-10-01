@@ -69,7 +69,7 @@ class SightProcesses(unittest.TestCase):
         self.assertEqual(self.items(seen), {"copper token", "stone tablet"})
         watched = self.request(observer, {"type": "snapshot"})
         self.assertEqual(watched["state"], opened["state"])
-        self.key(window, "escape")
+        self.key(window, "f9")
         self.assertEqual(window.child.wait(timeout=10), 0)
         text.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
@@ -102,7 +102,7 @@ class SightProcesses(unittest.TestCase):
                                      token=support.SPECTATOR_TOKEN)
                 native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
                 self.assertEqual(native["state"], state)
-                self.key(window, "escape")
+                self.key(window, "f9")
                 self.assertEqual(window.child.wait(timeout=10), 0)
             client.stop(); server.stop()
 

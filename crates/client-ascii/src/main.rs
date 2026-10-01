@@ -34,16 +34,66 @@ fn native_key_with_shift(key: NativeKey, shift: bool, ctrl: bool) -> Option<Key>
     if ctrl && key == NativeKey::P {
         return Some(Key::Scrollback);
     }
-    match (key, shift) {
-        (NativeKey::Comma, true) => Some(Key::Ascend),
-        (NativeKey::Period, true) => Some(Key::Descend),
-        _ => native_key(key),
+    if key == NativeKey::F9 {
+        return Some(Key::Quit);
     }
+    if let Some(mapped) = numpad_key(key) {
+        return Some(mapped);
+    }
+    if shift {
+        if let Some(mapped) = shifted_key(key) {
+            return Some(mapped);
+        }
+    }
+    native_key(key)
+}
+
+fn numpad_key(key: NativeKey) -> Option<Key> {
+    Some(match key {
+        NativeKey::NumPad0 => Key::Numpad0,
+        NativeKey::NumPad1 => Key::Numpad1,
+        NativeKey::NumPad2 => Key::Numpad2,
+        NativeKey::NumPad3 => Key::Numpad3,
+        NativeKey::NumPad4 => Key::Numpad4,
+        NativeKey::NumPad5 => Key::Numpad5,
+        NativeKey::NumPad6 => Key::Numpad6,
+        NativeKey::NumPad7 => Key::Numpad7,
+        NativeKey::NumPad8 => Key::Numpad8,
+        NativeKey::NumPad9 => Key::Numpad9,
+        _ => return None,
+    })
+}
+
+fn shifted_key(key: NativeKey) -> Option<Key> {
+    Some(match key {
+        NativeKey::Comma => Key::Ascend,
+        NativeKey::Period => Key::Descend,
+        NativeKey::Key2 => Key::Autopickup,
+        NativeKey::Key3 => Key::Extended,
+        NativeKey::Key4 => Key::Letter('$'),
+        NativeKey::Key7 => Key::KeyHelp,
+        NativeKey::Slash => Key::Help,
+        NativeKey::Semicolon => Key::Describe,
+        NativeKey::F => Key::Fight,
+        NativeKey::M => Key::SuppressRun,
+        NativeKey::D => Key::DropMany,
+        NativeKey::Y => Key::RunNorthWest,
+        NativeKey::U => Key::RunNorthEast,
+        NativeKey::H => Key::RunWest,
+        NativeKey::J => Key::RunSouth,
+        NativeKey::K => Key::RunNorth,
+        NativeKey::L => Key::RunEast,
+        NativeKey::B => Key::RunSouthWest,
+        NativeKey::N => Key::RunSouthEast,
+        other => return alphabetic(other, true),
+    })
 }
 
 fn native_key(key: NativeKey) -> Option<Key> {
+    if let Some(mapped) = numpad_key(key) {
+        return Some(mapped);
+    }
     Some(match key {
-        NativeKey::A => Key::Attack,
         NativeKey::Up | NativeKey::K => Key::Up,
         NativeKey::Down | NativeKey::J => Key::Down,
         NativeKey::Left | NativeKey::H => Key::Left,
@@ -54,10 +104,13 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::N => Key::SouthEast,
         NativeKey::Space => Key::Space,
         NativeKey::Period => Key::Wait,
-        NativeKey::G => Key::Pickup,
+        NativeKey::Comma => Key::Pickup,
+        NativeKey::G => Key::Go,
         NativeKey::D => Key::Drop,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
+        NativeKey::I => Key::Inventory,
+        NativeKey::M => Key::Suppress,
         NativeKey::F3 => Key::Control,
         NativeKey::R => Key::Release,
         NativeKey::F4 => Key::Note,
@@ -67,10 +120,104 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::Backspace => Key::Backspace,
         NativeKey::Tab => Key::Tab,
         NativeKey::F2 => Key::History,
+        NativeKey::F9 => Key::Quit,
         NativeKey::PageUp => Key::OlderHistory,
         NativeKey::PageDown => Key::RecentHistory,
-        _ => return None,
+        NativeKey::Key0 => Key::Key0,
+        NativeKey::Key1 => Key::Key1,
+        NativeKey::Key2 => Key::Key2,
+        NativeKey::Key3 => Key::Key3,
+        NativeKey::Key4 => Key::Key4,
+        NativeKey::Key5 => Key::Key5,
+        NativeKey::Key6 => Key::Key6,
+        NativeKey::Key7 => Key::Key7,
+        NativeKey::Key8 => Key::Key8,
+        NativeKey::Key9 => Key::Key9,
+        other => return alphabetic(other, false),
     })
+}
+
+fn alphabetic(key: NativeKey, shift: bool) -> Option<Key> {
+    let lower = match key {
+        NativeKey::A => 'a',
+        NativeKey::B => 'b',
+        NativeKey::C => 'c',
+        NativeKey::D => 'd',
+        NativeKey::E => 'e',
+        NativeKey::F => 'f',
+        NativeKey::G => 'g',
+        NativeKey::H => 'h',
+        NativeKey::I => 'i',
+        NativeKey::J => 'j',
+        NativeKey::K => 'k',
+        NativeKey::L => 'l',
+        NativeKey::M => 'm',
+        NativeKey::N => 'n',
+        NativeKey::O => 'o',
+        NativeKey::P => 'p',
+        NativeKey::Q => 'q',
+        NativeKey::R => 'r',
+        NativeKey::S => 's',
+        NativeKey::T => 't',
+        NativeKey::U => 'u',
+        NativeKey::V => 'v',
+        NativeKey::W => 'w',
+        NativeKey::X => 'x',
+        NativeKey::Y => 'y',
+        NativeKey::Z => 'z',
+        _ => return None,
+    };
+    let ch = if shift {
+        lower.to_ascii_uppercase()
+    } else {
+        lower
+    };
+    Some(Key::Letter(ch))
+}
+
+fn text_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::Letter(_)
+            | Key::Backspace
+            | Key::Key0
+            | Key::Key1
+            | Key::Key2
+            | Key::Key3
+            | Key::Key4
+            | Key::Key5
+            | Key::Key6
+            | Key::Key7
+            | Key::Key8
+            | Key::Key9
+            | Key::Numpad0
+            | Key::Numpad1
+            | Key::Numpad2
+            | Key::Numpad3
+            | Key::Numpad4
+            | Key::Numpad5
+            | Key::Numpad6
+            | Key::Numpad7
+            | Key::Numpad8
+            | Key::Numpad9
+    )
+}
+
+fn submit(app: &mut App, network: &Network, effect: Effect) -> bool {
+    let Effect::Request(request) = effect else {
+        return false;
+    };
+    match network.commands.try_send(request) {
+        Ok(()) => false,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            app.unsend();
+            false
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            app.disconnect("Network command queue unavailable.".into());
+            true
+        }
+    }
 }
 
 fn main() {
@@ -99,7 +246,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--config file.toml]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\n--config reads autopickup, click (travel|look), and bump_attacks (hostile|any|off). Omitted, those default to on, travel, and hostile.\nA: select attack target. Arrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel or look from the config file; F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc: cancel selection/travel, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--config file.toml]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\n--config reads autopickup, click (travel|look), and bump_attacks (hostile|any|off). Omitted, those default to on, travel, and hostile.\nArrows/hjkl/yubn and the numpad: move. Shifted YUHJKLBN: run. .: wait. F: fight. o/c then a direction: door. ,: pickup. d: drop. i: inventory. g: run. m: one step without a bump attack or autopickup. _: travel. @: autopickup. Left click: travel or look from the config file. F3/R: acquire/release control.\nF5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\nEsc cancels the current mode or travel and does not quit. F9 quits. Space confirms a menu or --More-- and does not wait. S does not save.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -230,18 +377,20 @@ fn window_loop(
             }
         }
         let apply_ms = turn.elapsed().as_secs_f64() * 1000.;
+        let pumped = app.pump();
+        if submit(&mut app, network, pumped) {
+            failed = true;
+        }
         let mut inputs = Vec::new();
         let typed = std::mem::take(&mut *text.borrow_mut());
+        let text_for_editor = !typed.is_empty() && app.accepts_text();
         if input.is_none() {
-            // Send text only to an already-open editor.
-            if (app.note.is_some() || app.place_name.is_some() || !app.pickup.is_empty())
-                && !typed.is_empty()
-            {
+            if text_for_editor {
                 inputs.push(Input::Text {
                     text: typed.clone(),
                 });
             }
-            if app.note.is_none() && !app.places_open && typed.contains('_') {
+            if app.accepts_travel_chord() && typed.contains('_') {
                 inputs.push(Input::Key { key: Key::Travel });
             }
             let pressed = window.get_mouse_down(minifb::MouseButton::Left);
@@ -267,9 +416,10 @@ fn window_loop(
                                 || window.is_key_down(NativeKey::RightCtrl),
                         )
                     })
+                    .filter(|key| !text_for_editor || !text_key(*key))
                     .map(|key| Input::Key { key }),
             );
-        } else if let Some(input) = input.as_ref().filter(|_| !app.busy) {
+        } else if let Some(input) = input.as_ref() {
             match input.try_recv() {
                 Ok(event) => {
                     let event = event.map_err(|e| format!("Invalid automation input: {e}"))?;
@@ -292,18 +442,20 @@ fn window_loop(
         for event in inputs {
             dirty = true;
             match app.input(event) {
-                Effect::None => {}
                 Effect::Quit => {
                     quit = true;
                     break;
                 }
-                Effect::Request(request) => {
-                    if network.commands.try_send(request).is_err() {
-                        app.disconnect("Network command queue unavailable.".into());
+                other => {
+                    if submit(&mut app, network, other) {
                         failed = true;
                     }
                 }
             }
+        }
+        let pumped = app.pump();
+        if submit(&mut app, network, pumped) {
+            failed = true;
         }
         let mut draw_ms = 0.;
         let native_started;
@@ -329,7 +481,9 @@ fn window_loop(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos();
-            let done = if !app.busy {
+            // A key is done when its command, and any pickup it caused, has left
+            // the queue. A repeat stays queued until its remaining steps finish.
+            let done = if !app.busy && app.queued() == 0 {
                 pending_input.take()
             } else {
                 None
@@ -354,6 +508,7 @@ fn window_loop(
                 "places_open":app.places_open,"place_selected":app.place_selected,"place_name":app.place_name,
                 "narration":state.map(|s|s.narration()),
                 "messages":app.message_lines(),"more":app.more(),
+                "inventory_letters":app.inventory_letters(),"queued":app.queued(),"look_cursor":app.look_cursor(),
                 "status":app.status,"input_done":done,"note":app.note.as_ref().map(|d|&d.text)}).to_string();
             previous_report_encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let write_started = Instant::now();
@@ -395,14 +550,33 @@ mod tests {
         assert_eq!(native_key(NativeKey::O), Some(Key::OpenDoor));
         assert_eq!(native_key(NativeKey::C), Some(Key::CloseDoor));
         assert_eq!(native_key(NativeKey::F3), Some(Key::Control));
-        assert_eq!(native_key(NativeKey::P), None);
+        assert_eq!(native_key(NativeKey::P), Some(Key::Letter('p')));
         assert_eq!(native_key(NativeKey::Space), Some(Key::Space));
         assert_eq!(
             native_key_with_shift(NativeKey::P, false, true),
             Some(Key::Scrollback)
         );
-        assert_eq!(native_key_with_shift(NativeKey::P, false, false), None);
-        assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
+        assert_eq!(
+            native_key_with_shift(NativeKey::P, false, false),
+            Some(Key::Letter('p'))
+        );
+        assert_eq!(native_key(NativeKey::G), Some(Key::Go));
+        assert_eq!(native_key(NativeKey::Comma), Some(Key::Pickup));
+        assert_eq!(native_key(NativeKey::A), Some(Key::Letter('a')));
+        assert_eq!(native_key(NativeKey::F9), Some(Key::Quit));
+        assert_eq!(
+            native_key_with_shift(NativeKey::F, true, false),
+            Some(Key::Fight)
+        );
+        assert_eq!(native_key(NativeKey::F), Some(Key::Letter('f')));
+        assert_eq!(native_key(NativeKey::NumPad6), Some(Key::Numpad6));
+        assert_eq!(native_key(NativeKey::NumPad5), Some(Key::Numpad5));
+        assert_eq!(native_key(NativeKey::NumPad0), Some(Key::Numpad0));
+        assert_eq!(native_key(NativeKey::Key3), Some(Key::Key3));
+        assert_eq!(
+            native_key_with_shift(NativeKey::L, true, false),
+            Some(Key::RunEast)
+        );
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
         assert_eq!(native_key(NativeKey::F5), Some(Key::Places));

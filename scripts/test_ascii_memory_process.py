@@ -68,7 +68,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
         refreshed = self.key(window,"right")
         self.assertEqual(self.tile(refreshed,4)["glyph"],".")
         self.assertTrue(self.tile(refreshed,4)["remembered"])
-        self.key(window,"escape")
+        self.key(window,"f9")
         window.child.wait(timeout=10)
         observer.stop(); server.stop()
         self.server()
