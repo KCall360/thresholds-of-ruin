@@ -211,16 +211,16 @@ impl Canvas {
     }
     pub fn draw(&mut self, app: &App) {
         self.pixels.fill(BG);
-        for (index, line) in app.message_lines().iter().enumerate() {
+        for (index, line) in crate::wrap(&app.status, MAP_COLS)
+            .iter()
+            .take(3)
+            .enumerate()
+        {
             self.text(
                 0,
                 index * CELL,
                 line,
-                if line == tor_client_hack::MORE {
-                    ACCENT
-                } else {
-                    TEXT
-                },
+                if app.busy { GOLD } else { TEXT },
                 2,
                 MAP_COLS,
             );
@@ -396,20 +396,6 @@ impl Canvas {
             }
             if page.entries.is_empty() {
                 self.text(72, 180, "No history entries yet.", MUTED, 2, 60);
-            }
-        }
-        if app.scrollback_open() {
-            self.panel(48, 88, 1104, 632);
-            self.text(72, 112, "EARLIER MESSAGES", ACCENT, 2, 65);
-            self.text(72, 144, "ESC close", MUTED, 1, 40);
-            let lines = app.scrollback_lines();
-            if lines.is_empty() {
-                self.text(72, 178, "No earlier messages.", MUTED, 2, 60);
-            } else {
-                let start = lines.len().saturating_sub(20);
-                for (i, line) in lines.iter().skip(start).enumerate() {
-                    self.text(72, 178 + i * 16, line, TEXT, 1, MAP_COLS);
-                }
             }
         }
     }

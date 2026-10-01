@@ -21,7 +21,6 @@ pub enum Key {
     Ascend,
     Descend,
     Wait,
-    Space,
     Pickup,
     Drop,
     OpenDoor,
@@ -36,7 +35,6 @@ pub enum Key {
     History,
     OlderHistory,
     RecentHistory,
-    Scrollback,
 }
 
 /// The native keyboard and opt-in process-test driver share this input boundary.
@@ -82,13 +80,6 @@ pub struct App {
     pub selected: usize,
     pub history_page: Option<HistoryPage>,
     pub history_scroll: usize,
-    log: tor_client_hack::MessageLog,
-}
-
-enum LogAppend {
-    Narration,
-    Line(String),
-    Nothing,
 }
 
 impl Default for App {
@@ -120,7 +111,6 @@ impl App {
             selected: 0,
             history_page: None,
             history_scroll: 0,
-            log: tor_client_hack::MessageLog::default(),
         }
     }
 
@@ -143,16 +133,6 @@ impl App {
 
     /// Apply every disclosed boundary, even when several updates share a frame.
     pub fn update(&mut self, update: StreamUpdate) -> Result<(), tor_client_common::StreamError> {
-        let appended = match &update.body {
-            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. } => {
-                LogAppend::Narration
-            }
-            UpdateBody::Annotation { entry } => match &entry.content {
-                HistoryContent::Annotation { text, .. } => LogAppend::Line(format!("Note: {text}")),
-                _ => LogAppend::Nothing,
-            },
-            _ => LogAppend::Nothing,
-        };
         let (before_branch, before, old) = {
             let state = self
                 .state
@@ -167,7 +147,6 @@ impl App {
         self.shift_chart(&before_branch, &before);
         self.state_changed(old);
         self.follow();
-        self.append_logged(appended);
         Ok(())
     }
 
@@ -188,7 +167,6 @@ impl App {
             self.state.as_mut().unwrap().replace_snapshot(snapshot)?;
             self.shift_chart(&before_branch, &before);
         }
-        self.log.clear_for_snapshot();
         self.state_changed(old);
         self.follow();
         Ok(())
@@ -280,7 +258,6 @@ impl App {
             .as_ref()
             .is_some_and(|(branch, _)| branch != state.branch())
         {
-            self.log.clear_for_branch_change();
             self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
@@ -315,74 +292,6 @@ impl App {
         self.busy = false;
     }
 
-    pub fn accept_status(&mut self, status: String) {
-        self.log.append(&status);
-        self.status = status;
-    }
-
-    pub fn message_lines(&self) -> Vec<String> {
-        self.log.display()
-    }
-
-    pub fn more(&self) -> bool {
-        self.log.more()
-    }
-
-    pub fn scrollback_open(&self) -> bool {
-        self.log.scrollback_open()
-    }
-
-    pub fn scrollback_lines(&self) -> &[String] {
-        self.log.scrollback()
-    }
-
-    fn append_logged(&mut self, appended: LogAppend) {
-        match appended {
-            LogAppend::Narration => {
-                let lines = self
-                    .state
-                    .as_ref()
-                    .map(|state| state.narration().to_vec())
-                    .unwrap_or_default();
-                self.log.append_narration(lines.iter().map(String::as_str));
-            }
-            LogAppend::Line(text) => self.log.append(&text),
-            LogAppend::Nothing => {}
-        }
-    }
-
-    /// Page `--More--` and local scrollback before any command, including while busy.
-    fn begin_input(&mut self, input: Input) -> Option<Input> {
-        if self.log.scrollback_open() {
-            if matches!(input, Input::Key { key: Key::Escape }) {
-                self.log.close_scrollback();
-            }
-            return None;
-        }
-        if self.log.more() {
-            if let Input::Key { key } = input {
-                self.log.acknowledge();
-                if matches!(key, Key::Space | Key::Enter | Key::Escape) {
-                    return None;
-                }
-                if key == Key::Scrollback {
-                    self.log.open_scrollback();
-                    return None;
-                }
-                return Some(Input::Key { key });
-            }
-        } else if matches!(
-            input,
-            Input::Key {
-                key: Key::Scrollback
-            }
-        ) {
-            self.log.open_scrollback();
-            return None;
-        }
-        Some(input)
-    }
-
     pub fn disconnect(&mut self, message: String) {
         self.travel_cursor = None;
         self.place_name = None;
@@ -397,9 +306,6 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
-        let Some(input) = self.begin_input(input) else {
-            return Effect::None;
-        };
         if !self.attack_targets.is_empty() {
             match input {
                 Input::Key { key: Key::Escape } => {
@@ -807,7 +713,7 @@ impl App {
             Key::Descend => self.act(Action::Move {
                 direction: Direction::Down,
             }),
-            Key::Wait | Key::Space => self.act(Action::Wait),
+            Key::Wait => self.act(Action::Wait),
             Key::Control => self.request(Request::AcquireControl),
             Key::Release => self.request(Request::ReleaseControl),
             Key::OpenDoor | Key::CloseDoor => {
@@ -1140,7 +1046,14 @@ pub fn history_text(entry: &HistoryEntry) -> String {
 }
 
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
-    tor_client_hack::wrap(text, width)
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    chars
+        .chunks(width.max(1))
+        .map(|line| line.iter().collect())
+        .collect()
 }
 
 pub fn history_lines(entries: &[HistoryEntry]) -> Vec<String> {

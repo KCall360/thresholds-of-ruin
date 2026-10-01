@@ -2,4 +2,3 @@
 //! links one test executable instead of one per file.
 
 mod column;
-mod log;
