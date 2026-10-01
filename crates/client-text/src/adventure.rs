@@ -33,12 +33,22 @@ struct Choice {
     door: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verbosity {
+    #[default]
+    Brief,
+    Verbose,
+    Superbrief,
+}
+
 #[derive(Default)]
 pub struct Dialogue {
     choices: Option<(u64, Vec<Choice>)>,
     item: Option<u64>,
     door: Option<u64>,
     pub queue: VecDeque<String>,
+    pub verbosity: Verbosity,
+    pub visited_places: BTreeSet<String>,
 }
 
 impl Dialogue {
@@ -107,6 +117,33 @@ impl Dialogue {
                     crate::parser::Verb::Quit => return Intent::Tools(Input::Quit),
                     crate::parser::Verb::Stop => return Intent::Stop,
                     crate::parser::Verb::Help => return Intent::Say(HELP.into()),
+                    crate::parser::Verb::Listen => {
+                        return Intent::Say(
+                            crate::narrative::examine_scenery("sound", state)
+                                .unwrap_or_else(|| "All is quiet.".into()),
+                        )
+                    }
+                    crate::parser::Verb::Smell => {
+                        return Intent::Say(
+                            crate::narrative::examine_scenery("smell", state)
+                                .unwrap_or_else(|| "The air carries no distinct scent.".into()),
+                        )
+                    }
+                    crate::parser::Verb::Search => {
+                        return Intent::Say(crate::narrative::search(state))
+                    }
+                    crate::parser::Verb::Verbose => {
+                        self.verbosity = Verbosity::Verbose;
+                        return Intent::Say("Maximum verbosity.".into());
+                    }
+                    crate::parser::Verb::Brief => {
+                        self.verbosity = Verbosity::Brief;
+                        return Intent::Say("Brief descriptions.".into());
+                    }
+                    crate::parser::Verb::Superbrief => {
+                        self.verbosity = Verbosity::Superbrief;
+                        return Intent::Say("Superbrief descriptions.".into());
+                    }
                     _ => {}
                 },
                 crate::parser::ParsedCommand::Directional { direction } => {
@@ -287,6 +324,9 @@ impl Dialogue {
                         crate::parser::Verb::Go => {
                             return self.object(&direct.raw, state, palette, "go")
                         }
+                        crate::parser::Verb::Search => {
+                            return Intent::Say(crate::narrative::search(state))
+                        }
                         _ => {}
                     }
                 }
@@ -342,6 +382,64 @@ impl Dialogue {
                 palette,
                 "go",
             ),
+            ("listen" | "hear", _) => Intent::Say(
+                crate::narrative::examine_scenery("sound", state)
+                    .unwrap_or_else(|| "All is quiet.".into()),
+            ),
+            ("smell" | "sniff", _) => Intent::Say(
+                crate::narrative::examine_scenery("smell", state)
+                    .unwrap_or_else(|| "The air carries no distinct scent.".into()),
+            ),
+            ("search", _) => Intent::Say(crate::narrative::search(state)),
+            ("verbose", "") => {
+                self.verbosity = Verbosity::Verbose;
+                Intent::Say("Maximum verbosity.".into())
+            }
+            ("brief", "") => {
+                self.verbosity = Verbosity::Brief;
+                Intent::Say("Brief descriptions.".into())
+            }
+            ("superbrief", "") => {
+                self.verbosity = Verbosity::Superbrief;
+                Intent::Say("Superbrief descriptions.".into())
+            }
+            ("name", rest) => {
+                let (target, _) = crate::word(rest);
+                if matches!(target, "room" | "place" | "here") {
+                    let (_, original_rest) = crate::word(line.trim());
+                    let (_, original_name) = crate::word(original_rest);
+                    if let Some(key) = crate::narrative::current_place_key(state) {
+                        Intent::Tools(crate::Input::Command(Command::RenamePlace {
+                            expected_revision: state.revision,
+                            key: key.into(),
+                            name: original_name.into(),
+                        }))
+                    } else {
+                        Intent::Say("You cannot discern an anchor here to name.".into())
+                    }
+                } else {
+                    match crate::parse(line, state) {
+                        Ok(input) => Intent::Tools(input),
+                        Err(e) => Intent::Say(e),
+                    }
+                }
+            }
+            ("note" | "annotate", _) => {
+                let (_, original_text) = crate::word(line.trim());
+                if !original_text.trim().is_empty() {
+                    Intent::Tools(crate::Input::Command(Command::Annotate {
+                        anchor: Anchor::State {
+                            revision: state.revision,
+                        },
+                        text: original_text.into(),
+                        source: ClientSource::User,
+                        audience: Audience::Actor,
+                        category: AnnotationCategory::Note,
+                    }))
+                } else {
+                    Intent::Say("What note would you like to make?".into())
+                }
+            }
             _ => {
                 let direction = if verb == "go" {
                     parse_direction(rest)
@@ -420,6 +518,11 @@ impl Dialogue {
         } else {
             (None, noun)
         };
+        if verb == "examine" {
+            if let Some(desc) = crate::narrative::examine_scenery(noun, state) {
+                return Intent::Say(desc);
+            }
+        }
         if verb == "examine"
             && matches!(
                 noun,
@@ -629,7 +732,7 @@ fn noun_matches(noun: &str, name: &str) -> bool {
             .all(|word| name.split_whitespace().any(|w| w == *word))
 }
 
-fn distance(p: Position) -> u64 {
+pub(crate) fn distance(p: Position) -> u64 {
     u64::from(p.x.unsigned_abs()) + u64::from(p.y.unsigned_abs()) + u64::from(p.z.unsigned_abs())
 }
 
@@ -828,7 +931,13 @@ fn open_surface<'a>(palette: &Palette, cell: &'a CellView) -> Option<&'a str> {
 
 /// The floor under an open cell: the seen solid cell below it, or, in raw
 /// diagnostic regions without one, what the open cell itself shows.
-fn floor_material<'a>(
+pub(crate) fn floor_material<'a>(cells: &'a [CellView], cell: &'a CellView) -> Option<&'a str> {
+    floor_material_with(&Palette::default(), cells, cell)
+}
+
+/// The floor under an open cell: the seen solid cell below it, or, in raw
+/// diagnostic regions without one, what the open cell itself shows.
+pub(crate) fn floor_material_with<'a>(
     palette: &Palette,
     cells: &'a [CellView],
     cell: &'a CellView,
@@ -865,6 +974,9 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
     if state.wizard_game {
         lines.push("*** WIZARD GAME — permanently marked ***".into());
     }
+    if let Some(title) = crate::narrative::place_title(state) {
+        lines.push(title);
+    }
     let floor = o
         .visible_cells
         .iter()
@@ -872,7 +984,7 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
     lines.push(floor.map_or_else(
         || "Your surroundings".into(),
         |c| {
-            floor_material(palette, &o.visible_cells, c).map_or_else(
+            floor_material_with(palette, &o.visible_cells, c).map_or_else(
                 || "You stand in an open space.".into(),
                 |m| format!("You stand in a space with a {} floor.", safe(m)),
             )
@@ -888,6 +1000,112 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
             "You can see walls of {}.",
             walls.into_iter().collect::<Vec<_>>().join(" and ")
         ));
+    }
+    if let Some(sensory) = crate::narrative::sensory_atmosphere(state) {
+        lines.push(sensory);
+    }
+    let mut seen = BTreeSet::new();
+    for item in &o.ground_items {
+        if seen.insert(item.item.id) {
+            lines.push(format!(
+                "You see {} {}.",
+                if item.item.quantity == 1 {
+                    indefinite(&item.item.name)
+                } else {
+                    format!("{} x {}", item.item.quantity, safe(&item.item.name))
+                },
+                if item.reachable {
+                    "at your feet".into()
+                } else if in_current_place(state, item.position) {
+                    "on the floor nearby".into()
+                } else {
+                    whereabouts(item.position)
+                }
+            ));
+        }
+    }
+    let mut doors = BTreeSet::new();
+    for cell in &o.visible_cells {
+        if let Some(door) = &cell.door {
+            if doors.insert(door.id) {
+                lines.push(format!(
+                    "You see {} {}.",
+                    indefinite(&format!(
+                        "{} {}",
+                        if door.open { "open" } else { "closed" },
+                        door.name
+                    )),
+                    whereabouts(cell.position)
+                ));
+            }
+        }
+    }
+    let mut actors = BTreeSet::new();
+    for actor in &o.visible_actors {
+        if actors.insert(actor.id) {
+            lines.push(format!(
+                "You see {} {}.",
+                if actor.id == o.actor {
+                    "yourself".into()
+                } else {
+                    indefinite(if actor.name.is_empty() {
+                        palette
+                            .resolve(words(), actor.asset.as_deref())
+                            .copied()
+                            .unwrap_or("figure")
+                    } else {
+                        &actor.name
+                    })
+                },
+                whereabouts(actor.position)
+            ));
+            if let Some(injury) = o
+                .combat
+                .as_ref()
+                .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
+            {
+                lines.push(format!("{} looks {}.", safe(&actor.name), injury.injury));
+            }
+        }
+    }
+    let ways: Vec<_> = [
+        Direction::North,
+        Direction::East,
+        Direction::South,
+        Direction::West,
+        Direction::NorthEast,
+        Direction::SouthEast,
+        Direction::SouthWest,
+        Direction::NorthWest,
+        Direction::Up,
+        Direction::Down,
+    ]
+    .into_iter()
+    .filter(|d| !destinations(state, *d).is_empty())
+    .map(direction_name)
+    .collect();
+    if !ways.is_empty() {
+        lines.push(format!("You can head {}.", ways.join(" or ")));
+    }
+    if !o.ready && !o.combat.as_ref().is_some_and(|c| c.terminal) {
+        lines.push("For now, you must wait.".into());
+    }
+    lines.join("\n")
+}
+
+pub fn describe_brief(state: &StateView) -> String {
+    describe_brief_with(state, &Palette::default())
+}
+
+pub fn describe_brief_with(state: &StateView, palette: &Palette) -> String {
+    let o = &state.observation;
+    let mut lines = Vec::new();
+    if let Some(c) = &o.combat {
+        lines.push(tor_client_common::narration::combat_status(c));
+        lines.extend(c.objective.clone());
+    }
+    if let Some(title) = crate::narrative::place_title(state) {
+        lines.push(title);
     }
     let mut seen = BTreeSet::new();
     for item in &o.ground_items {

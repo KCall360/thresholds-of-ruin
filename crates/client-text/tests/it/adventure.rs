@@ -551,3 +551,84 @@ fn take_all_queues_remaining_place_items() {
     assert_eq!(dialogue.queue.len(), 1);
     assert_eq!(dialogue.queue[0], "take silver coin");
 }
+
+#[test]
+fn narrative_place_title_sensory_and_verbosity() {
+    let mut s = state();
+    let prose = describe(&s);
+    assert!(
+        prose.contains("Stone Chamber")
+            || prose.contains("Stone Hall")
+            || prose.contains("Stone Passage")
+    );
+    assert!(prose.contains("stone floor"));
+    assert!(
+        prose.contains("cool")
+            || prose.contains("chill")
+            || prose.contains("Shadows")
+            || prose.contains("quiet")
+            || prose.contains("air")
+    );
+
+    // Authored place name overrides procedural
+    s.observation.places.push(PlaceView {
+        key: "cell-1".into(),
+        name: "Hallowed Crypt".into(),
+    });
+    assert!(describe(&s).contains("Hallowed Crypt"));
+
+    // Scenery examination
+    let mut dialogue = Dialogue::default();
+    assert_eq!(
+        dialogue.interpret("examine room", &s),
+        Intent::Say(describe(&s))
+    );
+    assert!(matches!(
+        dialogue.interpret("listen", &s),
+        Intent::Say(text) if text.contains("quiet") || text.contains("air")
+    ));
+    assert!(matches!(
+        dialogue.interpret("smell", &s),
+        Intent::Say(text) if text.contains("cool") || text.contains("stone")
+    ));
+    assert!(matches!(
+        dialogue.interpret("search", &s),
+        Intent::Say(text) if text.contains("copper token")
+    ));
+
+    // Verbosity modes
+    assert_eq!(
+        dialogue.interpret("verbose", &s),
+        Intent::Say("Maximum verbosity.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("brief", &s),
+        Intent::Say("Brief descriptions.".into())
+    );
+    assert_eq!(
+        dialogue.interpret("superbrief", &s),
+        Intent::Say("Superbrief descriptions.".into())
+    );
+
+    // Interactive place naming and notes
+    assert_eq!(
+        dialogue.interpret("name room Vault of Souls", &s),
+        Intent::Tools(tor_client_text::Input::Command(Command::RenamePlace {
+            expected_revision: s.revision,
+            key: "cell-1".into(),
+            name: "Vault of Souls".into(),
+        }))
+    );
+    assert_eq!(
+        dialogue.interpret("note Beware the lurking shadows", &s),
+        Intent::Tools(tor_client_text::Input::Command(Command::Annotate {
+            anchor: Anchor::State {
+                revision: s.revision
+            },
+            text: "Beware the lurking shadows".into(),
+            source: ClientSource::User,
+            audience: Audience::Actor,
+            category: AnnotationCategory::Note,
+        }))
+    );
+}

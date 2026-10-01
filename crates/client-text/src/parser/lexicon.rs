@@ -26,6 +26,12 @@ pub enum Verb {
     Step,
     Say,
     Again,
+    Listen,
+    Smell,
+    Search,
+    Verbose,
+    Brief,
+    Superbrief,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +76,7 @@ pub enum Pronoun {
 pub fn parse_verb(word: &str) -> Option<Verb> {
     match word {
         "look" | "l" => Some(Verb::Look),
-        "examine" | "x" | "inspect" | "read" | "study" | "search" | "check" => Some(Verb::Examine),
+        "examine" | "x" | "inspect" | "read" | "study" | "check" => Some(Verb::Examine),
         "inventory" | "i" => Some(Verb::Inventory),
         "take" | "get" | "grab" | "carry" | "acquire" => Some(Verb::Take),
         "drop" | "discard" | "leave" => Some(Verb::Drop),
@@ -93,6 +99,12 @@ pub fn parse_verb(word: &str) -> Option<Verb> {
         "step" => Some(Verb::Step),
         "say" | "shout" | "whisper" => Some(Verb::Say),
         "again" | "g" => Some(Verb::Again),
+        "listen" | "hear" => Some(Verb::Listen),
+        "smell" | "sniff" => Some(Verb::Smell),
+        "search" => Some(Verb::Search),
+        "verbose" => Some(Verb::Verbose),
+        "brief" => Some(Verb::Brief),
+        "superbrief" => Some(Verb::Superbrief),
         _ => None,
     }
 }
