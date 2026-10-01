@@ -247,6 +247,21 @@ class AsciiProcesses(unittest.TestCase):
         self.assertNotIn("join", revealed)
         client.stop()
 
+    def test_package_without_asset_rows_draws_floor_and_wall_and_reaches_ready(self):
+        # two-room names no assets. generated-filler's rats are not in the opening view.
+        client, frame = self.ascii(observe=False)
+        self.assertIn("Ready", frame["status"])
+        glyphs = {tile["glyph"] for tile in frame["map_tiles"]}
+        self.assertIn(".", glyphs)
+        self.assertIn("#", glyphs)
+        self.assertNotIn("palette", frame)
+        for tile in frame["map_tiles"]:
+            if tile["glyph"] == ".":
+                self.assertEqual(tile["color"], 0x6A7A72)
+            if tile["glyph"] == "#":
+                self.assertEqual(tile["color"], 0xC8C8C8)
+        client.stop()
+
     def start_package(self, name):
         self.server.stop()
         self.save = self.save.with_name(f"{name}.json")
