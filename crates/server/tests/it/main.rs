@@ -4,13 +4,12 @@
 mod background_save;
 mod checkpoints;
 mod descriptions;
-mod developer;
-mod diagonal;
 mod doors;
 mod dungeon;
 mod generated_regions;
 mod geometry;
 mod history;
+mod invariants;
 mod items;
 mod materials;
 mod package_pin;

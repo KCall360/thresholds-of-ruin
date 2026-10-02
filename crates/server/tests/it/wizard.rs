@@ -475,3 +475,14 @@ fn old_save_and_corrupt_wizard_journal_do_not_load() {
     );
     assert_eq!(std::fs::read(&path).unwrap(), corrupt);
 }
+
+/// Wizard operations name a known archetype and carry no forged properties.
+#[test]
+fn wizard_operations_reject_unknown_archetypes_and_forged_properties() {
+    for operation in [
+        serde_json::json!({"type":"place_item","kind":"sword","position":{"region":1,"x":1,"y":1,"z":0}}),
+        serde_json::json!({"type":"spawn_actor","position":{"region":1,"x":1,"y":1,"z":0},"turn_ticks":100,"god":true}),
+    ] {
+        assert!(serde_json::from_value::<tor_server::journal::WizardOperation>(operation).is_err());
+    }
+}

@@ -1,45 +1,12 @@
-use std::path::Path;
+use crate::support::{self, act, act_as, run_ai_turns};
 use tor_protocol::{Action, ActorId, Direction};
 use tor_server::{scenario_package, Engine};
 
-fn dungeon() -> Engine {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/first-dungeon");
-    Engine::memory(scenario_package::load(&path, 42, None, false).unwrap()).unwrap()
-}
-
-fn act(engine: &mut Engine, actor: ActorId, action: Action, sequence: &mut u64) {
-    *sequence += 1;
-    engine
-        .command(
-            "test",
-            "headless",
-            actor,
-            &format!("dungeon-{sequence}"),
-            &engine.branch().clone(),
-            tor_server::journal::Command::Act {
-                expected_revision: engine.revision(actor).unwrap(),
-                action,
-            },
-        )
-        .unwrap();
-}
-
-fn pump(engine: &mut Engine, sequence: &mut u64) {
-    for _ in 0..100 {
-        let Some((actor, action)) = engine.next_ai_action() else {
-            return;
-        };
-        act(engine, actor, action, sequence);
-    }
-    panic!("AI did not return to a player boundary");
-}
-
 #[test]
 fn authored_dungeon_completes_retrieval_and_escape() {
-    let mut engine = dungeon();
-    let mut sequence = 0;
+    let mut engine = Engine::memory(support::load("first-dungeon", 42)).unwrap();
     for _ in 0..160 {
-        pump(&mut engine, &mut sequence);
+        run_ai_turns(&mut engine);
         let state = engine.state(ActorId(1)).unwrap();
         assert!(!state.observation.combat.as_ref().unwrap().dead);
         if state.observation.combat.as_ref().unwrap().victory {
@@ -75,23 +42,9 @@ fn authored_dungeon_completes_retrieval_and_escape() {
         } else {
             action
         };
-        if engine
-            .command(
-                "test",
-                "headless",
-                ActorId(1),
-                &format!("player-{sequence}"),
-                &engine.branch().clone(),
-                tor_server::journal::Command::Act {
-                    expected_revision: state.revision,
-                    action,
-                },
-            )
-            .is_err()
-        {
-            act(&mut engine, ActorId(1), Action::Wait, &mut sequence);
+        if act(&mut engine, action).is_err() {
+            act_as(&mut engine, ActorId(1), Action::Wait).unwrap();
         }
-        sequence += 1;
     }
     panic!("dungeon did not reach victory within the bounded walkthrough");
 }
@@ -99,9 +52,7 @@ fn authored_dungeon_completes_retrieval_and_escape() {
 #[test]
 fn victory_death_and_pending_attacks_survive_durable_restart() {
     for package in ["dungeon-loop", "dungeon-death"] {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scenarios/tests")
-            .join(package);
+        let root = support::package(package);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("run.db");
         let mut engine = Engine::open(
@@ -109,13 +60,12 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
             scenario_package::load(&root, 42, None, false).unwrap(),
         )
         .unwrap();
-        let mut sequence = 0;
-        act(
+        act_as(
             &mut engine,
             ActorId(1),
             Action::Attack { target: ActorId(2) },
-            &mut sequence,
-        );
+        )
+        .unwrap();
         let pending = engine.state(ActorId(1)).unwrap();
         assert!(
             pending
@@ -129,36 +79,36 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
         drop(engine);
         let mut engine = Engine::open(&path, tor_server::Scenario::two_room(0)).unwrap();
         assert_eq!(engine.state(ActorId(1)).unwrap(), pending);
-        pump(&mut engine, &mut sequence);
+        run_ai_turns(&mut engine);
         if package == "dungeon-loop" {
             for _ in 0..3 {
-                act(
+                act_as(
                     &mut engine,
                     ActorId(1),
                     Action::Move {
                         direction: Direction::East,
                     },
-                    &mut sequence,
-                );
+                )
+                .unwrap();
             }
-            act(
+            act_as(
                 &mut engine,
                 ActorId(1),
                 Action::Take {
                     item: 100,
                     quantity: None,
                 },
-                &mut sequence,
-            );
+            )
+            .unwrap();
             for _ in 0..3 {
-                act(
+                act_as(
                     &mut engine,
                     ActorId(1),
                     Action::Move {
                         direction: Direction::West,
                     },
-                    &mut sequence,
-                );
+                )
+                .unwrap();
             }
             assert!(
                 engine
@@ -206,8 +156,7 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
 
 #[test]
 fn optional_starting_ai_keeps_inventory_and_higher_id_human_gets_input_boundary() {
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/dungeon-characters");
+    let root = support::package("dungeon-characters");
     let engine = Engine::memory(scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
     assert!(engine.is_ai(ActorId(1)));
     assert!(engine.state(ActorId(7)).unwrap().observation.ready);
@@ -227,7 +176,7 @@ fn optional_starting_ai_keeps_inventory_and_higher_id_human_gets_input_boundary(
 
 #[test]
 fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/dungeon-loop");
+    let root = support::package("dungeon-loop");
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("pause.db");
     let mut engine = Engine::open(
@@ -235,13 +184,12 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         scenario_package::load(&root, 42, None, false).unwrap(),
     )
     .unwrap();
-    let mut sequence = 0;
-    act(
+    act_as(
         &mut engine,
         ActorId(1),
         Action::Attack { target: ActorId(2) },
-        &mut sequence,
-    );
+    )
+    .unwrap();
     let remaining = engine
         .state(ActorId(1))
         .unwrap()
@@ -281,13 +229,13 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
     drop(engine);
     let mut engine = Engine::open(&path, tor_server::Scenario::two_room(0)).unwrap();
     assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
-    act(
+    act_as(
         &mut engine,
         ActorId(1),
         Action::Attack { target: ActorId(2) },
-        &mut sequence,
-    );
-    pump(&mut engine, &mut sequence);
+    )
+    .unwrap();
+    run_ai_turns(&mut engine);
     assert!(!engine
         .state(ActorId(1))
         .unwrap()
@@ -302,7 +250,7 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
 
 #[test]
 fn active_ai_memory_survives_forced_checkpoint_and_restart() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/dungeon-loop");
+    let root = support::package("dungeon-loop");
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("ai-checkpoint.db");
     let mut engine = Engine::open_with_policy(
@@ -314,14 +262,13 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
         },
     )
     .unwrap();
-    let mut sequence = 0;
-    act(
+    act_as(
         &mut engine,
         ActorId(1),
         Action::Attack { target: ActorId(2) },
-        &mut sequence,
-    );
-    pump(&mut engine, &mut sequence);
+    )
+    .unwrap();
+    run_ai_turns(&mut engine);
     let expected = engine.state(ActorId(1)).unwrap();
     engine.flush().unwrap();
     drop(engine);
@@ -332,7 +279,7 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
 
 #[test]
 fn stationary_attack_does_not_rebuild_unchanged_navigation() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/dungeon-loop");
+    let root = support::package("dungeon-loop");
     let mut engine =
         Engine::memory(scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
     let (_, profile) = engine

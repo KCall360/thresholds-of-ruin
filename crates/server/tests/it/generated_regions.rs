@@ -1,6 +1,7 @@
 //! Generated regions in play: built when first needed, the same in any
 //! order, replayed exactly, and different for each game seed. See
 //! docs/scenario-packages.md#generated-regions.
+use crate::support;
 use std::path::Path;
 use tor_protocol::{Action, ActorId, Direction, Observation};
 use tor_server::{
@@ -30,48 +31,18 @@ fn command_as(
     actor: ActorId,
     command: Command,
 ) -> Result<(), tor_server::Failure> {
-    engine
-        .command(
-            "player",
-            "test",
-            actor,
-            &uuid::Uuid::new_v4().to_string(),
-            &engine.branch().clone(),
-            command,
-        )
-        .map(|_| ())
+    support::submit(engine, actor, command).map(|_| ())
 }
 
 fn command(engine: &mut Engine, command: Command) -> Result<(), tor_server::Failure> {
     command_as(engine, ActorId(1), command)
 }
 
-/// Act as the character, after any AI turns due first. Returns the
-/// commands issued, AI turns included.
+/// One turn of play; returns the commands it took, AI turns included.
 fn act(engine: &mut Engine, action: Action) -> Result<usize, tor_server::Failure> {
-    let mut commands = 0;
-    while let Some((actor, ai)) = engine.next_ai_action() {
-        let expected_revision = engine.revision(actor).unwrap();
-        command_as(
-            engine,
-            actor,
-            Command::Act {
-                expected_revision,
-                action: ai,
-            },
-        )
-        .unwrap();
-        commands += 1;
-    }
-    let expected_revision = engine.revision(ActorId(1)).unwrap();
-    command(
-        engine,
-        Command::Act {
-            expected_revision,
-            action,
-        },
-    )?;
-    Ok(commands + 1)
+    let turns = support::run_ai_turns(engine);
+    support::act(engine, action)?;
+    Ok(turns + 1)
 }
 
 /// Step east `steps` times along the cave's straight corridor. A wandering

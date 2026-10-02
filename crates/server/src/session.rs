@@ -1395,6 +1395,8 @@ mod tests {
     }
 }
 
+/// Running until blocked: journeys, outgoing queues and slow clients, and the
+/// runner over its mailbox (see docs/run-until-blocked.md).
 #[cfg(test)]
-#[path = "travel_tests.rs"]
-mod travel_tests;
+#[path = "run_tests.rs"]
+mod run_tests;

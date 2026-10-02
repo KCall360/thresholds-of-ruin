@@ -1,6 +1,7 @@
 //! Asset palettes: observations name each disclosed thing's asset, and each
 //! client gets a palette forecast from the themes of the regions near its
 //! actor, never from what they hold. See docs/protocol.md#asset-palettes.
+use crate::support;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -11,7 +12,6 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
-use tor_server::journal::Command as Journal;
 use tor_server::{
     scenario_package, serve, Account, Engine, Scenario, Service, Simulation, Streaming,
 };
@@ -60,36 +60,7 @@ fn union(parts: &[BTreeSet<String>]) -> BTreeSet<String> {
 
 /// Act as the character after any AI turns due first.
 fn act(engine: &mut Engine, action: Action) -> Result<(), tor_server::Failure> {
-    while let Some((actor, ai)) = engine.next_ai_action() {
-        let revision = engine.revision(actor).unwrap();
-        engine
-            .command(
-                "player",
-                "test",
-                actor,
-                &uuid::Uuid::new_v4().to_string(),
-                &engine.branch().clone(),
-                Journal::Act {
-                    expected_revision: revision,
-                    action: ai,
-                },
-            )
-            .unwrap();
-    }
-    let revision = engine.revision(ActorId(1)).unwrap();
-    engine
-        .command(
-            "player",
-            "test",
-            ActorId(1),
-            &uuid::Uuid::new_v4().to_string(),
-            &engine.branch().clone(),
-            Journal::Act {
-                expected_revision: revision,
-                action,
-            },
-        )
-        .map(|_| ())
+    support::play(engine, action).map(|_| ())
 }
 
 /// Step east along the caves' straight corridor, waiting for rats in the way.

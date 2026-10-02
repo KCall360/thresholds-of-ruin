@@ -45,7 +45,7 @@ fn place_names_use_opaque_keys_and_remain_read_only_for_spectators() {
 }
 
 #[test]
-fn wizard_wire_rejects_arbitrary_archetypes_and_forged_properties() {
+fn spectators_are_not_permitted_wizard_commands() {
     assert!(!AccessRole::Spectator.permits(&Request::Command {
         branch: BranchId("branch".into()),
         command: Command::Wizard {
