@@ -3,11 +3,11 @@
 //! Synthesizes sparse observation data from the server into an authentic,
 //! evocative, and vibrant interactive fiction prose environment.
 
-use tor_client_common::surfaces;
-use tor_protocol::StateView;
+use tor_client_common::{surfaces, Palette};
+use tor_protocol::{CellView, Position, StateView};
 
 use crate::{
-    adventure::{distance, floor_material},
+    adventure::{distance, floor_material, floor_material_with, surface},
     safe,
 };
 
@@ -21,10 +21,11 @@ fn key_hash(key: &str) -> u64 {
     hash
 }
 
-/// Discovers the anchor key representing the character's current place.
-pub fn current_place_key(state: &StateView) -> Option<&str> {
-    state
-        .observation
+/// Discovers or deterministically designates the anchor representing the current space.
+pub fn current_place_anchor(state: &StateView) -> Option<(&str, Position)> {
+    let o = &state.observation;
+    // 1. Look for authored place hints at z = 0
+    let authored = o
         .visible_cells
         .iter()
         .filter(|c| c.place_hint && !c.wall && c.position.z == 0)
@@ -33,15 +34,66 @@ pub fn current_place_key(state: &StateView) -> Option<&str> {
                 c.position.x.unsigned_abs() as u64 + c.position.y.unsigned_abs() as u64,
                 &c.key,
             )
-        })
-        .map(|c| c.key.as_str())
+        });
+    if let Some(c) = authored {
+        return Some((c.key.as_str(), c.position));
+    }
+
+    // 2. Client-spawned place hint: compute centroid of walkable component connected to (0, 0, 0)
+    let mut walkable: std::collections::BTreeMap<(i32, i32), &CellView> =
+        std::collections::BTreeMap::new();
+    for cell in &o.visible_cells {
+        if !cell.wall && cell.position.z == 0 {
+            walkable.insert((cell.position.x, cell.position.y), cell);
+        }
+    }
+    if walkable.is_empty() {
+        return None;
+    }
+    let mut component: Vec<&CellView> = Vec::new();
+    let mut visited: std::collections::BTreeSet<(i32, i32)> = std::collections::BTreeSet::new();
+    let mut queue = vec![(0, 0)];
+    visited.insert((0, 0));
+    while let Some((x, y)) = queue.pop() {
+        if let Some(&cell) = walkable.get(&(x, y)) {
+            component.push(cell);
+            for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
+                let next = (x + dx, y + dy);
+                if !visited.contains(&next) && walkable.contains_key(&next) {
+                    visited.insert(next);
+                    queue.push(next);
+                }
+            }
+        }
+    }
+    if component.is_empty() {
+        return None;
+    }
+    let count = component.len() as i64;
+    let sum_x: i64 = component.iter().map(|c| c.position.x as i64).sum();
+    let sum_y: i64 = component.iter().map(|c| c.position.y as i64).sum();
+    let cx = sum_x / count;
+    let cy = sum_y / count;
+
+    let closest = component.into_iter().min_by_key(|c| {
+        (
+            (c.position.x as i64 - cx).abs() + (c.position.y as i64 - cy).abs(),
+            &c.key,
+        )
+    })?;
+    Some((closest.key.as_str(), closest.position))
+}
+
+/// Discovers the anchor key representing the character's current place.
+pub fn current_place_key(state: &StateView) -> Option<&str> {
+    current_place_anchor(state).map(|(k, _)| k)
 }
 
 /// Returns an evocative room title for the current place.
 ///
 /// Priority:
 /// 1. Player-named / authored place from `state.observation.places`.
-/// 2. Deterministic procedural title derived from architecture and materials.
+/// 2. None (suppresses arbitrary procedural headers like "Quiet Stone Chamber").
 pub fn place_title(state: &StateView) -> Option<String> {
     let key = current_place_key(state)?;
     if let Some(named) = state.observation.places.iter().find(|p| p.key == key) {
@@ -49,38 +101,51 @@ pub fn place_title(state: &StateView) -> Option<String> {
             return Some(safe(&named.name));
         }
     }
+    None
+}
 
-    let seed = key_hash(key);
+/// Synthesizes the environment into an integrated prose paragraph.
+pub fn synthesize_room(state: &StateView, palette: &Palette) -> String {
     let o = &state.observation;
+    let key = current_place_key(state).unwrap_or("");
+    let seed = key_hash(key);
 
-    let floor_mat = o
+    let floor_cell = o
         .visible_cells
         .iter()
-        .find(|c| distance(c.position) == 0 && !c.wall)
-        .and_then(|c| floor_material(&o.visible_cells, c));
-    let walls = surfaces::roles(&o.visible_cells).walls;
+        .find(|c| distance(c.position) == 0 && !c.wall);
+    if floor_cell.is_none() {
+        return "Your surroundings".into();
+    }
+    let floor_mat = floor_cell.and_then(|c| floor_material_with(palette, &o.visible_cells, c));
 
-    let material_prefix = if floor_mat.is_some_and(|m| m.contains("stone"))
-        || walls.iter().any(|w| w.contains("stone"))
-    {
-        "Stone"
-    } else if floor_mat.is_some_and(|m| m.contains("wood"))
-        || walls.iter().any(|w| w.contains("wood"))
-    {
-        "Timber"
-    } else if floor_mat.is_some_and(|m| m.contains("dirt") || m.contains("earth"))
-        || walls
-            .iter()
-            .any(|w| w.contains("dirt") || w.contains("earth"))
-    {
-        "Earthen"
-    } else if floor_mat.is_some_and(|m| m.contains("marble"))
-        || walls.iter().any(|w| w.contains("marble"))
-    {
-        "Marble"
+    let wall_materials = surfaces::roles_by(&o.visible_cells, |cell| surface(palette, cell)).walls;
+    let walls_str = wall_materials
+        .iter()
+        .map(|w| safe(w))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let walls_clause = if wall_materials.is_empty() {
+        String::new()
     } else {
-        "Ancient"
+        format!(" You can see walls of {walls_str}.")
     };
+
+    let material_prefix =
+        if floor_mat.is_some_and(|m| m.contains("stone")) || walls_str.contains("stone") {
+            "Stone"
+        } else if floor_mat.is_some_and(|m| m.contains("wood")) || walls_str.contains("wood") {
+            "Timber"
+        } else if floor_mat.is_some_and(|m| m.contains("dirt") || m.contains("earth"))
+            || walls_str.contains("dirt")
+            || walls_str.contains("earth")
+        {
+            "Earthen"
+        } else if floor_mat.is_some_and(|m| m.contains("marble")) || walls_str.contains("marble") {
+            "Marble"
+        } else {
+            "Ancient"
+        };
 
     let walkable: Vec<_> = o
         .visible_cells
@@ -112,11 +177,16 @@ pub fn place_title(state: &StateView) -> Option<String> {
     };
 
     const EPITHETS: &[&str] = &[
-        "Quiet", "Dim", "Shadowed", "Cold", "Drafty", "Dusty", "Still", "Echoing",
+        "quiet", "dim", "shadowed", "cold", "drafty", "dusty", "still", "echoing",
     ];
     let epithet = EPITHETS[(seed as usize) % EPITHETS.len()];
+    let full_form = format!("{material_prefix} {form}");
 
-    Some(format!("{epithet} {material_prefix} {form}"))
+    let sensory = sensory_atmosphere(state).unwrap_or_else(|| "The air is cool and still.".into());
+
+    let floor_phrase = floor_mat.map_or_else(String::new, |m| format!(" with a {} floor", safe(m)));
+
+    format!("You stand in a {epithet} {full_form}{floor_phrase}.{walls_clause} {sensory}")
 }
 
 /// Synthesizes consistent sensory atmosphere for the setting.

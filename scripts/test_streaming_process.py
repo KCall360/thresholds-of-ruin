@@ -263,7 +263,7 @@ class StreamingProcesses(unittest.TestCase):
             ["--connect", self.address], token=support.TOKEN)
         self.addCleanup(player.stop)
         welcome = player.until(lambda line: line == "> ")
-        self.assertIn("You stand in a space with a flagstone floor.", welcome)
+        self.assertIn("flagstone floor", welcome)
         player.child.stdin.write("examine floor\n")
         player.child.stdin.flush()
         examined = player.until(lambda line: line == "> ")

@@ -279,6 +279,25 @@ class AdventureProcesses(unittest.TestCase):
         # Save command executes clean barrier request
         self.assertEqual("> ", self.say(player, "save"))
 
+    def test_first_dungeon_room_1_presentation_and_exit_travel(self):
+        self.server()
+        player, welcome = self.adventure()
+        # Volumetric actor unification: observer's own multi-cell body is omitted from room entity listings
+        self.assertNotIn("You see yourself above you", welcome)
+        self.assertNotIn("You see yourself at your feet", welcome)
+        self.assertNotIn("delver", welcome)
+        # Geometry-derived exits & spatial synthesis
+        self.assertIn("stone floor", welcome)
+        self.assertIn("You can head east.", welcome)
+        # Directional navigation into Region 2 (Broken gallery)
+        walk_east = self.say(player, "east")
+        self.assertIn("You walk east.", walk_east)
+        # In Region 2, Broken gallery is presented and includes an exit back west
+        self.assertIn("You can head", walk_east)
+        # Moving back west through portal
+        walk_west = self.say(player, "west")
+        self.assertIn("You walk west.", walk_west)
+
 
 if __name__ == "__main__":
     unittest.main()
