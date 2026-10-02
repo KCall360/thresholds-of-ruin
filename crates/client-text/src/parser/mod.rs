@@ -13,7 +13,7 @@ pub mod scope;
 pub mod token;
 
 pub use context::{format_disambiguation_prompt, ConversationContext, PendingDisambiguation};
-pub use grammar::{match_sentence, ParsedCommand};
+pub use grammar::{match_sentence, match_sentence_with_raw, ParsedCommand, SessionCommand};
 pub use lexicon::{Preposition, Pronoun, Verb};
 pub use matcher::{match_noun_phrase, MatchResult, Referents};
 pub use noun_phrase::{parse_noun_phrase, NounPhrase};

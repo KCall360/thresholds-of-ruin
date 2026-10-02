@@ -839,3 +839,221 @@ fn test_expanded_if_interactions() {
         })
     );
 }
+
+#[test]
+fn test_conversational_clarification_with_noun_phrases() {
+    let mut s = state();
+    let mut dialogue = Dialogue::default();
+
+    // Add silver token next to copper token (both reachable at 0,0,0)
+    s.observation.ground_items.push(GroundItemView {
+        position: Position { x: 0, y: 0, z: 0 },
+        reachable: true,
+        item: ItemView {
+            id: 20,
+            name: "silver token".into(),
+            appearance: "item".into(),
+            identified: true,
+            description: "A small silver disc.".into(),
+            quantity: 1,
+            asset: None,
+        },
+    });
+
+    // 1. "take token" triggers disambiguation
+    let prompt = dialogue.interpret("take token", &s);
+    assert_eq!(
+        prompt,
+        Intent::Say(
+            "Which do you mean? 1) copper token (count 1); 2) silver token (count 1)".into()
+        )
+    );
+
+    // 2. Answer with "the first one"
+    assert_eq!(
+        dialogue.interpret("the first one", &s),
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None,
+        })
+    );
+
+    // 3. Trigger disambiguation again
+    let _ = dialogue.interpret("take token", &s);
+    // Answer with adjective/noun "silver"
+    assert_eq!(
+        dialogue.interpret("silver", &s),
+        Intent::Action(Action::Take {
+            item: 20,
+            quantity: None,
+        })
+    );
+
+    // 4. Trigger disambiguation again
+    let _ = dialogue.interpret("take token", &s);
+    // Answer with ordinal + head noun "the 2nd token"
+    assert_eq!(
+        dialogue.interpret("the 2nd token", &s),
+        Intent::Action(Action::Take {
+            item: 20,
+            quantity: None,
+        })
+    );
+
+    // 5. Trigger disambiguation again and answer with invalid option
+    let _ = dialogue.interpret("take token", &s);
+    assert_eq!(
+        dialogue.interpret("gold", &s),
+        Intent::Say("There is no matching option. Which do you mean? 1) copper token (count 1); 2) silver token (count 1)".into())
+    );
+    // Then answer with numeric choice "1"
+    assert_eq!(
+        dialogue.interpret("1", &s),
+        Intent::Action(Action::Take {
+            item: 1,
+            quantity: None,
+        })
+    );
+}
+
+#[test]
+fn test_pronoun_reference_flow() {
+    let mut s = state();
+    let mut dialogue = Dialogue::default();
+
+    s.observation.visible_actors.push(ActorView {
+        id: ActorId(42),
+        name: "goblin sentry".into(),
+        position: Position { x: 1, y: 0, z: 0 },
+        description: "A small, snarling goblin.".into(),
+        asset: None,
+    });
+
+    // Examine goblin sentry establishes actor pronoun
+    assert_eq!(
+        dialogue.interpret("examine goblin sentry", &s),
+        Intent::Say("A small, snarling goblin.".into())
+    );
+    assert_eq!(dialogue.actor, Some(ActorId(42)));
+
+    // Attack him uses established actor pronoun
+    assert_eq!(
+        dialogue.interpret("attack him", &s),
+        Intent::Action(Action::Attack {
+            target: ActorId(42),
+        })
+    );
+
+    // Ask her about treasure
+    assert_eq!(
+        dialogue.interpret("ask her about treasure", &s),
+        Intent::Say(
+            "The goblin sentry remains silent, offering no response about the treasure.".into()
+        )
+    );
+
+    // Plural items pronoun tracking
+    s.observation.ground_items.push(GroundItemView {
+        position: Position { x: 0, y: 0, z: 0 },
+        reachable: true,
+        item: ItemView {
+            id: 50,
+            name: "iron arrows".into(),
+            appearance: "item".into(),
+            identified: true,
+            description: "A bundle of arrows.".into(),
+            quantity: 5,
+            asset: None,
+        },
+    });
+
+    // Take iron arrows sets plural_items
+    assert_eq!(
+        dialogue.interpret("take iron arrows", &s),
+        Intent::Action(Action::Take {
+            item: 50,
+            quantity: None,
+        })
+    );
+    assert_eq!(dialogue.plural_items, vec![50]);
+
+    // Simulate item now being in player's inventory
+    s.observation.inventory.push(ItemView {
+        id: 50,
+        name: "iron arrows".into(),
+        appearance: "item".into(),
+        identified: true,
+        description: "A bundle of arrows.".into(),
+        quantity: 5,
+        asset: None,
+    });
+
+    // Drop them uses plural_items
+    assert_eq!(
+        dialogue.interpret("drop them", &s),
+        Intent::Action(Action::Drop {
+            item: 50,
+            quantity: None,
+        })
+    );
+}
+
+#[test]
+fn test_session_commands_unified_routing() {
+    let s = state();
+    let mut dialogue = Dialogue::default();
+
+    assert_eq!(
+        dialogue.interpret("save", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::Save))
+    );
+    assert_eq!(
+        dialogue.interpret("sync", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::Snapshot))
+    );
+    assert_eq!(
+        dialogue.interpret("control", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::AcquireControl))
+    );
+    assert_eq!(
+        dialogue.interpret("release", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::ReleaseControl))
+    );
+    assert_eq!(
+        dialogue.interpret("places", &s),
+        Intent::Tools(tor_client_text::Input::Places)
+    );
+    assert_eq!(
+        dialogue.interpret("history", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::History {
+            before: None,
+            limit: 50,
+        }))
+    );
+    assert_eq!(
+        dialogue.interpret("history 100", &s),
+        Intent::Tools(tor_client_text::Input::Request(Request::History {
+            before: Some(EntryId("100".into())),
+            limit: 50,
+        }))
+    );
+    assert_eq!(
+        dialogue.interpret("note Secret Passage Behind Rug", &s),
+        Intent::Tools(tor_client_text::Input::Command(Command::Annotate {
+            anchor: Anchor::State {
+                revision: s.revision
+            },
+            text: "Secret Passage Behind Rug".into(),
+            source: ClientSource::User,
+            audience: Audience::Actor,
+            category: AnnotationCategory::Note,
+        }))
+    );
+    assert_eq!(
+        dialogue.interpret("wizard teleport 1 2 3", &s),
+        Intent::Tools(tor_client_text::Input::Command(Command::Wizard {
+            expected_revision: s.revision,
+            operation: "teleport 1 2 3".into(),
+        }))
+    );
+}

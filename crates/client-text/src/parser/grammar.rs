@@ -9,6 +9,40 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionCommand {
+    Save,
+    Sync,
+    Control,
+    Release,
+    History {
+        before: Option<String>,
+    },
+    BranchHistory {
+        branch: String,
+        before: Option<String>,
+    },
+    Places,
+    Note {
+        text: String,
+        is_bookmark: bool,
+    },
+    Name {
+        target: String,
+        name: String,
+    },
+    Annotate {
+        source: String,
+        audience: String,
+        category: String,
+        anchor: String,
+        text: String,
+    },
+    Wizard {
+        command: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedCommand {
     Intransitive {
         verb: Verb,
@@ -44,10 +78,19 @@ pub enum ParsedCommand {
     /// A conversational follow-up (e.g. "the copper one", "copper", "first")
     /// answering a previous disambiguation question.
     Clarification(NounPhrase),
+    Session(SessionCommand),
 }
 
 /// Matches a sentence of tokens to a ParsedCommand.
 pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
+    match_sentence_with_raw(tokens, None)
+}
+
+/// Matches a sentence of tokens with optional raw string to preserve literal text.
+pub fn match_sentence_with_raw(
+    tokens: &[Token],
+    raw_line: Option<&str>,
+) -> Result<ParsedCommand, String> {
     if tokens.is_empty() {
         return Err("Please say what you want to do.".into());
     }
@@ -58,6 +101,147 @@ pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
             if let Some(dir) = parse_direction(word) {
                 return Ok(ParsedCommand::Directional { direction: dir });
             }
+        }
+    }
+
+    // Check for session / meta commands
+    if let Some(word) = tokens[0].as_word() {
+        match word {
+            "save" if tokens.len() == 1 => {
+                return Ok(ParsedCommand::Session(SessionCommand::Save));
+            }
+            "sync" if tokens.len() == 1 => {
+                return Ok(ParsedCommand::Session(SessionCommand::Sync));
+            }
+            "control" if tokens.len() == 1 => {
+                return Ok(ParsedCommand::Session(SessionCommand::Control));
+            }
+            "release" if tokens.len() == 1 => {
+                return Ok(ParsedCommand::Session(SessionCommand::Release));
+            }
+            "places" if tokens.len() == 1 => {
+                return Ok(ParsedCommand::Session(SessionCommand::Places));
+            }
+            "history" => {
+                let rest: Vec<_> = tokens[1..].iter().map(|t| t.text()).collect();
+                if rest.len() > 1 {
+                    return Err("Use history [before-id]".into());
+                }
+                let before = rest.first().cloned();
+                return Ok(ParsedCommand::Session(SessionCommand::History { before }));
+            }
+            "branch-history" | "branch_history" => {
+                let rest: Vec<_> = tokens[1..].iter().map(|t| t.text()).collect();
+                if rest.is_empty() || rest.len() > 2 {
+                    return Err("Use branch-history <branch> [before-id]".into());
+                }
+                let branch = rest[0].clone();
+                let before = rest.get(1).cloned();
+                return Ok(ParsedCommand::Session(SessionCommand::BranchHistory {
+                    branch,
+                    before,
+                }));
+            }
+            "note" | "bookmark" => {
+                let text = if let Some(raw) = raw_line {
+                    let (_, rest) = crate::word(raw.trim());
+                    rest.to_string()
+                } else {
+                    tokens[1..]
+                        .iter()
+                        .map(|t| t.text())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                if text.trim().is_empty() {
+                    return Err(format!("What {} would you like to make?", word));
+                }
+                return Ok(ParsedCommand::Session(SessionCommand::Note {
+                    text,
+                    is_bookmark: word == "bookmark",
+                }));
+            }
+            "name" => {
+                if tokens.len() < 3 {
+                    return Err(
+                        "Use name <place number> <new name> or name room <new name>.".into(),
+                    );
+                }
+                let (target, name) = if let Some(raw) = raw_line {
+                    let (_, rest) = crate::word(raw.trim());
+                    let (t, n) = crate::word(rest);
+                    (t.to_string(), n.to_string())
+                } else {
+                    let t = tokens[1].text();
+                    let n = tokens[2..]
+                        .iter()
+                        .map(|t| t.text())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    (t, n)
+                };
+                return Ok(ParsedCommand::Session(SessionCommand::Name {
+                    target,
+                    name,
+                }));
+            }
+            "annotate" => {
+                if let Some(raw) = raw_line {
+                    let (_, rest) = crate::word(raw.trim());
+                    let (source, rest) = crate::word(rest);
+                    let (audience, rest) = crate::word(rest);
+                    let (category, rest) = crate::word(rest);
+                    let (anchor, text) = crate::word(rest);
+                    if source.is_empty()
+                        || audience.is_empty()
+                        || category.is_empty()
+                        || anchor.is_empty()
+                        || text.is_empty()
+                    {
+                        return Err(
+                            "Use annotate <source> <audience> <category> <anchor> <text>".into(),
+                        );
+                    }
+                    return Ok(ParsedCommand::Session(SessionCommand::Annotate {
+                        source: source.into(),
+                        audience: audience.into(),
+                        category: category.into(),
+                        anchor: anchor.into(),
+                        text: text.into(),
+                    }));
+                } else {
+                    let rest: Vec<_> = tokens[1..].iter().map(|t| t.text()).collect();
+                    if rest.len() < 5 {
+                        return Err(
+                            "Use annotate <source> <audience> <category> <anchor> <text>".into(),
+                        );
+                    }
+                    return Ok(ParsedCommand::Session(SessionCommand::Annotate {
+                        source: rest[0].clone(),
+                        audience: rest[1].clone(),
+                        category: rest[2].clone(),
+                        anchor: rest[3].clone(),
+                        text: rest[4..].join(" "),
+                    }));
+                }
+            }
+            "wizard" => {
+                let command = if let Some(raw) = raw_line {
+                    let (_, rest) = crate::word(raw.trim());
+                    rest.to_string()
+                } else {
+                    tokens[1..]
+                        .iter()
+                        .map(|t| t.text())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                if command.trim().is_empty() {
+                    return Err("Use wizard <server developer command>.".into());
+                }
+                return Ok(ParsedCommand::Session(SessionCommand::Wizard { command }));
+            }
+            _ => {}
         }
     }
 
@@ -207,7 +391,12 @@ pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
 
         // Say <text>
         if verb == Verb::Say {
-            let text = rest.iter().map(|t| t.text()).collect::<Vec<_>>().join(" ");
+            let text = if let Some(raw) = raw_line {
+                let (_, rest) = crate::word(raw.trim());
+                rest.to_string()
+            } else {
+                rest.iter().map(|t| t.text()).collect::<Vec<_>>().join(" ")
+            };
             return Ok(ParsedCommand::Say { text });
         }
 
@@ -229,7 +418,7 @@ pub fn match_sentence(tokens: &[Token]) -> Result<ParsedCommand, String> {
 /// 3. Transitive: <noun> (e.g. "brass lantern")
 fn parse_transitive_or_ditransitive(verb: Verb, tokens: &[Token]) -> Result<ParsedCommand, String> {
     if tokens.is_empty() {
-        return Err(format!("What do you want to {verb:?}?"));
+        return Err(format!("What do you want to {}?", verb.as_str()));
     }
 
     // Search for a preposition that separates direct and indirect objects
@@ -484,5 +673,78 @@ mod tests {
             }
             other => panic!("Unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_session_commands() {
+        let tokens = tokenize("save");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::Save)
+        );
+
+        let tokens = tokenize("sync");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::Sync)
+        );
+
+        let tokens = tokenize("control");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::Control)
+        );
+
+        let tokens = tokenize("release");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::Release)
+        );
+
+        let tokens = tokenize("places");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::Places)
+        );
+
+        let tokens = tokenize("history");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::History { before: None })
+        );
+
+        let tokens = tokenize("history abc");
+        assert_eq!(
+            match_sentence(&tokens).unwrap(),
+            ParsedCommand::Session(SessionCommand::History {
+                before: Some("abc".into())
+            })
+        );
+
+        let tokens = tokenize("note A mysterious inscription");
+        assert_eq!(
+            match_sentence_with_raw(&tokens, Some("note A mysterious inscription")).unwrap(),
+            ParsedCommand::Session(SessionCommand::Note {
+                text: "A mysterious inscription".into(),
+                is_bookmark: false,
+            })
+        );
+
+        let tokens = tokenize("name 1 Hearth of Echoes");
+        assert_eq!(
+            match_sentence_with_raw(&tokens, Some("name 1 Hearth of Echoes")).unwrap(),
+            ParsedCommand::Session(SessionCommand::Name {
+                target: "1".into(),
+                name: "Hearth of Echoes".into(),
+            })
+        );
+
+        let tokens = tokenize("wizard teleport 1 2 3");
+        assert_eq!(
+            match_sentence_with_raw(&tokens, Some("wizard teleport 1 2 3")).unwrap(),
+            ParsedCommand::Session(SessionCommand::Wizard {
+                command: "teleport 1 2 3".into(),
+            })
+        );
     }
 }

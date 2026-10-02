@@ -46,6 +46,53 @@ pub enum Verb {
     Diagnose,
 }
 
+impl Verb {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Verb::Look => "look",
+            Verb::Examine => "examine",
+            Verb::Inventory => "inventory",
+            Verb::Take => "take",
+            Verb::Drop => "drop",
+            Verb::Put => "put",
+            Verb::Open => "open",
+            Verb::Close => "close",
+            Verb::Unlock => "unlock",
+            Verb::Lock => "lock",
+            Verb::Attack => "attack",
+            Verb::Go => "go",
+            Verb::Climb => "climb",
+            Verb::Enter => "enter",
+            Verb::Exit => "exit",
+            Verb::Wait => "wait",
+            Verb::Help => "help",
+            Verb::Quit => "quit",
+            Verb::Stop => "stop",
+            Verb::Step => "step",
+            Verb::Say => "say",
+            Verb::Again => "again",
+            Verb::Listen => "listen",
+            Verb::Smell => "smell",
+            Verb::Search => "search",
+            Verb::Verbose => "verbose",
+            Verb::Brief => "brief",
+            Verb::Superbrief => "superbrief",
+            Verb::Read => "read",
+            Verb::Drink => "drink",
+            Verb::Eat => "eat",
+            Verb::Wear => "wear",
+            Verb::Wield => "wield",
+            Verb::Remove => "remove",
+            Verb::Give => "give",
+            Verb::Push => "push",
+            Verb::Pull => "pull",
+            Verb::Turn => "turn",
+            Verb::Talk => "talk",
+            Verb::Diagnose => "diagnose",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preposition {
     At,

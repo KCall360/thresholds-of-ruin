@@ -177,3 +177,51 @@ Following the repository [testing policy](testing.md):
    deterministically to protocol actions without protocol leaks.
 4. **Actual-Process Acceptance Tests**: Full process acceptance testing
    driving natural IF transcripts through `scripts/test_adventure_process.py`.
+
+---
+
+## 5. Client-Side Narrative vs. Server-Side World Mutations
+
+A foundational principle of `tor-client-text` is delivering an authentic, immersive
+Interactive Fiction experience matching MDL Zork and Inform 7 even when the underlying
+simulation engine has not yet implemented specific backend mutation subsystems.
+
+### Current Protocol Scope (Milestone 4e)
+The server-authoritative protocol currently defines the following `Action` mutations:
+- `Action::Move { direction }` (discrete grid displacement and step execution)
+- `Action::Take { item, quantity }` (inventory acquisition from ground)
+- `Action::Drop { item, quantity }` (inventory placement to ground)
+- `Action::SetDoor { door, open }` (door opening and closing)
+- `Action::Attack { target }` (combat engagement against visible actors)
+- `Action::Wait` (turn advancement and combat continuation)
+
+### Simulated Client Narrative Actions
+To preserve natural IF interaction depth without waiting for server-side equipment,
+alchemy, or hunger systems, `tor-client-text` provides simulated literary feedback:
+1. **Equipment Operations**:
+   - `wear` / `don` -> *"You put on the <item>."*
+   - `wield` / `equip` -> *"You ready the <item> for combat."*
+   - `remove` / `doff` -> *"You take off the <item>."*
+2. **Consumables**:
+   - `drink` / `quaff` -> *"You take a sip of the <item>. It is refreshing, though it has no further effect right now."*
+   - `eat` / `consume` -> *"You sample the <item>. It sustains you, though it has no further effect right now."*
+3. **Physical Manipulation**:
+   - `push` / `pull` / `turn` -> Contextual feedback for scenery, doors, and actors.
+4. **Social & Speech**:
+   - `talk to` / `ask <actor> about <topic>` -> Authentic NPC silence/glare feedback.
+
+### Engine Integration Hook Points
+When future engine milestones implement server-authoritative equipment slots and
+consumable item effects, the client implementation in [`adventure.rs`](file:///f:/gemini/TOR/crates/client-text/src/adventure.rs)
+is explicitly annotated with structured hook comments:
+- `// HOOK[engine:equipment]`: In `fn object()`, replace the simulated `Intent::Say(...)`
+  branches for `wear`, `wield`, and `remove` with `Intent::Action(Action::Equip { item: id, slot })`
+  and `Intent::Action(Action::Unequip { item: id })`.
+- `// HOOK[engine:consumables]`: In `fn object()`, replace simulated `drink` and `eat`
+  branches with `Intent::Action(Action::Consume { item: id })`.
+- `// HOOK[engine:social]`: In `fn talk_to()`, replace conversational defaults with
+  dialogue requests once an NPC dialogue tree protocol is established.
+
+Because client presentation is entirely derived from disclosed `StateView` updates,
+upgrading these hook points from client narrative to backend actions will require
+zero changes to the parsing, disambiguation, or pronoun tracking pipelines.
