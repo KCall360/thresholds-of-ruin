@@ -145,6 +145,19 @@ glyph table belongs with the ASCII redesign, which stays deferred until after
 launcher rebuild for format 14, and closing 4e in the roadmap. Run
 `scripts/verify.py quick` before each commit and `full` before pushing.
 **Merge only with the maintainer's approval.**
+**Interactive fiction parser** (PR #55): the text client's natural-language
+parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
+and [adventure commands](docs/text-adventure.md).
+
+**Milestone 4e — region streaming, generation, and asset palettes (complete).**
+The region lifecycle (PR #44), streaming through disk regions (PR #45),
+preloading, per-region packages, generated regions and server palettes
+(PR #47, save format 14), its review fixes (PR #53) and palettes in the text
+and headless clients (PR #54). Against the pre-4e `main`, command p95 rose by
+at most 13% and by under 8% in most cases; see
+[region streaming](docs/region-streaming.md#performance). No ledger line was
+added; that needs a raw-data upload, which the maintainer must approve. The
+ASCII glyph table waits for the ASCII redesign.
 
 **ASCII redesign attempt:** PRs #48-#50 (flat map, message log, glyph table)
 were merged and then reverted by PR #52, which also fixed a race where the
@@ -179,8 +192,8 @@ The server reads a package's index, which is proportional to its region
 count, and saves keep a copy of it; everything else a game holds or saves
 grows with the regions played.
 
-The desktop launchers run the PR #45 build; they need rebuilding for format 14,
-and older playtest saves won't resume with them.
+The desktop launchers run the 4e build (save format 14); playtest saves from
+before it won't resume with them.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,
@@ -209,14 +222,11 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Faster verification (in progress, branch `tooling/faster-verification`).**
-Integration tests are now one binary per crate (`tests/it/`), and
-`scripts/verify.py` runs the checks in the `quick`, `push`, and `full` tiers
-described in the [testing policy](docs/testing.md#running-the-checks). On this
-machine, with 2 jobs, clean release test builds dropped from 23 to 16 minutes,
-and a release rebuild after a `world` change now takes about 5 minutes. A
-faster linker (`rust-lld`) made no difference, so it wasn't adopted. Next: a PR,
-CI on both platforms, and merge only with the maintainer's approval.
+**Running until blocked (in progress, branch `feature/run-until-blocked`).**
+The server pump and client travel cancellation are removed: the simulation
+runs until it needs client input, only the server interrupts, and clients pace
+the display. It needs a PR, CI on both platforms, and the maintainer's approval
+to merge.
 
 **Running until blocked (planned, branch `plan/run-until-blocked`).** The
 server pump and client travel cancellation will be removed: the simulation

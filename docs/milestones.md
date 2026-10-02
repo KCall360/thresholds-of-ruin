@@ -30,14 +30,15 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Authored scenarios | Complete (4a) | TOML packages, offline validation, pinned inputs |
 | Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
 | Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
-| Region streaming | In progress (4e) | Package games build regions on demand and keep detached regions on disk |
+| Region streaming | Complete (4e) | Regions built on demand, detached to disk, generated between authored ones; asset palettes |
 | Performance (3p) | Deferred, open | See [performance plan](performance-persistence.md#open-work) |
 | Distribution | Not started | Packaged clients and automatic local-server startup |
 
 Notable current limitations: clients must be relaunched to reconnect; active
 travel doesn't resume after a server restart; the server listens on loopback
-only; wizard history is bounded; every authored region is loaded at once; and
-there's no procedural generation.
+only; wizard history is bounded; generated regions are limited to rooms and
+corridors between authored ones; and the ASCII client doesn't draw from asset
+palettes yet.
 
 ## Completed milestones
 
@@ -145,59 +146,25 @@ specific item. Death is persistent and leaves a corpse and dropped inventory.
 Equipment, containers, locks, keys, and usable items aren't included. See
 [dungeon gameplay](dungeon.md).
 
-## In progress
-
 ### 4e — Region streaming, generation, and asset palettes
 
-The first slice implements a structural region catalog, deterministic directed
-preload-horizon queries, and a read-only authoring command. The second defines
-the [region lifecycle contract](region-streaming.md#region-lifecycle-contract)
-and implements it in the simulation: reference points (not hardcoded to
-players), pins, frozen time without catch-up, and detaching regions into
-self-contained records that reattach exactly, kept in a record store. A game
-can also start with no region built: a scenario package builds each region
-when it's first loaded, with the same result as building everything at once.
-Package games now stream: they start with the regions their characters need,
-move to the regions their reference points ask for after every command, and
-keep detached regions on disk, and the server builds or reads the regions just
-beyond the loaded ones in the background. Packages keep one file per region with
-a generated index, so a game reads a region's file only when it builds it, and
-saves pin their package, copying each region file they build from. Regions can
-be generated between authored ones, the same in any build order; see
-[generated regions](scenario-packages.md#generated-regions). The server names
-each disclosed thing's asset and sends each client an
-[asset palette](protocol.md#asset-palettes). Clients keep it current, ask for
-it again after a missed revision or an unexpected asset, and resolve assets
-with dotted-prefix fallback; the text client describes surfaces by asset words
-and the headless client reports the palette. The ASCII client doesn't draw from
-it yet. See
-[later slices](region-streaming.md#later-slices).
+Regions have a lifecycle driven by reference points in game state (characters
+and actors clients control), not hardcoded players: pins keep what an action
+can touch loaded, frozen regions don't advance time, and detached regions are
+kept on disk as self-contained records that reattach exactly. Package games
+start with only the regions their characters need, build each region from the
+package just before it's first loaded, move regions in and out after every
+command, and preload the regions just beyond the loaded ones in the background.
+Packages keep one file per region with a generated index, and saves pin their
+package. Generated regions fill the gaps between authored ones, the same in any
+build order; see [generated regions](scenario-packages.md#generated-regions).
+The server sends each client an [asset palette](protocol.md#asset-palettes);
+the text and headless clients resolve it, and the ASCII client's glyph table
+waits for the ASCII redesign. Transition work is bounded by the loaded actors
+and regions, never the whole world, and existing play costs about the same as
+before 4e; see [region streaming](region-streaming.md#performance).
 
-**Streaming.** Generate regions and zones on demand, depending on neighbors only
-through fixed structural metadata. Activation within the preload horizon
-persists generated results permanently; distant regions freeze every actor and
-effect. Reactivation performs deterministic deferred updates before normal
-scheduling. Save the complete active state, keep frozen regions on disk, and
-leave unactivated areas as pinned scenario/seed/version references. Load the
-saved active horizon first. Define cross-boundary effects and checkpoint and
-event handling before implementing streaming, rather than advancing frozen
-regions implicitly. Choose checkpoint boundaries using these scenario and
-streaming requirements.
-
-**Palettes.** Add separate palette snapshots and deltas over the existing
-connection, with independent revisions and snapshot requests, no
-acknowledgements, and identifiers only. Broad theme pools forecast assets before
-instances exist, tailored to the player's horizon without signaling the next
-room. Clients resolve dependencies, cache independently, and use fallbacks and
-retry for unexpected assets. Recompute palettes on load. The palette protocol
-doesn't need a 3D renderer.
-
-**Acceptance:** equivalent generation and replay with fixed inputs; no region
-replacement or frozen-time advancement; deterministic reactivation; save and
-load of complete actor, item, and physics knowledge; loading bounded relative to
-total world size; theme assets without entity disclosure; reconnect and gap
-snapshots; fallback for unexpected assets. Keep the current explicit-save
-barriers and consistent crash rollback.
+## In progress
 
 ### 3s — Three-dimensional sight
 
