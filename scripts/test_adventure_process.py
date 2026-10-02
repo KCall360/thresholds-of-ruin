@@ -84,7 +84,7 @@ class AdventureProcesses(ProcessTestCase):
         self.assertEqual("You start walking east, but stop when a figure comes into view.\n> ", self.say(player, "go east"))
 
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
-        self.server(scenario="portal-geometry-setup")
+        self.server(scenario="portal-geometry")
         player, welcome = self.adventure()
         self.assertIn("walls of stone", welcome)
         self.assertIn("made of stone", self.say(player, "examine walls"))
@@ -98,7 +98,7 @@ class AdventureProcesses(ProcessTestCase):
             self.assertNotIn(hidden, "\n".join(player.transcript))
 
     def test_wide_join_direction_then_approach_works_without_region_names(self):
-        self.server(scenario="wide-join-setup")
+        self.server(scenario="wide-join")
         player, _ = self.adventure()
         self.assertIn("You walk east.", self.say(player, "east"))
         self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
@@ -108,10 +108,10 @@ class AdventureProcesses(ProcessTestCase):
 
     def test_new_actor_interrupts_and_arrival_does_not_override_pickup_caution(self):
         # Each variant gets a separate save/server via a subtest-owned test instance.
-        for section, expected_phase in (("hazard", "hazard"), ("arrival_hazard", "arrived")):
-            with self.subTest(section=section):
+        for package, expected_phase in (("text-adventure-hazard", "hazard"), ("text-adventure-arrival-hazard", "arrived")):
+            with self.subTest(package=package):
                 self.setUp()
-                server = self.server(scenario="text-adventure-" + section)
+                server = self.server(scenario=package)
                 player, welcome = self.adventure()
                 self.assertNotIn("figure", welcome)
                 interrupted = self.say(player, "take tablet")

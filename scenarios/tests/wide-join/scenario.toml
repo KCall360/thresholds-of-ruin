@@ -1,6 +1,6 @@
 # Ordinary authored scenario; validate after every edit.
 format = 2
-id = "wide-join-setup"
+id = "wide-join"
 version = "1.0"
 ruleset = "dungeon-v17"
 default_character = 1

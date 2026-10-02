@@ -71,7 +71,7 @@ player acts.
   relay holds delivery while the controller commits actions and then checks
   catch-up. The ASCII places panel stays usable while delivery is paused. A
   deliberately omitted observation checks gap rejection and relaunch recovery.
-  The two-actor door fixture is `scenarios/tests/semantic-narration-setup`.
+  The two-actor door fixture is `scenarios/tests/semantic-narration`.
 - Deterministic service tests exercise actual server queue overflow, prove
   that play pauses for a nearly full queue without losing an update, and that
   the server drops a spectator that stops reading while the journey finishes.

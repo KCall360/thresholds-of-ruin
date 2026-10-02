@@ -1,6 +1,6 @@
 # Ordinary authored scenario; validate after every edit.
 format = 2
-id = "place-hints-setup"
+id = "place-hints"
 version = "1.0"
 ruleset = "dungeon-v17"
 default_character = 1

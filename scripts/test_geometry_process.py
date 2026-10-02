@@ -9,7 +9,7 @@ class GeometryProcesses(ProcessTestCase):
     graphical = True
 
     def test_wide_join_is_one_continuous_scene_in_every_frontend(self):
-        self.server(scenario="wide-join-setup")
+        self.server(scenario="wide-join")
         player, _ = self.client()
         fixture = load_fixture("wide-join.json")
         observer, seen = self.client(SPECTATOR_TOKEN)
@@ -34,7 +34,7 @@ class GeometryProcesses(ProcessTestCase):
         self.assertTrue((self.save.parent / "wide.ppm").exists())
 
     def test_rotated_sight_occlusion_memory_stairs_rewind_and_resume(self):
-        server = self.server(wizard=True, scenario="portal-geometry-setup")
+        server = self.server(wizard=True, scenario="portal-geometry")
         # The wizard also plays the character, so it keeps control.
         wizard, _ = self.client(WIZARD_TOKEN)
         observer, initial = self.client(SPECTATOR_TOKEN)

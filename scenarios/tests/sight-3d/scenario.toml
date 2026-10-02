@@ -3,7 +3,7 @@
 # wall it looks over, a creature hovering at head height, and a closed door
 # filling its two-cell doorway.
 format = 2
-id = "sight-3d-setup"
+id = "sight-3d"
 version = "1.0"
 ruleset = "dungeon-v17"
 default_character = 1

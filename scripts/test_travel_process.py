@@ -17,7 +17,7 @@ class TravelProcesses(ProcessTestCase):
         return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
 
     def test_ascii_selection_click_skip_and_resume(self):
-        server = self.server(wizard=True, scenario="travel-setup")
+        server = self.server(wizard=True, scenario="travel")
         spectator, _ = self.client(SPECTATOR_TOKEN)
         # A slow pace keeps the third journey on screen long enough to skip.
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--pace", "500"])
@@ -85,7 +85,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertFalse(arrived["state"]["wizard_game"])
 
     def test_native_underscore_and_mouse_click(self):
-        self.server(scenario="travel-setup")
+        self.server(scenario="travel")
         capture = Path(os.environ.get("TOR_TRAVEL_CAPTURE", str(self.save.parent / "travel.ppm")))
         client = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
         self.ascii_frame(client, lambda f: f["state"] is not None and not f["busy"])
@@ -183,8 +183,8 @@ class TravelProcesses(ProcessTestCase):
         self.assertEqual(returned["state"]["observation"]["tick"],200)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
 
-    def travel_scenario(self, setup_name):
-        self.server(scenario="travel-" + setup_name)
+    def travel_scenario(self, package):
+        self.server(scenario=package)
         player, initial = self.client()
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
         self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
@@ -198,7 +198,7 @@ class TravelProcesses(ProcessTestCase):
         return player, initial, stopped
 
     def test_harmless_discoveries_do_not_interrupt_travel(self):
-        _, initial, arrived = self.travel_scenario("harmless_discovery_setup")
+        _, initial, arrived = self.travel_scenario("travel-harmless-discovery")
         self.assertFalse(initial["state"]["observation"]["ground_items"])
         self.assertFalse(any(c["place_hint"] for c in initial["state"]["observation"]["visible_cells"]))
         self.assertEqual(arrived["travel"]["phase"], "arrived")
@@ -210,7 +210,7 @@ class TravelProcesses(ProcessTestCase):
         self.assertTrue(any(c["key"] not in old_keys for c in arrived["state"]["observation"]["visible_cells"]))
 
     def test_new_other_actor_interrupts_travel_as_potential_hazard(self):
-        player, initial, stopped = self.travel_scenario("hazard_setup")
+        player, initial, stopped = self.travel_scenario("travel-hazard")
         self.assertFalse(initial["state"]["observation"]["visible_actors"])
         self.assertEqual(stopped["travel"]["phase"], "hazard")
         self.assertEqual(stopped["travel"]["completed_steps"], 1)

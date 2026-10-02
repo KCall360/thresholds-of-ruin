@@ -78,7 +78,7 @@ class MaterialProcesses(ProcessTestCase):
         self.assertEqual(resumed["state"], opened["state"])
 
     def test_wizard_chamber_surface_refresh_native_view_and_rewind(self):
-        server = self.server(wizard=True, scenario="material-volumes-setup")
+        server = self.server(wizard=True, scenario="material-volumes")
         wizard = self.wizard()
         fixture = load_fixture("material-volumes.json")
         observer, initial = self.client(SPECTATOR_TOKEN)

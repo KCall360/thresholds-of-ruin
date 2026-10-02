@@ -11,7 +11,7 @@ class ShadowcastingProcesses(ProcessTestCase):
     graphical = True
 
     def test_door_corner_disclosure_agrees_across_clients_and_resume(self):
-        server = self.server(wizard=True, scenario="shadowcasting-setup")
+        server = self.server(wizard=True, scenario="shadowcasting")
         wizard = self.wizard()
         observer, initial = self.client(SPECTATOR_TOKEN)
         view = initial["state"]["observation"]

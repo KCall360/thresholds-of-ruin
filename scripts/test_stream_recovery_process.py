@@ -82,7 +82,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
         self.exercise('text')
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
-        self.server(scenario='semantic-narration-setup', seed=None)
+        self.server(scenario='semantic-narration', seed=None)
         player, _ = self.client()
         other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])
         other_state = self.frame(other, lambda f: f['type'] == 'ready')

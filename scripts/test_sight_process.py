@@ -1,6 +1,6 @@
 """Three-dimensional sight through the actual server and all three frontends.
 
-The `sight-3d-setup` package's character is two cells tall and sees from its
+The `sight-3d` package's character is two cells tall and sees from its
 head. It looks over a waist-high wall, sees a creature hovering at head height,
 and can't see past a closed door that fills its two-cell doorway until it opens
 the door. The `sight-3d-giant` package compares a three-cell giant with a
@@ -24,7 +24,7 @@ class SightProcesses(ProcessTestCase):
         return {i["item"]["name"] for i in observation["ground_items"]}
 
     def test_eye_height_hovering_creature_and_tall_door_across_clients_and_resume(self):
-        server = self.server(scenario="sight-3d-setup")
+        server = self.server(scenario="sight-3d")
         observer, initial = self.client(SPECTATOR_TOKEN)
         view = initial["state"]["observation"]
         # Over the waist-high wall, but not past the closed door.
@@ -59,7 +59,7 @@ class SightProcesses(ProcessTestCase):
         self.assertEqual(window.child.wait(timeout=10), 0)
         text.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
-        self.server(scenario="sight-3d-setup")
+        self.server(scenario="sight-3d")
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], opened["state"])
 

@@ -69,7 +69,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertFalse(resumed["state"]["wizard_game"])
 
     def test_wizard_occlusion_explicit_open_travel_memory_and_rewind(self):
-        server = self.server(wizard=True, scenario="doors-setup")
+        server = self.server(wizard=True, scenario="doors")
         wizard = self.wizard()
         observer, initial = self.client(SPECTATOR_TOKEN)
         player, welcome = self.adventure()
@@ -105,7 +105,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertFalse(any(c["key"] == tablet_cell["key"] for c in rewound["memory"]))
 
     def test_stop_and_rewind_discard_pending_door_action(self):
-        self.server(wizard=True, scenario="doors-setup")
+        self.server(wizard=True, scenario="doors")
         wizard = self.wizard()
         player, _ = self.adventure()
         observer, initial = self.client(SPECTATOR_TOKEN)
@@ -152,7 +152,7 @@ class DoorProcesses(ProcessTestCase):
             self.assertNotIn(forbidden, json.dumps(view))
 
     def test_arrival_revealing_an_actor_does_not_open_the_door(self):
-        self.server(scenario="doors-arrival_hazard")
+        self.server(scenario="doors-arrival-hazard")
         # The door is beyond diagonal reach. The south approach is walled off;
         # the first eastward step reveals the actor before manipulation.
         player, _ = self.adventure()

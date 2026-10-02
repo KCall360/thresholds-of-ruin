@@ -185,7 +185,7 @@ disclosure, repeated views, and floor-versus-exit distinctions. The actual-proce
 suite `scripts/test_adventure_process.py` verifies normal play, travel then pickup,
 exact successful/interrupted transcripts, prompt boundaries, pacing,
 spectators, persistence, and wizard-authored geometry/hazards using
-`scenarios/tests/text-adventure-*`, `wide-join-setup`, and `portal-geometry-setup`.
+`scenarios/tests/text-adventure-*`, `wide-join`, and `portal-geometry`.
 The existing discovery runs these tests in debug and release on Windows and Linux.
 
 ## Door interactions

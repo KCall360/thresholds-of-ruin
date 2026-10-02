@@ -9,7 +9,7 @@ class PlaceHintProcesses(ProcessTestCase):
     graphical = True
 
     def test_durable_names_in_real_clients_save_reconnect_and_rewind(self):
-        server = self.server(wizard=True, scenario="place-hints-setup")
+        server = self.server(wizard=True, scenario="place-hints")
         player, _ = self.adventure()
         observer, initial = self.client(SPECTATOR_TOKEN)
         places = initial["state"]["observation"]["places"]
@@ -65,7 +65,7 @@ class PlaceHintProcesses(ProcessTestCase):
         self.assertEqual(rewound["state"]["observation"]["places"], places)
 
     def test_perception_stale_memory_dynamic_removal_restart_and_rewind(self):
-        server = self.server(wizard=True, scenario="place-hints-setup")
+        server = self.server(wizard=True, scenario="place-hints")
         wizard = self.wizard()
         observer, initial = self.client(SPECTATOR_TOKEN)
         self.assertEqual(sum(c["place_hint"] for c in initial["state"]["observation"]["visible_cells"]), 2)
