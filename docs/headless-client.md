@@ -57,6 +57,13 @@ Every stdout line is a JSON frame containing:
   and `has_control` describe this attachment.
 - `history`: up to 100 recent entries disclosed to this identity.
 - `memory`: local last-seen cell contents, described below.
+- `palette`: the client's current [asset palette](protocol.md#asset-palettes):
+  `revision` (null before the first palette arrives), `assets`, and `stale`,
+  which is true after a missed revision until a full palette replaces it.
+  Palette messages also appear in `message` as they arrive. The client asks for
+  the whole palette itself after a missed revision, and once for each asset an
+  observation names that the palette lacks; the answer arrives as an `update`
+  or `response` frame like any other message.
 - `message`: the received protocol message, or null. History query pages and
   accepted action results are available here; no hidden state is added.
 - `error`: an input/request error on `ready`, otherwise null.

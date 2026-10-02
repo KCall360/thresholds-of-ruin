@@ -1,4 +1,5 @@
-use tor_client_text::adventure::{describe, Dialogue, Intent};
+use tor_client_common::Palette;
+use tor_client_text::adventure::{describe, describe_with, Dialogue, Intent};
 use tor_protocol::*;
 
 fn state() -> StateView {
@@ -342,4 +343,100 @@ fn attacks_clarify_visible_names_and_never_select_an_unknown_id() {
         dialogue.interpret("attack #99", &state),
         Intent::Say(_)
     ));
+}
+
+fn palette(revision: u64, body: PaletteBody) -> PaletteUpdate {
+    PaletteUpdate { revision, body }
+}
+
+#[test]
+fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
+    let mut s = state();
+    // A cave floor below, a stone wall beside, and an unnamed rat.
+    let here = s.observation.visible_cells[0].clone();
+    let solid = |key: &str, position: Position, asset: &str| CellView {
+        wall: true,
+        key: key.into(),
+        position,
+        asset: Some(asset.into()),
+        door: None,
+        ..here.clone()
+    };
+    s.observation.visible_cells.extend([
+        solid(
+            "floor",
+            Position {
+                z: -1,
+                ..here.position
+            },
+            "terrain.floor.cave",
+        ),
+        solid(
+            "wall",
+            Position {
+                y: 1,
+                ..here.position
+            },
+            "terrain.wall.stone",
+        ),
+    ]);
+    s.observation.visible_actors.push(ActorView {
+        name: String::new(),
+        description: String::new(),
+        id: ActorId(2),
+        position: Position {
+            x: 3,
+            ..here.position
+        },
+        asset: Some("creature.rat".into()),
+    });
+    // Without a palette, the disclosed materials and the default figure.
+    let plain = describe(&s);
+    assert!(plain.contains("a stone floor"), "{plain}");
+    assert!(plain.contains("walls of stone"), "{plain}");
+    assert!(plain.contains("a figure"), "{plain}");
+
+    let mut held = Palette::default();
+    held.apply(&palette(
+        1,
+        PaletteBody::Full {
+            assets: ["terrain.floor.cave", "terrain.wall.stone", "creature.rat"]
+                .map(String::from)
+                .into(),
+        },
+    ));
+    let worded = describe_with(&s, &held);
+    assert!(worded.contains("a packed earth floor"), "{worded}");
+    // No word for the stone wall itself: terrain.wall's.
+    assert!(worded.contains("walls of dressed stone"), "{worded}");
+    assert!(worded.contains("a rat"), "{worded}");
+    assert!(matches!(
+        Dialogue::default().interpret_with("examine floor", &s, &held),
+        Intent::Say(text) if text == "The visible floor is made of packed earth."
+    ));
+
+    // An asset the palette lacks keeps the client's own look.
+    held.apply(&palette(
+        2,
+        PaletteBody::Delta {
+            base: 1,
+            added: Default::default(),
+            removed: ["creature.rat".to_string()].into(),
+        },
+    ));
+    let partial = describe_with(&s, &held);
+    assert!(
+        partial.contains("a figure") && partial.contains("packed earth"),
+        "{partial}"
+    );
+    // After a missed revision, nothing is drawn from the palette.
+    held.apply(&palette(
+        9,
+        PaletteBody::Delta {
+            base: 8,
+            added: Default::default(),
+            removed: Default::default(),
+        },
+    ));
+    assert_eq!(describe_with(&s, &held), plain);
 }

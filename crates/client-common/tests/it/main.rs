@@ -3,5 +3,6 @@
 
 mod map_memory;
 mod memory;
+mod palette;
 mod streamed_notes;
 mod travel;

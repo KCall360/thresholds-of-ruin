@@ -41,6 +41,12 @@ fn open(map: &BTreeMap<(i32, i32, i32), &CellView>, key: (i32, i32, i32)) -> boo
 
 /// Classify every seen solid cell by the open cells seen next to it.
 pub fn roles(cells: &[CellView]) -> Roles<'_> {
+    roles_by(cells, material)
+}
+
+/// [`roles`], naming each cell with `name` instead of its material: a client
+/// that describes cells by their assets, say.
+pub fn roles_by<'a>(cells: &'a [CellView], name: impl Fn(&'a CellView) -> &'a str) -> Roles<'a> {
     let map = index(cells);
     let mut roles = Roles::default();
     for (&(x, y, z), cell) in &map {
@@ -48,16 +54,16 @@ pub fn roles(cells: &[CellView]) -> Roles<'_> {
             continue;
         }
         if open(&map, (x, y, z + 1)) {
-            roles.floors.insert(material(cell));
+            roles.floors.insert(name(cell));
         }
         if open(&map, (x, y, z - 1)) {
-            roles.ceilings.insert(material(cell));
+            roles.ceilings.insert(name(cell));
         }
         if [(1, 0), (-1, 0), (0, 1), (0, -1)]
             .into_iter()
             .any(|(dx, dy)| open(&map, (x + dx, y + dy, z)))
         {
-            roles.walls.insert(material(cell));
+            roles.walls.insert(name(cell));
         }
     }
     roles
@@ -139,5 +145,16 @@ mod tests {
         cells.retain(|c| c.position.z != -1);
         assert!(floor_below(&cells, origin).is_none());
         assert!(roles(&cells).floors.is_empty());
+    }
+
+    #[test]
+    fn roles_can_name_cells_by_something_other_than_their_material() {
+        let cells = room();
+        let roles = roles_by(
+            &cells,
+            |c| if c.material == "marble" { "glass" } else { "x" },
+        );
+        assert_eq!(roles.walls, BTreeSet::from(["glass"]));
+        assert_eq!(roles.floors, BTreeSet::from(["x"]));
     }
 }

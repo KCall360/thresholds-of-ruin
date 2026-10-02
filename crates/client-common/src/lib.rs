@@ -3,9 +3,11 @@
 mod connection;
 mod map_memory;
 pub mod narration;
+mod palette;
 mod state;
 pub mod surfaces;
 pub use connection::Connection;
+pub use palette::{observation_assets, AssetTable, Palette};
 pub use state::{ClientState, RememberedCell};
 
 use tor_protocol::{ActorId, StreamCursor};
