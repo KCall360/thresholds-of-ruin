@@ -31,8 +31,8 @@ Text supports `examine door`, `open door`, `close door`, and `go to door`.
 Visible doors participate in noun clarification and `it` references. A distant
 open/close intention travels to a currently visible approach cell, then submits a
 separate ordinary action. Success is one sentence and one completion prompt.
-`stop`, hazards (including hazards revealed on arrival), control loss, snapshot,
-rewind, replacement intentions, or disconnect discard the follow-up. Reach and
+Hazards (including hazards revealed on arrival), control loss, snapshot, rewind
+or disconnect discard the follow-up. Reach and
 state are rechecked on arrival. Restart never resumes an intention.
 
 ASCII displays `+` for closed doors and `/` for open doors. Press **O** to open

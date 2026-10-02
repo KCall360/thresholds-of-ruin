@@ -2,6 +2,7 @@
 use tor_protocol::*;
 
 pub mod adventure;
+pub mod engine;
 pub mod narrative;
 pub mod parser;
 

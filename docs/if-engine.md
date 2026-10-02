@@ -38,8 +38,9 @@ flowchart LR
    `ParsedCommand`. Unchanged in structure; see the parser architecture.
 2. **Resolve** (`engine::resolve`): noun phrases become *referents* in the
    current scene, or a question, or a refusal.
-3. **Plan** (`engine::verbs`, `engine::plan`): verb semantics turn a resolved
-   command into an *intention*: a goal and the steps that achieve it.
+3. **Plan** (`engine::verbs`): verb semantics turn a resolved command into
+   *goals*, an answer, a question or a refusal. `engine::turn` decides each
+   goal's steps as it runs.
 4. **Execute** (`engine::turn`): steps run one at a time against the server.
    Each step rechecks its preconditions against the view in hand.
 5. **Chronicle** (`engine::chronicle`): every update the turn receives becomes
@@ -89,8 +90,9 @@ Inform's:
 
 ### Verb semantics and plans
 
-`engine::verbs` is a declarative table from a verb and the kind of referent to
-a plan or a refusal. A plan is a goal plus steps:
+`engine::verbs` maps a verb and the kind of referent to goals or a refusal.
+`engine::turn` runs each goal as steps, deciding the next one from the view in
+hand:
 
 | Step | Server request | Completes when |
 | --- | --- | --- |
@@ -100,24 +102,25 @@ a plan or a refusal. A plan is a goal plus steps:
 
 Examples:
 
-| Verbs | Referent | Plan |
+| Verbs | Referent | Steps |
 | --- | --- | --- |
 | take, get, pick up, grab, carry | thing within reach | `Act(Take)` |
 | | thing out of reach | `Approach(thing)`, `Act(Take)` |
 | | thing already carried | refusal: "You already have the token." |
-| drop, put down, discard | carried thing | `Act(Drop)` |
-| open, close, shut; push, pull a door | door within reach | `Act(SetDoor)` |
+| drop, put down, discard; put on the floor | carried thing | `Act(Drop)` |
+| open, close, shut | door within reach | `Act(SetDoor)` |
 | | door out of reach | `Approach(door)`, `Act(SetDoor)` |
-| attack, kill, hit, fight, strike | figure | `Act(Attack)` (resumes interrupted preparation) |
+| attack, kill, hit, fight, strike | figure | `Approach(figure)` when not next to it, then `Act(Attack)` (which resumes interrupted preparation) |
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
 | a direction; go, walk, head | way onward | `Approach(exit)`, then the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
-| examine, x, look at, read, search, listen, smell | anything | no step; the answer is composed from the scene |
+| examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene |
+| wear, eat, drink, give, throw, unlock, push, talk, search, pray, ... | anything | refusal once the object is found: "You can't wear anything yet." |
 
 A step's preconditions are checked again just before it runs, with the view
 then in hand: the thing must still be there and within reach, the door still
 in the wrong state, the character in control and ready. A failed recheck
-ends the plan with a beat that says why ("but it is no longer there").
+ends the goal and the passage says why ("but it's no longer there").
 
 Travel is never told to attack, and arriving never authorizes the next step
 if a figure the turn hadn't seen came into view, even when the server
@@ -138,16 +141,22 @@ picking it up").
 
 **When a step completes.** The server runs play until this player's
 character is next, then reports it `ready`. So an action step completes at the
-first update after its acknowledgement in which the character is ready, and a
-journey step at the first update in which its travel has ended and the
-character is ready. That removes today's race, where the prompt returned at
+first update after its acknowledgement whose revision is newer and in which the
+character is ready, and a journey step at the first update in which its travel
+has ended and the character is ready. If play goes quiet for two seconds with
+the character still not ready, the step ends anyway: another player's
+character, or one nothing controls, is next. A journey still keeps the way it
+ended. That removes today's race, where the prompt returned at
 the acknowledgement and the rest of the turn arrived after it, and the
 corpse bug, where a pickup after a journey was dropped because the character
 was still recovering.
 
-Updates between turns (another player acting, a door opened elsewhere) are
-chronicled and composed the same way, printed as one passage above a fresh
-prompt.
+Updates between turns (another player acting, a door opened elsewhere, or the
+watched player's actions for a spectator) are gathered until play has been
+quiet for 150 ms, then composed the same way and printed as one passage above a
+fresh prompt. They also tell the watched character's own actions: "Time
+passes.", "You pick up a stone tablet."
+
 
 ### The chronicle
 
@@ -172,7 +181,7 @@ The composer realizes the turn's intentions and beats as one passage:
 1. **Journeys collapse into one clause.** Steps aren't narrated; the clause
    names the direction or destination: "You walk east." / "You walk over to
    the copper token".
-2. **A plan's steps join into one sentence** when they succeed: "You walk over
+2. **A goal's steps join into one sentence** when they succeed: "You walk over
    to the copper token and pick it up."
 3. **Interruptions keep the purpose:** "You walk toward the copper token,
    intent on picking it up. A ruin scout steps into view to the east, and you
@@ -203,24 +212,25 @@ Following the [testing policy](testing.md):
   (synonyms, preferences, groups, `all`/`except`, pronouns, questions), verb
   plans, chronicle beats from pairs of views, prose utilities and composition
   from beats.
-- **Turn tests** run whole inputs through scripted links: a journey and pickup,
-  an interrupted journey, an attack exchange with an interruption and a death,
-  pickup after combat recovery, a chain stopped by a question and resumed by
-  its answer.
-- **Server integration tests** run the engine against a real in-process server
-  and the authored scenarios, including first-dungeon's scout fight and corpse
-  pickup.
-- **Process acceptance tests** (`scripts/test_adventure_process.py`) check
-  exact transcripts through the real executables.
+- **Turn tests** (`crates/client-text/tests/it/turns.rs`) run whole inputs
+  through a scripted server whose updates pass through the real client state:
+  a journey and pickup, pickup after recovery, an interrupted journey, arrival
+  as a figure appears, an exchange of blows ending in a death, a chain paused
+  by a question and resumed by its answer, a refusal, grouped pickups and
+  `again`, a passage between turns, and refused verbs.
+- **Process acceptance tests** (`scripts/test_adventure_process.py` and the
+  other text process suites) check exact transcripts through the real
+  executables, including the first dungeon's fight and corpse pickup.
 
 ## Implementation order
 
-1. **Structured combat events** in the protocol, so blows and deaths reach the
-   client as data rather than English sentences.
-2. **The engine core:** scene, resolution, verb plans, turn execution,
-   chronicle and composition, replacing `Dialogue` and the presentation loop.
-   This also retires `parser::{scope, matcher, context}`, which the resolver
-   supersedes.
-3. **Places, exits and room descriptions:** describe the place the character
-   is in rather than everything visible, offer only ways that lead somewhere,
-   and say what blocks a way.
+1. **Structured combat events** (done, protocol 21): blows, interruptions and
+   deaths reach clients as data; injury is a level and the objective a kind.
+   The server sends no prose.
+2. **The engine core** (done): scene, resolution, verb plans, turn execution,
+   chronicle and composition replace `Dialogue` and the old presentation loop,
+   and `parser::{scope, matcher, context}`.
+3. **Places, exits and room descriptions** (next): describe the place the
+   character is in rather than everything visible, offer only ways that lead
+   somewhere, and say what blocks a way. Room descriptions and exits still come
+   from `adventure.rs` and `narrative.rs`.

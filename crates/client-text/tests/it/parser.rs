@@ -1,8 +1,12 @@
-//! End-to-end integration tests for the Interactive Fiction parser.
+//! Whole sentences through the parser, and what the resolver binds them to.
 
-use tor_client_text::parser::{
-    match_noun_phrase, parse_input, ConversationContext, Entity, MatchResult, ParsedCommand,
-    Preposition, Referents, Scope, Verb,
+use tor_client_common::Palette;
+use tor_client_text::{
+    engine::{
+        resolve::{resolve, Domain, Referents, Resolution},
+        scene::{Key, Kind, Scene},
+    },
+    parser::{parse_input, NounPhrase, ParsedCommand, Preposition, Verb},
 };
 use tor_protocol::*;
 
@@ -161,184 +165,213 @@ fn sentences_parse_into_commands_in_order() {
     ));
 }
 
-#[test]
-fn the_resolver_scope_lists_what_the_state_discloses() {
-    let state = sample_state();
-    let scope = Scope::from_state(&state);
-
-    // Should include: 2 inventory items + 3 ground items + 1 actor + 2 doors + surfaces
-    let items: Vec<_> = scope.entities.iter().filter(|e| e.is_item()).collect();
-    assert_eq!(items.len(), 5);
-
-    let carried: Vec<_> = scope.entities.iter().filter(|e| e.is_carried()).collect();
-    assert_eq!(carried.len(), 2);
-
-    let doors: Vec<_> = scope.entities.iter().filter(|e| e.is_door()).collect();
-    assert_eq!(doors.len(), 2);
-
-    let actors: Vec<_> = scope.entities.iter().filter(|e| e.is_actor()).collect();
-    assert_eq!(actors.len(), 1);
-}
-
-#[test]
-fn the_resolver_asks_which_and_resolves_the_answer() {
-    let state = sample_state();
-    let scope = Scope::from_state(&state);
-    let mut context = ConversationContext::default();
-
-    // 1. Player says "take token"
-    let commands = parse_input("take token").unwrap();
-    assert_eq!(commands.len(), 1);
-
-    let np = match &commands[0] {
-        ParsedCommand::Transitive { direct, .. } => direct,
-        other => panic!("Expected Transitive, got: {other:?}"),
-    };
-
-    // 2. Resolver finds two candidates: copper token and silver token
-    let result = match_noun_phrase(np, &scope, &context.referents);
-    let candidates = match result {
-        MatchResult::Multiple(candidates) => candidates,
-        other => panic!("Expected Multiple, got: {other:?}"),
-    };
-    assert_eq!(candidates.len(), 2);
-
-    // 3. System asks disambiguation question
-    let question = context.ask_disambiguation("take", candidates, state.revision);
-    assert_eq!(
-        question,
-        "Which do you mean: the copper token or the silver token?"
-    );
-
-    // 4. Player replies with clarification: "the copper one"
-    let reply_commands = parse_input("the copper one").unwrap();
-    assert_eq!(reply_commands.len(), 1);
-
-    let clarification_np = match &reply_commands[0] {
-        ParsedCommand::Clarification(np) => np,
-        other => panic!("Expected Clarification, got: {other:?}"),
-    };
-
-    // 5. Context resolves the pending action to the copper token
-    let (verb_phrase, chosen) = context
-        .resolve_clarification(clarification_np, state.revision)
-        .expect("Should resolve clarification");
-
-    assert_eq!(verb_phrase, "take");
-    assert_eq!(chosen.name(), "copper token");
-    if let Entity::Item { id, .. } = chosen {
-        assert_eq!(id, 1);
-    } else {
-        panic!("Expected item");
-    }
-
-    // 6. Confirm pronoun "it" is now updated to the copper token
-    assert_eq!(
-        context.referents.it.as_ref().map(|e| e.name()),
-        Some("copper token")
-    );
-}
-
-#[test]
-fn the_resolver_binds_it_to_the_last_mentioned_entity() {
-    let state = sample_state();
-    let scope = Scope::from_state(&state);
-    let mut context = ConversationContext::default();
-
-    // Set initial referent by examining the stone tablet
-    let tablet = scope
-        .entities
-        .iter()
-        .find(|e| e.name() == "stone tablet")
-        .unwrap()
-        .clone();
-    context.mention(&tablet);
-
-    // Player types "take it"
-    let commands = parse_input("take it").unwrap();
-    assert_eq!(commands.len(), 1);
-
-    let np = match &commands[0] {
-        ParsedCommand::Transitive { direct, .. } => direct,
-        other => panic!("Expected Transitive, got: {other:?}"),
-    };
-
-    let result = match_noun_phrase(np, &scope, &context.referents);
-    match result {
-        MatchResult::Single(entity) => {
-            assert_eq!(entity.name(), "stone tablet");
-            if let Entity::Item { id, .. } = entity {
-                assert_eq!(id, 3);
-            }
+/// The direct object of a one-sentence command.
+fn object(line: &str) -> NounPhrase {
+    match parse_input(line).unwrap().remove(0) {
+        ParsedCommand::Transitive { direct, .. } | ParsedCommand::Ditransitive { direct, .. } => {
+            direct
         }
-        other => panic!("Expected Single match, got: {other:?}"),
+        other => panic!("not transitive: {other:?}"),
     }
+}
+
+#[test]
+fn the_scene_lists_what_the_state_discloses() {
+    let state = sample_state();
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let count = |kind| scene.of(kind).count();
+    assert_eq!(count(Kind::Thing), 5);
+    assert_eq!(scene.of(Kind::Thing).filter(|r| r.carried).count(), 2);
+    assert_eq!(count(Kind::Door), 2);
+    assert_eq!(count(Kind::Figure), 1);
+    assert_eq!(count(Kind::Me), 1);
+    // A portcullis is a kind of door, and a scout a creature.
+    let gate = scene.get(Key::Door(102)).unwrap();
+    assert!(gate.heads.contains(&"door".to_owned()));
+    let goblin = scene.get(Key::Actor(ActorId(2))).unwrap();
+    assert!(goblin.words.contains(&"creature".to_owned()));
+}
+
+#[test]
+fn distinguishable_things_need_a_choice_and_alike_ones_dont() {
+    let mut state = sample_state();
+    let palette = Palette::default();
+    let referents = Referents::default();
+    let scene = Scene::new(&state, &palette);
+    assert_eq!(
+        resolve(&object("take token"), &scene, &referents, Domain::Ground),
+        Resolution::Ask(vec![Key::Item(1), Key::Item(2)])
+    );
+    assert_eq!(
+        resolve(
+            &object("take the silver one"),
+            &scene,
+            &referents,
+            Domain::Ground
+        ),
+        Resolution::One(Key::Item(2))
+    );
+    assert_eq!(
+        resolve(&object("take tokens"), &scene, &referents, Domain::Ground),
+        Resolution::Many(vec![Key::Item(1), Key::Item(2)])
+    );
+    // Two copper tokens can't be told apart, so either will do: the one in
+    // reach.
+    let mut twin = state.observation.ground_items[0].clone();
+    twin.item.id = 4;
+    twin.reachable = false;
+    twin.position.x = 1;
+    state.observation.ground_items[1] = twin;
+    let scene = Scene::new(&state, &palette);
+    assert_eq!(
+        resolve(&object("take token"), &scene, &referents, Domain::Ground),
+        Resolution::One(Key::Item(1))
+    );
+    // "The second token" still counts them both.
+    assert_eq!(
+        resolve(
+            &object("take the second token"),
+            &scene,
+            &referents,
+            Domain::Ground
+        ),
+        Resolution::One(Key::Item(4))
+    );
+}
+
+#[test]
+fn verbs_prefer_what_they_can_act_on() {
+    let mut state = sample_state();
+    state.observation.ground_items[2].item.name = "goblin scout corpse".into();
+    let palette = Palette::default();
+    let referents = Referents::default();
+    let scene = Scene::new(&state, &palette);
+    let scout = object("take scout");
+    // Taking means the corpse; attacking and examining, the living scout.
+    assert_eq!(
+        resolve(&scout, &scene, &referents, Domain::Ground),
+        Resolution::One(Key::Item(3))
+    );
+    assert_eq!(
+        resolve(&scout, &scene, &referents, Domain::Figures),
+        Resolution::One(Key::Actor(ActorId(2)))
+    );
+    assert_eq!(
+        resolve(&scout, &scene, &referents, Domain::Any),
+        Resolution::One(Key::Actor(ActorId(2)))
+    );
+    assert_eq!(
+        resolve(&object("take body"), &scene, &referents, Domain::Ground),
+        Resolution::One(Key::Item(3))
+    );
+    assert_eq!(
+        resolve(&object("drop sword"), &scene, &referents, Domain::Carried),
+        Resolution::One(Key::Item(10))
+    );
+    assert_eq!(
+        resolve(&object("examine me"), &scene, &referents, Domain::Any),
+        Resolution::One(Key::Me)
+    );
+    assert_eq!(
+        resolve(&object("take lamp"), &scene, &referents, Domain::Ground),
+        Resolution::Missing("You can't see any lamp here.".into())
+    );
+}
+
+#[test]
+fn it_is_the_last_thing_mentioned() {
+    let state = sample_state();
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let mut referents = Referents::default();
+    assert_eq!(
+        resolve(&object("take it"), &scene, &referents, Domain::Ground),
+        Resolution::Missing("I'm not sure what \"it\" refers to.".into())
+    );
+    referents.mention(scene.get(Key::Item(3)).unwrap());
+    assert_eq!(
+        resolve(&object("take it"), &scene, &referents, Domain::Ground),
+        Resolution::One(Key::Item(3))
+    );
+    referents.mention(scene.get(Key::Actor(ActorId(2))).unwrap());
+    assert_eq!(
+        resolve(&object("attack him"), &scene, &referents, Domain::Figures),
+        Resolution::One(Key::Actor(ActorId(2)))
+    );
+    // Gone from view, it can't be acted on.
+    let mut later = state.clone();
+    later.observation.visible_actors.clear();
+    let scene = Scene::new(&later, &palette);
+    assert_eq!(
+        resolve(&object("attack it"), &scene, &referents, Domain::Figures),
+        Resolution::Missing("You can't see it any more.".into())
+    );
 }
 
 #[test]
 fn ditransitive_commands_bind_both_objects() {
     let state = sample_state();
-    let scope = Scope::from_state(&state);
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
     let referents = Referents::default();
-
-    let commands = parse_input("attack the goblin with my iron sword").unwrap();
-    assert_eq!(commands.len(), 1);
-
-    let (direct, prep, indirect) = match &commands[0] {
-        ParsedCommand::Ditransitive {
-            verb,
-            direct,
-            preposition,
-            indirect,
-        } => {
-            assert_eq!(*verb, Verb::Attack);
-            (direct, *preposition, indirect)
-        }
-        other => panic!("Expected Ditransitive, got: {other:?}"),
+    let ParsedCommand::Ditransitive {
+        verb,
+        direct,
+        preposition,
+        indirect,
+    } = parse_input("attack the goblin with my iron sword")
+        .unwrap()
+        .remove(0)
+    else {
+        panic!("expected two objects");
     };
-
-    assert_eq!(prep, Preposition::With);
-
-    // Resolve target goblin
-    match match_noun_phrase(direct, &scope, &referents) {
-        MatchResult::Single(Entity::Actor { id, name, .. }) => {
-            assert_eq!(id, ActorId(2));
-            assert_eq!(name, "goblin scout");
-        }
-        other => panic!("Expected goblin match, got: {other:?}"),
-    }
-
-    // Resolve weapon sword
-    match match_noun_phrase(indirect, &scope, &referents) {
-        MatchResult::Single(Entity::Item { id, carried, .. }) => {
-            assert_eq!(id, 10);
-            assert!(carried);
-        }
-        other => panic!("Expected sword match, got: {other:?}"),
-    }
+    assert_eq!((verb, preposition), (Verb::Attack, Preposition::With));
+    assert_eq!(
+        resolve(&direct, &scene, &referents, Domain::Figures),
+        Resolution::One(Key::Actor(ActorId(2)))
+    );
+    assert_eq!(
+        resolve(&indirect, &scene, &referents, Domain::Carried),
+        Resolution::One(Key::Item(10))
+    );
 }
 
 #[test]
-fn take_all_except_excludes_the_named_item() {
-    let state = sample_state();
-    let scope = Scope::from_state(&state);
+fn all_except_leaves_out_everything_it_names() {
+    let mut state = sample_state();
+    let mut twin = state.observation.ground_items[0].clone();
+    twin.item.id = 4;
+    state.observation.ground_items.push(twin);
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
     let referents = Referents::default();
-
-    let commands = parse_input("take all except copper token").unwrap();
-    assert_eq!(commands.len(), 1);
-
-    let np = match &commands[0] {
-        ParsedCommand::Transitive { direct, .. } => direct,
-        other => panic!("Expected Transitive, got: {other:?}"),
-    };
-
-    let result = match_noun_phrase(np, &scope, &referents);
-    match result {
-        MatchResult::All(entities) => {
-            // Should contain all items except the copper token
-            assert!(!entities.iter().any(|e| e.name() == "copper token"));
-            assert!(entities.iter().any(|e| e.name() == "silver token"));
-        }
-        other => panic!("Expected All, got: {other:?}"),
-    }
+    assert_eq!(
+        resolve(
+            &object("take all except copper token"),
+            &scene,
+            &referents,
+            Domain::Ground
+        ),
+        // In reach first, then the nearest.
+        Resolution::Many(vec![Key::Item(2), Key::Item(3)])
+    );
+    assert_eq!(
+        resolve(
+            &object("drop everything but the key"),
+            &scene,
+            &referents,
+            Domain::Carried
+        ),
+        Resolution::Many(vec![Key::Item(10)])
+    );
+    assert_eq!(
+        resolve(
+            &object("take all tokens"),
+            &scene,
+            &referents,
+            Domain::Ground
+        ),
+        Resolution::Many(vec![Key::Item(1), Key::Item(2), Key::Item(4)])
+    );
 }

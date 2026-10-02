@@ -1,23 +1,16 @@
 //! Advanced natural language Interactive Fiction (IF) parser.
 //!
-//! Provides sentence tokenization, lexicon and grammar matching,
-//! noun phrase resolution against disclosed world entities, pronoun tracking,
-//! conversational disambiguation, and command queuing.
+//! Provides sentence tokenization, lexicon and grammar matching. Resolving
+//! what the words refer to is the engine's job; see `crate::engine`.
 
-pub mod context;
 pub mod grammar;
 pub mod lexicon;
-pub mod matcher;
 pub mod noun_phrase;
-pub mod scope;
 pub mod token;
 
-pub use context::{format_disambiguation_prompt, ConversationContext, PendingDisambiguation};
 pub use grammar::{match_sentence, match_sentence_with_raw, ParsedCommand, SessionCommand};
 pub use lexicon::{Preposition, Pronoun, Verb};
-pub use matcher::{match_noun_phrase, MatchResult, Referents};
 pub use noun_phrase::{parse_noun_phrase, NounPhrase};
-pub use scope::{Entity, Scope, SurfaceType};
 pub use token::{split_sentences, tokenize, Token};
 
 /// Parses a raw line of player input into one or more sequential ParsedCommands.

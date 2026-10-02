@@ -186,7 +186,8 @@ pub fn synthesize_room(state: &StateView, palette: &Palette) -> String {
 
     let floor_phrase = floor_mat.map_or_else(String::new, |m| format!(" with a {} floor", safe(m)));
 
-    format!("You stand in a {epithet} {full_form}{floor_phrase}.{walls_clause} {sensory}")
+    let place = crate::engine::prose::indefinite(&format!("{epithet} {full_form}"));
+    format!("You stand in {place}{floor_phrase}.{walls_clause} {sensory}")
 }
 
 /// Synthesizes consistent sensory atmosphere for the setting.

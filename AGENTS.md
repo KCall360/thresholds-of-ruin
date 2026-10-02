@@ -113,11 +113,16 @@ validators share `workload_report.py`; protocol messages have recorded wire
 samples; test packages are named for what they set up. See the
 [testing policy](docs/testing.md).
 
-**Interactive fiction parser** (PR #55): the text client's natural-language
-parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
-and [adventure commands](docs/text-adventure.md). The resolver modules
-(`parser::scope`, `matcher`, `context`) are built and tested but not yet used:
-`Dialogue` still resolves names and pronouns itself.
+**Interactive fiction engine (in progress, branch `feature/if-engine`).** The
+text client's `engine` module replaces `Dialogue`: everything between two
+prompts is one passage, and the prompt returns only when it's the player's
+move. Protocol 21 sends combat facts instead of prose. See the
+[IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
+[adventure commands](docs/text-adventure.md). Decisions agreed with the
+maintainer: the server sends facts, never sentences; verbs the game can't carry
+out yet are recognized and refused plainly, never narrated as if they worked.
+Next: places, exits and room descriptions (step 3 of the engine plan). The
+branch needs a PR, CI on both platforms, and the maintainer's approval to merge.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),

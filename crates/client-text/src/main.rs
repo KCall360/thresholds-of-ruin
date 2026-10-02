@@ -30,7 +30,7 @@ async fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-text [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--script] [--pace 75]\nSet TOR_SERVER_TOKEN to the server's token. Enter one command per line.\n{}\n\n--script selects the development scripting interface. Use help session in the game for connection and history tools.", tor_client_text::adventure::HELP);
+                println!("tor-client-text [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--script] [--pace 0]\nSet TOR_SERVER_TOKEN to the server's token. Enter one command per line.\n{}\n\n--script selects the development scripting interface. Use help session in the game for connection and history tools.", tor_client_text::engine::verbs::HELP);
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -50,9 +50,9 @@ async fn run() -> Result<(), Error> {
     let token = std::env::var("TOR_SERVER_TOKEN")
         .map_err(|_| "Set TOR_SERVER_TOKEN before starting the client")?;
     let mut connection = Connection::connect(address, token, actor, "text").await?;
-    // Play shows journey steps 75 ms apart by default; scripts see every
-    // update as it arrives.
-    let pace = pace.unwrap_or(if script { 0 } else { 75 });
+    // The adventure interface tells each turn as one passage, so spacing out
+    // its updates would only delay it; --pace can still slow them down.
+    let pace = pace.unwrap_or(0);
     connection.set_pace(std::time::Duration::from_millis(pace));
     if !script {
         return adventure_ui::run(connection, observe).await;

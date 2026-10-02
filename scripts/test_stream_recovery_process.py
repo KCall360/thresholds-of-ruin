@@ -45,8 +45,8 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertEqual(caught_up['history'], final['history'])
             self.assertEqual(caught_up['narration'], ['Time passes.'])
         else:
-            for _ in range(4):
-                slow.until(lambda line: line == 'Time passes.')
+            # The four waits arrive together and are told as one passage.
+            slow.until(lambda line: 'Time passes.' in line)
 
         relay.drop_observation.set()
         self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
@@ -97,10 +97,11 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertIsNone(self.request(other, {'type':'snapshot'})['error'])
             changed = self.command(other, {'type':'act','action':{'type':'set_door','door':door,'open':opened}})
             self.assertIsNone(changed['error'])
-            sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
-            output = text.until(lambda line: line == sentence)
+            told = 'The wooden door to the east swings ' + ('open.' if opened else 'shut.')
+            output = text.until(lambda line: told in line)
             self.assertNotIn('You open', output)
             self.assertNotIn('You close', output)
+            sentence = 'The wooden door is now ' + ('open.' if opened else 'closed.')
             shown = self.ascii_frame(window, lambda f: sentence in (f.get('narration') or []))
             self.assertFalse(shown['has_control'])
             self.assertIn('You notice a figure.' if opened else 'You can no longer see the figure.', shown['narration'])

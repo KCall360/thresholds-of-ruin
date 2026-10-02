@@ -5,9 +5,11 @@ recover from slow or broken connections without losing or inventing state.
 
 ## Disclosed narration
 
-The shared client state derives prose from consecutive validated observations
-and explicit action results. Text and ASCII share the same action wording,
-including perceived item and door names.
+The shared client state derives prose from consecutive validated observations,
+explicit action results and combat events. The ASCII client shows that prose;
+the text client composes its own from the same facts (see
+[the IF engine](if-engine.md#the-chronicle)). The server sends facts, never
+sentences.
 
 Sight changes report:
 
@@ -23,8 +25,8 @@ The narration never invents facts:
 - A figure leaving sight is never described as dying or moving.
 - A changed door never names an unseen actor as its cause.
 - Hidden actions and unchanged views produce no prose.
-- Changes in disclosed readiness say when the character must wait or can act
-  again, without attributing the change to an unseen action.
+- ASCII says when the character must wait or can act again; the text client
+  never mentions readiness, and returns its prompt when the character can act.
 
 Narration is transient presentation, not durable history. Snapshots, including
 those after rewind and relaunch, reset the comparison baseline without replaying
@@ -34,18 +36,18 @@ old notices. Invalid updates leave both state and prose unchanged.
 lines); F2 still opens durable history. Automation frames include the same prose
 in a `narration` array, which is empty immediately after a snapshot.
 
-**Text** reports each compound intention (such as walking over and picking
-something up) as a single response, suppressing the intermediate steps. Outside
-compound journeys it reports the sight changes above. The `--script` diagnostic
-interface is unchanged.
+**Text** tells everything between two prompts as one passage: the intention,
+what happened on the way, how it ended, and what else came into or left sight.
+Updates between turns are gathered and told together above a fresh prompt. The
+`--script` diagnostic interface is unchanged.
 
 ## Interruption
 
 Travel stops before its next step when an actor is newly perceived. Actors
 already visible when the trip started aren't new hazards, and harmless terrain,
 items, and place hints don't stop travel. If the step that reveals a hazard also
-reaches the destination, the movement finishes, but text still cancels any
-pending pickup or door use. Positive HP loss also interrupts travel; see
+reaches the destination, the movement finishes, but text still doesn't go on to
+the pickup or door use it walked over for. Positive HP loss also interrupts travel; see
 [dungeon gameplay](dungeon.md). Blocked moves, being thrown off course,
 control loss, wizard changes, and rewind behave as described in
 [travel](travel.md); a journey waits, rather than stopping, while another
