@@ -39,13 +39,14 @@ cover the rest of the contribution workflow.
 | Unit | Individual rules and data structures behave correctly, including boundaries and overflow | `#[cfg(test)]` modules inside each crate |
 | Crate integration | Public APIs of one crate work together | `crates/<crate>/tests/it/*.rs`, compiled as one binary per crate |
 | Cross-crate integration | Simulation, world, and server behave correctly together | `crates/test-support/tests`, `crates/server/tests` |
-| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` |
+| Protocol | Real WebSocket traffic, authorization, disclosure, retries, and ordering; recorded samples of every message kind round-trip exactly | `crates/server/tests/it/websocket.rs`, `wizard_websocket.rs`, `crates/protocol/tests` (samples recorded by `scripts/record_wire_samples.py`) |
 | Persistence and recovery | Saves, checkpoints, crash rollback, corruption, and replay | `crates/server/tests/it/background_save.rs`, `checkpoints.rs`, `recovery_fixtures.rs` |
 | Client model | Parsing, presentation models, input mapping, and shared client state | `crates/client-*/tests` |
 | Actual-process acceptance | The real server and clients work end to end | `scripts/test_*_process.py` |
-| Scenario packages | Authored content validates and loads | `scenarios/`, `crates/server/tests/it/scenario_packages.rs` |
+| Scenario packages | Authored content validates and loads, and every test package is named by a test | `scenarios/`, `crates/server/tests/it/scenario_packages.rs`, `scripts/test_scenario_references.py` |
+| Package invariants | Every package rejects atomically, answers retries, replays exactly after a restart, and rewinds to its start | `crates/server/tests/it/invariants.rs` |
 | Documentation | Local links resolve, guides are indexed, and stated versions match the code | `scripts/test_documentation.py` |
-| Performance tooling | Comparison logic and the performance ledger's format (never timing thresholds) | `scripts/test_perf_compare.py`, `scripts/test_perf_ledger.py` |
+| Performance tooling | Comparison logic, workload report validators, and the performance ledger's format (never timing thresholds) | `scripts/test_perf_compare.py`, `scripts/test_workload_reports.py`, `scripts/test_perf_ledger.py` |
 | Dependency boundaries | Crates only depend on permitted crates | `scripts/check_architecture.py`, `scripts/test_check_architecture.py` |
 
 ### Acceptance tests with real applications
@@ -62,9 +63,31 @@ asserts both the server's authoritative result and what the client shows.
   frontend feature should send genuine native keyboard (and, where relevant,
   mouse) events rather than only injecting events through the input model.
 - Include save/resume, reconnect, spectator access, and rewind when the
-  feature interacts with them.
+  feature interacts with them: when a client holds state for the feature (map
+  memory, place names, palettes, a pending intention) or presents it
+  differently to a spectator. Server-side replay, restart, retry and rewind of
+  every package are already covered by the
+  [package invariants](#package-invariants); don't repeat them per feature.
 
-### Scenario packages and wizard scripts
+Process tests share [`scripts/process_harness.py`](../scripts/process_harness.py).
+Derive each test class from `ProcessTestCase`, which builds the binaries once
+per run and gives each test its own directory and save. Its helpers are grouped
+by client:
+
+| Helper | Use it for |
+| --- | --- |
+| `server(*args, wizard=, scenario=, ...)` | Start `tor-server` on a free port; sets `self.address` |
+| `client()`, `act()`, `request()`, `command()`, `frame()` | Drive and read the headless client |
+| `wizard()`, `wizard_command()` | Privileged setup through the headless client; the wizard never takes control |
+| `play(client, steps)` | Play fixture steps (`{"move": ...}`, `{"take": ...}`) as ordinary actions |
+| `text_client()` | The text client's scripted line interface |
+| `adventure()`, `say()`, `send()` | The text client's interactive prompt |
+| `window()`, `ascii_frame()`, `key()`, `native_keys()` | The native ASCII client, through automation or genuine OS events |
+
+Set `graphical = True` on a class that opens native windows. Test modules
+never import each other; anything two of them share belongs in the harness.
+
+### Scenario packages, fixtures and wizard commands
 
 - Use ordinary validated [scenario packages](scenario-packages.md) for the initial
   setup of unit, integration, and process tests. Test-only packages live in
@@ -73,18 +96,52 @@ asserts both the server's authoritative result and what the client shows.
 - Use scripted [wizard mode](wizard-mode.md) commands to test privileged
   behavior and deliberate runtime changes (for example: place a monster and
   equipment, teleport into position, then fight using ordinary actions). Test a
-  wizard feature through its own privileged commands. Versioned wizard scripts
-  live in `scripts/fixtures/*.json`.
+  wizard feature through its own privileged commands. Versioned process-test
+  fixtures (wizard command lists and fixture walks) live in
+  `scripts/fixtures/*.json`; load them with `load_fixture()`.
 - Setup shortcuts must not bypass the behavior under test. A wizard-built
   scenario doesn't prove that a feature works, or is properly restricted, in a
   normal game, so normal-play coverage is still required.
-- New scripted automation should use the headless client for setup and
-  driving. Use the text client when the behavior under test is text input or
+- Use the headless client for setup and driving, including wizard setup.
+  Use the text client only when the behavior under test is text input or
+  presentation, and the native ASCII client only for its own input and
   presentation.
+- Name a test package after the feature or situation it sets up (`doors`,
+  `travel-hazard`), in lowercase words joined by hyphens.
 - Checkpoint fixtures are ordinary saves created by reproducible setup
   sequences. They load through the normal path.
 - Scenario certificates (`validation.json`) must be regenerated after any
   package source edit.
+
+### Package invariants
+
+[`crates/server/tests/it/invariants.rs`](../crates/server/tests/it/invariants.rs)
+plays every package in `scenarios/` and `scenarios/tests/` for a few turns,
+the package's own AI included, and checks that:
+
+- a rejected command changes no actor's state;
+- a retried request is answered without acting again;
+- a restart replays every actor's state exactly;
+- rewinding to the start restores the initial observation.
+
+A new package is covered as soon as it exists. Feature tests assert what is
+particular to the feature and leave these generic checks to the invariants.
+
+### Test organization and names
+
+- Name a test for the behavior it proves, as a sentence:
+  `a_rejected_door_action_changes_nothing`, not `test_doors_2`. Rust tests
+  don't take a `test_` prefix; Python test methods need it, followed by the
+  sentence.
+- Keep one behavior per test. Split a test when its failure would leave the
+  reader guessing which of several behaviors broke; shared setup goes in a
+  helper, not in one long test.
+- Rust integration tests share helpers through each binary's support module
+  (for the server, [`support.rs`](../crates/server/tests/it/support.rs):
+  `act`, `play`, `run_ai_turns`, `wizard`, `package`, `load`). Add a helper
+  there rather than another private copy in a test file.
+- Put a test in the file for the behavior's own subject. A file of mixed
+  subjects is a sign to split it.
 
 ## Bugs and regressions
 
@@ -274,6 +331,10 @@ required on the final commit before merging.
   [background saving](background-saving.md) for the durability contract.
 
 ### Formats and fixtures
+
+When the protocol version changes, rerun `python scripts/record_wire_samples.py`
+to record `crates/protocol/tests/fixtures/wire-v<version>.json` and review its
+difference: every change in it is a change to the wire format.
 
 The project supports only the current protocol, save format, and ruleset (listed
 in the [roadmap](milestones.md#current-implementation)). When a format changes,
