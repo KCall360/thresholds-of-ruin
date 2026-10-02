@@ -122,7 +122,7 @@ class AdventureProcesses(ProcessTestCase):
                 self.assertEqual(state["travel"]["phase"], expected_phase)
                 self.assertEqual(state["travel"]["completed_steps"], 1)
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
-                self.assertIn("unremarkable figure", self.say(player, "examine figure"))
+                self.assertIn("nothing special about the figure", self.say(player, "examine figure"))
                 for process in (player, observer, server): process.stop()
 
     def test_clarification_is_free_and_wizard_rewind_clears_pending_pickup(self):

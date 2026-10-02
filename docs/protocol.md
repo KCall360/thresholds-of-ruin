@@ -56,7 +56,7 @@ An attached spectator receives every accepted action and result for their actor,
 plus the same disclosed state that a controlling client receives. This includes
 pickup, movement, and wait; rejected commands and local UI inputs are not gameplay
 history. Combat and autonomous actors publish actor-specific health, progress,
-qualitative injuries, and perceived narration through the same stream. This is an
+qualitative injuries, and perceived combat events through the same stream. This is an
 actor-perspective view: hidden rooms and other actors' private commands and
 numerical combat attributes are not exposed. Spectators cannot write even private annotations.
 
@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":20,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":21,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -459,9 +459,22 @@ height slices. See [physics](physics.md) for numerical and persistence rules.
 
 Attack actions carry a disclosed target actor ID. Movement never implicitly
 attacks. Combat observations carry own HP, preparation/recovery, qualitative
-visible-actor injury/hostility, disclosed narration, objective text when enabled,
-and durable victory/death status. They do not carry enemy numerical attributes,
-AI memory, internal coordinates, or RNG state. Non-combat diagnostic fixtures
+visible-actor injury (`healthy`, `wounded`, `badly_wounded`, `near_death`) and
+hostility, the objective's kind when enabled (`retrieve_and_return` or
+`reach_exit`), and durable victory/death status.
+
+They also carry `events`: what the action the view follows did, as far as the
+observer knows. An `attack` names its `attacker` and `target` and its `outcome`
+(`miss`, `no_injury`, `hit`); a participant the observer couldn't see is `null`.
+`interrupted` reports the observer's own wind-up being interrupted, and `died`
+names a disclosed actor that died, after the blow that killed it. The server
+sends facts, never prose: clients write their own sentences, and actor
+descriptions and names are empty when nothing is authored. The observer's own
+body, seen from another cell, is the actor whose id is the observation's
+`actor`.
+
+Combat observations don't carry enemy numerical attributes, AI memory,
+internal coordinates, or RNG state. Non-combat diagnostic fixtures
 omit the optional combat view.
 
 After reconnecting during preparation, a journaled input boundary preserves

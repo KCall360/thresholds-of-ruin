@@ -40,8 +40,9 @@ as potentially stale sightings. No world-wide appearance catalog is sent.
 
 This is a deliberately small cosmetic foundation: all existing floor/wall cells
 use stone; the three token materials and stone tablet have authored examination
-text; other item names receive a neutral fallback. Actors are generic figures;
-repeated views of the observing actor identify itself. These stubs add no item
+text; other items and all actors have no authored description, and the client
+says so in its own words. The observing actor's own body, seen from another
+cell, is identified by its id, never listed as a figure in the room. These stubs add no item
 abilities, identification rules, hardness, digging, lighting, or material editing.
 Existing opaque wall terrain supplies the actual sight and movement obstruction.
 

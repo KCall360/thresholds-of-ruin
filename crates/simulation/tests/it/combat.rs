@@ -3,7 +3,7 @@ use std::{
     num::NonZeroU64,
 };
 use tor_simulation::{
-    combat::{CombatSpec, DamageType, Objective},
+    combat::{AttackOutcome, CombatSpec, DamageType, DisclosedCombatEvent, Injury, Objective},
     Action, ActorId, Game,
 };
 use tor_world::{Direction, Location, Position, RegionId};
@@ -167,6 +167,96 @@ fn human_death_has_no_next_actor_and_keeps_a_corpse() {
     assert_eq!(
         Game::restore_checkpoint(game.checkpoint(&mut shared), &shared),
         Some(game)
+    );
+}
+
+#[test]
+fn combat_views_carry_events_and_injury_as_data() {
+    let mut game = duel();
+    let mut enemy = CombatSpec::default();
+    enemy.attack.bonus = 100;
+    enemy.attack.wind_up = 30;
+    game.configure_combat(ActorId(2), enemy).unwrap();
+    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
+        .unwrap();
+    game.act(ActorId(2), Action::Attack { target: ActorId(1) })
+        .unwrap();
+    // The enemy's quicker blow lands first and interrupts the wind-up.
+    let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
+    assert_eq!(
+        view.events,
+        [
+            DisclosedCombatEvent::Attack {
+                attacker: Some(ActorId(2)),
+                target: Some(ActorId(1)),
+                outcome: AttackOutcome::Hit,
+            },
+            DisclosedCombatEvent::Interrupted { actor: ActorId(1) },
+        ]
+    );
+    assert_eq!(view.actors, [(ActorId(2), false, Injury::Healthy)]);
+}
+
+#[test]
+fn a_resisted_blow_is_no_injury_and_a_landed_one_wounds() {
+    let mut game = duel();
+    let mut hero = CombatSpec::default();
+    hero.attack.bonus = 100;
+    hero.immunities.insert(DamageType::Impact);
+    game.configure_combat(ActorId(1), hero).unwrap();
+    let mut enemy = CombatSpec::default();
+    enemy.attack.bonus = 100;
+    enemy.attack.wind_up = 30;
+    game.configure_combat(ActorId(2), enemy).unwrap();
+    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
+        .unwrap();
+    game.act(ActorId(2), Action::Attack { target: ActorId(1) })
+        .unwrap();
+    let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
+    assert!(view.events.contains(&DisclosedCombatEvent::Attack {
+        attacker: Some(ActorId(2)),
+        target: Some(ActorId(1)),
+        outcome: AttackOutcome::NoInjury,
+    }));
+    assert!(view.events.contains(&DisclosedCombatEvent::Attack {
+        attacker: Some(ActorId(1)),
+        target: Some(ActorId(2)),
+        outcome: AttackOutcome::Hit,
+    }));
+    assert_eq!(view.actors, [(ActorId(2), false, Injury::Wounded)]);
+    // The next action's view carries only that action's events.
+    game.act(game.next_actor().unwrap(), Action::Wait).unwrap();
+    let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
+    assert!(!view.events.iter().any(|e| matches!(
+        e,
+        DisclosedCombatEvent::Attack {
+            outcome: AttackOutcome::NoInjury,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_death_is_an_event_naming_the_dead() {
+    let mut game = duel();
+    let mut enemy = CombatSpec::default();
+    enemy.attack.bonus = 100;
+    enemy.attack.damage = BTreeMap::from([(DamageType::Vital, 100)]);
+    game.configure_combat(ActorId(2), enemy).unwrap();
+    game.act(ActorId(1), Action::Wait).unwrap();
+    game.act(ActorId(2), Action::Attack { target: ActorId(1) })
+        .unwrap();
+    let view = game.observe(ActorId(1)).unwrap().combat.unwrap();
+    assert_eq!(
+        view.events,
+        [
+            DisclosedCombatEvent::Attack {
+                attacker: Some(ActorId(2)),
+                target: Some(ActorId(1)),
+                outcome: AttackOutcome::Hit,
+            },
+            DisclosedCombatEvent::Died { actor: ActorId(1) },
+        ]
     );
 }
 

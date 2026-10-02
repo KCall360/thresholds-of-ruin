@@ -58,12 +58,54 @@ pub struct CombatView {
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
     pub recovery_remaining: u64,
-    pub actors: Vec<(ActorId, bool, &'static str)>,
-    pub messages: Vec<String>,
-    pub objective: Option<String>,
+    pub actors: Vec<(ActorId, bool, Injury)>,
+    /// What the action this view follows did, as far as the observer knows.
+    pub events: Vec<DisclosedCombatEvent>,
+    pub objective: Option<ObjectiveKind>,
     pub victory: bool,
     pub dead: bool,
     pub terminal: bool,
+}
+
+/// How hurt a visible actor looks; never its numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Injury {
+    Healthy,
+    Wounded,
+    BadlyWounded,
+    NearDeath,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectiveKind {
+    /// Bring the objective item back to the exit.
+    RetrieveAndReturn,
+    ReachExit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttackOutcome {
+    Miss,
+    /// Struck, but every damage component was resisted.
+    NoInjury,
+    Hit,
+}
+
+/// A combat event as one observer may know it. `None` is a participant it
+/// couldn't see.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisclosedCombatEvent {
+    Attack {
+        attacker: Option<ActorId>,
+        target: Option<ActorId>,
+        outcome: AttackOutcome,
+    },
+    Interrupted {
+        actor: ActorId,
+    },
+    Died {
+        actor: ActorId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,13 +232,13 @@ impl Game {
             .filter_map(|(other, a)| {
                 let c = a.combat.as_ref()?;
                 let injury = if c.hp == c.spec.max_hp {
-                    "healthy"
+                    Injury::Healthy
                 } else if u64::from(c.hp) * 4 <= u64::from(c.spec.max_hp) {
-                    "near death"
+                    Injury::NearDeath
                 } else if u64::from(c.hp) * 2 <= u64::from(c.spec.max_hp) {
-                    "badly wounded"
+                    Injury::BadlyWounded
                 } else {
-                    "wounded"
+                    Injury::Wounded
                 };
                 Some((*other, self.hostile(id, *other), injury))
             })
@@ -204,17 +246,8 @@ impl Game {
         // Personal sensations are always safe; third-party events require both participants visible.
         let disclosed =
             |actor| actor == id || self.actors.get(&actor).is_some_and(|a| visible(a.location));
-        let name = |actor| {
-            if actor == id {
-                "You".to_owned()
-            } else {
-                self.actors
-                    .get(&actor)
-                    .and_then(|a| a.combat.as_ref())
-                    .map_or_else(|| "A figure".into(), |c| c.spec.name.clone())
-            }
-        };
-        let messages = self
+        let seen = |actor| disclosed(actor).then_some(actor);
+        let events = self
             .combat
             .events
             .iter()
@@ -227,29 +260,23 @@ impl Game {
                 } if (*actor == id || *target == id)
                     || (disclosed(*actor) && disclosed(*target)) =>
                 {
-                    let source = if disclosed(*actor) {
-                        name(*actor)
-                    } else {
-                        "Something".into()
-                    };
-                    let target = if disclosed(*target) {
-                        name(*target).to_lowercase()
-                    } else {
-                        "something".into()
-                    };
-                    Some(if !hit {
-                        format!("{source} missed {target}.")
-                    } else if *damage == 0 {
-                        format!("{source} struck {target}, but caused no injury.")
-                    } else {
-                        format!("{source} struck {target}.")
+                    Some(DisclosedCombatEvent::Attack {
+                        attacker: seen(*actor),
+                        target: seen(*target),
+                        outcome: if !hit {
+                            AttackOutcome::Miss
+                        } else if *damage == 0 {
+                            AttackOutcome::NoInjury
+                        } else {
+                            AttackOutcome::Hit
+                        },
                     })
                 }
                 CombatEvent::Interrupted { actor } if *actor == id => {
-                    Some("Your attack was interrupted.".into())
+                    Some(DisclosedCombatEvent::Interrupted { actor: *actor })
                 }
                 CombatEvent::Died { actor } if disclosed(*actor) => {
-                    Some(format!("{} died.", name(*actor)))
+                    Some(DisclosedCombatEvent::Died { actor: *actor })
                 }
                 _ => None,
             })
@@ -272,7 +299,7 @@ impl Game {
                 0
             },
             actors,
-            messages,
+            events,
             objective: self
                 .combat
                 .objective
@@ -280,9 +307,9 @@ impl Game {
                 .filter(|o| o.disclosed)
                 .map(|o| {
                     if o.item.is_some() {
-                        "Retrieve the objective item and return to the exit.".into()
+                        ObjectiveKind::RetrieveAndReturn
                     } else {
-                        "Reach the exit.".into()
+                        ObjectiveKind::ReachExit
                     }
                 }),
             victory: self.combat.outcome.victor.is_some(),
@@ -642,17 +669,22 @@ impl Game {
                 .unwrap()
                 .pending = None;
             self.actors.get_mut(&id).unwrap().ready_at = self.tick + attack.recovery;
+            // The blow comes before any death it causes.
+            let resolved = self.combat.events.len();
             let damage = if hit {
                 self.apply_damage(p.target, &attack.damage)
             } else {
                 0
             };
-            self.combat.events.push(CombatEvent::Resolved {
-                actor: id,
-                target: p.target,
-                hit,
-                damage,
-            });
+            self.combat.events.insert(
+                resolved,
+                CombatEvent::Resolved {
+                    actor: id,
+                    target: p.target,
+                    hit,
+                    damage,
+                },
+            );
         }
     }
 }

@@ -697,9 +697,9 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             actors: vec![CombatActorView {
                 actor: ActorId(2),
                 hostile,
-                injury: "healthy".into(),
+                injury: Injury::Healthy,
             }],
-            messages: vec![],
+            events: vec![],
             objective: None,
             victory: false,
             dead: false,

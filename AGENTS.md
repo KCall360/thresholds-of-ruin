@@ -105,14 +105,13 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
-**Test suite rationalization (in progress, branch `tests/rationalize`).**
-Process tests share `scripts/process_harness.py` and use the headless client
-for wizard setup; every scenario package is checked by the
+**Test suite rationalization (complete, PR #59).** Process tests share
+`scripts/process_harness.py` and use the headless client for wizard setup;
+every scenario package is checked by the
 [package invariants](docs/testing.md#package-invariants); the workload
 validators share `workload_report.py`; protocol messages have recorded wire
 samples; test packages are named for what they set up. See the
-[testing policy](docs/testing.md). It needs a PR, CI on both platforms, and
-the maintainer's approval to merge.
+[testing policy](docs/testing.md).
 
 **Interactive fiction parser** (PR #55): the text client's natural-language
 parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
@@ -193,9 +192,9 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Running until blocked and spatial narrative** (PRs #57 and #58, protocol
-20): the simulation runs until it needs client input, only the server ends a
-journey, and clients pace the display; see
+**Running until blocked and spatial narrative** (PRs #57 and #58): the
+simulation runs until it needs client input, only the server ends a journey,
+and clients pace the display; see
 [running until blocked](docs/run-until-blocked.md) and the
 [spatial narrative](docs/spatial-narrative-architecture.md).
 

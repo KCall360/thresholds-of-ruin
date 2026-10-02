@@ -149,6 +149,7 @@ impl Dialogue {
     /// Interpret a line against the state in hand. Surfaces are described by
     /// their asset words where the palette holds their assets.
     pub fn interpret_with(&mut self, line: &str, state: &StateView, palette: &Palette) -> Intent {
+        let state = &named(state);
         let trimmed = line.trim();
         let normalized = trimmed.to_lowercase();
         if normalized == "again" || normalized == "g" {
@@ -673,7 +674,7 @@ impl Dialogue {
                                 Intent::Say(format!(
                                     "{} looks {}.",
                                     safe(&actor.name),
-                                    injury.injury
+                                    tor_client_common::narration::injury(injury.injury)
                                 ))
                             } else {
                                 Intent::Say(format!("{} appears uninjured.", safe(&actor.name)))
@@ -871,7 +872,7 @@ impl Dialogue {
             };
             self.actor = Some(actor.id);
             return match verb {
-                "examine" => Intent::Say(safe(&actor.description)),
+                "examine" => Intent::Say(actor_description(actor)),
                 "read" => Intent::Say("There is nothing written on them.".into()),
                 "push" | "pull" => Intent::Say("They wouldn't appreciate that.".into()),
                 "turn" => Intent::Say("They stare back at you.".into()),
@@ -888,7 +889,7 @@ impl Dialogue {
                 if let Some(actor) = state.observation.visible_actors.iter().find(|a| a.id == id) {
                     self.actor = Some(actor.id);
                     return match verb {
-                        "examine" => Intent::Say(safe(&actor.description)),
+                        "examine" => Intent::Say(actor_description(actor)),
                         "read" => Intent::Say("There is nothing written on them.".into()),
                         "push" | "pull" => Intent::Say("They wouldn't appreciate that.".into()),
                         "turn" => Intent::Say("They stare back at you.".into()),
@@ -1239,7 +1240,7 @@ impl Dialogue {
                 {
                     choices.push(Choice {
                         label: format!("{} {}", safe(&actor.name), whereabouts(actor.position)),
-                        intent: Intent::Say(safe(&actor.description)),
+                        intent: Intent::Say(actor_description(actor)),
                         item: None,
                         door: None,
                         actor: Some(actor.id),
@@ -1307,6 +1308,25 @@ impl Dialogue {
             state.revision,
             "You cannot see anything like that here.",
         )
+    }
+}
+
+/// Actors nothing names are called figures.
+fn named(state: &StateView) -> StateView {
+    let mut state = state.clone();
+    for actor in &mut state.observation.visible_actors {
+        if actor.name.trim().is_empty() {
+            actor.name = "figure".into();
+        }
+    }
+    state
+}
+
+fn actor_description(actor: &ActorView) -> String {
+    if actor.description.trim().is_empty() {
+        format!("You see nothing special about the {}.", safe(&actor.name))
+    } else {
+        safe(&actor.description)
     }
 }
 
@@ -1816,7 +1836,10 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
     let mut lines = Vec::new();
     if let Some(c) = &o.combat {
         lines.push(tor_client_common::narration::combat_status(c));
-        lines.extend(c.objective.clone());
+        lines.extend(
+            c.objective
+                .map(|o| tor_client_common::narration::objective(o).to_owned()),
+        );
     }
     if state.wizard_game {
         lines.push("*** WIZARD GAME — permanently marked ***".into());
@@ -1870,7 +1893,11 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
                 .as_ref()
                 .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
             {
-                lines.push(format!("{} looks {}.", safe(actor.name), injury.injury));
+                lines.push(format!(
+                    "{} looks {}.",
+                    safe(actor.name),
+                    tor_client_common::narration::injury(injury.injury)
+                ));
             }
         }
     }
@@ -1908,7 +1935,10 @@ pub fn describe_brief_with(state: &StateView, palette: &Palette) -> String {
     let mut lines = Vec::new();
     if let Some(c) = &o.combat {
         lines.push(tor_client_common::narration::combat_status(c));
-        lines.extend(c.objective.clone());
+        lines.extend(
+            c.objective
+                .map(|o| tor_client_common::narration::objective(o).to_owned()),
+        );
     }
     if let Some(title) = crate::narrative::place_title(state) {
         lines.push(title);
@@ -1958,7 +1988,11 @@ pub fn describe_brief_with(state: &StateView, palette: &Palette) -> String {
                 .as_ref()
                 .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
             {
-                lines.push(format!("{} looks {}.", safe(actor.name), injury.injury));
+                lines.push(format!(
+                    "{} looks {}.",
+                    safe(actor.name),
+                    tor_client_common::narration::injury(injury.injury)
+                ));
             }
         }
     }

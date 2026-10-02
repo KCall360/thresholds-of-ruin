@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -98,8 +98,11 @@ pub struct GroundItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorView {
+    /// Empty when nothing names it. The observer's own body is the actor
+    /// whose id is `Observation::actor`; clients say who that is.
     #[serde(default)]
     pub name: String,
+    /// Authored appearance; empty when none is authored.
     #[serde(default)]
     pub description: String,
     pub id: ActorId,
@@ -151,8 +154,10 @@ pub struct CombatView {
     pub preparation_active: bool,
     pub recovery_remaining: u64,
     pub actors: Vec<CombatActorView>,
-    pub messages: Vec<String>,
-    pub objective: Option<String>,
+    /// What the action this view follows did, as far as the observer knows.
+    /// Clients write their own prose from these.
+    pub events: Vec<CombatEventView>,
+    pub objective: Option<ObjectiveKind>,
     pub victory: bool,
     pub dead: bool,
     pub terminal: bool,
@@ -162,7 +167,53 @@ pub struct CombatView {
 pub struct CombatActorView {
     pub actor: ActorId,
     pub hostile: bool,
-    pub injury: String,
+    pub injury: Injury,
+}
+
+/// How hurt a visible actor looks; never its numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Injury {
+    Healthy,
+    Wounded,
+    BadlyWounded,
+    NearDeath,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveKind {
+    /// Bring the objective item back to the exit.
+    RetrieveAndReturn,
+    ReachExit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttackOutcome {
+    Miss,
+    /// Struck, but every damage component was resisted.
+    NoInjury,
+    Hit,
+}
+
+/// A combat event as the observer knows it. An absent participant is one
+/// it couldn't see; the observer itself is `Observation::actor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CombatEventView {
+    Attack {
+        attacker: Option<ActorId>,
+        target: Option<ActorId>,
+        outcome: AttackOutcome,
+    },
+    /// The observer's own attack preparation was interrupted.
+    Interrupted {
+        actor: ActorId,
+    },
+    Died {
+        actor: ActorId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

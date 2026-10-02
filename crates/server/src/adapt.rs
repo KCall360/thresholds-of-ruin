@@ -179,7 +179,7 @@ pub fn observation(
         {
             visible_actors.push(p::ActorView {
                 name: actor.name.clone(),
-                description: actor.description.into(),
+                description: String::new(),
                 id: p::ActorId(actor.id.0),
                 position: offset(cell.offset),
                 asset: actor.asset.clone(),
@@ -187,8 +187,8 @@ pub fn observation(
         }
         if cell.location == view.location && cell.offset != (w::Position { x: 0, y: 0, z: 0 }) {
             visible_actors.push(p::ActorView {
-                name: "yourself".into(),
-                description: "You recognize your own appearance from another angle.".into(),
+                name: String::new(),
+                description: String::new(),
                 id: p::ActorId(view.actor.0),
                 position: offset(cell.offset),
                 asset: view.asset.clone(),
@@ -208,11 +208,14 @@ pub fn observation(
                 .map(|(id, hostile, injury)| p::CombatActorView {
                     actor: p::ActorId(id.0),
                     hostile,
-                    injury: injury.into(),
+                    injury: injury_view(injury),
                 })
                 .collect(),
-            messages: c.messages,
-            objective: c.objective,
+            events: c.events.into_iter().map(combat_event_view).collect(),
+            objective: c.objective.map(|o| match o {
+                s::combat::ObjectiveKind::RetrieveAndReturn => p::ObjectiveKind::RetrieveAndReturn,
+                s::combat::ObjectiveKind::ReachExit => p::ObjectiveKind::ReachExit,
+            }),
             victory: c.victory,
             dead: c.dead,
             terminal: c.terminal,
@@ -244,6 +247,37 @@ pub fn observation(
                 asset: item.asset,
             })
             .collect(),
+    }
+}
+
+fn injury_view(injury: s::combat::Injury) -> p::Injury {
+    match injury {
+        s::combat::Injury::Healthy => p::Injury::Healthy,
+        s::combat::Injury::Wounded => p::Injury::Wounded,
+        s::combat::Injury::BadlyWounded => p::Injury::BadlyWounded,
+        s::combat::Injury::NearDeath => p::Injury::NearDeath,
+    }
+}
+
+fn combat_event_view(event: s::combat::DisclosedCombatEvent) -> p::CombatEventView {
+    use s::combat::{AttackOutcome as O, DisclosedCombatEvent as E};
+    let id = |actor: s::ActorId| p::ActorId(actor.0);
+    match event {
+        E::Attack {
+            attacker,
+            target,
+            outcome,
+        } => p::CombatEventView::Attack {
+            attacker: attacker.map(id),
+            target: target.map(id),
+            outcome: match outcome {
+                O::Miss => p::AttackOutcome::Miss,
+                O::NoInjury => p::AttackOutcome::NoInjury,
+                O::Hit => p::AttackOutcome::Hit,
+            },
+        },
+        E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
+        E::Died { actor } => p::CombatEventView::Died { actor: id(actor) },
     }
 }
 

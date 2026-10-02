@@ -696,7 +696,7 @@ fn diagnose_reports_health_from_the_disclosed_combat_state() {
         preparation_active: false,
         recovery_remaining: 0,
         actors: vec![],
-        messages: vec![],
+        events: vec![],
         objective: None,
         victory: false,
         dead: false,
