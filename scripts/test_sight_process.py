@@ -7,26 +7,12 @@ the door. The `sight-3d-giant` package compares a three-cell giant with a
 two-cell humanoid at the same start. See docs/sight-3d.md.
 """
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-import test_adventure_process as adventure_support
-from test_text_process import inspect_save
+
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save
 
 
-class SightProcesses(unittest.TestCase):
-    setUpClass = classmethod(ascii_support.AsciiProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    server = headless.HeadlessProcesses.server
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    request = headless.HeadlessProcesses.request
-    command = headless.HeadlessProcesses.command
-    ascii_frame = ascii_support.AsciiProcesses.frame
-    key = ascii_support.AsciiProcesses.key
-    adventure = adventure_support.AdventureProcesses.adventure
-    say = adventure_support.AdventureProcesses.say
+class SightProcesses(ProcessTestCase):
+    graphical = True
 
     @staticmethod
     def cell(observation, x, y, z):
@@ -39,7 +25,7 @@ class SightProcesses(unittest.TestCase):
 
     def test_eye_height_hovering_creature_and_tall_door_across_clients_and_resume(self):
         server = self.server(scenario="sight-3d-setup")
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        observer, initial = self.client(SPECTATOR_TOKEN)
         view = initial["state"]["observation"]
         # Over the waist-high wall, but not past the closed door.
         self.assertTrue(self.cell(view, -2, 0, 0)["wall"])
@@ -54,7 +40,7 @@ class SightProcesses(unittest.TestCase):
         for z in (-1, 2):
             self.assertEqual((self.cell(view, 0, 0, z)["wall"], self.cell(view, 0, 0, z)["material"]),
                              (True, "stone"))
-        text, welcome = self.adventure(support.SPECTATOR_TOKEN)
+        text, welcome = self.adventure(SPECTATOR_TOKEN)
         self.assertIn("copper token", welcome)
         self.assertNotIn("stone tablet", welcome)
         self.assertIn("stone", self.say(text, "examine ceiling"))
@@ -74,7 +60,7 @@ class SightProcesses(unittest.TestCase):
         text.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
         self.server(scenario="sight-3d-setup")
-        _, resumed = self.client(support.SPECTATOR_TOKEN)
+        _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], opened["state"])
 
     def test_three_cell_giant_sees_over_a_wall_a_humanoid_cannot(self):
@@ -99,7 +85,7 @@ class SightProcesses(unittest.TestCase):
             self.assertEqual(creature in positions, giant)
             if giant:
                 window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
-                                     token=support.SPECTATOR_TOKEN)
+                                     token=SPECTATOR_TOKEN)
                 native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
                 self.assertEqual(native["state"], state)
                 self.key(window, "escape")

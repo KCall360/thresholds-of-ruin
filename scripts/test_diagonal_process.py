@@ -1,39 +1,16 @@
 """Diagonal gameplay through actual native ASCII, text and headless processes."""
-from test_text_process import flush_save, inspect_save
 import os
 import unittest
 
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-import test_adventure_process as adventure_support
-import test_doors_process as doors
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, door, inspect_save
 
 
-class DiagonalProcesses(unittest.TestCase):
-    setUpClass = classmethod(ascii_support.AsciiProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    server = headless.HeadlessProcesses.server
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    command = headless.HeadlessProcesses.command
-    request = headless.HeadlessProcesses.request
-    act = headless.HeadlessProcesses.act
-    adventure = adventure_support.AdventureProcesses.adventure
-    say = adventure_support.AdventureProcesses.say
-    native_keys = doors.DoorProcesses.native_keys
-    key = ascii_support.AsciiProcesses.key
-
-    def setup_wizard(self):
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        wizard.command("release")
-        return wizard
+class DiagonalProcesses(ProcessTestCase):
+    graphical = True
 
     def test_normal_native_keys_notes_spectator_and_resume(self):
         server = self.server()
-        observer, _ = self.client(support.SPECTATOR_TOKEN)
+        observer, _ = self.client(SPECTATOR_TOKEN)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", os.environ.get("TOR_DIAGONAL_CAPTURE", str(self.save.parent / "diagonal.ppm"))])
         current = self.frame(window, lambda f: f.get("state") and not f["busy"])
         key = self.native_keys(window)
@@ -55,21 +32,21 @@ class DiagonalProcesses(unittest.TestCase):
         key("Escape", False)
         watched = self.request(observer, {"type":"snapshot"})
         self.assertEqual(watched["state"], current["state"])
-        flush_save(self)
+        self.flush_save()
         before = self.save.read_bytes()
         denied = self.act(observer, {"type":"move","direction":"north_east"})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(self.save.read_bytes(),before)
         window.stop(); observer.stop(); server.stop()
         self.server()
-        _, resumed = self.client(support.SPECTATOR_TOKEN)
+        _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],current["state"])
         self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v17")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
         self.server(wizard=True, scenario="diagonal-doors")
-        wizard = self.setup_wizard()
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        observer, initial = self.client(SPECTATOR_TOKEN)
         player, _ = self.adventure()
         self.assertEqual(self.say(player,"open door"),"You open the wooden door.\n> ")
         opened = self.request(observer,{"type":"snapshot"})
@@ -90,15 +67,14 @@ class DiagonalProcesses(unittest.TestCase):
         key("u",True)
         reopened = self.frame(window,lambda f:f.get("state",{}).get("observation",{}).get("tick")==868 and not f["busy"])
         key("u",False)
-        self.assertTrue(doors.DoorProcesses.door(reopened)["open"])
+        self.assertTrue(door(reopened)["open"])
         window.stop()
-        wizard.command("sync")
-        self.assertNotIn("Server error",wizard.command("wizard wall 3 3 2 0 closed"))
-        wizard.command("control")
+        self.wizard_command(wizard, "wall 3 3 2 0 closed")
+        self.assertIsNone(self.request(wizard, {"type": "acquire_control"})["error"])
         before = self.request(observer,{"type":"snapshot"})
-        self.assertIn("Server error",wizard.command("ne"))
+        self.assertIsNotNone(self.act(wizard, {"type": "move", "direction": "north_east"})["error"])
         self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],before["state"])
-        self.assertNotIn("Server error",wizard.command("wizard rewind initial"))
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer,{"type":"snapshot"})
         self.assertNotEqual(rewound["branch"],initial["branch"])
         self.assertEqual(rewound["state"]["observation"]["tick"],0)
@@ -120,7 +96,7 @@ class DiagonalProcesses(unittest.TestCase):
         self.server(scenario="diagonal-stairs")
         window = self.launch("tor-client-ascii",["--connect",self.address,"--report-frames"])
         self.frame(window,lambda f:f.get("state") and not f["busy"])
-        observer, _ = self.client(support.SPECTATOR_TOKEN)
+        observer, _ = self.client(SPECTATOR_TOKEN)
         key = self.native_keys(window)
         for name, direction, tick in [("comma","up",100),("period","down",200)]:
             key("Shift_L",True)

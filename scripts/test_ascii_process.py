@@ -8,53 +8,30 @@ import os
 import subprocess
 import unittest
 
-import test_text_process as text_support
-from test_text_process import TOKEN, SPECTATOR_TOKEN, flush_save
+from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 
 
-class AsciiProcesses(unittest.TestCase):
-    setUp = text_support.TextProcesses.setUp
-    launch = text_support.TextProcesses.launch
-    start_server = text_support.TextProcesses.start_server
-    client = text_support.TextProcesses.client
+class AsciiProcesses(ProcessTestCase):
+    graphical = True
 
-    @classmethod
-    def setUpClass(cls):
-        if os.name != "nt" and not os.environ.get("DISPLAY"):
-            raise RuntimeError("Graphical process tests require DISPLAY; run under xvfb-run on Linux")
-        text_support.TextProcesses.setUpClass.__func__(cls)
+    def setUp(self):
+        super().setUp()
+        self.game = self.server(spectator=False)
 
     def ascii(self, observe=True):
         process = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", *(["--observe"] if observe else [])])
-        frame = self.frame(process, lambda f: f["state"] is not None and not f["busy"])
+        frame = self.ascii_frame(process, lambda f: f["state"] is not None and not f["busy"])
         self.assertGreater(frame["frame"], 0)
         self.assertTrue(frame["window_open"])
         self.assertNotIn(TOKEN, str(frame))
         return process, frame
 
-    def frame(self, process, predicate):
-        found = []
-        def match(line):
-            if not line.startswith('{'): return False
-            value = json.loads(line)
-            if value.get("type") == "frame" and predicate(value):
-                found.append(value)
-                return True
-            return False
-        process.until(match, seconds=20)
-        return found[-1]
-
-    def key(self, process, key):
-        process.child.stdin.write(json.dumps({"type":"key", "key":key}) + "\n")
-        process.child.stdin.flush()
-        return self.frame(process, lambda f: f.get("input_done") == key and not f["busy"])
-
     def test_read_only_spectator_window_streams_actions_and_resumes(self):
-        self.server.stop()
-        self.server, self.address = self.start_server(spectator=True)
-        player, _ = self.client()
+        self.game.stop()
+        self.game = self.server()
+        player, _ = self.text_client()
         spectator = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
-        initial = self.frame(spectator, lambda f: f["state"] is not None and not f["busy"])
+        initial = self.ascii_frame(spectator, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(initial["role"], "spectator")
         self.assertFalse(initial["has_control"])
         self.assertIn("read-only", initial["status"])
@@ -62,7 +39,7 @@ class AsciiProcesses(unittest.TestCase):
         actions = ["take token", "wait", "east", "east", "east", "east", "east"]
         for revision, action in enumerate(actions, 1):
             player.command(action)
-            watched = self.frame(spectator, lambda f: f["state"]["revision"] == revision)
+            watched = self.ascii_frame(spectator, lambda f: f["state"]["revision"] == revision)
             entries = [e for e in watched["history"] if e["content"]["type"] == "action"]
             self.assertEqual(len(entries), revision)
             self.assertIn("event", entries[-1]["content"])
@@ -70,9 +47,9 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(next(i["position"] for i in watched["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
         player.command("note Secret")
         player.command("annotate user actor note here Public progress")
-        shared = self.frame(spectator, lambda f: "Public progress" in str(f["history"]))
+        shared = self.ascii_frame(spectator, lambda f: "Public progress" in str(f["history"]))
         self.assertNotIn("Secret", str(shared))
-        flush_save(self)
+        self.flush_save()
         before = self.save.read_bytes()
         for key in ["control", "release", "right", "pickup", "wait", "note"]:
             denied = self.key(spectator, key)
@@ -88,24 +65,24 @@ class AsciiProcesses(unittest.TestCase):
         self.assertEqual(spectator.child.wait(timeout=10), 0)
         self.assertEqual(self.save.read_bytes(), before)
         player.stop()
-        self.server.stop()
-        self.server, self.address = self.start_server(spectator=True)
+        self.game.stop()
+        self.game = self.server()
         resumed = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
-        restored = self.frame(resumed, lambda f: f["state"] is not None and not f["busy"])
+        restored = self.ascii_frame(resumed, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(restored["role"], "spectator")
         self.assertEqual(restored["state"], watched["state"])
         self.assertEqual(restored["history"], shared["history"])
         self.assertIn("read-only", self.key(resumed, "control")["status"])
 
     def test_text_to_window_control_transfer_and_save_resume(self):
-        text, _ = self.client()
+        text, _ = self.text_client()
         ascii_client, initial = self.ascii()
         self.assertIn("stone tablet", str(initial))
         self.assertFalse(initial["has_control"])
         text.command("take token")
-        self.frame(ascii_client, lambda f: f["state"]["revision"] == 1)
+        self.ascii_frame(ascii_client, lambda f: f["state"]["revision"] == 1)
         text.command("note Return through the entry.")
-        self.frame(ascii_client, lambda f: "Return through the entry." in str(f["history"]))
+        self.ascii_frame(ascii_client, lambda f: "Return through the entry." in str(f["history"]))
         denied = self.key(ascii_client, "control")
         self.assertIn("ControlTaken", denied["status"])
         text.command("release")
@@ -124,9 +101,9 @@ class AsciiProcesses(unittest.TestCase):
         self.key(ascii_client, "escape")
         self.assertEqual(ascii_client.child.wait(timeout=10), 0)
         text.stop()
-        self.server.stop()
-        self.server, self.address = self.start_server()
-        resumed_text, welcome = self.client(observe=True)
+        self.game.stop()
+        self.game = self.server(spectator=False)
+        resumed_text, welcome = self.text_client(observe=True)
         resumed_ascii, restored = self.ascii()
         self.assertEqual(restored["state"], before)
         self.assertEqual(restored["history"], moved["history"])
@@ -151,8 +128,8 @@ class AsciiProcesses(unittest.TestCase):
         invalid = self.key(client, "ascend")
         self.assertIn("InvalidAction", invalid["status"])
         self.assertEqual(invalid["state"], noted["state"])
-        self.server.stop()
-        self.frame(client, lambda f: not f["connected"])
+        self.game.stop()
+        self.ascii_frame(client, lambda f: not f["connected"])
         self.assertNotEqual(client.child.wait(timeout=15), 0)
 
     def test_bad_authentication_discloses_no_state(self):
@@ -165,38 +142,10 @@ class AsciiProcesses(unittest.TestCase):
         # This path uses real OS key messages, not the JSON automation driver.
         capture = self.save.parent / "native-frame.ppm"
         client = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
-        self.frame(client, lambda f: f["has_control"] and not f["busy"])
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-            user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
-            user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-            user32.IsWindowVisible.argtypes = [wintypes.HWND]
-            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-            handles = []
-            @callback_type
-            def find_window(hwnd, _):
-                pid = wintypes.DWORD()
-                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                if pid.value == client.child.pid and user32.IsWindowVisible(hwnd):
-                    handles.append(hwnd)
-                return True
-            user32.EnumWindows(find_window, 0)
-            self.assertTrue(handles, "Actual native window must exist")
-            def key_event(key, down):
-                vk = {"g":0x47, "Escape":0x1B}[key]
-                scan = user32.MapVirtualKeyW(vk, 0)
-                lparam = 1 | (scan << 16) | (0 if down else 0xC0000000)
-                self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk, lparam))
-        else:
-            windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", r"^Thresholds of Ruin \| ASCII$"], text=True, timeout=10).split()
-            self.assertEqual(len(windows), 1)
-            def key_event(key, down):
-                subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], key], check=True, timeout=10)
+        self.ascii_frame(client, lambda f: f["has_control"] and not f["busy"])
+        key_event = self.native_keys(client)
         key_event("g", True)
-        picked = self.frame(client, lambda f: f["state"]["revision"] == 1 and not f["busy"])
+        picked = self.ascii_frame(client, lambda f: f["state"]["revision"] == 1 and not f["busy"])
         key_event("g", False)
         self.assertIn("token", str(picked["state"]["observation"]["inventory"]))
         key_event("Escape", True)

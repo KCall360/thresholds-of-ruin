@@ -1,21 +1,15 @@
 """The benchmark trace driven through real headless clients and ASCII frames."""
 import json
 import os
-from pathlib import Path
 import unittest
-import test_text_process as support
 from performance_driver import run_demo
 
+from process_harness import ProcessTestCase
 
-class PerformanceProcesses(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        support.TextProcesses.setUpClass.__func__(cls)
 
+class PerformanceProcesses(ProcessTestCase):
     def test_mixed_trace_is_presented_and_verified_for_complete_cycles(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        output = Path(directory.name) / "demo"
+        output = self.directory / "demo"
         regions = int(os.environ.get("TOR_PERFORMANCE_REGIONS", "8"))
         cycles = int(os.environ.get("TOR_PERFORMANCE_CYCLES", "1"))
         result = run_demo(self.bin, output, regions=regions, actors=1, cycles=cycles, pace=0, stay_open=False, correlate=True, defer_logs=True)
@@ -38,9 +32,7 @@ class PerformanceProcesses(unittest.TestCase):
         self.assertEqual(json.loads((output / "result.json").read_text())["cycles"], cycles)
 
     def test_eight_real_clients_follow_scheduled_turns_and_visibility_changes(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        result = run_demo(self.bin, Path(directory.name)/"multi", regions=8, actors=8, cycles=1, pace=0)
+        result = run_demo(self.bin, self.directory/"multi", regions=8, actors=8, cycles=1, pace=0)
         self.assertEqual({s["actor"] for s in result["samples"]}, set(range(1,9)))
         self.assertIn("multi_actor_visibility_change", {s["label"] for s in result["samples"]})
 

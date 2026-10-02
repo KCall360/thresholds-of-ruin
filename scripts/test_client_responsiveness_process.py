@@ -1,33 +1,19 @@
 """Native input during blocked saving/checkpoints, and bounded burst delivery."""
-import json
 import sqlite3
 import time
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-import test_doors_process as doors
+
+from process_harness import ProcessTestCase
 
 
-class ClientResponsivenessProcesses(unittest.TestCase):
-    setUpClass = classmethod(support.TextProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    request = headless.HeadlessProcesses.request
-    command = headless.HeadlessProcesses.command
-    native_keys = doors.DoorProcesses.native_keys
-    ascii_frame = ascii_support.AsciiProcesses.frame
-
-    def server(self, interval):
-        server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--save", self.save,
-            "--regions", "256", "--checkpoint-interval", str(interval),
-            "--save-target-ms", "1", "--save-max-ms", "1000", "--save-idle-ms", "0"])
-        self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
+class ClientResponsivenessProcesses(ProcessTestCase):
+    def saving_server(self, interval):
+        """A 256-region server that saves at once and checkpoints every `interval` actions."""
+        return self.server("--regions", 256, "--checkpoint-interval", interval, "--save-target-ms", 1,
+                           "--save-max-ms", 1000, "--save-idle-ms", 0, seed=None, spectator=False)
 
     def native_during_save(self, interval):
-        self.server(interval)
+        self.saving_server(interval)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
         tick = initial["state"]["observation"]["tick"]
@@ -86,7 +72,7 @@ class ClientResponsivenessProcesses(unittest.TestCase):
         self.native_during_save(1)
 
     def test_burst_preserves_final_state_and_bounded_history(self):
-        self.server(16)
+        self.saving_server(16)
         player, _ = self.client()
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"])
         self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])

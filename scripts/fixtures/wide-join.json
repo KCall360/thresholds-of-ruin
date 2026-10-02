@@ -1,0 +1,30 @@
+{
+  "item_offset": {
+    "x": 5,
+    "y": -1,
+    "z": 0
+  },
+  "walk": [
+    {
+      "move": "east"
+    },
+    {
+      "move": "east"
+    },
+    {
+      "move": "east"
+    },
+    {
+      "move": "east"
+    },
+    {
+      "move": "east"
+    },
+    {
+      "move": "north"
+    },
+    {
+      "take": "stone tablet"
+    }
+  ]
+}

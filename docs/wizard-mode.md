@@ -123,7 +123,7 @@ player, and spectator roles, disabled mode, same-user retry bypasses, stale bran
 requests, and snapshots. A slow-controller regression verifies rewind snapshots
 precede new-branch control updates.
 
-`scripts/scenarios/wizard-foundation.json` currently drives the actual server,
+`scripts/fixtures/wizard-foundation.json` currently drives the actual server,
 text client, text spectator, and native ASCII spectator in
 `scripts/test_wizard_process.py`. The existing process tests are retained for
 now; new scripted wizard scenarios should use `tor-client-headless` for

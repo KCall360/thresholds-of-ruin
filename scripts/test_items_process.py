@@ -1,33 +1,19 @@
 """Quantity transfers through real clients using an ordinary validated package."""
 import json
-from pathlib import Path
 import unittest
-import test_text_process as support
-import test_adventure_process as adventure
-import test_ascii_process as ascii_support
+
+from process_harness import ProcessTestCase
 
 
-class ItemProcesses(unittest.TestCase):
-    setUpClass = classmethod(support.TextProcesses.setUpClass.__func__)
-    frame = ascii_support.AsciiProcesses.frame
-    key = ascii_support.AsciiProcesses.key
-    say = adventure.AdventureProcesses.say
-
-    def launch(self, name, args, cls=support.Process):
-        p = cls(self.bin / (name + self.suffix), args)
-        self.addCleanup(p.stop)
-        return p
+class ItemProcesses(ProcessTestCase):
+    graphical = True
 
     def setUp(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        self.save = Path(directory.name) / 'items.db'
+        super().setUp()
         self.start()
 
-    def start(self):
-        self.server = self.launch('tor-server', ['--listen', '127.0.0.1:0', '--scenario',
-            support.ROOT / 'scenarios/tests/items', '--save', self.save])
-        self.address = json.loads(self.server.until(lambda s: s.startswith('{')))['address']
+    def start(self, package="items"):
+        self.game = self.server(scenario=package, seed=None, spectator=False)
 
     def test_direct_quantities_merge_drop_and_restart(self):
         p = self.launch('tor-client-text', ['--script', '--connect', self.address])
@@ -40,14 +26,13 @@ class ItemProcesses(unittest.TestCase):
         self.assertIn('Dropped', p.command('drop 2 #23'))
         self.assertIn('6 x arrow', p.command('inventory'))
         self.assertIn('InvalidAction', p.command('drop 99 #23'))
-        p.command('save'); p.stop(); self.server.stop(); self.start()
+        p.command('save'); p.stop(); self.game.stop(); self.start()
         resumed = self.launch('tor-client-text', ['--script', '--connect', self.address])
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
 
     def test_adventure_quantity_survives_clarification_and_walk(self):
-        p = self.launch('tor-client-text', ['--connect', self.address], adventure.AdventureProcess)
-        p.until(lambda s: s == '> ')
+        p, _ = self.adventure()
         self.assertIn('Which', self.say(p, 'take 2 arrows'))
         self.assertIn('pick up 2', self.say(p, '1'))
         self.assertIn('2 x arrow', self.say(p, 'inventory'))
@@ -59,7 +44,7 @@ class ItemProcesses(unittest.TestCase):
 
     def test_ascii_quantity_picker_and_drop_present_authoritative_counts(self):
         p = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
-        self.frame(p, lambda f: f['state'] is not None and not f['busy'])
+        self.ascii_frame(p, lambda f: f['state'] is not None and not f['busy'])
         self.key(p, 'pickup')
         p.child.stdin.write(json.dumps({'type':'text','text':'3'}) + '\n'); p.child.stdin.flush()
         taken = self.key(p, 'enter')

@@ -38,10 +38,15 @@ SHARED_PREFIXES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/",
 # Paths that never affect Rust packages or process behavior.
 INERT_PREFIXES = ("docs/", "perf/", ".github/", "README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", "ruff.toml", ".gitignore")
 # Clients launched by process tests. Any other runtime package change selects every process test.
+# Each client package, and the text by which a process test can launch it: the
+# binary name or a `process_harness` helper for that client. The harness offers
+# helpers for every client, so its own text is not searched. Every server stop
+# saves through the headless client, so any test that starts a server uses it.
+HARNESS = "process_harness"
 CLIENT_BINARIES = {
-    "tor-client-ascii": "tor-client-ascii",
-    "tor-client-text": "tor-client-text",
-    "tor-client-headless": "tor-client-headless",
+    "tor-client-ascii": ("tor-client-ascii", ".window(", ".ascii_frame(", ".key(", ".native_keys("),
+    "tor-client-text": ("tor-client-text", ".text_client(", ".adventure("),
+    "tor-client-headless": ("tor-client-headless", ".server(", ".client(", ".wizard(", "save_at"),
 }
 # Failure text that points at the machine rather than the change. The step still fails.
 ENVIRONMENT_HINTS = {
@@ -147,7 +152,7 @@ def select_process_tests(paths, affected, everything, scripts_dir):
         if closure & changed_modules:
             selected.add(test)
         for package in affected & set(CLIENT_BINARIES):
-            if any(CLIENT_BINARIES[package] in text(m) for m in closure):
+            if any(marker in text(m) for m in closure - {HARNESS} for marker in CLIENT_BINARIES[package]):
                 selected.add(test)
     return sorted(selected)
 

@@ -124,7 +124,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         result["restart_input_ms"] = elapsed
         key(window, "release")
         # Text player follows the same recovered state and explicit-save barrier.
-        from test_text_process import Process
+        from process_harness import Process
         text = Process(bin_dir/("tor-client-text"+suffix), ["--script","--connect",address], token=env["TOR_SERVER_TOKEN"])
         try:
             text.until(lambda line:line == "Ready.")

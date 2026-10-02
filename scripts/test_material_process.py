@@ -1,28 +1,14 @@
 """Finite material enclosure through actual server and all three frontends."""
-from test_text_process import inspect_save
 import json
 import os
 from pathlib import Path
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-import test_adventure_process as adventure_support
+
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save, load_fixture
 
 
-class MaterialProcesses(unittest.TestCase):
-    setUpClass = classmethod(ascii_support.AsciiProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    server = headless.HeadlessProcesses.server
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    request = headless.HeadlessProcesses.request
-    command = headless.HeadlessProcesses.command
-    ascii_frame = ascii_support.AsciiProcesses.frame
-    key = ascii_support.AsciiProcesses.key
-    adventure = adventure_support.AdventureProcesses.adventure
-    say = adventure_support.AdventureProcesses.say
+class MaterialProcesses(ProcessTestCase):
+    graphical = True
 
     def here(self, frame):
         return self.column(frame, 0)
@@ -37,7 +23,7 @@ class MaterialProcesses(unittest.TestCase):
         player, welcome = self.adventure()
         self.assertIn("walls of stone", welcome)
         self.assertIn("stone", self.say(player, "examine ceiling"))
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        observer, initial = self.client(SPECTATOR_TOKEN)
         # Floors and ceilings are seen solid cells: stone underfoot, open
         # headroom, and a stone ceiling two cells up.
         self.assertEqual((self.column(initial, -1)["wall"], self.column(initial, -1)["material"]), (True, "stone"))
@@ -51,12 +37,12 @@ class MaterialProcesses(unittest.TestCase):
         player.stop(); observer.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
         self.server()
-        _, resumed = self.client(support.SPECTATOR_TOKEN)
+        _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)
 
     def test_doorway_corners_from_west_on_door_and_east_in_native_ascii(self):
         server = self.server()
-        observer, _ = self.client(support.SPECTATOR_TOKEN)
+        observer, _ = self.client(SPECTATOR_TOKEN)
         capture = self.save.parent / "door-rim.ppm"
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture])
         self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
@@ -88,33 +74,32 @@ class MaterialProcesses(unittest.TestCase):
         self.assertEqual(window.child.wait(timeout=10), 0)
         observer.stop(); server.stop()
         self.server()
-        _, resumed = self.client(support.SPECTATOR_TOKEN)
+        _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], opened["state"])
 
     def test_wizard_chamber_surface_refresh_native_view_and_rewind(self):
         server = self.server(wizard=True, scenario="material-volumes-setup")
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/material-volumes.json").read_text())
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
-        text, welcome = self.adventure(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        fixture = load_fixture("material-volumes.json")
+        observer, initial = self.client(SPECTATOR_TOKEN)
+        text, welcome = self.adventure(SPECTATOR_TOKEN)
         self.assertIn("stone floor", welcome)
         self.assertIn("stone", self.say(text, "examine ceiling"))
         capture = Path(os.environ.get("TOR_MATERIAL_CAPTURE", str(self.save.parent / "material.ppm")))
-        window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture], token=support.SPECTATOR_TOKEN)
+        window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture], token=SPECTATOR_TOKEN)
         native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(native["state"], initial["state"])
-        self.assertNotIn("Server error", wizard.command("wizard teleport 1 1 1 1 0"))
+        self.wizard_command(wizard, "teleport 1 1 1 1 0")
         away = self.request(observer, {"type": "snapshot"})
         key = self.here(initial)["key"]
         # The ceiling is its own seen cell, remembered like any other.
         ceiling = self.column(initial, 2)["key"]
         remembered = lambda view: next(c for c in view["memory"] if c["key"] == ceiling)
         self.assertTrue(remembered(away)["wall"])
-        self.assertNotIn("Server error", wizard.command(fixture["remove_ceiling"]))
+        self.wizard_command(wizard, fixture["remove_ceiling"])
         stale = self.request(observer, {"type": "snapshot"})
         self.assertTrue(remembered(stale)["wall"])
-        self.assertNotIn("Server error", wizard.command("wizard teleport 1 3 1 1 0"))
+        self.wizard_command(wizard, "teleport 1 3 1 1 0")
         refreshed = self.request(observer, {"type": "snapshot"})
         # The hole is open, and nothing past the chamber's storage is shown.
         self.assertFalse(self.column(refreshed, 2)["wall"])
@@ -123,7 +108,7 @@ class MaterialProcesses(unittest.TestCase):
         native = self.ascii_frame(window, lambda f: f["state"] == refreshed["state"])
         self.assertEqual(native["state"], refreshed["state"])
         self.assertIn("stone", self.say(text, "examine ceiling")) # Other ceiling cells remain visible.
-        self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertTrue(self.column(rewound, 2)["wall"])
         self.assertIn(key, [c["key"] for c in rewound["memory"]])
@@ -133,7 +118,7 @@ class MaterialProcesses(unittest.TestCase):
         self.assertTrue(capture.read_bytes().startswith(b"P6"))
         wizard.stop(); observer.stop(); text.stop(); server.stop()
         self.server(wizard=True)
-        _, resumed = self.client(support.SPECTATOR_TOKEN)
+        _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], rewound["state"])
 
 

@@ -74,7 +74,7 @@ asserts both the server's authoritative result and what the client shows.
   behavior and deliberate runtime changes (for example: place a monster and
   equipment, teleport into position, then fight using ordinary actions). Test a
   wizard feature through its own privileged commands. Versioned wizard scripts
-  live in `scripts/scenarios/*.json`.
+  live in `scripts/fixtures/*.json`.
 - Setup shortcuts must not bypass the behavior under test. A wizard-built
   scenario doesn't prove that a feature works, or is properly restricted, in a
   normal game, so normal-play coverage is still required.

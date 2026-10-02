@@ -1,39 +1,24 @@
 """Shadowcasting disclosure through real text, headless and graphical clients."""
-from test_text_process import inspect_save
 import json
 import os
 from pathlib import Path
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-import test_adventure_process as adventure_support
 
-class ShadowcastingProcesses(unittest.TestCase):
-    setUpClass = classmethod(ascii_support.AsciiProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    server = headless.HeadlessProcesses.server
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    request = headless.HeadlessProcesses.request
-    command = headless.HeadlessProcesses.command
-    ascii_frame = ascii_support.AsciiProcesses.frame
-    key = ascii_support.AsciiProcesses.key
-    adventure = adventure_support.AdventureProcesses.adventure
-    say = adventure_support.AdventureProcesses.say
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, inspect_save
+
+
+class ShadowcastingProcesses(ProcessTestCase):
+    graphical = True
 
     def test_door_corner_disclosure_agrees_across_clients_and_resume(self):
         server = self.server(wizard=True, scenario="shadowcasting-setup")
-        wizard = self.launch("tor-client-text", ["--connect",self.address], token=headless.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        wizard.command("release")
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        observer, initial = self.client(SPECTATOR_TOKEN)
         view = initial["state"]["observation"]
         self.assertEqual([i["item"]["name"] for i in view["ground_items"]],["copper token"])
         self.assertTrue(any(c["position"] == {"x":1,"y":-1,"z":0} for c in view["visible_cells"]))
         self.assertFalse(any(c["position"] == {"x":2,"y":0,"z":0} for c in view["visible_cells"]))
-        text, welcome = self.adventure(support.SPECTATOR_TOKEN)
+        text, welcome = self.adventure(SPECTATOR_TOKEN)
         self.assertIn("copper token",welcome)
         self.assertNotIn("stone tablet",welcome)
         capture=Path(os.environ.get("TOR_SHADOW_CAPTURE",str(self.save.parent / "shadow.ppm")))
@@ -58,7 +43,7 @@ class ShadowcastingProcesses(unittest.TestCase):
         text.stop(); observer.stop(); wizard.stop(); server.stop()
         self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v17")
         self.server(wizard=True)
-        _, resumed=self.client(support.SPECTATOR_TOKEN)
+        _, resumed=self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],closed["state"])
 
 if __name__ == "__main__":

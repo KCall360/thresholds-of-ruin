@@ -1,60 +1,15 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
-from test_text_process import flush_save
 import json
-from pathlib import Path
 import unittest
 
-import test_text_process as support
-
-WIZARD_TOKEN = "headless-wizard-test-token-not-a-secret"
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
-class HeadlessProcesses(unittest.TestCase):
-    launch = support.TextProcesses.launch
-
-    @classmethod
-    def setUpClass(cls):
-        support.TextProcesses.setUpClass.__func__(cls)
-
-    def setUp(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        self.save = Path(directory.name) / "game.json"
-
-    def server(self, wizard=False, scenario=None, character=None):
-        env = {"TOR_SPECTATOR_TOKEN": support.SPECTATOR_TOKEN}
-        if wizard:
-            env["TOR_WIZARD_TOKEN"] = WIZARD_TOKEN
-        server = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", "42",
-                              "--save", self.save, *(["--wizard"] if wizard else []),
-                              *(["--scenario", Path(__file__).resolve().parents[1] / "scenarios/tests" / scenario] if scenario else []),
-                              *(["--character", str(character)] if character else [])], extra_env=env)
-        self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
-        return server
-
-    def frame(self, client, predicate):
-        output = client.until(lambda line: predicate(json.loads(line)))
-        return json.loads(output.splitlines()[-1])
-
-    def client(self, token=support.TOKEN):
-        client = self.launch("tor-client-headless", ["--connect", self.address], token=token)
-        return client, self.frame(client, lambda frame: frame["type"] == "ready")
-
-    def command(self, client, value):
-        client.child.stdin.write(json.dumps(value) + "\n")
-        client.child.stdin.flush()
-        return self.frame(client, lambda frame: frame["type"] == "ready")
-
-    def request(self, client, request):
-        return self.command(client, {"type": "request", "request": request})
-
-    def act(self, client, action):
-        return self.command(client, {"type": "act", "action": action})
-
+class HeadlessProcesses(ProcessTestCase):
     def test_normal_play_spectator_stream_denials_and_resume(self):
         server = self.server()
         player, initial = self.client()
-        spectator, observing = self.client(support.SPECTATOR_TOKEN)
+        spectator, observing = self.client(SPECTATOR_TOKEN)
         self.assertTrue(initial["has_control"])
         self.assertFalse(observing["has_control"])
         self.assertEqual(observing["role"], "spectator")
@@ -65,7 +20,7 @@ class HeadlessProcesses(unittest.TestCase):
         seen = self.frame(spectator, lambda f: f["state"]["revision"] == taken["state"]["revision"])
         self.assertEqual(seen["state"], taken["state"])
         self.assertEqual(seen["message"]["update"]["body"]["event"]["content"]["event"]["type"], "taken")
-        flush_save(self)
+        self.flush_save()
         before = self.save.read_bytes()
         denied = self.act(spectator, {"type": "wait"})
         self.assertIn("read-only", denied["error"])
@@ -92,28 +47,27 @@ class HeadlessProcesses(unittest.TestCase):
 
     def test_wizard_hidden_change_stale_memory_revisit_and_rewind(self):
         self.server(wizard=True)
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        observer, initial = self.client(SPECTATOR_TOKEN)
         self.assertTrue(initial["state"]["wizard_game"])
-        fixture = json.loads((Path(__file__).parent / "scenarios/perception-memory.json").read_text())
+        fixture = load_fixture("perception-memory.json")
         for command in fixture["visit_and_leave"]:
-            self.assertNotIn("Server error", wizard.command(command))
+            self.wizard_command(wizard, command)
         before = self.request(observer, {"type": "snapshot"})
         gallery = next(view for view in before["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"]))
         self.assertEqual(len(gallery["ground_items"]), 1)
-        wizard.command(fixture["hidden_change"])
+        self.wizard_command(wizard, fixture["hidden_change"])
         after = self.request(observer, {"type": "snapshot"})
         # Wizard receipts advance their author's actor revision, even when the
         # command changes a hidden room. The disclosed scene stays unchanged.
         self.assertEqual(next(view for view in after["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"])), gallery)
         self.assertEqual(after["state"]["observation"], before["state"]["observation"])
         self.assertFalse(any(entry["content"]["type"] == "wizard" for entry in after["history"]))
-        wizard.command(fixture["revisit"])
+        self.wizard_command(wizard, fixture["revisit"])
         refreshed = self.request(observer, {"type": "snapshot"})
         gallery = next(view for view in refreshed["memory"] if any(i["item"]["name"] == "stone tablet" for i in view["ground_items"]))
         self.assertEqual(len(gallery["ground_items"]), 2)
-        wizard.command("wizard rewind initial")
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], initial["branch"])
         self.assertEqual(len(rewound["memory"]), len(rewound["state"]["observation"]["visible_cells"]))
@@ -124,7 +78,7 @@ class HeadlessProcesses(unittest.TestCase):
         player, initial = self.client()
         observer, attached = self.client()
         self.assertFalse(attached["has_control"])
-        flush_save(self)
+        self.flush_save()
         before = self.save.read_bytes()
         player.child.stdin.write("not JSON\n")
         player.child.stdin.flush()
