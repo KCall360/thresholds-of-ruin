@@ -19,7 +19,7 @@ authoritative until the guide is corrected.
 
 | Topic | Guide |
 | --- | --- |
-| Terminal play | [Text client](text-client.md), [adventure commands](text-adventure.md), [IF parser architecture](if-parser-architecture.md) |
+| Terminal play | [Text client](text-client.md), [adventure commands](text-adventure.md), [IF parser architecture](if-parser-architecture.md), [spatial narrative architecture](spatial-narrative-architecture.md) |
 | Windowed play | [Graphical ASCII client](ascii-client.md), [remembered map](ascii-memory.md) |
 | Combat, AI, victory, and death | [Dungeon gameplay](dungeon.md) |
 | Items and identification | [Items and character knowledge](items.md) |

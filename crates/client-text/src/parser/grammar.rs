@@ -413,9 +413,9 @@ pub fn match_sentence_with_raw(
 }
 
 /// Helper to parse the remainder of a command as either:
-/// 1. Ditransitive: <direct> <prep> <indirect> (e.g. "goblin with iron sword")
-/// 2. MultiTransitive: <noun1> and <noun2> (e.g. "copper token and stone tablet")
-/// 3. Transitive: <noun> (e.g. "brass lantern")
+/// 1. Ditransitive: `<direct> <prep> <indirect>` (e.g. "goblin with iron sword")
+/// 2. MultiTransitive: `<noun1> and <noun2>` (e.g. "copper token and stone tablet")
+/// 3. Transitive: `<noun>` (e.g. "brass lantern")
 fn parse_transitive_or_ditransitive(verb: Verb, tokens: &[Token]) -> Result<ParsedCommand, String> {
     if tokens.is_empty() {
         return Err(format!("What do you want to {}?", verb.as_str()));
