@@ -7,7 +7,7 @@ use tor_protocol::*;
 use crate::{safe, Input};
 
 pub const HELP: &str = "attack <actor>, places, name <place number> <new name>, look (l), examine <thing> (x), inventory (i), get/drop [quantity] <thing>, open/close <door>, go to <thing>, north/east/south/west/ne/se/sw/nw/up/down, wait, stop, quit.\nAnswer a question with a name or its number. You can type stop while walking.";
-pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>.\nstep <direction> makes one careful step. Developer commands require wizard authority.";
+pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds between journey steps].\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Intent {
@@ -340,6 +340,7 @@ impl Dialogue {
                     Intent::Tools(Input::Request(Request::ReleaseControl))
                 }
                 crate::parser::SessionCommand::Places => Intent::Tools(Input::Places),
+                crate::parser::SessionCommand::Pace(pace) => Intent::Tools(Input::Pace(pace)),
                 crate::parser::SessionCommand::History { before } => {
                     Intent::Tools(Input::Request(Request::History {
                         before: before.map(EntryId),

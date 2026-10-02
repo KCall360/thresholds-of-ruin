@@ -46,15 +46,18 @@ already visible when the trip started aren't new hazards, and harmless terrain,
 items, and place hints don't stop travel. If the step that reveals a hazard also
 reaches the destination, the movement finishes, but text still cancels any
 pending pickup or door use. Positive HP loss also interrupts travel; see
-[dungeon gameplay](dungeon.md). Cancellation, blocked moves, another actor's
-input turn, control loss, wizard changes, and rewind behave as described in
-[travel](travel.md).
+[dungeon gameplay](dungeon.md). Blocked moves, being thrown off course,
+control loss, wizard changes, and rewind behave as described in
+[travel](travel.md); a journey waits, rather than stopping, while another
+player acts.
 
 ## Slow and broken streams
 
-- Bounded queues preserve ordered observations. If a connection's server queue
-  overflows, the server disconnects it; it never silently drops an update.
-- A slow spectator can't stop the controller's journey.
+- Bounded queues preserve ordered observations, and the server never silently
+  drops an update. Play pauses while a connection's queue is nearly full and
+  resumes when it reads; a connection that stays nearly full for five seconds,
+  or that overflows while a request is handled, is disconnected.
+- A slow spectator can delay the controller's journey but can't stop it.
 - A replacement connection receives the committed state and current travel
   status in a fresh snapshot.
 - Clients reject sequence gaps without applying the offending update.
@@ -69,8 +72,9 @@ input turn, control loss, wizard changes, and rewind behave as described in
   catch-up. The ASCII places panel stays usable while delivery is paused. A
   deliberately omitted observation checks gap rejection and relaunch recovery.
   The two-actor door fixture is `scenarios/tests/semantic-narration-setup`.
-- Deterministic service tests exercise actual server queue overflow and prove
-  a slow spectator can't stop active travel.
+- Deterministic service tests exercise actual server queue overflow, prove
+  that play pauses for a nearly full queue without losing an update, and that
+  the server drops a spectator that stops reading while the journey finishes.
 - Shared-state tests cover deduplication, disclosure limits, atomic rejection,
   snapshot resets, and perceived names.
 - The client workload has a narration variant:

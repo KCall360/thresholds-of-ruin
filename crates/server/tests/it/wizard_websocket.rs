@@ -1,14 +1,14 @@
 use futures_util::{SinkExt, StreamExt};
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{oneshot, Mutex},
+    sync::oneshot,
     time::timeout,
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
 use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOperation};
-use tor_server::{serve, Account, Engine, Scenario, Service};
+use tor_server::{serve, Account, Engine, Scenario, Service, Simulation};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 async fn receive(client: &mut Client) -> ServerMessage {
@@ -78,7 +78,7 @@ async fn raw_wizard_requests_enforce_roles_disabled_mode_retries_and_rewind_boun
         let (stop, stopped) = oneshot::channel();
         let server = tokio::spawn(serve(
             listener,
-            Arc::new(Mutex::new(Service::new(engine))),
+            Simulation::start(Service::new(engine)),
             accounts,
             async {
                 let _ = stopped.await;

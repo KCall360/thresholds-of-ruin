@@ -423,9 +423,11 @@ traversal client retains every disclosed observation throughout exploration.
 Pass `--correlate` to either actual-client driver to enable
 `TOR_TIMING_DIAGNOSTICS` only in its child processes. Diagnostic stderr records
 request UUIDs, client request/send/ack boundaries, headless output durations,
-server lock/handler durations and acknowledgement send completion. It omits tokens,
+server mailbox-wait/handler durations (`lock_ms` is how long a request waited in
+the simulation's mailbox) and acknowledgement send completion. It omits tokens,
 request bodies, private world state and protocol changes. Server diagnostics are
-written after releasing the session lock. All diagnostic I/O can itself stall.
+written by the simulation thread between actions. All diagnostic I/O can itself
+stall.
 
 ```sh
 python scripts/performance_driver.py --bin-dir target/release --output target/correlated --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture --correlate

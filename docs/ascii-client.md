@@ -46,7 +46,8 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | O / C, then a direction | Open / close the adjacent door using arrows or HJKL/YUBN; no door means a local message and no ticks |
 | G / D | Pick up at your feet / drop from inventory; Up/Down selects, digits set a count, Enter confirms (blank = whole stack) |
 | `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
-| Escape during travel | Cancel at the next action boundary |
+| Any key during a journey | Show the rest of the journey at once; journeys can't be cancelled |
+| `[` / `]` | Show journey steps more slowly / quickly (`--pace <ms>` sets the start, default 75) |
 | F3 / R | Acquire / release actor control |
 | F4 | Compose a note anchored to the state where composition began |
 | Tab in note editor | Switch between private and actor-visible audience; defaults to private |

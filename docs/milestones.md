@@ -11,7 +11,7 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **19**, save format **14**, ruleset
+**Current formats:** protocol **20**, save format **14**, ruleset
 **`dungeon-v17`**, scenario validator **`tor-scenario-6`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
@@ -23,7 +23,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
 | Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
-| Server and persistence | Complete for current scope | Local authenticated WebSockets, background journal, checkpoints, replay, history and annotations |
+| Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations |
 | Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
 | Navigation and interaction | Complete (milestone 3) | Known-cell travel, interruption, prose and examination, clarification, compound pickup/doors, durable places, narration, stream recovery |

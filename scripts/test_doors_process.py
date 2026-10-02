@@ -134,11 +134,14 @@ class DoorProcesses(unittest.TestCase):
         self.assertFalse(self.door(rewound)["open"])
         self.assertFalse(any(c["key"] == tablet_cell["key"] for c in rewound["memory"]))
 
-    def test_cancel_and_rewind_discard_pending_door_action(self):
+    def test_stop_and_rewind_discard_pending_door_action(self):
         self.server(wizard=True, scenario="doors-setup")
         wizard = self.setup_wizard()
         player, _ = self.adventure()
         observer, initial = self.client(support.SPECTATOR_TOKEN)
+        # Journeys can't be cancelled, but a slow pace leaves time to drop
+        # what was to follow one.
+        self.say(player, "pace 1000")
         self.send(player, "open door")
         self.send(player, "stop")
         output = player.until(lambda line: line == "> ")
@@ -146,6 +149,10 @@ class DoorProcesses(unittest.TestCase):
         stopped = self.request(observer, {"type":"snapshot"})
         self.assertFalse(self.door(stopped)["open"])
         self.assertFalse(any(h["content"].get("action", {}).get("type") == "set_door" for h in stopped["history"]))
+        # Start the second journey from the beginning again.
+        wizard.command("sync")
+        self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
+        self.say(player, "look")
         self.send(player, "open door")
         self.frame(observer, lambda f: (f.get("travel") or {}).get("phase") == "active")
         # Sync the wizard before a revision-checked rewind while travel progresses.

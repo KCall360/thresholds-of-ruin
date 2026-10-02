@@ -1,4 +1,5 @@
 use crate::engine::valid_label;
+use crate::runner::{Mail, Simulation};
 use crate::{Account, Service};
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
@@ -6,7 +7,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_tungstenite::{
@@ -23,16 +24,15 @@ use tor_protocol::*;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-type IncomingRequest = (u64, String, Request, Option<std::time::Instant>);
-
 /// Native clients authenticate over a loopback-only WebSocket listener.
 /// Remote deployments and browser origins are deliberately not enabled yet.
+/// Returns the service once shut down and flushed.
 pub async fn serve(
     listener: TcpListener,
-    service: Arc<Mutex<Service>>,
+    simulation: Simulation,
     accounts: Vec<Account>,
     shutdown: impl Future<Output = ()> + Send,
-) -> io::Result<()> {
+) -> io::Result<Service> {
     if !listener.local_addr()?.ip().is_loopback() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -63,67 +63,49 @@ pub async fn serve(
     let accounts = Arc::new(accounts);
     let capacity = Arc::new(Semaphore::new(128));
     let mut tasks = JoinSet::new();
-    let (request_tx, mut request_rx) = mpsc::channel::<IncomingRequest>(64);
+    let Simulation { mail, thread } = simulation;
     tokio::pin!(shutdown);
-    // Delivery pacing only: simulation time still advances solely through actions.
-    let mut travel_pump = tokio::time::interval(Duration::from_millis(75));
-    travel_pump.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         tokio::select! {
             biased;
             _ = &mut shutdown => break Ok(()),
-            Some((client_id, request_id, request, started)) = request_rx.recv() => {
-                if let Some(started) = started {
-                    let mut session = service.lock().await;
-                    let lock_ms = started.elapsed().as_secs_f64() * 1000.;
-                    let handle_started = std::time::Instant::now();
-                    session.deliver_or_advance(Some((client_id, request_id.clone(), request)));
-                    let handle_ms = handle_started.elapsed().as_secs_f64() * 1000.;
-                    drop(session);
-                    timing_event("server_handled", client_id, &request_id, lock_ms, handle_ms);
-                } else {
-                    let mut session = service.lock().await;
-                    session.deliver_or_advance(Some((client_id, request_id, request)));
-                }
-            }
-            _ = travel_pump.tick() => {
-                let mut session = service.lock().await;
-                session.deliver_or_advance(None);
-            }
             accepted = listener.accept() => {
                 let (socket, _) = match accepted { Ok(value) => value, Err(error) => break Err(error) };
                 if let Ok(permit) = capacity.clone().try_acquire_owned() {
-                    let service = service.clone();
+                    let mail = mail.clone();
                     let accounts = accounts.clone();
-                    let request_tx = request_tx.clone();
                     tasks.spawn(async move {
                         let _permit = permit;
-                        connection(socket, service, accounts, request_tx).await;
+                        connection(socket, mail, accounts).await;
                     });
                 }
             }
             _ = tasks.join_next(), if !tasks.is_empty() => {}
         }
     };
-    service.lock().await.shutdown();
+    let (reply, stopped) = oneshot::channel();
+    let handle = if mail.send(Mail::Shutdown(reply)).await.is_ok() {
+        stopped.await.ok().flatten()
+    } else {
+        None
+    };
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
-    let handle = service.lock().await.flush_handle();
+    drop(mail);
+    let service = tokio::task::spawn_blocking(move || thread.join())
+        .await
+        .map_err(io::Error::other)?
+        .map_err(|_| io::Error::other("the simulation thread panicked"))?;
     if let Some(handle) = handle {
         tokio::task::spawn_blocking(move || handle.flush())
             .await
             .map_err(io::Error::other)?
             .map_err(io::Error::other)?;
     }
-    result
+    result.map(|()| service)
 }
 
-async fn connection(
-    socket: TcpStream,
-    service: Arc<Mutex<Service>>,
-    accounts: Arc<Vec<Account>>,
-    request_tx: mpsc::Sender<IncomingRequest>,
-) {
+async fn connection(socket: TcpStream, mail: mpsc::Sender<Mail>, accounts: Arc<Vec<Account>>) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(16 * 1024))
         .max_frame_size(Some(16 * 1024));
@@ -152,9 +134,17 @@ async fn connection(
     };
     let mut client = match authenticated {
         Ok((account, frontend)) => {
-            let connected = {
-                let mut service = service.lock().await;
-                service.connect(account, frontend)
+            let (reply, answer) = oneshot::channel();
+            let connect = Mail::Connect {
+                account: account.clone(),
+                frontend,
+                reply,
+            };
+            if mail.send(connect).await.is_err() {
+                return;
+            }
+            let Ok(connected) = answer.await else {
+                return;
             };
             match connected {
                 Ok(client) => client,
@@ -196,7 +186,8 @@ async fn connection(
                     Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
                         Ok(ClientMessage::Request { request_id, request }) => {
                             let started = timing.then(std::time::Instant::now);
-                            if request_tx.send((client.id, request_id, request, started)).await.is_err() {
+                            let request = Mail::Request { client: client.id, request_id, request, started };
+                            if mail.send(request).await.is_err() {
                                 break;
                             }
                         },
@@ -211,7 +202,7 @@ async fn connection(
             }
         }
     }
-    service.lock().await.disconnect(client.id);
+    let _ = mail.send(Mail::Disconnect(client.id)).await;
     let _ = timeout(IO_TIMEOUT, socket.close(None)).await;
 }
 
@@ -246,9 +237,16 @@ async fn send_error(
     }
 }
 
-// Emit after releasing the session lock. Diagnostic stderr can itself block;
-// timestamps and durations expose that boundary without affecting ordinary play.
-fn timing_event(event: &str, client: u64, request_id: &str, lock_ms: f64, duration_ms: f64) {
+// Diagnostic stderr can itself block; timestamps and durations expose that
+// boundary without affecting ordinary play. For `server_handled`, `lock_ms` is
+// how long the request waited in the simulation's mailbox.
+pub(crate) fn timing_event(
+    event: &str,
+    client: u64,
+    request_id: &str,
+    lock_ms: f64,
+    duration_ms: f64,
+) {
     eprintln!(
         "{}",
         serde_json::json!({"timing_version":1,"event":event,"client":client,

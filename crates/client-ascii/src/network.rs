@@ -19,22 +19,39 @@ pub enum Event {
     Fatal(String),
 }
 
+/// What the window asks of the network worker.
+pub enum Command {
+    Request(Request),
+    /// Show what has arrived without waiting.
+    Skip,
+    /// Space shown updates this far apart.
+    Pace(Duration),
+}
+
 pub struct Network {
-    pub commands: async_mpsc::Sender<Request>,
+    pub commands: async_mpsc::Sender<Command>,
     pub events: Receiver<Event>,
     worker: JoinHandle<Result<(), String>>,
 }
 
 impl Network {
-    pub fn start(address: SocketAddr, token: String, actor: ActorId, observe: bool) -> Self {
-        let (commands, rx) = async_mpsc::channel(1);
+    pub fn start(
+        address: SocketAddr,
+        token: String,
+        actor: ActorId,
+        observe: bool,
+        pace: Duration,
+    ) -> Self {
+        let (commands, rx) = async_mpsc::channel(4);
         let (tx, events) = mpsc::sync_channel(64);
         let worker = std::thread::spawn(move || {
             let result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| -> Error { e.into() })
-                .and_then(|runtime| runtime.block_on(run(address, token, actor, observe, rx, &tx)));
+                .and_then(|runtime| {
+                    runtime.block_on(run(address, token, actor, observe, pace, rx, &tx))
+                });
             if let Err(error) = &result {
                 let _=tx.try_send(Event::Fatal(format!("Connection ended: {error}. Relaunch to reconnect; inspect history before retrying.")));
             }
@@ -71,10 +88,12 @@ async fn run(
     token: String,
     actor: ActorId,
     observe: bool,
-    mut rx: async_mpsc::Receiver<Request>,
+    pace: Duration,
+    mut rx: async_mpsc::Receiver<Command>,
     tx: &SyncSender<Event>,
 ) -> Result<(), Error> {
     let mut connection = Connection::connect(address, token, actor, "ascii").await?;
+    connection.set_pace(pace);
     publish(tx, Event::Role(connection.role()))?;
     publish(tx, Event::Snapshot(Box::new(connection.state.snapshot())))?;
     if connection.role() == AccessRole::Spectator {
@@ -94,10 +113,14 @@ async fn run(
     loop {
         tokio::select! {
             message=connection.next()=>{present(message?,tx)?;},
-            request=rx.recv()=>{
-                let Some(request)=request else {connection.close().await?;return Ok(());};
-                transact(&mut connection,request,tx).await?;
-                publish(tx,Event::Ready)?;
+            command=rx.recv()=>match command {
+                None => {connection.close().await?;return Ok(());},
+                Some(Command::Request(request)) => {
+                    transact(&mut connection,request,tx).await?;
+                    publish(tx,Event::Ready)?;
+                },
+                Some(Command::Skip) => connection.skip(),
+                Some(Command::Pace(pace)) => connection.set_pace(pace),
             },
         }
     }

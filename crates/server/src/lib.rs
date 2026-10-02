@@ -9,6 +9,7 @@ pub mod performance_fixture;
 mod preload;
 pub mod region_streaming;
 mod regions;
+mod runner;
 pub use regions::Streaming;
 pub mod scenario_package;
 mod session;
@@ -19,5 +20,6 @@ pub use engine::{
     ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure, RecoveryProfile,
     RegionCounts, Scenario,
 };
+pub use runner::{Simulation, SimulationHandle};
 pub use session::{Account, Service};
 pub use transport::serve;

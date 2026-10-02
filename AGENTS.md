@@ -126,7 +126,7 @@ Merged: the structural `RegionCatalog` and horizon planner, the
 
 **Merged in PR #47:** background preloading, per-region package files with
 the package pin (save format 14), regions declared only when needed,
-generated filler regions, and server-side asset palettes (protocol 19). A
+generated filler regions, and server-side asset palettes. A
 review of it found ten issues; branch `fix/review-4e` fixes them with
 regression tests, including the palette process test.
 

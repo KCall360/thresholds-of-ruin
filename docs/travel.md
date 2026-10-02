@@ -13,10 +13,10 @@ left-click a visible floor cell to travel immediately. Clicks use the same map
 layout as rendering, including stair panels and resized-window letterboxing.
 Walls, undisclosed cells, and panels outside the map are not destinations.
 
-During active travel, Escape requests cancellation instead of quitting. The map
-shows travel status and the number of completed steps. Selecting with `_` again
-requires cancelling the active trip first; a new valid click can replace it.
-Spectators can observe progress but cannot start or cancel travel. The [text adventure interface](text-adventure.md) now interprets directions and
+Only the server ends a journey; there's no way to cancel one. While a journey
+is shown, any key shows the rest of it at once, and `[` and `]` show steps more
+slowly or quickly. The map shows travel status and the number of completed
+steps. Spectators can observe progress but cannot start travel. The [text adventure interface](text-adventure.md) now interprets directions and
 object intentions through this backend travel. Its explicit `--script` mode
 preserves one-cell commands and diagnostic output.
 
@@ -52,13 +52,12 @@ acknowledges it immediately. Each completed step is a separately committed ordin
 move with the actor's normal action cost, revision, event, and observer update.
 No planned route or future outcome is sent to clients.
 
-A server pump attempts at most one step per actor every 75 milliseconds, releasing
-the session lock between pumps. This is delivery/cancellation pacing, not game
-time: only ordinary actions advance simulation ticks. Missed pumps do not cause a
-catch-up burst. A journey ends on:
+The server [runs play until it needs a client's input](run-until-blocked.md),
+so a journey takes a step whenever its actor is next to act. When another
+player's actor is next, the journey waits for its turn and then continues.
+Clients space the steps out on screen. A journey ends on:
 
 - Arrival at the requested cell.
-- Cancellation, an accepted manual action, or a replacement travel request.
 - A blocked move or save-queue admission failure; no further steps are attempted.
 - A newly perceived potential hazard relative to the trip's starting view.
   Other actors conservatively count as potential hazards, including nonhostile
@@ -66,8 +65,13 @@ catch-up burst. A journey ends on:
   New ordinary terrain, ground items, and place hints do not interrupt travel.
   Hazard detection stops before another step; arrival takes precedence when the
   revealing step also reaches the destination.
-- Another actor requiring input, rather than automatically waiting its turn.
+- Being displaced or struck while moving (`decision_required`).
 - Controller release/disconnect or an accepted wizard setup/rewind.
+
+These are checked before every step, so whatever happened while a journey waited
+for its turn, such as another player opening a door, can end it. While a journey
+runs, the controller's action and travel commands are rejected with
+`actor_busy`; saving doesn't stop it.
 
 Positive HP loss interrupts travel at the next service action boundary; fully
 resisted damage does not. Travel never turns movement into an attack. Actors
@@ -78,7 +82,6 @@ work. See [dungeon gameplay](dungeon.md) for damage and attack interruption, and
 [narration and stream recovery](narration-and-recovery.md) for slow and broken
 connections.
 
-A cancel request applies at an action boundary and cannot undo committed steps.
 Travel status and active jobs are session-local. Restart restores completed moves,
 request receipts, and actor navigation knowledge but never resumes travel. Rewind
 clears travel before publishing the new branch snapshot. Terminal status lasts
@@ -102,17 +105,9 @@ receipt lookup.
 Snapshots contain nullable `travel`. Ordered `travel` updates carry `status` and
 an optional history `entry` for the accepted request. Status contains the travel
 entry `id`, opaque `destination`, `completed_steps`, and `phase`: `active`,
-`arrived`, `cancelled`, `blocked`, `hazard`, `decision_required`, `control_lost`,
+`arrived`, `blocked`, `hazard`, `decision_required`, `control_lost`,
 `world_changed`, or `failed`. These updates do not alter action revisions.
 Headless frames expose the same status for scripted clients.
-
-```json
-{"type":"cancel_travel","branch":"<current branch>","travel_id":"<travel entry id>"}
-```
-
-Cancellation requires the current controller and matching branch/job identity.
-Repeating cancellation for the same completed job is harmless. An old cancellation
-cannot stop a newer trip. A failed replacement request leaves an existing job alone.
 
 ## Compatibility and verification
 
@@ -121,8 +116,8 @@ revision; saves are not migrated.
 
 Focused tests cover remembered routing, hidden shortcuts, rotations, stairs,
 cycles, stale terrain, free rejection, deterministic replay/rewind, receipts,
-permissions, cancellation, harmless discoveries, newly seen actors, and
-control/lifecycle interruption.
+permissions, busy rejection, harmless discoveries, newly seen actors, waiting
+for and being interrupted by another player, and control/lifecycle interruption.
 `scenarios/tests/travel-*` supplies ordinary validated setups for actual
 server/text/headless/native ASCII process acceptance. Ordinary non-wizard travel
 is tested separately. Native keyboard and mouse events exercise `_` selection and

@@ -1,13 +1,12 @@
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
-use tor_server::{serve, Account, Engine, Scenario, Service};
+use tor_server::{serve, Account, Engine, Scenario, Service, Simulation, SimulationHandle};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -69,15 +68,16 @@ async fn attach(client: &mut Client) -> Snapshot {
 }
 async fn launch() -> (
     String,
-    Arc<Mutex<Service>>,
+    SimulationHandle,
     oneshot::Sender<()>,
-    tokio::task::JoinHandle<std::io::Result<()>>,
+    tokio::task::JoinHandle<std::io::Result<Service>>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("ws://{}", listener.local_addr().unwrap());
-    let service = Arc::new(Mutex::new(Service::new(
+    let simulation = Simulation::start(Service::new(
         Engine::memory(Scenario::two_room(42)).unwrap(),
-    )));
+    ));
+    let service = simulation.handle();
     let mut accounts = vec![
         Account {
             role: tor_protocol::AccessRole::Player,
@@ -99,7 +99,7 @@ async fn launch() -> (
         actors: BTreeSet::from([ActorId(1)]),
     });
     let (stop, stopped) = oneshot::channel();
-    let server = tokio::spawn(serve(listener, service.clone(), accounts, async {
+    let server = tokio::spawn(serve(listener, simulation, accounts, async {
         let _ = stopped.await;
     }));
     (address, service, stop, server)
@@ -244,15 +244,17 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
         other => panic!("{other:?}"),
     }
     service
-        .lock()
+        .with(|service| {
+            service.annotate_backend(
+                ActorId(1),
+                "simulation",
+                Anchor::State { revision: 0 },
+                AnnotationCategory::Explanation,
+                "A rare explanation.",
+            )
+        })
         .await
-        .annotate_backend(
-            ActorId(1),
-            "simulation",
-            Anchor::State { revision: 0 },
-            AnnotationCategory::Explanation,
-            "A rare explanation.",
-        )
+        .expect("running simulation")
         .unwrap();
     for client in [&mut text, &mut ascii, &mut bob] {
         match receive(client).await {

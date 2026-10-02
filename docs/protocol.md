@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":19,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":20,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -355,8 +355,8 @@ format, and the tested durability boundaries.
 {"type":"request","request_id":"save-1","request":{"type":"save"}}
 ```
 
-The save acknowledgement covers the accepted prefix at request time. It does not
-hold the session lock while disk I/O runs. Spectators cannot request saves.
+The save acknowledgement covers the accepted prefix at request time. Play
+doesn't wait for disk I/O, and saving doesn't stop a journey. Spectators cannot request saves.
 
 ## Validation
 
@@ -419,7 +419,7 @@ a new branch; new entry anchors cannot reference another branch. Wizard paramete
 are private to their author so normal spectators do not receive hidden setup facts.
 
 See [unnamed place hints](place-hints.md) for anchor attributes and authoring,
-[travel](travel.md) for start/cancel requests and durable receipts, and
+[travel](travel.md) for travel requests and durable receipts, and
 [doors](doors.md) for observations, actions, events, and privileged placement.
 [Material volumes](material-volumes.md) describe how clients derive floors and
 ceilings from seen solid cells, and wizard chamber authoring. [Diagonal movement](diagonal-movement.md)

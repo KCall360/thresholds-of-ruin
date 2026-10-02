@@ -64,8 +64,8 @@ revalidate current perception and reach when their wind-up finishes. Melee reach
 uses occupied body cells and conservative diagonal/vertical portal traversal;
 all cardinal traversal orders must agree and remain unobstructed.
 
-The server executes at most one autonomous action per pump, leaving delivery and
-cancellation opportunities between actions. Disconnect, release, restart, and
+The server [runs autonomous actors until a client's actor is
+next](run-until-blocked.md), handling requests between actions. Disconnect, release, restart, and
 rewind suspend human preparation and stop autonomous continuation. Resubmit the
 same attack to resume preserved progress. During recovery, text `wait` or ASCII
 Space requests continuation without inventing a second simulation action.

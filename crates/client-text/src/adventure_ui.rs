@@ -155,26 +155,27 @@ fn can_act(connection: &Connection) -> bool {
     }
 }
 
-async fn stop(connection: &mut Connection, session: &mut Session) -> Result<(), Error> {
-    // Discard the follow-up before waiting for cancellation: arrival can race
-    // with the request, but the player's stop must still prevent pickup.
-    if let Some(journey) = &mut session.journey {
-        journey.cancelled = true;
+/// Only the server ends a journey. Before the player's next command, show
+/// the rest of the one in progress at once: what the server has already sent
+/// arrives without pacing, and reading stops once nothing more comes.
+async fn catch_up(connection: &mut Connection, session: &mut Session) -> Result<(), Error> {
+    if session.journey.is_none() {
+        return Ok(());
     }
-    if let Some(status) = connection
-        .state
-        .travel()
-        .filter(|t| t.phase == TravelPhase::Active)
-    {
-        let request = Request::CancelTravel {
-            branch: connection.state.branch().clone(),
-            travel_id: status.id.clone(),
+    connection.skip();
+    while session.journey.is_some() {
+        let Ok(message) = tokio::time::timeout(CATCH_UP, connection.next()).await else {
+            break;
         };
-        transact(connection, session, request).await?;
+        present(connection, session, &message?);
+        finish_journey(connection, session).await?;
     }
-    finish_journey(connection, session).await?;
     Ok(())
 }
+
+/// How long [`catch_up`] waits for another update before handing back to the
+/// player. A journey waiting on another player's turn may take longer.
+const CATCH_UP: std::time::Duration = std::time::Duration::from_millis(250);
 
 async fn dispatch(
     connection: &mut Connection,
@@ -190,16 +191,20 @@ async fn dispatch(
         Intent::Stop => {
             session.dialogue.queue.clear();
             if can_act(connection) {
-                let moving = session.journey.is_some();
-                stop(connection, session).await?;
-                if !moving {
+                if let Some(journey) = &mut session.journey {
+                    // The walk can't be stopped, but what was to follow it can.
+                    journey.item = None;
+                    journey.door = None;
+                    println!("You can't stop partway; you keep walking.");
+                    catch_up(connection, session).await?;
+                } else {
                     println!("You are not walking anywhere.");
                 }
             }
         }
         Intent::Action(action) => {
             if can_act(connection) {
-                stop(connection, session).await?;
+                catch_up(connection, session).await?;
                 act(connection, session, action).await?;
             }
         }
@@ -211,7 +216,7 @@ async fn dispatch(
             direction,
         } => {
             if can_act(connection) {
-                stop(connection, session).await?;
+                catch_up(connection, session).await?;
                 let branch = connection.state.branch().clone();
                 let epoch = session.epoch;
                 let hazards = hazards(connection.state.state());
@@ -266,6 +271,18 @@ async fn dispatch(
                 }
                 Input::Help => {
                     println!("{}", adventure::HELP);
+                    return Ok(());
+                }
+                Input::Pace(None) => {
+                    println!(
+                        "Journey steps are shown {} ms apart.",
+                        connection.pace().as_millis()
+                    );
+                    return Ok(());
+                }
+                Input::Pace(Some(ms)) => {
+                    connection.set_pace(std::time::Duration::from_millis(ms));
+                    println!("Journey steps are now shown {ms} ms apart.");
                     return Ok(());
                 }
                 Input::Quit => return Ok(()),
@@ -432,9 +449,8 @@ fn interruption(phase: TravelPhase, state: &StateView, previous: &BTreeSet<Actor
             };
             format!("stop when {article} {} comes into view.", safe(name))
         }
-        TravelPhase::Cancelled => "stop before going any farther.".into(),
         TravelPhase::Blocked => "find the way blocked and stop.".into(),
-        TravelPhase::DecisionRequired => "have to stop and wait.".into(),
+        TravelPhase::DecisionRequired => "are thrown off course and stop.".into(),
         TravelPhase::ControlLost => "stop as control changes.".into(),
         TravelPhase::WorldChanged => "stop as your surroundings change.".into(),
         _ => "cannot continue.".into(),

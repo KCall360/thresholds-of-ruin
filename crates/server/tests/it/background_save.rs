@@ -131,11 +131,11 @@ async fn server_shutdown_flushes_without_requiring_engine_drop() {
     let path = dir.path().join("game.db");
     let mut engine = Engine::open_with_policy(&path, Scenario::two_room(0), slow_policy()).unwrap();
     act(&mut engine, "one");
-    let service = std::sync::Arc::new(tokio::sync::Mutex::new(tor_server::Service::new(engine)));
+    let simulation = tor_server::Simulation::start(tor_server::Service::new(engine));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    tor_server::serve(
+    let service = tor_server::serve(
         listener,
-        service.clone(),
+        simulation,
         vec![tor_server::Account {
             user: "player".into(),
             token: "test-token".into(),
@@ -148,6 +148,7 @@ async fn server_shutdown_flushes_without_requiring_engine_drop() {
     .unwrap();
     // Service still owns the engine: this proves the server barrier, not Drop.
     assert_eq!(support::read(&path)["records"].as_array().unwrap().len(), 1);
+    drop(service);
 }
 
 #[test]

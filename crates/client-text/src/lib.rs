@@ -14,6 +14,8 @@ pub enum Input {
     Places,
     Help,
     Quit,
+    /// Show, or set in milliseconds, the time between shown journey steps.
+    Pace(Option<u64>),
     Request(Request),
     Command(Command),
 }
@@ -105,6 +107,13 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         ("release", "") => Ok(Input::Request(Request::ReleaseControl)),
         ("save", "") => Ok(Input::Request(Request::Save)),
         ("sync", "") => Ok(Input::Request(Request::Snapshot)),
+        ("pace", "") => Ok(Input::Pace(None)),
+        ("pace", ms) => ms
+            .parse::<u64>()
+            .ok()
+            .filter(|ms| *ms <= 5000)
+            .map(|ms| Input::Pace(Some(ms)))
+            .ok_or_else(|| "Use pace <milliseconds from 0 to 5000>.".into()),
         ("history", before) if !before.chars().any(char::is_whitespace) => {
             Ok(Input::Request(Request::History {
                 before: (!before.is_empty()).then(|| EntryId(before.into())),

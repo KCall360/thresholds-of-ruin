@@ -40,12 +40,13 @@ class TravelProcesses(unittest.TestCase):
     def terminal(self, client):
         return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
 
-    def test_ascii_selection_click_cancellation_and_resume(self):
+    def test_ascii_selection_click_skip_and_resume(self):
         server = self.server(wizard=True, scenario="travel-setup")
         wizard = self.wizard()
         wizard.command("release")
         spectator, _ = self.client(support.SPECTATOR_TOKEN)
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
+        # A slow pace keeps the third journey on screen long enough to skip.
+        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--pace", "500"])
         initial = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         self.assertTrue(initial["has_control"])
         self.key(ascii_client, "travel")
@@ -68,17 +69,22 @@ class TravelProcesses(unittest.TestCase):
         self.key(ascii_client, "travel")
         for _ in range(7): self.key(ascii_client, "right")
         self.key(ascii_client, "enter")
-        self.key(ascii_client, "escape")
-        # The cancellation acknowledgement frame already contains final travel status.
+        # Only the server ends a journey: Escape shows the rest of it at once.
+        skipped = self.key(ascii_client, "escape")
+        self.assertEqual(skipped["status"], "Skipping ahead.")
+        finished = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != returned["travel"]["id"] and f["travel"]["phase"] != "active")
+        self.assertEqual(finished["travel"]["phase"], "arrived")
+        self.assertEqual(finished["travel"]["completed_steps"], 7)
         synced = self.request(spectator, {"type": "snapshot"})
-        self.assertEqual(synced["travel"]["phase"], "cancelled")
-        self.assertLess(synced["travel"]["completed_steps"], 7)
+        self.assertEqual(synced["travel"], finished["travel"])
+        self.assertEqual(synced["state"]["observation"]["tick"], 1700)
         self.assertIn("Travel requested", wizard.command("history"))
         self.assertIn("Your surroundings", wizard.command("look"))
         self.assertNotIn("region", json.dumps(synced))
         flush_save(self)
         before = self.save.read_bytes()
-        denied = self.request(spectator, {"type":"cancel_travel", "branch":synced["branch"], "travel_id":synced["travel"]["id"]})
+        destination = synced["state"]["observation"]["visible_cells"][0]["key"]
+        denied = self.request(spectator, {"type":"command", "branch":synced["branch"], "command":{"type":"travel", "expected_revision":synced["state"]["revision"], "destination":destination}})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(self.save.read_bytes(), before)
         for client in (ascii_client, wizard, spectator): client.stop()

@@ -62,7 +62,7 @@ fn ordered_travel_status_is_separate_from_action_revisions_and_rejects_regressio
     );
     assert_eq!(client, before);
     client
-        .apply(update(3, 1, TravelPhase::Cancelled, false))
+        .apply(update(3, 1, TravelPhase::Hazard, false))
         .unwrap();
     let before = client.clone();
     assert_eq!(

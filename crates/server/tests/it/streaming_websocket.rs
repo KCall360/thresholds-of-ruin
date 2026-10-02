@@ -3,14 +3,14 @@
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::Arc;
+
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
-use tor_server::{scenario_package, serve, Account, Engine, Service, Streaming};
+use tor_server::{scenario_package, serve, Account, Engine, Service, Simulation, Streaming};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -118,7 +118,7 @@ async fn a_spectator_whose_actor_leaves_the_loaded_world_is_detached_not_the_pla
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("ws://{}", listener.local_addr().unwrap());
-    let service = Arc::new(Mutex::new(Service::new(Engine::memory(scenario).unwrap())));
+    let service = Simulation::start(Service::new(Engine::memory(scenario).unwrap()));
     let accounts = vec![
         Account {
             role: AccessRole::Player,

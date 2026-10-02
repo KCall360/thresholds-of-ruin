@@ -37,6 +37,25 @@ pub(crate) struct Connection {
     pub close: watch::Receiver<bool>,
 }
 
+/// Each client's outgoing queue. A client whose queue overflows is
+/// disconnected; it never silently misses an update.
+pub(crate) const QUEUE: usize = 256;
+
+/// A run pauses while an attached client's queue has less room than this. One
+/// action sends each client only a few messages, so a run never overflows a
+/// client that keeps reading.
+pub(crate) const HEADROOM: usize = 16;
+
+/// What [`Service::step`] did.
+pub(crate) enum Step {
+    /// It took an action or ended a journey; call it again.
+    Progress,
+    /// It needs input from a client, or nobody is playing.
+    Blocked,
+    /// These clients' queues are nearly full; wait for them to read.
+    Full(Vec<(u64, mpsc::Sender<ServerMessage>)>),
+}
+
 /// Until hostility and environmental danger are modeled, another perceived
 /// actor is conservatively a potential hazard. Never consult hidden actors,
 /// and do not classify another portal view of the observer as a threat.
@@ -112,7 +131,7 @@ impl Service {
         })?;
         let id = self.next_client;
         self.next_client = next;
-        let (messages, receiver) = mpsc::channel(64);
+        let (messages, receiver) = mpsc::channel(QUEUE);
         let (close, closing) = watch::channel(false);
         let actors: Vec<_> = self
             .engine
@@ -254,34 +273,9 @@ impl Service {
                         "A save is already pending",
                     ));
                 }
-                if self.controllers.get(&actor) == Some(&id) {
-                    self.stop_travel(actor, TravelPhase::Cancelled);
-                }
                 let target = self.engine.request_save();
                 self.pending_saves.push((id, request_id.into(), target));
                 self.poll_saves();
-            }
-            Request::CancelTravel { branch, travel_id } => {
-                if self.controllers.get(&actor) != Some(&id) {
-                    return Err(Failure::new(
-                        ErrorCode::NotController,
-                        "Acquire control before cancelling travel",
-                    ));
-                }
-                if &branch != self.engine.branch() {
-                    return Err(Failure::new(
-                        ErrorCode::WrongBranch,
-                        "Travel belongs to another branch",
-                    ));
-                }
-                if self.travel_status.get(&actor).map(|s| &s.id) != Some(&travel_id) {
-                    return Err(Failure::new(
-                        ErrorCode::InvalidRequest,
-                        "Travel is unavailable",
-                    ));
-                }
-                self.stop_travel(actor, TravelPhase::Cancelled);
-                self.ack(id, request_id, None);
             }
             Request::AcquireControl => {
                 if self.engine.is_ai(actor) {
@@ -379,6 +373,17 @@ impl Service {
                         "Acquire control before acting",
                     ));
                 }
+                // Only the server ends a journey; the player waits for it.
+                if matches!(
+                    command,
+                    crate::journal::Command::Act { .. } | crate::journal::Command::Travel { .. }
+                ) && self.travels.contains_key(&actor)
+                {
+                    return Err(Failure::new(
+                        ErrorCode::ActorBusy,
+                        "Your character is still travelling",
+                    ));
+                }
                 let revisions: BTreeMap<_, _> = self
                     .engine
                     .actors()
@@ -397,7 +402,6 @@ impl Service {
                 }
                 match visible_entry.content {
                     HistoryContent::Travel { ref destination } => {
-                        self.stop_travel(actor, TravelPhase::Cancelled);
                         let steps = self.engine.travel_route(actor, destination)?;
                         let observation = self.engine.observation(actor)?;
                         let phase = if steps.is_empty() {
@@ -482,7 +486,6 @@ impl Service {
                     }
                     HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
                     HistoryContent::PlaceRenamed { .. } | HistoryContent::Action { .. } => {
-                        self.stop_travel(actor, TravelPhase::Cancelled);
                         self.action_update(&revisions, &visible_entry)?;
                     }
                 }
@@ -619,21 +622,8 @@ impl Service {
         }
     }
 
-    /// One step of the session loop. A request already read from a socket is
-    /// applied before autonomous work. That work moves the revision, and the
-    /// server would otherwise reject the waiting command as stale.
-    pub(crate) fn deliver_or_advance(&mut self, ready: Option<(u64, String, Request)>) {
-        if let Some((id, request_id, request)) = ready {
-            self.handle(id, request_id, request);
-        } else {
-            self.advance_travel();
-            self.poll_saves();
-        }
-    }
-
-    /// At most one ordinary action per actor per pump; never hold the service lock
-    /// for a whole route. Network delivery/cancellation runs between boundaries.
-    pub(crate) fn advance_travel(&mut self) {
+    /// Apply the pauses a released or disconnected controller left behind.
+    fn apply_pending_pauses(&mut self) {
         for actor in std::mem::take(&mut self.pending_pauses) {
             let revisions = self
                 .engine
@@ -651,150 +641,197 @@ impl Service {
                 }
             }
         }
-        self.advance_ai();
-        for actor in self.travels.keys().copied().collect::<Vec<_>>() {
-            let Some(mut job) = self.travels.remove(&actor) else {
-                continue;
-            };
-            if self.controllers.get(&actor) != Some(&job.owner) {
-                self.stop_travel(actor, TravelPhase::ControlLost);
-                continue;
-            }
-            let Ok(state) = self.engine.state(actor) else {
-                self.stop_travel(actor, TravelPhase::Failed);
-                continue;
-            };
-            if job
-                .hp
-                .zip(state.observation.combat.as_ref().map(|c| c.hp))
-                .is_some_and(|(before, after)| after < before)
-            {
-                self.stop_travel(actor, TravelPhase::Hazard);
-                continue;
-            }
-            if !potential_hazards(&state.observation).is_subset(&job.hazards) {
-                self.stop_travel(actor, TravelPhase::Hazard);
-                continue;
-            }
-            if !state.observation.ready {
-                self.stop_travel(actor, TravelPhase::DecisionRequired);
-                continue;
-            }
-            let step = job.steps.pop_front().expect("active route");
-            let direction = match step.direction {
-                tor_world::Direction::North => Direction::North,
-                tor_world::Direction::East => Direction::East,
-                tor_world::Direction::South => Direction::South,
-                tor_world::Direction::West => Direction::West,
-                tor_world::Direction::NorthEast => Direction::NorthEast,
-                tor_world::Direction::SouthEast => Direction::SouthEast,
-                tor_world::Direction::SouthWest => Direction::SouthWest,
-                tor_world::Direction::NorthWest => Direction::NorthWest,
+    }
 
-                tor_world::Direction::Up => Direction::Up,
-                tor_world::Direction::Down => Direction::Down,
-                _ => unreachable!("travel directions are observer-relative"),
-            };
-            let revisions = self
-                .engine
-                .actors()
-                .into_iter()
-                .map(|a| (a, self.engine.revision(a).expect("existing actor")))
-                .collect();
-            let client = &self.clients[&job.owner];
-            let result = self.engine.command(
-                &client.user,
-                &client.frontend,
-                actor,
-                &uuid::Uuid::new_v4().to_string(),
-                &self.engine.branch().clone(),
-                crate::journal::Command::Act {
-                    expected_revision: state.revision,
-                    action: Action::Move { direction },
-                },
-            );
-            let result = match result {
-                Ok(result) => result,
-                Err(error) => {
-                    self.stop_travel(
-                        actor,
-                        if error.code == ErrorCode::InvalidAction {
-                            TravelPhase::Blocked
-                        } else {
-                            TravelPhase::Failed
-                        },
-                    );
-                    continue;
-                }
-            };
-            self.travel_status
-                .get_mut(&actor)
-                .expect("active status")
-                .completed_steps += 1;
-            if self
-                .action_update(&revisions, &result.entry.disclosed())
-                .is_err()
-            {
-                self.stop_travel(actor, TravelPhase::Failed);
-                continue;
+    /// Take one action, or say why the simulation can't. The runner calls this
+    /// until it blocks and handles waiting mail between calls, so a request
+    /// waits for at most one action. What happens depends only on the game and
+    /// the commands it received, never on wall-clock time.
+    pub(crate) fn step(&mut self) -> Step {
+        self.apply_pending_pauses();
+        let full: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.actor.is_some() && client.messages.capacity() < HEADROOM)
+            .map(|(&id, client)| (id, client.messages.clone()))
+            .collect();
+        if !full.is_empty() {
+            return Step::Full(full);
+        }
+        let Some(next) = self.engine.next_actor() else {
+            return Step::Blocked;
+        };
+        if self.travels.contains_key(&next) {
+            self.travel_step(next);
+            return Step::Progress;
+        }
+        // Scenario AI plays only while someone is playing: a run never
+        // continues with no controlled actor left alive.
+        if !self.engine.is_ai(next)
+            || !self.autonomous_enabled
+            || !self
+                .controllers
+                .keys()
+                .any(|&actor| self.engine.alive(actor))
+        {
+            return Step::Blocked;
+        }
+        self.advance_ai(next);
+        Step::Progress
+    }
+
+    #[cfg(test)]
+    pub(crate) fn run_until_blocked(&mut self) {
+        while matches!(self.step(), Step::Progress) {}
+    }
+
+    /// One step of a journey whose actor is next. The checks before the step
+    /// catch anything other actors did while the journey waited for its turn.
+    fn travel_step(&mut self, actor: ActorId) {
+        let Some(mut job) = self.travels.remove(&actor) else {
+            return;
+        };
+        if self.controllers.get(&actor) != Some(&job.owner) {
+            self.stop_travel(actor, TravelPhase::ControlLost);
+            return;
+        }
+        let Ok(state) = self.engine.state(actor) else {
+            self.stop_travel(actor, TravelPhase::Failed);
+            return;
+        };
+        if job
+            .hp
+            .zip(state.observation.combat.as_ref().map(|c| c.hp))
+            .is_some_and(|(before, after)| after < before)
+        {
+            self.stop_travel(actor, TravelPhase::Hazard);
+            return;
+        }
+        if !potential_hazards(&state.observation).is_subset(&job.hazards) {
+            self.stop_travel(actor, TravelPhase::Hazard);
+            return;
+        }
+        let step = job.steps.pop_front().expect("active route");
+        let direction = match step.direction {
+            tor_world::Direction::North => Direction::North,
+            tor_world::Direction::East => Direction::East,
+            tor_world::Direction::South => Direction::South,
+            tor_world::Direction::West => Direction::West,
+            tor_world::Direction::NorthEast => Direction::NorthEast,
+            tor_world::Direction::SouthEast => Direction::SouthEast,
+            tor_world::Direction::SouthWest => Direction::SouthWest,
+            tor_world::Direction::NorthWest => Direction::NorthWest,
+
+            tor_world::Direction::Up => Direction::Up,
+            tor_world::Direction::Down => Direction::Down,
+            _ => unreachable!("travel directions are observer-relative"),
+        };
+        let revisions = self
+            .engine
+            .actors()
+            .into_iter()
+            .map(|a| (a, self.engine.revision(a).expect("existing actor")))
+            .collect();
+        let client = &self.clients[&job.owner];
+        let result = self.engine.command(
+            &client.user,
+            &client.frontend,
+            actor,
+            &uuid::Uuid::new_v4().to_string(),
+            &self.engine.branch().clone(),
+            crate::journal::Command::Act {
+                expected_revision: state.revision,
+                action: Action::Move { direction },
+            },
+        );
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.stop_travel(
+                    actor,
+                    if error.code == ErrorCode::InvalidAction {
+                        TravelPhase::Blocked
+                    } else {
+                        TravelPhase::Failed
+                    },
+                );
+                return;
             }
-            if self.controllers.get(&actor) != Some(&job.owner) {
-                self.stop_travel(actor, TravelPhase::ControlLost);
-                continue;
-            }
-            let Ok(observation) = self.engine.observation(actor) else {
-                self.stop_travel(actor, TravelPhase::Failed);
-                continue;
-            };
-            let hazard = !potential_hazards(&observation).is_subset(&job.hazards)
-                || job
-                    .hp
-                    .zip(observation.combat.as_ref().map(|c| c.hp))
-                    .is_some_and(|(before, after)| after < before);
-            if observation
-                .motion
-                .as_ref()
-                .is_some_and(|m| m.displaced || m.impacted)
-            {
-                self.stop_travel(actor, TravelPhase::DecisionRequired);
-            } else if job.steps.is_empty() {
-                self.stop_travel(actor, TravelPhase::Arrived);
-            } else if hazard {
-                self.stop_travel(actor, TravelPhase::Hazard);
-            } else if !observation.ready {
-                self.stop_travel(actor, TravelPhase::DecisionRequired);
-            } else {
-                self.travels.insert(actor, job);
-                self.travel_update(actor, None);
-            }
+        };
+        self.travel_status
+            .get_mut(&actor)
+            .expect("active status")
+            .completed_steps += 1;
+        if self
+            .action_update(&revisions, &result.entry.disclosed())
+            .is_err()
+        {
+            self.stop_travel(actor, TravelPhase::Failed);
+            return;
+        }
+        if self.controllers.get(&actor) != Some(&job.owner) {
+            self.stop_travel(actor, TravelPhase::ControlLost);
+            return;
+        }
+        let Ok(observation) = self.engine.observation(actor) else {
+            self.stop_travel(actor, TravelPhase::Failed);
+            return;
+        };
+        let hazard = !potential_hazards(&observation).is_subset(&job.hazards)
+            || job
+                .hp
+                .zip(observation.combat.as_ref().map(|c| c.hp))
+                .is_some_and(|(before, after)| after < before);
+        if observation
+            .motion
+            .as_ref()
+            .is_some_and(|m| m.displaced || m.impacted)
+        {
+            self.stop_travel(actor, TravelPhase::DecisionRequired);
+        } else if job.steps.is_empty() {
+            self.stop_travel(actor, TravelPhase::Arrived);
+        } else if hazard {
+            self.stop_travel(actor, TravelPhase::Hazard);
+        } else {
+            // Another actor may be next; the journey waits for its turn.
+            self.travels.insert(actor, job);
+            self.travel_update(actor, None);
         }
     }
 
-    fn advance_ai(&mut self) {
-        if !self.autonomous_enabled || self.controllers.is_empty() {
-            return;
-        }
-        let Some((actor, action)) = self.engine.next_ai_action() else {
-            return;
-        };
+    fn advance_ai(&mut self, actor: ActorId) {
+        let action = self
+            .engine
+            .next_ai_action()
+            .filter(|(chosen, _)| *chosen == actor)
+            .map(|(_, action)| action);
         let revisions = self
             .engine
             .actors()
             .into_iter()
             .map(|id| (id, self.engine.revision(id).unwrap()))
             .collect();
-        let command = crate::journal::Command::Act {
-            expected_revision: self.engine.revision(actor).unwrap(),
-            action,
+        let result = match action {
+            Some(action) => {
+                let command = crate::journal::Command::Act {
+                    expected_revision: self.engine.revision(actor).unwrap(),
+                    action,
+                };
+                self.engine.command(
+                    "scenario-ai",
+                    "server-ai",
+                    actor,
+                    &uuid::Uuid::new_v4().to_string(),
+                    &self.engine.branch().clone(),
+                    command,
+                )
+            }
+            None => Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI has no action",
+            )),
         };
-        match self.engine.command(
-            "scenario-ai",
-            "server-ai",
-            actor,
-            &uuid::Uuid::new_v4().to_string(),
-            &self.engine.branch().clone(),
-            command,
-        ) {
+        match result {
             Ok(result) => {
                 let _ = self.action_update(&revisions, &result.entry.disclosed());
             }
@@ -1088,7 +1125,7 @@ mod tests {
         controller.messages.try_recv().unwrap();
         controller.messages.try_recv().unwrap();
         observer.messages.try_recv().unwrap();
-        for i in 0..64 {
+        for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
         service.autonomous_enabled = true;
@@ -1144,7 +1181,7 @@ mod tests {
         controller.messages.try_recv().unwrap();
         controller.messages.try_recv().unwrap();
         observer.messages.try_recv().unwrap();
-        for i in 0..64 {
+        for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
         }
         service.handle(
@@ -1197,7 +1234,7 @@ mod tests {
         service.handle(connection.id, "control".into(), Request::AcquireControl);
         connection.messages.try_recv().unwrap();
         connection.messages.try_recv().unwrap();
-        for i in 0..65 {
+        for i in 0..QUEUE + 1 {
             service.handle(connection.id, format!("snapshot-{i}"), Request::Snapshot);
         }
         assert!(*connection.close.borrow());
@@ -1258,35 +1295,82 @@ mod tests {
         while client.messages.try_recv().is_ok() {}
         assert!(
             service.engine.next_ai_action().is_some(),
-            "the guard must be next, so the pump would move the revision"
+            "the guard must be next"
         );
         (service, client)
     }
 
     #[test]
-    fn the_autonomous_pump_moves_the_revision_when_nothing_is_waiting() {
+    fn ai_turns_run_until_a_controlled_actor_is_due() {
         let (mut service, _client) = character_waiting_on_a_guard();
         let before = service.engine.revision(ActorId(1)).unwrap();
-        service.deliver_or_advance(None);
+        service.run_until_blocked();
+        assert_eq!(service.engine.next_actor(), Some(ActorId(1)));
         assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
+        assert!(matches!(service.step(), Step::Blocked));
     }
 
     #[test]
-    fn an_already_read_wizard_command_is_applied_before_the_autonomous_pump() {
+    fn ai_does_not_play_when_nobody_controls_an_actor() {
+        let (mut service, client) = character_waiting_on_a_guard();
+        service.handle(client.id, "release".into(), Request::ReleaseControl);
+        service.run_until_blocked();
+        assert!(
+            service.engine.next_ai_action().is_some(),
+            "the guard must still be waiting for its turn"
+        );
+    }
+
+    #[test]
+    fn a_full_client_queue_pauses_the_run_until_the_client_reads() {
         let (mut service, mut client) = character_waiting_on_a_guard();
+        for i in 0..QUEUE - HEADROOM + 1 {
+            service.handle(client.id, format!("fill-{i}"), Request::Snapshot);
+        }
+        let before = service.engine.revision(ActorId(1)).unwrap();
+        let Step::Full(full) = service.step() else {
+            panic!("the run must wait for the client");
+        };
+        assert_eq!(
+            full.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [client.id]
+        );
+        assert_eq!(service.engine.revision(ActorId(1)).unwrap(), before);
+        assert!(!*client.close.borrow());
+        while client.messages.try_recv().is_ok() {}
+        service.run_until_blocked();
+        assert_eq!(service.engine.next_actor(), Some(ActorId(1)));
+        assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
+    }
+
+    /// Mail that is already waiting, here a rewind against the current
+    /// revision, is handled before the next action can change that revision.
+    #[tokio::test]
+    async fn mail_waiting_in_the_mailbox_is_handled_before_the_next_action() {
+        let (service, mut client) = character_waiting_on_a_guard();
         let revision = service.engine.revision(ActorId(1)).unwrap();
         let branch = service.engine.branch().clone();
-        service.deliver_or_advance(Some((
-            client.id,
-            "rewind".into(),
-            Request::Command {
+        let (mail, mailbox) = mpsc::channel(8);
+        mail.send(crate::runner::Mail::Request {
+            client: client.id,
+            request_id: "rewind".into(),
+            request: Request::Command {
                 branch: branch.clone(),
                 command: Command::Wizard {
                     expected_revision: revision,
                     operation: "rewind initial".into(),
                 },
             },
-        )));
+            started: None,
+        })
+        .await
+        .unwrap();
+        let (reply, stopped) = tokio::sync::oneshot::channel();
+        mail.send(crate::runner::Mail::Shutdown(reply))
+            .await
+            .unwrap();
+        crate::runner::run(service, mailbox, crate::runner::STALL).await;
+        stopped.await.unwrap();
         let mut messages = Vec::new();
         while let Ok(message) = client.messages.try_recv() {
             messages.push(message);

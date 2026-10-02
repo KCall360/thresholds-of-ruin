@@ -35,6 +35,10 @@ pub enum Key {
     History,
     OlderHistory,
     RecentHistory,
+    /// Show journey steps more slowly.
+    Slower,
+    /// Show journey steps more quickly.
+    Faster,
 }
 
 /// The native keyboard and opt-in process-test driver share this input boundary.
@@ -51,7 +55,17 @@ pub enum Effect {
     None,
     Quit,
     Request(Request),
+    /// Show the rest of a journey without waiting.
+    Skip,
+    /// Space shown updates this many milliseconds apart.
+    Pace(u64),
 }
+
+/// The step delays [`Key::Slower`] and [`Key::Faster`] move between.
+pub const PACES_MS: [u64; 9] = [0, 25, 50, 75, 100, 150, 200, 300, 500];
+
+/// The default delay between shown journey steps.
+pub const DEFAULT_PACE_MS: u64 = 75;
 
 pub struct NoteDraft {
     pub text: String,
@@ -61,6 +75,7 @@ pub struct NoteDraft {
 
 pub struct App {
     pub bump_attacks: BumpAttacks,
+    pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
     pub map_level: i32,
     pub places_open: bool,
@@ -92,6 +107,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             bump_attacks: BumpAttacks::Hostile,
+            pace_ms: DEFAULT_PACE_MS,
             attack_targets: Vec::new(),
             map_level: 0,
             places_open: false,
@@ -207,6 +223,33 @@ impl App {
     }
 
     pub fn input(&mut self, input: Input) -> Effect {
+        if let Input::Key {
+            key: key @ (Key::Slower | Key::Faster),
+        } = input
+        {
+            let at = PACES_MS
+                .iter()
+                .position(|&pace| pace >= self.pace_ms)
+                .unwrap_or(PACES_MS.len() - 1);
+            let at = if key == Key::Slower {
+                (at + 1).min(PACES_MS.len() - 1)
+            } else {
+                at.saturating_sub(1)
+            };
+            self.pace_ms = PACES_MS[at];
+            self.status = format!("Journey steps {} ms apart.", self.pace_ms);
+            return Effect::Pace(self.pace_ms);
+        }
+        // Only the server ends a journey; a key press shows the rest at once.
+        if matches!(input, Input::Key { .. })
+            && self.connected
+            && self.state.as_ref().is_some_and(|s| {
+                s.has_control() && s.travel().is_some_and(|t| t.phase == TravelPhase::Active)
+            })
+        {
+            self.status = "Skipping ahead.".into();
+            return Effect::Skip;
+        }
         if !self.attack_targets.is_empty() {
             match input {
                 Input::Key { key: Key::Escape } => {
@@ -253,20 +296,6 @@ impl App {
             if self.travel_cursor.take().is_some() {
                 self.status = "Travel selection cancelled.".into();
                 return Effect::None;
-            }
-            if self.connected
-                && self.state.as_ref().is_some_and(|s| {
-                    s.has_control() && s.travel().is_some_and(|t| t.phase == TravelPhase::Active)
-                })
-            {
-                if self.busy {
-                    return Effect::None;
-                }
-                let state = self.state.as_ref().expect("attached");
-                return self.request(Request::CancelTravel {
-                    branch: state.branch().clone(),
-                    travel_id: state.travel().expect("active travel").id.clone(),
-                });
             }
             if self.note.take().is_some()
                 || self.history_page.take().is_some()
