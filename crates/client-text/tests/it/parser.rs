@@ -6,7 +6,7 @@ use tor_client_text::parser::{
 };
 use tor_protocol::*;
 
-fn test_state() -> StateView {
+fn sample_state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game": false,
         "revision": 1,
@@ -132,7 +132,7 @@ fn test_state() -> StateView {
 }
 
 #[test]
-fn test_parse_multi_sentence_pipeline() {
+fn sentences_parse_into_commands_in_order() {
     let input = "take copper token. go east. open the oak door";
     let commands = parse_input(input).unwrap();
     assert_eq!(commands.len(), 3);
@@ -162,8 +162,8 @@ fn test_parse_multi_sentence_pipeline() {
 }
 
 #[test]
-fn test_scope_extraction_from_state() {
-    let state = test_state();
+fn the_resolver_scope_lists_what_the_state_discloses() {
+    let state = sample_state();
     let scope = Scope::from_state(&state);
 
     // Should include: 2 inventory items + 3 ground items + 1 actor + 2 doors + surfaces
@@ -181,8 +181,8 @@ fn test_scope_extraction_from_state() {
 }
 
 #[test]
-fn test_conversational_disambiguation_flow() {
-    let state = test_state();
+fn the_resolver_asks_which_and_resolves_the_answer() {
+    let state = sample_state();
     let scope = Scope::from_state(&state);
     let mut context = ConversationContext::default();
 
@@ -240,8 +240,8 @@ fn test_conversational_disambiguation_flow() {
 }
 
 #[test]
-fn test_pronoun_reference_flow() {
-    let state = test_state();
+fn the_resolver_binds_it_to_the_last_mentioned_entity() {
+    let state = sample_state();
     let scope = Scope::from_state(&state);
     let mut context = ConversationContext::default();
 
@@ -276,8 +276,8 @@ fn test_pronoun_reference_flow() {
 }
 
 #[test]
-fn test_ditransitive_attack_goblin_with_sword() {
-    let state = test_state();
+fn ditransitive_commands_bind_both_objects() {
+    let state = sample_state();
     let scope = Scope::from_state(&state);
     let referents = Referents::default();
 
@@ -319,8 +319,8 @@ fn test_ditransitive_attack_goblin_with_sword() {
 }
 
 #[test]
-fn test_take_all_except_token() {
-    let state = test_state();
+fn take_all_except_excludes_the_named_item() {
+    let state = sample_state();
     let scope = Scope::from_state(&state);
     let referents = Referents::default();
 

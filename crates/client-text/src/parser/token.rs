@@ -155,7 +155,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tokenize_basic() {
+    fn tokenize_basic() {
         let tokens = tokenize("take the copper token");
         assert_eq!(
             tokens,
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_punctuation_and_numbers() {
+    fn tokenize_punctuation_and_numbers() {
         let tokens = tokenize("take 3 arrows; then go north.");
         assert_eq!(
             tokens,
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_sentences() {
+    fn periods_split_sentences() {
         let tokens = tokenize("take lamp. go east. open door");
         let sentences = split_sentences(&tokens);
         assert_eq!(sentences.len(), 3);
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_sentences_then_and_then() {
+    fn split_sentences_then_and_then() {
         let tokens = tokenize("take lamp and then go east then look");
         let sentences = split_sentences(&tokens);
         assert_eq!(sentences.len(), 3);

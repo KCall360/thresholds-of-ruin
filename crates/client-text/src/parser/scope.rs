@@ -1,4 +1,9 @@
 //! Disclosed entity representation and scope extraction from StateView.
+//!
+//! Part of the resolver (`scope`, `matcher`, `context`), which is built and
+//! tested but not yet used by the game: `adventure::Dialogue` still resolves
+//! names, pronouns and clarification answers itself. See
+//! section 3.3 of docs/if-parser-architecture.md.
 
 use tor_client_common::surfaces;
 use tor_protocol::{ActorId, Direction, Position, StateView};

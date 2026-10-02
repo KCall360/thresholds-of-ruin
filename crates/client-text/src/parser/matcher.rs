@@ -1,4 +1,9 @@
 //! Matching NounPhrases against entities in perceptual Scope.
+//!
+//! Part of the resolver (`scope`, `matcher`, `context`), which is built and
+//! tested but not yet used by the game: `adventure::Dialogue` still resolves
+//! names, pronouns and clarification answers itself. See
+//! section 3.3 of docs/if-parser-architecture.md.
 
 use super::{
     lexicon::Pronoun,
@@ -175,7 +180,7 @@ mod tests {
     use crate::parser::token::tokenize;
 
     #[test]
-    fn test_match_single_entity() {
+    fn match_single_entity() {
         let scope = Scope {
             entities: vec![
                 Entity::Item {
@@ -214,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_multiple_ambiguous() {
+    fn match_multiple_ambiguous() {
         let scope = Scope {
             entities: vec![
                 Entity::Item {
@@ -246,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_ordinal() {
+    fn match_ordinal() {
         let scope = Scope {
             entities: vec![
                 Entity::Item {
@@ -278,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_pronoun_it() {
+    fn match_pronoun_it() {
         let item = Entity::Item {
             id: 1,
             name: "copper token".into(),

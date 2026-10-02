@@ -44,7 +44,7 @@ mod tests {
     use tor_protocol::Direction;
 
     #[test]
-    fn test_parse_multi_command_line() {
+    fn parse_multi_command_line() {
         let commands = parse_input("take the copper token. go east. open the wooden door").unwrap();
         assert_eq!(commands.len(), 3);
 
@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ditransitive_attack_with() {
+    fn parse_ditransitive_attack_with() {
         let commands = parse_input("attack the goblin with the iron sword").unwrap();
         assert_eq!(commands.len(), 1);
 
