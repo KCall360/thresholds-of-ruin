@@ -770,10 +770,9 @@ fn travel_label(phase: tor_protocol::TravelPhase) -> &'static str {
     match phase {
         Active => "MOVING",
         Arrived => "ARRIVED",
-        Cancelled => "CANCELLED",
         Blocked => "PATH BLOCKED",
         Hazard => "POTENTIAL HAZARD IN SIGHT",
-        DecisionRequired => "ANOTHER ACTOR NEEDS INPUT",
+        DecisionRequired => "THROWN OFF COURSE",
         ControlLost => "CONTROL RELEASED",
         WorldChanged => "WORLD CHANGED",
         Failed => "COULD NOT SAVE OR MOVE",

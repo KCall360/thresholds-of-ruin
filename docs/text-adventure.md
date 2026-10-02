@@ -113,7 +113,10 @@ chaining, and contextual pronouns.
   manipulating it on arrival.
 - `take tablet`: take it immediately if reachable, otherwise travel to its current
   disclosed cell and attempt ordinary pickup on arrival.
-- `stop` / `cancel`: cancel travel and discard any pending pickup.
+- `stop` / `cancel`: journeys can't be stopped partway; this shows the rest of
+  the current one at once.
+- `pace [milliseconds]`: show or set the time between shown journey steps
+  (default 75, or `--pace` at startup; `0` shows each step as it arrives).
 - `step east`: explicitly request one ordinary movement action.
 - `wait`, `control`, `release`, `sync`, `note <text>`, `history` and `wizard` commands retain
   their existing authority and timing rules; `quit` disconnects.
@@ -138,10 +141,11 @@ Pronouns resolve contextually:
 
 The prompt is `> `, with the cursor immediately after the space, and returns when
 the intention has completed or
-been interrupted, not when the server accepts a travel request. Input remains live:
-`stop` cancels during movement, and queries can still display information. Another
-movement/manipulation intention replaces the old trip. Piped commands that intend
-sequential journeys must wait for the completion prompt.
+been interrupted, not when the server accepts a travel request. The server
+finishes a journey as soon as nothing else needs to act; the client shows its
+steps at the chosen pace. Input remains live: another command first shows the
+rest of the journey at once, then runs. Piped commands that intend sequential
+journeys must wait for the completion prompt.
 
 Successful approach-and-pickup produces one sentence. Directional arrival reports
 the direction and describes the destination once. Interruptions summarize the
@@ -157,7 +161,7 @@ from another actor no longer repeat the entire room description. Explicit `look`
 and snapshots still describe the scene. See [narration and stream recovery](narration-and-recovery.md).
 
 A pending pickup is connection-local and tied to the exact travel receipt and
-branch. It is discarded on cancellation, any non-arrival termination, snapshot,
+branch. It is discarded on `stop`, any non-arrival termination, snapshot,
 rewind, control loss, replacement intent, or disconnect. Arrival rechecks control,
 readiness, item identity and reach. Even if backend arrival takes precedence over
 a newly visible actor, text pauses without pickup. Every eventual pickup is a
@@ -179,7 +183,7 @@ a detailed reference tool, including IDs needed for annotation/rewind anchors.
 Behavior tests cover nouns, pronouns, clarification invalidation, ambiguous places,
 disclosure, repeated views, and floor-versus-exit distinctions. The actual-process
 suite `scripts/test_adventure_process.py` verifies normal play, travel then pickup,
-exact successful/interrupted transcripts, prompt boundaries, cancellation,
+exact successful/interrupted transcripts, prompt boundaries, pacing,
 spectators, persistence, and wizard-authored geometry/hazards using
 `scenarios/tests/text-adventure-*`, `wide-join-setup`, and `portal-geometry-setup`.
 The existing discovery runs these tests in debug and release on Windows and Linux.

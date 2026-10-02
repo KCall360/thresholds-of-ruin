@@ -85,10 +85,8 @@ fn travel_steps_are_saved_ordinary_actions_and_retry_does_not_restart() {
     let (mut service, mut client) = fixture();
     let request = start(&mut service, &mut client, 5);
     assert_eq!(service.engine.observation(ActorId(1)).unwrap().tick, 0);
-    for _ in 0..5 {
-        service.advance_travel();
-        drain(&mut client);
-    }
+    service.run_until_blocked();
+    drain(&mut client);
     let status = &service.travel_status[&ActorId(1)];
     assert_eq!(status.phase, TravelPhase::Arrived);
     assert_eq!(status.completed_steps, 5);
@@ -99,7 +97,7 @@ fn travel_steps_are_saved_ordinary_actions_and_retry_does_not_restart() {
         Some(ServerMessage::Ack { .. })
     ));
     assert!(service.travels.is_empty());
-    service.advance_travel();
+    service.run_until_blocked();
     assert_eq!(service.engine.observation(ActorId(1)).unwrap().tick, 500);
     let history = service
         .engine
@@ -116,39 +114,97 @@ fn travel_steps_are_saved_ordinary_actions_and_retry_does_not_restart() {
 }
 
 #[test]
-fn cancellation_stops_at_boundary_and_spectator_cannot_cancel_or_retry() {
+fn spectators_cannot_start_or_retry_travel() {
     let (mut service, mut client) = fixture();
     let mut spectator = connect(&mut service, AccessRole::Spectator);
     let request = start(&mut service, &mut client, 7);
-    service.advance_travel();
-    drain(&mut client);
-    let cancel = Request::CancelTravel {
-        branch: service.engine.branch().clone(),
-        travel_id: service.travel_status[&ActorId(1)].id.clone(),
+    service.handle(spectator.id, "travel".into(), request);
+    assert!(drain(&mut spectator).iter().any(|m| matches!(
+        m,
+        ServerMessage::Error {
+            code: ErrorCode::Unauthorized,
+            ..
+        }
+    )));
+    service.run_until_blocked();
+    assert_eq!(
+        service.travel_status[&ActorId(1)].phase,
+        TravelPhase::Arrived
+    );
+}
+
+#[test]
+fn commands_during_a_journey_are_busy_and_leave_it_running() {
+    let (mut service, mut client) = fixture();
+    let request = start(&mut service, &mut client, 7);
+    let travel_id = service.travel_status[&ActorId(1)].id.clone();
+    let Request::Command { branch, command } = request else {
+        unreachable!()
     };
-    for (id, request) in [("travel", request), ("cancel", cancel.clone())] {
-        service.handle(spectator.id, id.into(), request);
-        assert!(drain(&mut spectator).iter().any(|m| matches!(
+    let Command::Travel { destination, .. } = command else {
+        unreachable!()
+    };
+    let revision = service.engine.revision(ActorId(1)).unwrap();
+    for (id, command) in [
+        (
+            "act",
+            Command::Act {
+                expected_revision: revision,
+                action: Action::Wait,
+            },
+        ),
+        (
+            "replacement",
+            Command::Travel {
+                expected_revision: revision,
+                destination,
+            },
+        ),
+    ] {
+        service.handle(
+            client.id,
+            id.into(),
+            Request::Command {
+                branch: branch.clone(),
+                command,
+            },
+        );
+        assert!(drain(&mut client).iter().any(|m| matches!(
             m,
             ServerMessage::Error {
-                code: ErrorCode::Unauthorized,
+                code: ErrorCode::ActorBusy,
                 ..
             }
         )));
     }
-    service.handle(client.id, "cancel".into(), cancel.clone());
-    drain(&mut client);
-    service.advance_travel();
+    let status = &service.travel_status[&ActorId(1)];
+    assert_eq!(
+        (status.phase, &status.id),
+        (TravelPhase::Active, &travel_id)
+    );
+    assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+    service.run_until_blocked();
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
-        TravelPhase::Cancelled
+        TravelPhase::Arrived
     );
-    assert_eq!(service.engine.observation(ActorId(1)).unwrap().tick, 100);
-    service.handle(client.id, "cancel-again".into(), cancel);
-    assert!(matches!(
-        drain(&mut client).last(),
-        Some(ServerMessage::Ack { .. })
-    ));
+}
+
+#[test]
+fn saving_during_a_journey_does_not_stop_it() {
+    let (mut service, mut client) = fixture();
+    start(&mut service, &mut client, 7);
+    service.handle(client.id, "save".into(), Request::Save);
+    service.poll_saves();
+    assert!(drain(&mut client)
+        .iter()
+        .any(|m| matches!(m, ServerMessage::Ack { request_id, .. } if request_id == "save")));
+    assert_eq!(
+        service.travel_status[&ActorId(1)].phase,
+        TravelPhase::Active
+    );
+    service.run_until_blocked();
+    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 7);
 }
 
 #[test]
@@ -163,7 +219,7 @@ fn control_loss_and_wizard_changes_stop_jobs() {
             _ => setup(&mut service, &mut client, "rewind initial"),
         }
         assert!(service.travels.is_empty());
-        service.advance_travel();
+        service.run_until_blocked();
         assert_eq!(service.engine.observation(ActorId(1)).unwrap().tick, 0);
     }
 }
@@ -179,10 +235,8 @@ fn harmless_discoveries_do_not_interrupt_travel() {
     assert!(before.ground_items.is_empty());
     assert!(!before.visible_cells.iter().any(|cell| cell.place_hint));
     start(&mut service, &mut client, 7);
-    for _ in 0..7 {
-        service.advance_travel();
-        drain(&mut client);
-    }
+    service.run_until_blocked();
+    drain(&mut client);
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
         TravelPhase::Arrived
@@ -211,7 +265,7 @@ fn a_newly_seen_other_actor_interrupts_before_another_step() {
         .visible_actors
         .is_empty());
     start(&mut service, &mut client, 7);
-    service.advance_travel();
+    service.run_until_blocked();
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
         TravelPhase::Hazard
@@ -223,7 +277,7 @@ fn a_newly_seen_other_actor_interrupts_before_another_step() {
         .visible_actors
         .iter()
         .any(|actor| actor.id == ActorId(2)));
-    service.advance_travel();
+    service.run_until_blocked();
     assert_eq!(service.engine.state(ActorId(1)).unwrap(), stopped);
 }
 
@@ -261,26 +315,123 @@ fn repeated_views_of_self_are_not_potential_hazards() {
 }
 
 #[test]
-fn blocked_step_is_free_and_other_actor_decision_interrupts() {
-    for position in [1, 6] {
-        let (mut service, mut client) = fixture();
-        setup(
-            &mut service,
-            &mut client,
-            &format!("actor 100 3 {position} 0 0"),
-        );
-        start(&mut service, &mut client, 5);
-        service.advance_travel();
-        assert_eq!(
-            service.travel_status[&ActorId(1)].phase,
-            if position == 1 {
-                TravelPhase::Blocked
-            } else {
-                TravelPhase::DecisionRequired
-            }
-        );
-        assert!(service.travels.is_empty());
+fn blocked_step_is_free() {
+    let (mut service, mut client) = fixture();
+    setup(&mut service, &mut client, "actor 100 3 1 0 0");
+    start(&mut service, &mut client, 5);
+    service.run_until_blocked();
+    assert_eq!(
+        service.travel_status[&ActorId(1)].phase,
+        TravelPhase::Blocked
+    );
+    assert_eq!(service.engine.observation(ActorId(1)).unwrap().tick, 0);
+    assert!(service.travels.is_empty());
+}
+
+/// Connect a second player controlling a new actor at `x` in the corridor.
+fn second_player(service: &mut Service, client: &mut Connection, x: i32) -> Connection {
+    setup(service, client, &format!("actor 100 3 {x} 0 0"));
+    let mut other = service
+        .connect(
+            &Account {
+                user: "other-user".into(),
+                token: "other".into(),
+                role: AccessRole::Player,
+                actors: BTreeSet::from([ActorId(2)]),
+            },
+            "test".into(),
+        )
+        .unwrap();
+    service.handle(
+        other.id,
+        "attach".into(),
+        Request::Attach { actor: ActorId(2) },
+    );
+    service.handle(other.id, "control".into(), Request::AcquireControl);
+    drain(&mut other);
+    other
+}
+
+fn act(service: &mut Service, client: &mut Connection, actor: ActorId, action: Action) {
+    service.handle(
+        client.id,
+        uuid::Uuid::new_v4().to_string(),
+        Request::Command {
+            branch: service.engine.branch().clone(),
+            command: Command::Act {
+                expected_revision: service.engine.revision(actor).unwrap(),
+                action,
+            },
+        },
+    );
+    let messages = drain(client);
+    assert!(
+        !messages
+            .iter()
+            .any(|m| matches!(m, ServerMessage::Error { .. })),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn a_journey_waits_while_another_player_acts_and_then_continues() {
+    let (mut service, mut client) = fixture();
+    let mut other = second_player(&mut service, &mut client, 7);
+    start(&mut service, &mut client, 5);
+    service.run_until_blocked();
+    let status = &service.travel_status[&ActorId(1)];
+    assert_eq!(
+        (status.phase, status.completed_steps),
+        (TravelPhase::Active, 1)
+    );
+    assert_eq!(service.engine.next_actor(), Some(ActorId(2)));
+    assert!(matches!(service.step(), Step::Blocked));
+    while service.travel_status[&ActorId(1)].phase == TravelPhase::Active {
+        act(&mut service, &mut other, ActorId(2), Action::Wait);
+        service.run_until_blocked();
     }
+    let status = &service.travel_status[&ActorId(1)];
+    assert_eq!(
+        (status.phase, status.completed_steps),
+        (TravelPhase::Arrived, 5)
+    );
+}
+
+#[test]
+fn another_players_action_can_interrupt_a_waiting_journey() {
+    let (mut service, mut client) = fixture();
+    setup(&mut service, &mut client, "door 3 6 0 0 closed");
+    let mut other = second_player(&mut service, &mut client, 7);
+    assert!(service
+        .engine
+        .observation(ActorId(1))
+        .unwrap()
+        .visible_actors
+        .is_empty());
+    start(&mut service, &mut client, 4);
+    service.run_until_blocked();
+    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 1);
+    assert_eq!(service.engine.next_actor(), Some(ActorId(2)));
+    let door = service
+        .engine
+        .observation(ActorId(2))
+        .unwrap()
+        .visible_cells
+        .iter()
+        .find_map(|cell| cell.door.as_ref().map(|door| door.id))
+        .unwrap();
+    act(
+        &mut service,
+        &mut other,
+        ActorId(2),
+        Action::SetDoor { door, open: true },
+    );
+    service.run_until_blocked();
+    let status = &service.travel_status[&ActorId(1)];
+    assert_eq!(
+        (status.phase, status.completed_steps),
+        (TravelPhase::Hazard, 1)
+    );
 }
 
 #[test]
@@ -342,38 +493,10 @@ fn active_rewind_publishes_snapshot_before_any_new_branch_update() {
 }
 
 #[test]
-fn an_old_cancel_cannot_stop_a_replacement_trip() {
-    let (mut service, mut client) = fixture();
-    let request = start(&mut service, &mut client, 7);
-    let old_id = service.travel_status[&ActorId(1)].id.clone();
-    service.handle(client.id, "replacement".into(), request);
-    drain(&mut client);
-    let new_id = service.travel_status[&ActorId(1)].id.clone();
-    assert_ne!(new_id, old_id);
-    service.handle(
-        client.id,
-        "late-cancel".into(),
-        Request::CancelTravel {
-            branch: service.engine.branch().clone(),
-            travel_id: old_id,
-        },
-    );
-    assert!(matches!(
-        drain(&mut client).last(),
-        Some(ServerMessage::Error { .. })
-    ));
-    assert_eq!(
-        service.travel_status[&ActorId(1)].phase,
-        TravelPhase::Active
-    );
-    assert_eq!(service.travel_status[&ActorId(1)].id, new_id);
-}
-
-#[test]
 fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
     let (mut service, mut controller) = fixture();
     let mut observer = connect(&mut service, AccessRole::Spectator);
-    for i in 0..64 {
+    for i in 0..QUEUE {
         service.handle(controller.id, format!("fill-{i}"), Request::Snapshot);
     }
     start(&mut service, &mut controller, 7);
@@ -394,22 +517,31 @@ fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
 }
 
 #[test]
-fn slow_spectator_reconnects_at_committed_travel_state_without_stopping_controller() {
+fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_state() {
     let (mut service, mut controller) = fixture();
     let mut slow = connect(&mut service, AccessRole::Spectator);
     start(&mut service, &mut controller, 7);
     drain(&mut slow);
-    for i in 0..64 {
+    service.step();
+    for i in 0..QUEUE - HEADROOM {
         service.handle(slow.id, format!("fill-{i}"), Request::Snapshot);
     }
-    service.advance_travel();
     drain(&mut controller);
+    let Step::Full(full) = service.step() else {
+        panic!("the journey must wait for the spectator");
+    };
+    assert_eq!(
+        full.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        [slow.id]
+    );
+    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 1);
+    // The runner disconnects a client that stays full; the journey goes on.
+    service.disconnect(slow.id);
     assert!(*slow.close.borrow());
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
         TravelPhase::Active
     );
-    assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 1);
     let mut replacement = connect(&mut service, AccessRole::Spectator);
     service.handle(replacement.id, "resync".into(), Request::Snapshot);
     let ServerMessage::Snapshot { snapshot, .. } = drain(&mut replacement).pop().unwrap() else {
@@ -418,14 +550,66 @@ fn slow_spectator_reconnects_at_committed_travel_state_without_stopping_controll
     assert_eq!(snapshot.state, service.engine.state(ActorId(1)).unwrap());
     assert_eq!(snapshot.travel.unwrap().completed_steps, 1);
     assert!(!snapshot.has_control);
-    for _ in 0..6 {
-        service.advance_travel();
-        drain(&mut controller);
-        drain(&mut replacement);
-    }
+    service.run_until_blocked();
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
         TravelPhase::Arrived
     );
     assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 7);
+    let observations = drain(&mut replacement)
+        .into_iter()
+        .filter(|m| {
+            matches!(m, ServerMessage::Update { update } if matches!(
+                update.body,
+                UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+            ))
+        })
+        .count();
+    assert_eq!(
+        observations, 6,
+        "every remaining step reaches the spectator"
+    );
+}
+
+/// The runner, over its mailbox: a spectator that never reads is dropped
+/// after the stall timeout, and the controller's journey finishes.
+#[tokio::test]
+async fn the_runner_drops_a_stalled_spectator_and_finishes_the_journey() {
+    let (mut service, mut controller) = fixture();
+    let slow = connect(&mut service, AccessRole::Spectator);
+    start(&mut service, &mut controller, 7);
+    for i in 0..QUEUE - HEADROOM {
+        service.handle(slow.id, format!("fill-{i}"), Request::Snapshot);
+    }
+    let (mail, mailbox) = mpsc::channel(8);
+    let runner = tokio::spawn(crate::runner::run(
+        service,
+        mailbox,
+        std::time::Duration::from_millis(50),
+    ));
+    let finished = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Some(message) = controller.messages.recv().await {
+            if let ServerMessage::Update { update } = message {
+                if let UpdateBody::Travel { status, .. } = update.body {
+                    if status.phase != TravelPhase::Active {
+                        return status;
+                    }
+                }
+            }
+        }
+        panic!("the controller was disconnected");
+    })
+    .await
+    .expect("the journey must finish");
+    assert_eq!(
+        (finished.phase, finished.completed_steps),
+        (TravelPhase::Arrived, 7)
+    );
+    assert!(*slow.close.borrow());
+    let (reply, stopped) = tokio::sync::oneshot::channel();
+    mail.send(crate::runner::Mail::Shutdown(reply))
+        .await
+        .unwrap();
+    stopped.await.unwrap();
+    runner.await.unwrap();
 }

@@ -105,6 +105,46 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
+**Interactive Fiction natural language parser and client narrative (branch `feature/if-parser`).**
+Complete: lexer, tokenizer, noun phrase grammar, context tracking, scope extraction,
+compound sentence chaining, ditransitives (`attack <actor> with <weapon>`, `unlock <door> with <key>`, `put <item> on floor`),
+negative quantifiers (`take all except <item>`), natural-language disambiguation (*"the first one"*),
+anaphoric pronoun resolution (`it`, `them`, `him`, `her`), sensory inspection (`listen`, `smell`),
+surface examinations (`examine walls/floor/ceiling`), expanded IF interaction depth (`diagnose`, `search`, `again`, `g`,
+`read`, `drink`, `eat`, `wear`, `wield`, `remove`, `talk to`, `ask about`), place naming and persistent notes,
+unified session routing, and decoupled protocol testing via `tor-client-headless`.
+Architecture documented in [`docs/if-parser-architecture.md`](docs/if-parser-architecture.md) and
+user commands in [`docs/text-adventure.md`](docs/text-adventure.md). Tests added at unit (28 tests),
+integration (34 tests), and actual-process acceptance (13 tests in `scripts/test_adventure_process.py`) layers.
+Ready for PR.
+
+**Milestone 4e — region streaming, generation, and asset palettes (in progress).**
+Merged: the structural `RegionCatalog` and horizon planner, the
+[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
+(PR #44), and package games streaming through disk regions (PR #45); see
+[region streaming](docs/region-streaming.md).
+
+**Merged in PR #47:** background preloading, per-region package files with
+the package pin (save format 14), regions declared only when needed,
+generated filler regions, and server-side asset palettes. A
+review of it found ten issues; branch `fix/review-4e` fixes them with
+regression tests, including the palette process test.
+
+**Palettes in the clients (slice 6)** are on branch `client/palettes`: a
+shared `Palette` and `AssetTable` in `client-common` (the connection asks for
+the palette again after a missed revision, and once per unexpected asset),
+asset words for surfaces and unnamed figures in the text client, and the
+palette in every headless output line; see
+[palettes in the clients](docs/protocol.md#palettes-in-the-clients). It needs
+a PR, CI on both platforms, and the maintainer's approval to merge. The ASCII
+glyph table belongs with the ASCII redesign, which stays deferred until after
+3s.
+
+**Still to do for 4e:** the performance comparison
+(`perf_compare.py` on the streaming cases against the pre-4e `main`), the
+launcher rebuild for format 14, and closing 4e in the roadmap. Run
+`scripts/verify.py quick` before each commit and `full` before pushing.
+**Merge only with the maintainer's approval.**
 **Interactive fiction parser** (PR #55): the text client's natural-language
 parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
 and [adventure commands](docs/text-adventure.md).
@@ -187,6 +227,12 @@ The server pump and client travel cancellation are removed: the simulation
 runs until it needs client input, only the server interrupts, and clients pace
 the display. It needs a PR, CI on both platforms, and the maintainer's approval
 to merge.
+
+**Running until blocked (planned, branch `plan/run-until-blocked`).** The
+server pump and client travel cancellation will be removed: the simulation
+runs until it needs client input, only the server interrupts, and clients pace
+display. Start after the 4e performance comparison. See the
+[plan](docs/run-until-blocked.md), including its open questions.
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the

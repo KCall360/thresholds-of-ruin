@@ -146,7 +146,7 @@ applying damage. Positive HP loss interrupts, waiting preserves valid progress,
 and retrying the same attack resumes it. Movement, another action, or loss of target
 validity discards progress. Recovery time remains distinct from resumable work.
 Control-loss/restart boundaries preserve valid work but require fresh human input;
-travel keeps its cancellation and no-auto-resume policy. Future timed actions can
+travel keeps its no-auto-resume policy. Future timed actions can
 reuse these boundaries with their own concrete partial-effect policies.
 
 ## Protocol and streaming
@@ -238,13 +238,16 @@ destinations and composes travel with optional pickup; see
 [the adventure interface](text-adventure.md). Active jobs never resume
 automatically after restart.
 
-The server executes travel toward known destinations as a sequence of ordinary
-actions. It resolves and publishes each completed step without disclosing
-unresolved route steps or future outcomes. Clients choose how to present completed
-progress, including animation or slower pacing, but cannot affect simulation time.
-Threats, damage, blocked paths, newly perceived hazards, arrival, and decisions
-interrupt travel. Player cancellation takes effect at an action boundary; already
-executed actions cannot be cancelled. Navigation cannot use undiscovered terrain.
+One thread owns the session and [runs play until it needs a client's
+input](run-until-blocked.md): AI turns and journey steps run back to back, and
+requests are handled between actions. No timer advances the game. The server
+executes travel toward known destinations as a sequence of ordinary actions. It
+resolves and publishes each completed step without disclosing unresolved route
+steps or future outcomes. Clients choose how to present completed progress,
+including animation or slower pacing, but cannot affect simulation time. Threats,
+damage, blocked paths, newly perceived hazards, arrival, and being thrown off
+course interrupt travel; only the server ends a journey. Navigation cannot use
+undiscovered terrain.
 
 ## Durable place knowledge
 

@@ -11,6 +11,8 @@ use super::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCommand {
     Save,
+    /// Show or set the milliseconds between shown journey steps.
+    Pace(Option<u64>),
     Sync,
     Control,
     Release,
@@ -121,6 +123,20 @@ pub fn match_sentence_with_raw(
             }
             "places" if tokens.len() == 1 => {
                 return Ok(ParsedCommand::Session(SessionCommand::Places));
+            }
+            "pace" if tokens.len() <= 2 => {
+                let pace = match tokens.get(1) {
+                    None => None,
+                    Some(token) => Some(
+                        token
+                            .text()
+                            .parse::<u64>()
+                            .ok()
+                            .filter(|ms| *ms <= 5000)
+                            .ok_or("Use pace <milliseconds from 0 to 5000>.")?,
+                    ),
+                };
+                return Ok(ParsedCommand::Session(SessionCommand::Pace(pace)));
             }
             "history" => {
                 let rest: Vec<_> = tokens[1..].iter().map(|t| t.text()).collect();

@@ -2,10 +2,8 @@ use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
-use tor_server::{serve, Account, Engine, SavePolicy, Scenario, Service};
+use tor_server::{serve, Account, Engine, SavePolicy, Scenario, Service, Simulation};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -178,14 +176,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             actors: accounts[0].actors.clone(),
         });
     }
-    let service = Arc::new(Mutex::new(Service::new(engine)));
+    let simulation = Simulation::start(Service::new(engine));
     let listener = TcpListener::bind(listen).await?;
     println!(
         "{}",
         serde_json::json!({ "address": listener.local_addr()?.to_string(), "protocol": tor_protocol::PROTOCOL_VERSION })
     );
     io::stdout().flush()?;
-    serve(listener, service, accounts, async {
+    serve(listener, simulation, accounts, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;

@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -390,10 +390,6 @@ pub enum Request {
     Continue,
     /// Acknowledged only after all earlier accepted records are durable.
     Save,
-    CancelTravel {
-        branch: BranchId,
-        travel_id: EntryId,
-    },
     HistoryBranch {
         branch: BranchId,
         before: Option<EntryId>,
@@ -478,6 +474,8 @@ pub enum ErrorCode {
     InvalidAction,
     StorageFailure,
     InvalidArchive,
+    /// The actor is still on a journey; only the server ends one.
+    ActorBusy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -555,7 +553,6 @@ pub struct TravelStatus {
 pub enum TravelPhase {
     Active,
     Arrived,
-    Cancelled,
     Blocked,
     Hazard,
     DecisionRequired,

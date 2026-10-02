@@ -108,7 +108,7 @@ class AdventureProcesses(unittest.TestCase):
         for extra in ("wizard", "control", "step", "sync", "history", "Ready."):
             self.assertNotIn(extra, help_text)
 
-    def test_stop_discards_pickup_and_spectator_cannot_start_or_stop_travel(self):
+    def test_stop_skips_the_journey_and_discards_pickup_and_spectator_cannot_travel(self):
         self.server()
         player, _ = self.adventure()
         spectator, _ = self.adventure(support.SPECTATOR_TOKEN)
@@ -117,12 +117,14 @@ class AdventureProcesses(unittest.TestCase):
         self.assertIn("read-only", self.say(spectator, "take tablet"))
         self.assertIn("read-only", self.say(spectator, "stop"))
         self.assertEqual(self.save.read_bytes(), before)
+        self.assertIn("1000 ms", self.say(player, "pace 1000"))
         self.send(player, "take tablet")
-        self.assertIn("stop", self.say(player, "stop"))
+        stopped = self.say(player, "stop")
+        self.assertIn("can't stop partway", stopped)
+        self.assertNotIn("pick it up", stopped)
         observer, initial = self.client(support.SPECTATOR_TOKEN)
-        self.assertEqual(initial["travel"]["phase"], "cancelled")
+        self.assertEqual(initial["travel"]["phase"], "arrived")
         self.assertEqual(initial["state"]["observation"]["inventory"], [])
-        self.assertLess(initial["travel"]["completed_steps"], 7)
         self.assertIn("empty-handed", self.say(player, "inventory"))
 
     def test_directional_interruption_is_one_narrative_response(self):

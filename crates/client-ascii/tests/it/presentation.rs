@@ -496,7 +496,7 @@ fn resized_clicks_and_stair_panels_use_the_rendered_cell_layout() {
 }
 
 #[test]
-fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
+fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(state());
@@ -559,13 +559,16 @@ fn escape_cancels_active_travel_and_changed_observations_clear_selection() {
         })
         .unwrap();
     app.set_state(current);
+    // Only the server ends a journey: any key shows the rest of it at once.
+    for key in [Key::Escape, Key::Up, Key::Wait] {
+        assert_eq!(app.input(Input::Key { key }), Effect::Skip);
+    }
     assert_eq!(
-        app.input(Input::Key { key: Key::Escape }),
-        Effect::Request(Request::CancelTravel {
-            branch: BranchId("test".into()),
-            travel_id: EntryId("trip".into())
-        })
+        app.input(Input::Key { key: Key::Slower }),
+        Effect::Pace(100)
     );
+    assert_eq!(app.input(Input::Key { key: Key::Faster }), Effect::Pace(75));
+    assert_eq!(app.input(Input::Key { key: Key::Faster }), Effect::Pace(50));
 }
 
 #[test]

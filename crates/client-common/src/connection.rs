@@ -1,6 +1,10 @@
 use crate::{observation_assets, ClientState, Palette};
 use futures_util::{SinkExt, StreamExt};
-use std::{error::Error, net::SocketAddr, time::Duration};
+use std::{
+    error::Error,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use tokio::{net::TcpStream, time::timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tor_protocol::*;
@@ -19,6 +23,23 @@ pub struct Connection {
     role: AccessRole,
     timing: bool,
     previous_timing_write_ms: f64,
+    pace: Duration,
+    /// A received update waiting for its turn on screen.
+    held: Option<ServerMessage>,
+    last_shown: Option<Instant>,
+    skipping: bool,
+}
+
+/// Whether a message shows the player a new moment of play. Only these are
+/// spaced out; everything else is applied as soon as it arrives.
+fn shown(message: &ServerMessage) -> bool {
+    matches!(
+        message,
+        ServerMessage::Update { update } if matches!(
+            update.body,
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+        )
+    )
 }
 
 impl Connection {
@@ -77,6 +98,10 @@ impl Connection {
             role,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
             previous_timing_write_ms: 0.,
+            pace: Duration::ZERO,
+            held: None,
+            last_shown: None,
+            skipping: false,
         })
     }
 
@@ -84,7 +109,35 @@ impl Connection {
         self.role
     }
 
+    /// The least time between two updates the player sees. The server runs
+    /// play until it needs input, so a journey's steps arrive together; this
+    /// spaces them out on screen. Zero shows every update as it arrives.
+    pub fn pace(&self) -> Duration {
+        self.pace
+    }
+
+    pub fn set_pace(&mut self, pace: Duration) {
+        self.pace = pace;
+    }
+
+    /// Show what has already arrived without waiting, until the next request.
+    /// This only changes the display; the server isn't told.
+    pub fn skip(&mut self) {
+        self.skipping = true;
+    }
+
+    /// Whether an update is waiting for its turn on screen.
+    pub fn playing(&self) -> bool {
+        self.held.is_some()
+    }
+
+    /// Send a request; any skipping ends, so what follows is paced again.
     pub async fn request(&mut self, request: Request) -> Result<String, ConnectionError> {
+        self.skipping = false;
+        self.send_request(request).await
+    }
+
+    async fn send_request(&mut self, request: Request) -> Result<String, ConnectionError> {
         let request_id = uuid::Uuid::new_v4().to_string();
         let started = self.timing.then(std::time::Instant::now);
         if self.timing {
@@ -111,10 +164,26 @@ impl Connection {
     /// Apply ordered updates and palettes before presentation. A palette that
     /// misses a revision, or an observation naming an asset the palette
     /// lacks, sends a `palette` request; its answer is an ordinary palette
-    /// message. Waiting for a frame is safe to cancel when terminal input
-    /// becomes available.
+    /// message. An update the player sees waits until [`Connection::pace`]
+    /// after the previous one. Waiting is safe to cancel when terminal input
+    /// becomes available: a held update is kept for the next call.
     pub async fn next(&mut self) -> Result<ServerMessage, ConnectionError> {
-        let message = receive(&mut self.socket).await?;
+        let mut message = match self.held.take() {
+            Some(message) => message,
+            None => receive(&mut self.socket).await?,
+        };
+        if shown(&message) {
+            let due = self
+                .last_shown
+                .map(|shown| shown + self.pace)
+                .filter(|due| !self.skipping && *due > Instant::now());
+            if let Some(due) = due {
+                self.held = Some(message);
+                tokio::time::sleep_until(due.into()).await;
+                message = self.held.take().expect("held update");
+            }
+            self.last_shown = Some(Instant::now());
+        }
         if self.timing {
             if let ServerMessage::Ack { request_id, .. } = &message {
                 self.timing_event("client_ack", request_id, None);
@@ -150,7 +219,7 @@ impl Connection {
             _ => false,
         };
         if ask {
-            self.request(Request::Palette).await?;
+            self.send_request(Request::Palette).await?;
         }
         Ok(message)
     }

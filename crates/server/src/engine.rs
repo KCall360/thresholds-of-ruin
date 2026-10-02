@@ -953,6 +953,13 @@ impl Engine {
     pub fn is_ai(&self, actor: ActorId) -> bool {
         self.game.is_ai(SimActor(actor.0))
     }
+    /// The actor the scheduler runs next, if any can act.
+    pub fn next_actor(&self) -> Option<ActorId> {
+        self.game.next_actor().map(|actor| ActorId(actor.0))
+    }
+    pub fn alive(&self, actor: ActorId) -> bool {
+        self.game.alive(SimActor(actor.0))
+    }
 
     pub fn pause_preparation(&mut self, actor: ActorId) -> Result<Option<CommandResult>, Failure> {
         if self.game.is_ai(SimActor(actor.0))
