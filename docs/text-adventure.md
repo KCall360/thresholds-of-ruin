@@ -80,15 +80,32 @@ invent enclosed walls or use internal region names.
 
 ## Intentions and conversation
 
+The text client includes a dedicated natural language Interactive Fiction (IF)
+parser (see [IF parser architecture](if-parser-architecture.md)) supporting full
+sentence structures, prepositions, multi-object conjunctions, compound sentence
+chaining, and contextual pronouns.
+
 - `places`: list learned names, marked in sight or remembered.
-- `name <place number> <new name>`: rename a listed place without taking a turn.
+- `name <place number> <new name>` or `name room <new name>`: rename a listed place or current room without taking a turn.
 - `look` / `l`: describe current sight and visible ways onward.
 - `examine <thing>` / `x <thing>` / `look at <thing>`: inspect disclosed appearance;
-  `examine walls` and `examine floor` describe visible surface material.
+  `examine walls`, `examine floor`, and `examine ceiling` describe visible surface materials.
+- `listen` / `smell`: perceive local auditory and olfactory environmental ambiance.
+- `diagnose`: check physical condition, wounds, and combat injuries.
+- `search`: inspect immediate surroundings for noteworthy details.
+- `again` / `g`: repeat the previous gameplay command.
 - `inventory` / `i`: list carried names and quantities.
 - `take 3 arrows` / `drop 2 arrows`: transfer a requested quantity from a selected
-  stack; omit the count to transfer the whole stack. Ambiguous names prompt for
-  clarification, preserving the count through selection and any approach.
+  stack; omit the count to transfer the whole stack.
+- `take token and brass key`: pick up multiple distinct items sequentially.
+- `take all except stone tablet`: acquire all co-located items while excluding specific entities.
+- `put iron sword on floor`: ditransitive item placement.
+- `attack goblin with iron sword`: ready a carried weapon for combat.
+- `unlock oak door with brass key`: open or unlock a door using a carried key.
+- `drink healing potion` / `eat iron ration`: consume carried supplies (see [client simulation hooks](if-parser-architecture.md#5-client-side-narrative-vs-server-side-world-mutations)).
+- `wear ring` / `wield sword` / `remove ring`: manipulate equipment.
+- `talk to <actor>` / `ask <actor> about <topic>`: conversational engagement.
+- Compound sentence chains: `take sword. go east. open oak door` or `take key and then unlock door`.
 - Diagonal names and `ne`/`se`/`sw`/`nw` work with travel and `step`; descriptions
   use eight horizontal bearings (diagonal sectors cover ratios from 1:2 to 2:1).
 - Directions / `go east`: travel to a visible destination as described above.
@@ -98,15 +115,26 @@ invent enclosed walls or use internal region names.
   disclosed cell and attempt ordinary pickup on arrival.
 - `stop` / `cancel`: cancel travel and discard any pending pickup.
 - `step east`: explicitly request one ordinary movement action.
-- `wait`, `control`, `release`, `sync`, notes, history and wizard commands retain
+- `wait`, `control`, `release`, `sync`, `note <text>`, `history` and `wizard` commands retain
   their existing authority and timing rules; `quit` disconnects.
 
-Nouns match whole words in disclosed names, ignoring articles. Clarification
-accepts a listed number or distinguishing words such as `the copper one`.
-Clarification is discarded after an observation revision changes; snapshots
-also reset conversation. `it` refers to the last selected item, and only while
-that item is still visible or carried. Identical names can be selected by number.
-There is no unrestricted natural-language parser or generated narration.
+### Clarification and pronouns
+
+When a noun phrase matches multiple candidates, the parser prompts for clarification:
+> *"Which do you mean? 1) copper token (count 1); 2) silver token (count 1)"*
+
+Clarification accepts:
+- A listed number (`1`, `2`)
+- An ordinal phrase (`the first one`, `the 2nd token`)
+- Distinguishing adjectives or nouns (`copper`, `the silver one`)
+
+Entering an invalid candidate politely prompts again without discarding the choice context.
+Entering an action command (e.g. `look`, `inventory`) cancels the pending question.
+
+Pronouns resolve contextually:
+- `it`: refers to the most recently examined, manipulated, or targeted entity.
+- `them`: refers to plural item collections (e.g. `take arrows` -> `drop them`).
+- `him` / `her`: refers to the most recently inspected or targeted actor (e.g. `examine goblin sentry` -> `attack him`).
 
 The prompt is `> `, with the cursor immediately after the space, and returns when
 the intention has completed or

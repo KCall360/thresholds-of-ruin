@@ -201,6 +201,83 @@ class AdventureProcesses(unittest.TestCase):
         resumed, _ = self.adventure()
         self.assertIn("empty-handed", self.say(resumed, "inventory"))
 
+    def test_multi_command_sentence_chains_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        response = self.say(player, "examine token. take it. east")
+        self.assertIn("worn spiral", response)
+        self.assertIn("You pick up the copper token.", response)
+        self.assertIn("You walk east.", response)
+
+    def test_expanded_if_interactions_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        # Diagnose
+        self.assertIn("good health", self.say(player, "diagnose"))
+        # Read
+        self.assertIn("worn spiral", self.say(player, "read copper token"))
+        self.assertIn("There is nothing written there.", self.say(player, "read floor"))
+        # Command repetition with again and g
+        self.assertIn("Time passes.", self.say(player, "wait"))
+        self.assertIn("Time passes.", self.say(player, "again"))
+        self.assertIn("Time passes.", self.say(player, "g"))
+        # Ditransitive put on floor
+        self.assertIn("You pick up the copper token.", self.say(player, "take copper token"))
+        self.assertIn("You drop 1 x copper token.", self.say(player, "put copper token on floor"))
+        # Conversational interaction with self
+        self.assertIn("madness", self.say(player, "talk to myself"))
+
+    def test_conversational_clarification_and_pronouns_in_real_process(self):
+        self.server(wizard=True, scenario="text-adventure-clarification")
+        player, _ = self.adventure()
+        # 1. Ambiguous noun triggers clarification question
+        question = self.say(player, "take token")
+        self.assertIn("Which do you mean?", question)
+        # 2. Invalid option politely re-prompts without crashing or clearing choices
+        invalid = self.say(player, "gold")
+        self.assertIn("There is no matching option. Which do you mean?", invalid)
+        # 3. Conversational natural language ordinal resolution
+        first_pickup = self.say(player, "the first one")
+        self.assertIn("You pick up the copper token.", first_pickup)
+        # 4. Follow-up disambiguation resolved with ordinal / candidate number
+        question2 = self.say(player, "take token")
+        self.assertIn("Which do you mean?", question2)
+        second_pickup = self.say(player, "2")
+        self.assertIn("You pick up the copper token.", second_pickup)
+        # 5. Plural pronoun 'them' drops the carried items
+        drop_response = self.say(player, "drop them")
+        self.assertIn("You drop 1 x copper token.", drop_response)
+        # 6. Singular pronoun 'it' picks the dropped item back up
+        take_response = self.say(player, "take it")
+        self.assertIn("You pick up the copper token.", take_response)
+
+    def test_session_commands_and_sensory_in_real_process(self):
+        self.server()
+        player, _ = self.adventure()
+        # Sensory inspection
+        listen = self.say(player, "listen")
+        self.assertTrue(any(word in listen.lower() for word in ("silence", "quiet", "sound", "hum", "hear")))
+        smell = self.say(player, "smell")
+        self.assertTrue(any(word in smell.lower() for word in ("scent", "air", "smell", "dust", "stone", "damp")))
+        # Architectural examination
+        self.assertIn("walls are made of stone", self.say(player, "examine walls"))
+        self.assertIn("floor is made of stone", self.say(player, "examine floor"))
+        # Places command: shows visible anchors
+        places_out = self.say(player, "places")
+        self.assertIn("1. Hollow Promise (in sight)", places_out)
+        # Name place by index
+        self.say(player, "name 1 Vault of Whispers")
+        self.assertIn("1. Vault of Whispers (in sight)", self.say(player, "places"))
+        # Note command
+        self.say(player, "note The shadows gather near the portal")
+        _, state = self.client(support.SPECTATOR_TOKEN)
+        # Verify the note was recorded authoritatively
+        kinds = [h["content"]["type"] for h in state["history"]]
+        self.assertIn("annotation", kinds)
+        # Save command executes clean barrier request
+        self.assertEqual("> ", self.say(player, "save"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

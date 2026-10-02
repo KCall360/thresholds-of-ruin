@@ -3,3 +3,4 @@
 
 mod adventure;
 mod commands;
+mod parser;
