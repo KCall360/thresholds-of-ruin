@@ -1,6 +1,6 @@
 # Region streaming foundations
 
-Milestone 4e is in progress. These parts are implemented:
+Milestone 4e is complete. It implemented:
 
 - a backend structural catalog and preload-horizon planner (below);
 - the [region lifecycle](#region-lifecycle-contract) in `tor-simulation`:
@@ -474,11 +474,32 @@ The world's size doesn't change the command or transition time; a 256-hall
 game keeps 250 halls unbuilt. These cases are new, so there's no earlier
 base to compare them against.
 
+To check that 4e didn't slow ordinary play, `perf_compare.py` compared the
+finished 4e `main` with the commit before the lifecycle work (PR #43), three
+interleaved rounds per case on this machine, saves on its hard disk:
+
+| Case | Metric | Before p50 / p95 / max | After p50 / p95 / max |
+| --- | --- | --- | --- |
+| r8-a1-h100-memory | command | 0.566 / 0.809 / 1.457 ms | 0.577 / 0.866 / 1.459 ms |
+| r64-a8-h100-memory | command | 0.018 / 2.692 / 6.091 ms | 0.022 / 2.912 / 8.110 ms |
+| r256-a8-h100-memory | command | 0.024 / 3.165 / 7.225 ms | 0.026 / 3.225 / 7.331 ms |
+| r64-a8-h100-durable | command | 0.031 / 2.700 / 9.996 ms | 0.033 / 2.855 / 6.171 ms |
+| combat a8-h1000 | command | 0.713 / 3.666 / 6.512 ms | 0.754 / 3.656 / 5.689 ms |
+| physics a1-i1-c8-falling | command | 0.075 / 3.425 / 6.866 ms | 0.072 / 2.528 / 3.439 ms |
+
+Command p95 rose by at most 13% in any case and by under 8% in most, and the
+larger worlds didn't move more than the small one. Restart replay p50 rose
+1–5% for the memory cases and 23% (510 to 626 ms) for the durable one. The only
+operation count that grew is body-cell lookups in the combat and physics
+workloads (192 to 24,474 more per run), from the per-command pin and reach
+checks; replay, perception and scene counts are unchanged. Save timings on the
+hard disk varied too much between rounds to compare.
+
 ### Later slices
 
 1. **Palettes in the ASCII client:** the text and headless clients use
    [asset palettes](protocol.md#palettes-in-the-clients); the ASCII client's
-   glyph table waits for the ASCII redesign.
+   glyph table waits for the ASCII redesign, after 4e.
 
 ### Lifecycle verification
 

@@ -105,46 +105,19 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
-**Interactive Fiction natural language parser and client narrative (branch `feature/if-parser`).**
-Complete: lexer, tokenizer, noun phrase grammar, context tracking, scope extraction,
-compound sentence chaining, ditransitives (`attack <actor> with <weapon>`, `unlock <door> with <key>`, `put <item> on floor`),
-negative quantifiers (`take all except <item>`), natural-language disambiguation (*"the first one"*),
-anaphoric pronoun resolution (`it`, `them`, `him`, `her`), sensory inspection (`listen`, `smell`),
-surface examinations (`examine walls/floor/ceiling`), expanded IF interaction depth (`diagnose`, `search`, `again`, `g`,
-`read`, `drink`, `eat`, `wear`, `wield`, `remove`, `talk to`, `ask about`), place naming and persistent notes,
-unified session routing, and decoupled protocol testing via `tor-client-headless`.
-Architecture documented in [`docs/if-parser-architecture.md`](docs/if-parser-architecture.md) and
-user commands in [`docs/text-adventure.md`](docs/text-adventure.md). Tests added at unit (28 tests),
-integration (34 tests), and actual-process acceptance (13 tests in `scripts/test_adventure_process.py`) layers.
-Ready for PR.
+**Interactive fiction parser** (PR #55): the text client's natural-language
+parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
+and [adventure commands](docs/text-adventure.md).
 
-**Milestone 4e — region streaming, generation, and asset palettes (in progress).**
-Merged: the structural `RegionCatalog` and horizon planner, the
-[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
-(PR #44), and package games streaming through disk regions (PR #45); see
-[region streaming](docs/region-streaming.md).
-
-**Merged in PR #47:** background preloading, per-region package files with
-the package pin (save format 14), regions declared only when needed,
-generated filler regions, and server-side asset palettes (protocol 19). A
-review of it found ten issues; branch `fix/review-4e` fixes them with
-regression tests, including the palette process test.
-
-**Palettes in the clients (slice 6)** are on branch `client/palettes`: a
-shared `Palette` and `AssetTable` in `client-common` (the connection asks for
-the palette again after a missed revision, and once per unexpected asset),
-asset words for surfaces and unnamed figures in the text client, and the
-palette in every headless output line; see
-[palettes in the clients](docs/protocol.md#palettes-in-the-clients). It needs
-a PR, CI on both platforms, and the maintainer's approval to merge. The ASCII
-glyph table belongs with the ASCII redesign, which stays deferred until after
-3s.
-
-**Still to do for 4e:** the performance comparison
-(`perf_compare.py` on the streaming cases against the pre-4e `main`), the
-launcher rebuild for format 14, and closing 4e in the roadmap. Run
-`scripts/verify.py quick` before each commit and `full` before pushing.
-**Merge only with the maintainer's approval.**
+**Milestone 4e — region streaming, generation, and asset palettes (complete).**
+The region lifecycle (PR #44), streaming through disk regions (PR #45),
+preloading, per-region packages, generated regions and server palettes
+(PR #47, save format 14), its review fixes (PR #53) and palettes in the text
+and headless clients (PR #54). Against the pre-4e `main`, command p95 rose by
+at most 13% and by under 8% in most cases; see
+[region streaming](docs/region-streaming.md#performance). No ledger line was
+added; that needs a raw-data upload, which the maintainer must approve. The
+ASCII glyph table waits for the ASCII redesign.
 
 **ASCII redesign attempt:** PRs #48-#50 (flat map, message log, glyph table)
 were merged and then reverted by PR #52, which also fixed a race where the
@@ -179,8 +152,8 @@ The server reads a package's index, which is proportional to its region
 count, and saves keep a copy of it; everything else a game holds or saves
 grows with the regions played.
 
-The desktop launchers run the PR #45 build; they need rebuilding for format 14,
-and older playtest saves won't resume with them.
+The desktop launchers run the 4e build (save format 14); playtest saves from
+before it won't resume with them.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,
@@ -209,14 +182,11 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Faster verification (in progress, branch `tooling/faster-verification`).**
-Integration tests are now one binary per crate (`tests/it/`), and
-`scripts/verify.py` runs the checks in the `quick`, `push`, and `full` tiers
-described in the [testing policy](docs/testing.md#running-the-checks). On this
-machine, with 2 jobs, clean release test builds dropped from 23 to 16 minutes,
-and a release rebuild after a `world` change now takes about 5 minutes. A
-faster linker (`rust-lld`) made no difference, so it wasn't adopted. Next: a PR,
-CI on both platforms, and merge only with the maintainer's approval.
+**Running until blocked (in progress, branch `feature/run-until-blocked`).**
+The server pump and client travel cancellation are removed: the simulation
+runs until it needs client input, only the server interrupts, and clients pace
+the display. It needs a PR, CI on both platforms, and the maintainer's approval
+to merge.
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the
