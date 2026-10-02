@@ -7,8 +7,9 @@ from stream_relay import StreamRelay
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN
 
-# Enough turns to fill a stalled spectator's socket buffers and outgoing queue.
-TURNS = 600
+# Enough turns to fill a stalled spectator's outgoing queue (256 messages)
+# and what's left of its socket buffers several times over.
+TURNS = 1500
 # The server drops a client whose queue stays full this long (runner::STALL).
 STALL_SECONDS = 5
 
@@ -17,7 +18,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
     def test_a_spectator_that_stops_reading_is_dropped_and_play_continues(self):
         self.server()
         player, initial = self.client()
-        relay = StreamRelay(self.address)
+        relay = StreamRelay(self.address, receive_buffer=4096)
         self.addCleanup(relay.close)
         stalled = self.launch("tor-client-headless", ["--connect", relay.address], token=SPECTATOR_TOKEN)
         self.frame(stalled, lambda f: f["type"] == "ready")
