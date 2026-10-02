@@ -380,14 +380,15 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
             "terrain.wall.stone",
         ),
     ]);
+    let rat_pos = Position {
+        x: 3,
+        ..here.position
+    };
     s.observation.visible_actors.push(ActorView {
         name: String::new(),
         description: String::new(),
         id: ActorId(2),
-        position: Position {
-            x: 3,
-            ..here.position
-        },
+        position: rat_pos,
         asset: Some("creature.rat".into()),
     });
     // Without a palette, the disclosed materials and the default figure.
@@ -1054,6 +1055,291 @@ fn test_session_commands_unified_routing() {
         Intent::Tools(tor_client_text::Input::Command(Command::Wizard {
             expected_revision: s.revision,
             operation: "teleport 1 2 3".into(),
+        }))
+    );
+}
+
+#[test]
+fn test_multicell_actor_volume_unification() {
+    let mut s = state();
+    // Add player's own multi-cell body (ActorId(1), height 2, cells (0,0,0) and (0,0,1))
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "Your own physical body.".into(),
+            position: Position { x: 0, y: 0, z: 0 },
+            asset: Some("creature.delver".into()),
+        },
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "Your own physical body.".into(),
+            position: Position { x: 0, y: 0, z: 1 },
+            asset: Some("creature.delver".into()),
+        },
+    ]);
+    // Add 2-cell humanoid (ActorId(2), height 2, cells (3,0,0) and (3,0,1))
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(2),
+            name: "scout".into(),
+            description: "A nimble scout.".into(),
+            position: Position { x: 3, y: 0, z: 0 },
+            asset: Some("creature.scout".into()),
+        },
+        ActorView {
+            id: ActorId(2),
+            name: "scout".into(),
+            description: "A nimble scout.".into(),
+            position: Position { x: 3, y: 0, z: 1 },
+            asset: Some("creature.scout".into()),
+        },
+    ]);
+    // Add 3-cell high giant (ActorId(3), height 3, cells at (5,0,0), (5,0,1), (5,0,2))
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(3),
+            name: "giant".into(),
+            description: "A huge giant.".into(),
+            position: Position { x: 5, y: 0, z: 0 },
+            asset: Some("creature.giant".into()),
+        },
+        ActorView {
+            id: ActorId(3),
+            name: "giant".into(),
+            description: "A huge giant.".into(),
+            position: Position { x: 5, y: 0, z: 1 },
+            asset: Some("creature.giant".into()),
+        },
+        ActorView {
+            id: ActorId(3),
+            name: "giant".into(),
+            description: "A huge giant.".into(),
+            position: Position { x: 5, y: 0, z: 2 },
+            asset: Some("creature.giant".into()),
+        },
+    ]);
+    // Add 2-cell wide beast (ActorId(4), width 2, height 1, cells at (0,3,0) and (1,3,0))
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(4),
+            name: "beast".into(),
+            description: "A wide beast.".into(),
+            position: Position { x: 0, y: 3, z: 0 },
+            asset: Some("creature.beast".into()),
+        },
+        ActorView {
+            id: ActorId(4),
+            name: "beast".into(),
+            description: "A wide beast.".into(),
+            position: Position { x: 1, y: 3, z: 0 },
+            asset: Some("creature.beast".into()),
+        },
+    ]);
+
+    let prose = describe(&s);
+    // Player's own local physical body is filtered out
+    assert!(!prose.contains("yourself"));
+    assert!(!prose.contains("delver"));
+    // 2-cell humanoid has normal indefinite description
+    assert!(prose.contains("You see a scout to the east."));
+    // 3-cell high actor has "towering"
+    assert!(prose.contains("You see a towering giant to the east."));
+    // 2-cell wide actor has "massive"
+    assert!(prose.contains("You see a massive beast to the south."));
+}
+
+#[test]
+fn test_portal_self_observation_preserved_and_unified() {
+    let mut s = state();
+    // Player local body cells at (0,0,0) and (0,0,1)
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "Your own body.".into(),
+            position: Position { x: 0, y: 0, z: 0 },
+            asset: Some("creature.delver".into()),
+        },
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "Your own body.".into(),
+            position: Position { x: 0, y: 0, z: 1 },
+            asset: Some("creature.delver".into()),
+        },
+    ]);
+    // Portal self-observation cells seen at (4, 0, 0) and (4, 0, 1)
+    s.observation.visible_actors.extend([
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "You recognize your own appearance from another angle.".into(),
+            position: Position { x: 4, y: 0, z: 0 },
+            asset: Some("creature.delver".into()),
+        },
+        ActorView {
+            id: ActorId(1),
+            name: "delver".into(),
+            description: "You recognize your own appearance from another angle.".into(),
+            position: Position { x: 4, y: 0, z: 1 },
+            asset: Some("creature.delver".into()),
+        },
+    ]);
+
+    let prose = describe(&s);
+    // Local body is not listed as "yourself at your feet" or "yourself above you"
+    assert!(!prose.contains("yourself at your feet"));
+    assert!(!prose.contains("yourself above you"));
+    // Portal loop sighting IS preserved!
+    assert!(prose.contains("You see yourself to the east."));
+}
+
+#[test]
+fn test_geometry_derived_perimeter_exits() {
+    let mut s = state();
+    // Clear all place hints so room is completely unhinted
+    for cell in &mut s.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    // Add walls surrounding an opening at (3, 0, 0)
+    // Wall above and wall below: (3, -1, 0) and (3, 1, 0)
+    s.observation.visible_cells.push(CellView {
+        key: "wall-north".into(),
+        position: Position { x: 3, y: -1, z: 0 },
+        wall: true,
+        material: "stone".into(),
+        place_hint: false,
+        door: None,
+        asset: None,
+        stairs_up: false,
+        stairs_down: false,
+    });
+    s.observation.visible_cells.push(CellView {
+        key: "wall-south".into(),
+        position: Position { x: 3, y: 1, z: 0 },
+        wall: true,
+        material: "stone".into(),
+        place_hint: false,
+        door: None,
+        asset: None,
+        stairs_up: false,
+        stairs_down: false,
+    });
+
+    let prose = describe(&s);
+    // Should detect the constriction/opening and declare "You can head east."
+    assert!(prose.contains("You can head east."));
+
+    let mut dialogue = Dialogue::default();
+    let intent = dialogue.interpret("east", &s);
+    assert!(matches!(
+        intent,
+        Intent::Travel {
+            direction: Some(Direction::East),
+            ref label,
+            ..
+        } if label.contains("open archway to the east")
+    ));
+}
+
+#[test]
+fn test_multiple_openings_disambiguation() {
+    let mut s = state();
+    for cell in &mut s.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    // Opening 1 at (2, 0, 0) flanked by walls at (2, -1) and (2, 1)
+    // Opening 2 at (4, 0, 0) flanked by walls at (4, -1) and (4, 1)
+    s.observation.visible_cells.extend([
+        CellView {
+            key: "wall-1a".into(),
+            position: Position { x: 2, y: -1, z: 0 },
+            wall: true,
+            material: "stone".into(),
+            place_hint: false,
+            door: None,
+            asset: None,
+            stairs_up: false,
+            stairs_down: false,
+        },
+        CellView {
+            key: "wall-1b".into(),
+            position: Position { x: 2, y: 1, z: 0 },
+            wall: true,
+            material: "stone".into(),
+            place_hint: false,
+            door: None,
+            asset: None,
+            stairs_up: false,
+            stairs_down: false,
+        },
+        CellView {
+            key: "wall-2a".into(),
+            position: Position { x: 4, y: -1, z: 0 },
+            wall: true,
+            material: "stone".into(),
+            place_hint: false,
+            door: None,
+            asset: None,
+            stairs_up: false,
+            stairs_down: false,
+        },
+        CellView {
+            key: "wall-2b".into(),
+            position: Position { x: 4, y: 1, z: 0 },
+            wall: true,
+            material: "stone".into(),
+            place_hint: false,
+            door: None,
+            asset: None,
+            stairs_up: false,
+            stairs_down: false,
+        },
+    ]);
+
+    let mut dialogue = Dialogue::default();
+    let intent = dialogue.interpret("east", &s);
+    match intent {
+        Intent::Say(msg) => {
+            assert!(msg.contains("Which do you mean?"));
+            assert!(msg.contains("1) an open archway to the east"));
+            assert!(msg.contains("2) an open archway to the east"));
+        }
+        _ => panic!("Expected disambiguation prompt for multiple openings, got: {intent:?}"),
+    }
+}
+
+#[test]
+fn test_client_spawned_place_hint_determinism() {
+    let mut s = state();
+    // Strip all authored place hints
+    for cell in &mut s.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    let anchor = tor_client_text::narrative::current_place_anchor(&s);
+    assert!(anchor.is_some());
+    let (key1, pos1) = anchor.unwrap();
+
+    // Deterministic permanence: repeated evaluations produce identical anchor
+    let (key2, pos2) = tor_client_text::narrative::current_place_anchor(&s).unwrap();
+    assert_eq!(key1, key2);
+    assert_eq!(pos1, pos2);
+
+    let prose1 = describe(&s);
+    let prose2 = describe(&s);
+    assert_eq!(prose1, prose2);
+
+    // Player naming in unhinted space targets this deterministic anchor key
+    let mut dialogue = Dialogue::default();
+    let name_intent = dialogue.interpret("name room Forgotten Vault", &s);
+    assert_eq!(
+        name_intent,
+        Intent::Tools(tor_client_text::Input::Command(Command::RenamePlace {
+            expected_revision: s.revision,
+            key: key1.to_string(),
+            name: "Forgotten Vault".into(),
         }))
     );
 }

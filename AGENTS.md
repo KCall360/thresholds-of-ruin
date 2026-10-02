@@ -222,17 +222,15 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Running until blocked (in progress, branch `feature/run-until-blocked`).**
-The server pump and client travel cancellation are removed: the simulation
-runs until it needs client input, only the server interrupts, and clients pace
-the display. It needs a PR, CI on both platforms, and the maintainer's approval
-to merge.
-
-**Running until blocked (planned, branch `plan/run-until-blocked`).** The
-server pump and client travel cancellation will be removed: the simulation
-runs until it needs client input, only the server interrupts, and clients pace
-display. Start after the 4e performance comparison. See the
-[plan](docs/run-until-blocked.md), including its open questions.
+**Running until blocked and spatial narrative (in progress, branch `feature/run-until-blocked`).**
+The server pump and client travel cancellation are removed: the simulation runs until it
+needs client input, only the server interrupts journeys, and clients pace the display
+(protocol 20). Spatial narrative improvements unify multi-cell volumetric actors into
+coherent observed entities (filtering contiguous player cells while preserving portal
+self-sightings), derive navigable exits and openings from wall perimeters and constrictions,
+synthesize pure deterministic room prose from PlaceKey and palette assets, and provide
+deterministic place anchor fallback for unhinted regions. Verified across unit, integration,
+and process tests. It needs a PR, CI on both platforms, and the maintainer's approval to merge.
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the

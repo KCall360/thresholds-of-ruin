@@ -1387,7 +1387,7 @@ fn whereabouts(p: Position) -> String {
 
 // Use the same visible-anchor grouping for both exits and item descriptions.
 fn place_at(state: &StateView, position: Position) -> Option<&str> {
-    state
+    let authored = state
         .observation
         .visible_cells
         .iter()
@@ -1399,7 +1399,11 @@ fn place_at(state: &StateView, position: Position) -> Option<&str> {
                 &c.key,
             )
         })
-        .map(|c| c.key.as_str())
+        .map(|c| c.key.as_str());
+    if authored.is_some() {
+        return authored;
+    }
+    crate::narrative::current_place_key(state)
 }
 
 fn in_current_place(state: &StateView, position: Position) -> bool {
@@ -1449,6 +1453,119 @@ fn destinations(state: &StateView, direction: Direction) -> Vec<Destination> {
     if !result.is_empty() {
         return result;
     }
+    // Tier 2: Disclosed doors
+    let mut doors: Vec<Destination> = Vec::new();
+    for cell in cells {
+        if cell.position.z == 0 && bearing(cell.position) == Some(direction) {
+            if let Some(door) = &cell.door {
+                if seen.insert(cell.key.clone()) {
+                    let status = if door.open { "open" } else { "closed" };
+                    doors.push(Destination {
+                        key: cell.key.clone(),
+                        label: format!(
+                            "{} to the {}",
+                            indefinite(&format!("{status} {}", door.name)),
+                            direction_name(direction)
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    if !doors.is_empty() {
+        doors.sort_by_key(|d| d.label.clone());
+        return doors;
+    }
+
+    // Tier 3: Perimeter wall breaks / constrictions (archways, passages)
+    let wall_map: BTreeSet<(i32, i32)> = cells
+        .iter()
+        .filter(|c| c.wall && c.position.z == 0)
+        .map(|c| (c.position.x, c.position.y))
+        .collect();
+
+    if !wall_map.is_empty() {
+        let is_constriction = |x: i32, y: i32| {
+            // 1-wide horizontal opening (flanked by north and south walls)
+            (wall_map.contains(&(x, y - 1)) && wall_map.contains(&(x, y + 1)))
+                // 1-wide vertical opening (flanked by west and east walls)
+                || (wall_map.contains(&(x - 1, y)) && wall_map.contains(&(x + 1, y)))
+                // 2-wide horizontal opening
+                || (wall_map.contains(&(x, y - 1)) && wall_map.contains(&(x, y + 2)))
+                || (wall_map.contains(&(x, y - 2)) && wall_map.contains(&(x, y + 1)))
+                // 2-wide vertical opening
+                || (wall_map.contains(&(x - 1, y)) && wall_map.contains(&(x + 2, y)))
+                || (wall_map.contains(&(x - 2, y)) && wall_map.contains(&(x + 1, y)))
+        };
+
+        let mut constriction_cells: Vec<&CellView> = cells
+            .iter()
+            .filter(|c| {
+                !c.wall
+                    && c.position.z == 0
+                    && bearing(c.position) == Some(direction)
+                    && is_constriction(c.position.x, c.position.y)
+            })
+            .collect();
+
+        if !constriction_cells.is_empty() {
+            let mut openings: Vec<Vec<&CellView>> = Vec::new();
+            while let Some(cell) = constriction_cells.pop() {
+                let mut group = vec![cell];
+                let mut queue = vec![cell];
+                while let Some(curr) = queue.pop() {
+                    let mut i = 0;
+                    while i < constriction_cells.len() {
+                        let other = constriction_cells[i];
+                        if (curr.position.x - other.position.x).abs() <= 1
+                            && (curr.position.y - other.position.y).abs() <= 1
+                        {
+                            constriction_cells.swap_remove(i);
+                            group.push(other);
+                            queue.push(other);
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
+                openings.push(group);
+            }
+
+            openings.sort_by_key(|g| {
+                let target = g.iter().max_by_key(|c| distance(c.position)).unwrap();
+                (
+                    distance(target.position),
+                    target.position.x,
+                    target.position.y,
+                )
+            });
+
+            let mut exits: Vec<Destination> = Vec::new();
+            for group in openings {
+                let target = group.iter().max_by_key(|c| distance(c.position)).unwrap();
+                if seen.insert(target.key.clone()) {
+                    let label = if group.len() <= 2 {
+                        format!("an open archway to the {}", direction_name(direction))
+                    } else {
+                        format!("a narrow passage to the {}", direction_name(direction))
+                    };
+                    exits.push(Destination {
+                        key: target.key.clone(),
+                        label,
+                    });
+                }
+            }
+            if !exits.is_empty() {
+                if exits.len() > 1 && exits[0].label == exits[1].label {
+                    for (idx, exit) in exits.iter_mut().enumerate() {
+                        exit.label = format!("{} ({})", exit.label, idx + 1);
+                    }
+                }
+                return exits;
+            }
+        }
+    }
+
     // Bare floor is movement within a place, not evidence of a way onward.
     // Stairs provide an explicit exception even in an unhinted space.
     if matches!(direction, Direction::Up | Direction::Down)
@@ -1500,7 +1617,7 @@ pub fn words() -> &'static AssetTable<&'static str> {
 }
 
 /// A solid cell's word: its asset's, or its material.
-fn surface<'a>(palette: &Palette, cell: &'a CellView) -> &'a str {
+pub(crate) fn surface<'a>(palette: &Palette, cell: &'a CellView) -> &'a str {
     palette
         .resolve(words(), cell.asset.as_deref())
         .copied()
@@ -1546,6 +1663,146 @@ fn indefinite(name: &str) -> String {
     format!("{article} {}", safe(name))
 }
 
+struct UnifiedActor<'a> {
+    id: ActorId,
+    name: &'a str,
+    asset: Option<&'a str>,
+    base_position: Position,
+    cells: Vec<Position>,
+}
+
+fn unified_actors<'a>(actors: &'a [ActorView]) -> Vec<UnifiedActor<'a>> {
+    let mut by_id: BTreeMap<ActorId, Vec<&'a ActorView>> = BTreeMap::new();
+    for actor in actors {
+        by_id.entry(actor.id).or_default().push(actor);
+    }
+    let mut result = Vec::new();
+    for (&id, list) in &by_id {
+        let mut remaining: Vec<&'a ActorView> = list.clone();
+        while !remaining.is_empty() {
+            let first = remaining.remove(0);
+            let mut component = vec![first];
+            let mut queue = vec![first];
+            while let Some(curr) = queue.pop() {
+                let mut i = 0;
+                while i < remaining.len() {
+                    let other = remaining[i];
+                    if (other.position.x - curr.position.x).abs() <= 1
+                        && (other.position.y - curr.position.y).abs() <= 1
+                        && (other.position.z - curr.position.z).abs() <= 2
+                    {
+                        remaining.swap_remove(i);
+                        component.push(other);
+                        queue.push(other);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            component.sort_by_key(|a| (a.position.z, a.position.y, a.position.x));
+            let base = component[0];
+            let cells = component.iter().map(|a| a.position).collect();
+            result.push(UnifiedActor {
+                id,
+                name: &base.name,
+                asset: base.asset.as_deref(),
+                base_position: base.position,
+                cells,
+            });
+        }
+    }
+    result.sort_by_key(|a| {
+        (
+            a.base_position.z,
+            a.base_position.y,
+            a.base_position.x,
+            a.id.0,
+        )
+    });
+    result
+}
+
+fn format_actor(actor: &UnifiedActor, observer: ActorId, palette: &Palette) -> Option<String> {
+    if actor.id == observer {
+        if actor.cells.iter().any(|p| p.x == 0 && p.y == 0) {
+            return None;
+        } else {
+            return Some(format!(
+                "You see yourself {}.",
+                whereabouts(actor.base_position)
+            ));
+        }
+    }
+    let base_name = if actor.name.is_empty() {
+        palette
+            .resolve(words(), actor.asset)
+            .copied()
+            .unwrap_or("figure")
+    } else {
+        actor.name
+    };
+
+    let min_z = actor
+        .cells
+        .iter()
+        .map(|p| p.z)
+        .min()
+        .unwrap_or(actor.base_position.z);
+    let max_z = actor
+        .cells
+        .iter()
+        .map(|p| p.z)
+        .max()
+        .unwrap_or(actor.base_position.z);
+    let height = (max_z - min_z).abs() + 1;
+
+    let min_x = actor
+        .cells
+        .iter()
+        .map(|p| p.x)
+        .min()
+        .unwrap_or(actor.base_position.x);
+    let max_x = actor
+        .cells
+        .iter()
+        .map(|p| p.x)
+        .max()
+        .unwrap_or(actor.base_position.x);
+    let min_y = actor
+        .cells
+        .iter()
+        .map(|p| p.y)
+        .min()
+        .unwrap_or(actor.base_position.y);
+    let max_y = actor
+        .cells
+        .iter()
+        .map(|p| p.y)
+        .max()
+        .unwrap_or(actor.base_position.y);
+    let width = (max_x - min_x).abs().max((max_y - min_y).abs()) + 1;
+
+    let full_name = if height >= 3
+        && !base_name.contains("towering")
+        && width >= 2
+        && !base_name.contains("massive")
+    {
+        format!("towering, massive {base_name}")
+    } else if height >= 3 && !base_name.contains("towering") {
+        format!("towering {base_name}")
+    } else if width >= 2 && !base_name.contains("massive") {
+        format!("massive {base_name}")
+    } else {
+        base_name.to_string()
+    };
+
+    Some(format!(
+        "You see {} {}.",
+        indefinite(&full_name),
+        whereabouts(actor.base_position)
+    ))
+}
+
 /// [`describe_with`] without a palette: every thing keeps its disclosed
 /// material or name.
 pub fn describe(state: &StateView) -> String {
@@ -1567,33 +1824,7 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
     if let Some(title) = crate::narrative::place_title(state) {
         lines.push(title);
     }
-    let floor = o
-        .visible_cells
-        .iter()
-        .find(|c| distance(c.position) == 0 && !c.wall);
-    lines.push(floor.map_or_else(
-        || "Your surroundings".into(),
-        |c| {
-            floor_material_with(palette, &o.visible_cells, c).map_or_else(
-                || "You stand in an open space.".into(),
-                |m| format!("You stand in a space with a {} floor.", safe(m)),
-            )
-        },
-    ));
-    let walls: BTreeSet<_> = surfaces::roles_by(&o.visible_cells, |cell| surface(palette, cell))
-        .walls
-        .into_iter()
-        .map(safe)
-        .collect();
-    if !walls.is_empty() {
-        lines.push(format!(
-            "You can see walls of {}.",
-            walls.into_iter().collect::<Vec<_>>().join(" and ")
-        ));
-    }
-    if let Some(sensory) = crate::narrative::sensory_atmosphere(state) {
-        lines.push(sensory);
-    }
+    lines.push(crate::narrative::synthesize_room(state, palette));
     let mut seen = BTreeSet::new();
     for item in &o.ground_items {
         if seen.insert(item.item.id) {
@@ -1630,31 +1861,16 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
             }
         }
     }
-    let mut actors = BTreeSet::new();
-    for actor in &o.visible_actors {
-        if actors.insert(actor.id) {
-            lines.push(format!(
-                "You see {} {}.",
-                if actor.id == o.actor {
-                    "yourself".into()
-                } else {
-                    indefinite(if actor.name.is_empty() {
-                        palette
-                            .resolve(words(), actor.asset.as_deref())
-                            .copied()
-                            .unwrap_or("figure")
-                    } else {
-                        &actor.name
-                    })
-                },
-                whereabouts(actor.position)
-            ));
+    let unified = unified_actors(&o.visible_actors);
+    for actor in &unified {
+        if let Some(desc) = format_actor(actor, o.actor, palette) {
+            lines.push(desc);
             if let Some(injury) = o
                 .combat
                 .as_ref()
                 .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
             {
-                lines.push(format!("{} looks {}.", safe(&actor.name), injury.injury));
+                lines.push(format!("{} looks {}.", safe(actor.name), injury.injury));
             }
         }
     }
@@ -1733,31 +1949,16 @@ pub fn describe_brief_with(state: &StateView, palette: &Palette) -> String {
             }
         }
     }
-    let mut actors = BTreeSet::new();
-    for actor in &o.visible_actors {
-        if actors.insert(actor.id) {
-            lines.push(format!(
-                "You see {} {}.",
-                if actor.id == o.actor {
-                    "yourself".into()
-                } else {
-                    indefinite(if actor.name.is_empty() {
-                        palette
-                            .resolve(words(), actor.asset.as_deref())
-                            .copied()
-                            .unwrap_or("figure")
-                    } else {
-                        &actor.name
-                    })
-                },
-                whereabouts(actor.position)
-            ));
+    let unified = unified_actors(&o.visible_actors);
+    for actor in &unified {
+        if let Some(desc) = format_actor(actor, o.actor, palette) {
+            lines.push(desc);
             if let Some(injury) = o
                 .combat
                 .as_ref()
                 .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
             {
-                lines.push(format!("{} looks {}.", safe(&actor.name), injury.injury));
+                lines.push(format!("{} looks {}.", safe(actor.name), injury.injury));
             }
         }
     }
