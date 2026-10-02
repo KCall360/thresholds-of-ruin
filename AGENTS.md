@@ -105,6 +105,19 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
+**Interactive Fiction natural language parser and client narrative (branch `feature/if-parser`).**
+Complete: lexer, tokenizer, noun phrase grammar, context tracking, scope extraction,
+compound sentence chaining, ditransitives (`attack <actor> with <weapon>`, `unlock <door> with <key>`, `put <item> on floor`),
+negative quantifiers (`take all except <item>`), natural-language disambiguation (*"the first one"*),
+anaphoric pronoun resolution (`it`, `them`, `him`, `her`), sensory inspection (`listen`, `smell`),
+surface examinations (`examine walls/floor/ceiling`), expanded IF interaction depth (`diagnose`, `search`, `again`, `g`,
+`read`, `drink`, `eat`, `wear`, `wield`, `remove`, `talk to`, `ask about`), place naming and persistent notes,
+unified session routing, and decoupled protocol testing via `tor-client-headless`.
+Architecture documented in [`docs/if-parser-architecture.md`](docs/if-parser-architecture.md) and
+user commands in [`docs/text-adventure.md`](docs/text-adventure.md). Tests added at unit (28 tests),
+integration (34 tests), and actual-process acceptance (13 tests in `scripts/test_adventure_process.py`) layers.
+Ready for PR.
+
 **Milestone 4e — region streaming, generation, and asset palettes (in progress).**
 Merged: the structural `RegionCatalog` and horizon planner, the
 [region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
