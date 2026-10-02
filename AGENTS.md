@@ -218,6 +218,12 @@ and a release rebuild after a `world` change now takes about 5 minutes. A
 faster linker (`rust-lld`) made no difference, so it wasn't adopted. Next: a PR,
 CI on both platforms, and merge only with the maintainer's approval.
 
+**Running until blocked (planned, branch `plan/run-until-blocked`).** The
+server pump and client travel cancellation will be removed: the simulation
+runs until it needs client input, only the server interrupts, and clients pace
+display. Start after the 4e performance comparison. See the
+[plan](docs/run-until-blocked.md), including its open questions.
+
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the
 eight-actor combat and dense-falling p95 overruns and the deferred client
