@@ -1,5 +1,4 @@
 """Backend travel through actual server, text observer, headless and native ASCII."""
-from test_text_process import flush_save
 import json
 import os
 import subprocess
@@ -8,43 +7,18 @@ from pathlib import Path
 import time
 import unittest
 
-import test_ascii_process as ascii_support
-import test_headless_process as headless_support
-import test_text_process as support
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN
 
 
-class TravelProcesses(unittest.TestCase):
-    launch = support.TextProcesses.launch
-    setUp = headless_support.HeadlessProcesses.setUp
-    server = headless_support.HeadlessProcesses.server
-    client = headless_support.HeadlessProcesses.client
-    frame = headless_support.HeadlessProcesses.frame
-    command = headless_support.HeadlessProcesses.command
-    request = headless_support.HeadlessProcesses.request
-    ascii_frame = ascii_support.AsciiProcesses.frame
-
-    @classmethod
-    def setUpClass(cls):
-        ascii_support.AsciiProcesses.setUpClass.__func__(cls)
-
-    def key(self, client, key):
-        client.child.stdin.write(json.dumps({"type": "key", "key": key}) + "\n")
-        client.child.stdin.flush()
-        return self.ascii_frame(client, lambda f: f.get("input_done") == key and not f["busy"])
-
-    def wizard(self):
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        return wizard
+class TravelProcesses(ProcessTestCase):
+    graphical = True
 
     def terminal(self, client):
         return self.frame(client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
 
     def test_ascii_selection_click_skip_and_resume(self):
-        server = self.server(wizard=True, scenario="travel-setup")
-        wizard = self.wizard()
-        wizard.command("release")
-        spectator, _ = self.client(support.SPECTATOR_TOKEN)
+        server = self.server(wizard=True, scenario="travel")
+        spectator, _ = self.client(SPECTATOR_TOKEN)
         # A slow pace keeps the third journey on screen long enough to skip.
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--pace", "500"])
         initial = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
@@ -78,23 +52,22 @@ class TravelProcesses(unittest.TestCase):
         synced = self.request(spectator, {"type": "snapshot"})
         self.assertEqual(synced["travel"], finished["travel"])
         self.assertEqual(synced["state"]["observation"]["tick"], 1700)
-        self.assertIn("Travel requested", wizard.command("history"))
-        self.assertIn("Your surroundings", wizard.command("look"))
+        self.assertIn("travel", [entry["content"]["type"] for entry in synced["history"]])
         self.assertNotIn("region", json.dumps(synced))
-        flush_save(self)
+        self.flush_save()
         before = self.save.read_bytes()
         destination = synced["state"]["observation"]["visible_cells"][0]["key"]
         denied = self.request(spectator, {"type":"command", "branch":synced["branch"], "command":{"type":"travel", "expected_revision":synced["state"]["revision"], "destination":destination}})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(self.save.read_bytes(), before)
-        for client in (ascii_client, wizard, spectator): client.stop()
+        for client in (ascii_client, spectator): client.stop()
         server.stop()
         self.server(wizard=True)
-        observer, resumed = self.client(support.SPECTATOR_TOKEN)
+        observer, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], synced["state"])
         self.assertIsNone(resumed["travel"])
         wizard = self.wizard()
-        wizard.command("wizard rewind initial")
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type":"snapshot"})
         self.assertEqual(rewound["state"]["observation"]["tick"], 0)
         self.assertIsNone(rewound["travel"])
@@ -112,9 +85,7 @@ class TravelProcesses(unittest.TestCase):
         self.assertFalse(arrived["state"]["wizard_game"])
 
     def test_native_underscore_and_mouse_click(self):
-        self.server(wizard=True, scenario="travel-setup")
-        wizard = self.wizard()
-        wizard.command("release")
+        self.server(scenario="travel")
         capture = Path(os.environ.get("TOR_TRAVEL_CAPTURE", str(self.save.parent / "travel.ppm")))
         client = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
         self.ascii_frame(client, lambda f: f["state"] is not None and not f["busy"])
@@ -212,12 +183,10 @@ class TravelProcesses(unittest.TestCase):
         self.assertEqual(returned["state"]["observation"]["tick"],200)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
 
-    def travel_scenario(self, setup_name):
-        self.server(wizard=True, scenario="travel-" + setup_name)
-        wizard = self.wizard()
-        wizard.command("release")
+    def travel_scenario(self, package):
+        self.server(scenario=package)
         player, initial = self.client()
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=support.SPECTATOR_TOKEN)
+        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
         self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         destination = next(c["key"] for c in initial["state"]["observation"]["visible_cells"] if c["position"] == {"x":7,"y":0,"z":0})
         self.request(player, {"type":"command", "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
@@ -229,7 +198,7 @@ class TravelProcesses(unittest.TestCase):
         return player, initial, stopped
 
     def test_harmless_discoveries_do_not_interrupt_travel(self):
-        _, initial, arrived = self.travel_scenario("harmless_discovery_setup")
+        _, initial, arrived = self.travel_scenario("travel-harmless-discovery")
         self.assertFalse(initial["state"]["observation"]["ground_items"])
         self.assertFalse(any(c["place_hint"] for c in initial["state"]["observation"]["visible_cells"]))
         self.assertEqual(arrived["travel"]["phase"], "arrived")
@@ -241,7 +210,7 @@ class TravelProcesses(unittest.TestCase):
         self.assertTrue(any(c["key"] not in old_keys for c in arrived["state"]["observation"]["visible_cells"]))
 
     def test_new_other_actor_interrupts_travel_as_potential_hazard(self):
-        player, initial, stopped = self.travel_scenario("hazard_setup")
+        player, initial, stopped = self.travel_scenario("travel-hazard")
         self.assertFalse(initial["state"]["observation"]["visible_actors"])
         self.assertEqual(stopped["travel"]["phase"], "hazard")
         self.assertEqual(stopped["travel"]["completed_steps"], 1)

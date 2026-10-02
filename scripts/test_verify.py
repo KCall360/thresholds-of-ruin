@@ -63,10 +63,11 @@ class ProcessSelection(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.scripts = Path(self.temp.name)
         files = {
-            "test_text_process.py": "BIN = 'tor-client-text'\n",
-            "test_ascii_process.py": "import test_text_process as support\nBIN = 'tor-client-ascii'\n",
-            "test_items_process.py": "import test_ascii_process\n",
-            "test_headless_process.py": "from test_text_process import flush\nBIN = 'tor-client-headless'\n",
+            "process_harness.py": "BINS = ['tor-client-text', 'tor-client-ascii', 'tor-client-headless']\n",
+            "test_text_process.py": "import process_harness\nself.text_client()\n",
+            "test_ascii_process.py": "import process_harness\nself.window()\n",
+            "test_items_process.py": "import process_harness\nself.key(window, 'g')\n",
+            "test_headless_process.py": "from process_harness import ProcessTestCase\nBIN = 'tor-client-headless'\n",
             "test_perf_ledger.py": "import json\n",
         }
         for name, text in files.items():
@@ -83,11 +84,13 @@ class ProcessSelection(unittest.TestCase):
     def test_client_change_selects_tests_that_can_launch_it_through_helpers(self):
         self.assertEqual(self.select([], ["tor-client-ascii"]), ["test_ascii_process", "test_items_process"])
 
+    def test_harness_helpers_do_not_select_every_test_for_one_client(self):
+        self.assertEqual(self.select([], ["tor-client-text"]), ["test_text_process"])
+        self.assertEqual(self.select([], ["tor-client-headless"]), ["test_headless_process"])
+
     def test_support_script_change_selects_its_importers(self):
-        self.assertEqual(
-            self.select(["scripts/test_ascii_process.py"], []), ["test_ascii_process", "test_items_process"],
-        )
-        self.assertEqual(len(self.select(["scripts/test_text_process.py"], [])), 4)
+        self.assertEqual(self.select(["scripts/test_ascii_process.py"], []), ["test_ascii_process"])
+        self.assertEqual(len(self.select(["scripts/process_harness.py"], [])), 4)
 
     def test_docs_only_change_selects_no_process_tests(self):
         self.assertEqual(self.select(["docs/testing.md"], []), [])

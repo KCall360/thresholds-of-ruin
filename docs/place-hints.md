@@ -55,7 +55,7 @@ promoted to wizard mode.
 
 Tests cover topology-independent authoring, visibility, terrain changes, stale
 memory and refresh, permissions, invalid setup, replay, and rewind. The versioned
-`scripts/scenarios/place-hints.json` scenario drives actual server/text/headless/
+`scripts/fixtures/place-hints.json` scenario drives actual server/text/headless/
 native ASCII processes. Windows/Linux debug and release CI includes these tests.
 
 [Backend travel](travel.md) uses remembered geometry. The

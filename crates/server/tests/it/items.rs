@@ -1,3 +1,4 @@
+use crate::support;
 use std::path::Path;
 use tor_protocol::{Action, ActorId};
 use tor_server::journal::{Command, WizardOperation};
@@ -13,21 +14,7 @@ fn scenario(character: Option<u64>) -> Scenario {
     .unwrap()
 }
 fn act(engine: &mut Engine, action: Action) {
-    let actor = ActorId(1);
-    let revision = engine.revision(actor).unwrap();
-    engine
-        .command(
-            "player",
-            "test",
-            actor,
-            &format!("action-{revision}"),
-            &engine.branch().clone(),
-            Command::Act {
-                expected_revision: revision,
-                action,
-            },
-        )
-        .unwrap();
+    support::act(engine, action).unwrap();
 }
 fn wizard(engine: &mut Engine, operation: WizardOperation) {
     let actor = ActorId(1);

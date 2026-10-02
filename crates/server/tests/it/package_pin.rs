@@ -4,7 +4,7 @@
 use crate::support;
 use std::path::Path;
 use tor_protocol::{Action, ActorId, Direction};
-use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario, Streaming};
+use tor_server::{scenario_package, Engine, SavePolicy, Scenario, Streaming};
 
 fn corridor_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/streaming-corridor")
@@ -35,20 +35,7 @@ fn seven_halls_built(out: &Path) -> Scenario {
 }
 
 fn act(engine: &mut Engine, action: Action) -> Result<(), tor_server::Failure> {
-    let revision = engine.revision(ActorId(1)).unwrap();
-    engine
-        .command(
-            "player",
-            "test",
-            ActorId(1),
-            &uuid::Uuid::new_v4().to_string(),
-            &engine.branch().clone(),
-            Command::Act {
-                expected_revision: revision,
-                action,
-            },
-        )
-        .map(|_| ())
+    support::act(engine, action).map(|_| ())
 }
 
 fn walk(engine: &mut Engine, direction: Direction, steps: usize) {

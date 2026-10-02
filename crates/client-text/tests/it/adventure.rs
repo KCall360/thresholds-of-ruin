@@ -634,28 +634,57 @@ fn narrative_place_title_sensory_and_verbosity() {
     );
 }
 
+/// Carry a potion, a ration, a ring and a sword (items 10 to 13).
+fn carrying(s: &mut StateView) {
+    for (id, name, description) in [
+        (10, "healing potion", "A vial of bubbling red draught."),
+        (11, "iron ration", "Hard tack and dried meat."),
+        (12, "iron ring", "A band of cold wrought iron."),
+        (13, "iron sword", "A sharp steel blade."),
+    ] {
+        s.observation.inventory.push(ItemView {
+            id,
+            name: name.into(),
+            appearance: "item".into(),
+            identified: true,
+            description: description.into(),
+            quantity: 1,
+            asset: None,
+        });
+    }
+}
+
+/// A goblin sentry (actor 42) stands one cell east.
+fn goblin(s: &mut StateView) {
+    s.observation.visible_actors.push(ActorView {
+        id: ActorId(42),
+        name: "goblin sentry".into(),
+        position: Position { x: 1, y: 0, z: 0 },
+        description: "A small, snarling goblin.".into(),
+        asset: None,
+    });
+}
+
 #[test]
-fn test_expanded_if_interactions() {
+fn again_repeats_the_previous_command_once_there_is_one() {
+    let s = state();
+    let mut dialogue = Dialogue::default();
+    for again in ["again", "g"] {
+        assert_eq!(
+            dialogue.interpret(again, &s),
+            Intent::Say("There is no previous command to repeat.".into())
+        );
+    }
+    assert_eq!(dialogue.interpret("wait", &s), Intent::Action(Action::Wait));
+    for again in ["again", "g"] {
+        assert_eq!(dialogue.interpret(again, &s), Intent::Action(Action::Wait));
+    }
+}
+
+#[test]
+fn diagnose_reports_health_from_the_disclosed_combat_state() {
     let mut s = state();
     let mut dialogue = Dialogue::default();
-
-    // 1. again / g
-    assert_eq!(
-        dialogue.interpret("again", &s),
-        Intent::Say("There is no previous command to repeat.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("g", &s),
-        Intent::Say("There is no previous command to repeat.".into())
-    );
-    assert_eq!(dialogue.interpret("wait", &s), Intent::Action(Action::Wait));
-    assert_eq!(
-        dialogue.interpret("again", &s),
-        Intent::Action(Action::Wait)
-    );
-    assert_eq!(dialogue.interpret("g", &s), Intent::Action(Action::Wait));
-
-    // 2. diagnose
     assert_eq!(
         dialogue.interpret("diagnose", &s),
         Intent::Say("You are in good health, with no apparent injuries or afflictions.".into())
@@ -677,9 +706,12 @@ fn test_expanded_if_interactions() {
         dialogue.interpret("diagnose", &s),
         Intent::Say(text) if text.contains("minor cuts") && text.contains("18/20")
     ));
-    s.observation.combat = None;
+}
 
-    // 3. read
+#[test]
+fn read_shows_an_items_description_and_scenery_has_nothing_written() {
+    let s = state();
+    let mut dialogue = Dialogue::default();
     assert_eq!(
         dialogue.interpret("read copper token", &s),
         Intent::Say("A small copper disc.".into())
@@ -688,46 +720,13 @@ fn test_expanded_if_interactions() {
         dialogue.interpret("read floor", &s),
         Intent::Say("There is nothing written there.".into())
     );
+}
 
-    // Give player an inventory
-    s.observation.inventory.push(ItemView {
-        id: 10,
-        name: "healing potion".into(),
-        appearance: "item".into(),
-        identified: true,
-        description: "A vial of bubbling red draught.".into(),
-        quantity: 1,
-        asset: None,
-    });
-    s.observation.inventory.push(ItemView {
-        id: 11,
-        name: "iron ration".into(),
-        appearance: "item".into(),
-        identified: true,
-        description: "Hard tack and dried meat.".into(),
-        quantity: 1,
-        asset: None,
-    });
-    s.observation.inventory.push(ItemView {
-        id: 12,
-        name: "iron ring".into(),
-        appearance: "item".into(),
-        identified: true,
-        description: "A band of cold wrought iron.".into(),
-        quantity: 1,
-        asset: None,
-    });
-    s.observation.inventory.push(ItemView {
-        id: 13,
-        name: "iron sword".into(),
-        appearance: "item".into(),
-        identified: true,
-        description: "A sharp steel blade.".into(),
-        quantity: 1,
-        asset: None,
-    });
-
-    // 4. drink and eat
+#[test]
+fn only_consumables_can_be_drunk_or_eaten() {
+    let mut s = state();
+    carrying(&mut s);
+    let mut dialogue = Dialogue::default();
     assert!(matches!(
         dialogue.interpret("drink healing potion", &s),
         Intent::Say(text) if text.contains("refreshing")
@@ -744,30 +743,33 @@ fn test_expanded_if_interactions() {
         dialogue.interpret("eat iron sword", &s),
         Intent::Say("The iron sword is not edible.".into())
     );
+}
 
-    // 5. wear, wield, remove
-    assert_eq!(
-        dialogue.interpret("wear iron ring", &s),
-        Intent::Say("You put on the iron ring.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("put on iron ring", &s),
-        Intent::Say("You put on the iron ring.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("remove iron ring", &s),
-        Intent::Say("You take off the iron ring.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("take off iron ring", &s),
-        Intent::Say("You take off the iron ring.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("wield iron sword", &s),
-        Intent::Say("You ready the iron sword for combat.".into())
-    );
+#[test]
+fn wearing_wielding_and_removing_are_narrated_until_equipment_exists() {
+    let mut s = state();
+    carrying(&mut s);
+    let mut dialogue = Dialogue::default();
+    for (input, reply) in [
+        ("wear iron ring", "You put on the iron ring."),
+        ("put on iron ring", "You put on the iron ring."),
+        ("remove iron ring", "You take off the iron ring."),
+        ("take off iron ring", "You take off the iron ring."),
+        ("wield iron sword", "You ready the iron sword for combat."),
+    ] {
+        assert_eq!(
+            dialogue.interpret(input, &s),
+            Intent::Say(reply.into()),
+            "{input}"
+        );
+    }
+}
 
-    // 6. put <item> on floor / ground
+#[test]
+fn putting_an_item_on_the_floor_drops_it_and_containers_refuse_it() {
+    let mut s = state();
+    carrying(&mut s);
+    let mut dialogue = Dialogue::default();
     assert_eq!(
         dialogue.interpret("put iron sword on floor", &s),
         Intent::Action(Action::Drop {
@@ -779,36 +781,44 @@ fn test_expanded_if_interactions() {
         dialogue.interpret("put iron sword in chest", &s),
         Intent::Say("You cannot put the iron sword in the chest.".into())
     );
+}
 
-    // 7. give and talk with actor
-    s.observation.visible_actors.push(ActorView {
-        id: ActorId(42),
-        name: "goblin sentry".into(),
-        position: Position { x: 1, y: 0, z: 0 },
-        description: "A small, snarling goblin.".into(),
-        asset: None,
-    });
+#[test]
+fn giving_and_talking_get_in_world_replies() {
+    let mut s = state();
+    carrying(&mut s);
+    goblin(&mut s);
+    let mut dialogue = Dialogue::default();
+    for (input, reply) in [
+        (
+            "give iron ring to goblin",
+            "The goblin sentry does not seem interested in the iron ring.",
+        ),
+        (
+            "talk to goblin",
+            "The goblin sentry glares warily and offers no reply.",
+        ),
+        (
+            "ask goblin about dungeon",
+            "The goblin sentry remains silent, offering no response about the dungeon.",
+        ),
+        (
+            "talk to myself",
+            "Talking to yourself is a sure sign of madness.",
+        ),
+    ] {
+        assert_eq!(
+            dialogue.interpret(input, &s),
+            Intent::Say(reply.into()),
+            "{input}"
+        );
+    }
+}
 
-    assert_eq!(
-        dialogue.interpret("give iron ring to goblin", &s),
-        Intent::Say("The goblin sentry does not seem interested in the iron ring.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("talk to goblin", &s),
-        Intent::Say("The goblin sentry glares warily and offers no reply.".into())
-    );
-    assert_eq!(
-        dialogue.interpret("ask goblin about dungeon", &s),
-        Intent::Say(
-            "The goblin sentry remains silent, offering no response about the dungeon.".into()
-        )
-    );
-    assert_eq!(
-        dialogue.interpret("talk to myself", &s),
-        Intent::Say("Talking to yourself is a sure sign of madness.".into())
-    );
-
-    // 8. push, pull, turn on door
+#[test]
+fn pushing_opens_and_pulling_closes_a_door_and_turning_does_nothing() {
+    let mut s = state();
+    let mut dialogue = Dialogue::default();
     s.observation.visible_cells[1].door = Some(DoorView {
         id: 99,
         open: false,
@@ -818,7 +828,6 @@ fn test_expanded_if_interactions() {
         approaches: vec!["cell-0".into()],
         asset: None,
     });
-
     assert_eq!(
         dialogue.interpret("push oak door", &s),
         Intent::Action(Action::SetDoor {
@@ -830,7 +839,6 @@ fn test_expanded_if_interactions() {
         dialogue.interpret("turn oak door", &s),
         Intent::Say("Turning the handle does nothing unusual.".into())
     );
-
     s.observation.visible_cells[1].door.as_mut().unwrap().open = true;
     assert_eq!(
         dialogue.interpret("pull oak door", &s),
@@ -842,7 +850,7 @@ fn test_expanded_if_interactions() {
 }
 
 #[test]
-fn test_conversational_clarification_with_noun_phrases() {
+fn clarification_accepts_ordinals_adjectives_and_numbers() {
     let mut s = state();
     let mut dialogue = Dialogue::default();
 
@@ -918,7 +926,7 @@ fn test_conversational_clarification_with_noun_phrases() {
 }
 
 #[test]
-fn test_pronoun_reference_flow() {
+fn pronouns_refer_to_the_last_actor_and_items_mentioned() {
     let mut s = state();
     let mut dialogue = Dialogue::default();
 
@@ -1000,7 +1008,7 @@ fn test_pronoun_reference_flow() {
 }
 
 #[test]
-fn test_session_commands_unified_routing() {
+fn session_commands_work_at_the_adventure_prompt() {
     let s = state();
     let mut dialogue = Dialogue::default();
 
@@ -1060,7 +1068,7 @@ fn test_session_commands_unified_routing() {
 }
 
 #[test]
-fn test_multicell_actor_volume_unification() {
+fn actors_occupying_several_cells_are_described_once_by_size() {
     let mut s = state();
     // Add player's own multi-cell body (ActorId(1), height 2, cells (0,0,0) and (0,0,1))
     s.observation.visible_actors.extend([
@@ -1151,7 +1159,7 @@ fn test_multicell_actor_volume_unification() {
 }
 
 #[test]
-fn test_portal_self_observation_preserved_and_unified() {
+fn your_own_body_is_omitted_but_seen_through_a_portal() {
     let mut s = state();
     // Player local body cells at (0,0,0) and (0,0,1)
     s.observation.visible_actors.extend([
@@ -1197,7 +1205,7 @@ fn test_portal_self_observation_preserved_and_unified() {
 }
 
 #[test]
-fn test_geometry_derived_perimeter_exits() {
+fn an_unhinted_opening_in_the_walls_is_an_exit() {
     let mut s = state();
     // Clear all place hints so room is completely unhinted
     for cell in &mut s.observation.visible_cells {
@@ -1245,7 +1253,7 @@ fn test_geometry_derived_perimeter_exits() {
 }
 
 #[test]
-fn test_multiple_openings_disambiguation() {
+fn two_openings_in_one_direction_ask_which() {
     let mut s = state();
     for cell in &mut s.observation.visible_cells {
         cell.place_hint = false;
@@ -1312,7 +1320,7 @@ fn test_multiple_openings_disambiguation() {
 }
 
 #[test]
-fn test_client_spawned_place_hint_determinism() {
+fn unhinted_places_get_the_same_anchor_every_time() {
     let mut s = state();
     // Strip all authored place hints
     for cell in &mut s.observation.visible_cells {

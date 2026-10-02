@@ -54,7 +54,7 @@ There is no persistent visibility cache to invalidate after a door edit or rewin
 area and tests every floor pair for reciprocity. It also checks door corners,
 straight shadows, convex room walls, diagonal blockers, rotated split-room
 invariance from both sides, and bounded repeated appearances through cycles.
-Server tests verify current perception through save/resume and rewind. `scenarios/tests/shadowcasting-setup` and
+Server tests verify current perception through save/resume and rewind. `scenarios/tests/shadowcasting` and
 `scripts/test_shadowcasting_process.py` drive real text, headless and native ASCII
 clients and check disclosure, stale memory, ordinary door actions and resume.
 These tests are included in Windows/Linux CI discovery for debug and release.

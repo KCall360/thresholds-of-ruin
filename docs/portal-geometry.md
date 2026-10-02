@@ -107,7 +107,7 @@ Saves contain the private view-identity salt.
 Tests compare one region against the same space split by a wide join, including
 all visible offsets. They cover rotations, consistent movement, height offsets,
 wall occlusion, corners, cycles, atomic rejection, stable opaque keys, sanitized
-history, reach, current-format replay, and rewind. `scripts/scenarios/wide-join.json` and
+history, reach, current-format replay, and rewind. `scripts/fixtures/wide-join.json` and
 `portal-geometry.json` drive the actual server, text, headless, and native ASCII
 clients. They test continuous sight, movement/pickup, hidden changes, stale
 memory, stairs, restart, and rewind on Windows/Linux in debug and release.

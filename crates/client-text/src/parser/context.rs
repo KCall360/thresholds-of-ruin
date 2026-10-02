@@ -1,4 +1,9 @@
 //! Conversational state, active pronoun referents, and disambiguation.
+//!
+//! Part of the resolver (`scope`, `matcher`, `context`), which is built and
+//! tested but not yet used by the game: `adventure::Dialogue` still resolves
+//! names, pronouns and clarification answers itself. See
+//! section 3.3 of docs/if-parser-architecture.md.
 
 use std::collections::VecDeque;
 
@@ -116,7 +121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_format_disambiguation_prompt_two() {
+    fn format_disambiguation_prompt_two() {
         let candidates = vec![
             Entity::Item {
                 id: 1,
@@ -144,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_disambiguation_prompt_three() {
+    fn format_disambiguation_prompt_three() {
         let candidates = vec![
             Entity::Item {
                 id: 1,

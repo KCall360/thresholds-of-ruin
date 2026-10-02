@@ -1,31 +1,17 @@
 """Real playable clients: delayed delivery, gap rejection, snapshot on relaunch."""
-import json
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
-from test_adventure_process import AdventureProcess
 from stream_relay import StreamRelay
-from pathlib import Path
+
+from process_harness import ProcessTestCase, AdventureProcess, SPECTATOR_TOKEN
 
 
-class StreamRecoveryProcesses(unittest.TestCase):
-    setUpClass = classmethod(support.TextProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    server = headless.HeadlessProcesses.server
-    launch = support.TextProcesses.launch
-    client = headless.HeadlessProcesses.client
-    frame = headless.HeadlessProcesses.frame
-    command = headless.HeadlessProcesses.command
-    request = headless.HeadlessProcesses.request
-    ascii_frame = ascii_support.AsciiProcesses.frame
-
+class StreamRecoveryProcesses(ProcessTestCase):
     def playable(self, kind, address):
         if kind == 'ascii':
-            client = self.launch('tor-client-ascii', ['--connect', address, '--automation'], token=support.SPECTATOR_TOKEN)
+            client = self.launch('tor-client-ascii', ['--connect', address, '--automation'], token=SPECTATOR_TOKEN)
             initial = self.ascii_frame(client, lambda f: f['state'] is not None and not f['busy'])
         else:
-            client = AdventureProcess(self.bin / ('tor-client-text' + self.suffix), ['--connect', address], token=support.SPECTATOR_TOKEN)
+            client = AdventureProcess(self.bin / ('tor-client-text' + self.suffix), ['--connect', address], token=SPECTATOR_TOKEN)
             self.addCleanup(client.stop)
             initial = client.until(lambda line: line == '> ')
         return client, initial
@@ -96,14 +82,7 @@ class StreamRecoveryProcesses(unittest.TestCase):
         self.exercise('text')
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
-        server = self.launch('tor-server', ['--listen', '127.0.0.1:0', '--save', self.save,
-            '--scenario', Path(__file__).resolve().parents[1] / 'scenarios/tests/semantic-narration-setup', '--wizard'],
-            extra_env={'TOR_WIZARD_TOKEN': headless.WIZARD_TOKEN,
-                       'TOR_SPECTATOR_TOKEN': support.SPECTATOR_TOKEN})
-        self.address = json.loads(server.until(lambda line: line.startswith('{')))['address']
-        wizard = self.launch('tor-client-text', ['--connect', self.address], token=headless.WIZARD_TOKEN)
-        wizard.until(lambda line: line == 'Ready.')
-        wizard.command('release')
+        self.server(scenario='semantic-narration', seed=None)
         player, _ = self.client()
         other = self.launch('tor-client-headless', ['--connect', self.address, '--actor', '2'])
         other_state = self.frame(other, lambda f: f['type'] == 'ready')

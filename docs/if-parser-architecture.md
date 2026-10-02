@@ -58,7 +58,7 @@ flowchart TD
 
 ## 3. Component Specifications
 
-### 3.1 Lexer and Tokenizer (`parser::lexer`)
+### 3.1 Lexer and Tokenizer (`parser::token`)
 
 The lexer converts raw user input strings into a sequence of sentences, where
 each sentence is a list of typed tokens.
@@ -108,7 +108,14 @@ rules.
      E.g., `hit goblin with iron sword`, `take coin from floor`, `put sword on floor`, `give ring to goblin`, `ask goblin about key`.
   5. `CompoundTransitive(Verb, Vec<NounPhrase>)`: E.g., `take sword and shield`.
 
-### 3.3 Noun Phrases and Scope Binding (`parser::resolver`)
+### 3.3 Noun Phrases and Scope Binding (`parser::noun_phrase`, `parser::scope`, `parser::matcher`)
+
+> **Status:** `parser::scope`, `parser::matcher` and `parser::context` (3.4) are
+> built and unit tested but not yet used by the game. Until `Dialogue` in
+> `adventure.rs` is moved onto them, it resolves names, pronouns and
+> clarification answers itself, and its own tests in
+> `crates/client-text/tests/it/adventure.rs` are what cover play. Tests of the
+> resolver modules cover only those modules.
 
 A noun phrase represents the player's reference to one or more game entities:
 
@@ -153,7 +160,7 @@ The conversation context preserves state between user turns:
   - The context stores the partially completed command and candidate set.
   - On the following turn, an input such as *"the copper one"*, *"copper"*, or *"the first one"* completes the pending command naturally.
 
-### 3.5 Simulation Synthesis (`adventure::synthesizer`)
+### 3.5 Simulation Synthesis (`adventure`)
 
 The resolved IF command is converted into backend simulation commands:
 - **Immediate vs. Compound Travel**:
@@ -169,14 +176,16 @@ The resolved IF command is converted into backend simulation commands:
 ## 4. Testing Strategy
 
 Following the repository [testing policy](testing.md):
-1. **Parser Unit Tests**: Complete unit tests covering lexing, tokenization,
-   synonyms, prepositions, conjunctions, plurals, ordinals, and pronouns.
-2. **Disambiguation Unit Tests**: Verifying conversational clarification prompts
-   and multi-turn resolution.
-3. **Simulation Mapping Tests**: Verifying that resolved IF intents map
-   deterministically to protocol actions without protocol leaks.
-4. **Actual-Process Acceptance Tests**: Full process acceptance testing
-   driving natural IF transcripts through `scripts/test_adventure_process.py`.
+1. **Parser unit tests** (`#[cfg(test)]` modules in `parser/`): tokenizing,
+   sentences, noun phrases, grammar, and the resolver modules.
+2. **Parser pipeline tests** (`crates/client-text/tests/it/parser.rs`): whole
+   sentences through tokenizing and grammar, and the resolver's scope,
+   matching and pronouns.
+3. **Adventure tests** (`crates/client-text/tests/it/adventure.rs`): what
+   `Dialogue` does with each input, as protocol actions or narration, and the
+   narrative descriptions. These cover play as it is today.
+4. **Actual-process acceptance tests** (`scripts/test_adventure_process.py`):
+   natural transcripts through the real text client and server.
 
 ---
 
@@ -212,7 +221,7 @@ alchemy, or hunger systems, `tor-client-text` provides simulated literary feedba
 
 ### Engine Integration Hook Points
 When future engine milestones implement server-authoritative equipment slots and
-consumable item effects, the client implementation in [`adventure.rs`](file:///f:/gemini/TOR/crates/client-text/src/adventure.rs)
+consumable item effects, the client implementation in [`adventure.rs`](../crates/client-text/src/adventure.rs)
 is explicitly annotated with structured hook comments:
 - `// HOOK[engine:equipment]`: In `fn object()`, replace the simulated `Intent::Say(...)`
   branches for `wear`, `wield`, and `remove` with `Intent::Action(Action::Equip { item: id, slot })`

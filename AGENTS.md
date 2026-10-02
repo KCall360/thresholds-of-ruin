@@ -105,49 +105,20 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
-**Interactive Fiction natural language parser and client narrative (branch `feature/if-parser`).**
-Complete: lexer, tokenizer, noun phrase grammar, context tracking, scope extraction,
-compound sentence chaining, ditransitives (`attack <actor> with <weapon>`, `unlock <door> with <key>`, `put <item> on floor`),
-negative quantifiers (`take all except <item>`), natural-language disambiguation (*"the first one"*),
-anaphoric pronoun resolution (`it`, `them`, `him`, `her`), sensory inspection (`listen`, `smell`),
-surface examinations (`examine walls/floor/ceiling`), expanded IF interaction depth (`diagnose`, `search`, `again`, `g`,
-`read`, `drink`, `eat`, `wear`, `wield`, `remove`, `talk to`, `ask about`), place naming and persistent notes,
-unified session routing, and decoupled protocol testing via `tor-client-headless`.
-Architecture documented in [`docs/if-parser-architecture.md`](docs/if-parser-architecture.md) and
-user commands in [`docs/text-adventure.md`](docs/text-adventure.md). Tests added at unit (28 tests),
-integration (34 tests), and actual-process acceptance (13 tests in `scripts/test_adventure_process.py`) layers.
-Ready for PR.
+**Test suite rationalization (in progress, branch `tests/rationalize`).**
+Process tests share `scripts/process_harness.py` and use the headless client
+for wizard setup; every scenario package is checked by the
+[package invariants](docs/testing.md#package-invariants); the workload
+validators share `workload_report.py`; protocol messages have recorded wire
+samples; test packages are named for what they set up. See the
+[testing policy](docs/testing.md). It needs a PR, CI on both platforms, and
+the maintainer's approval to merge.
 
-**Milestone 4e — region streaming, generation, and asset palettes (in progress).**
-Merged: the structural `RegionCatalog` and horizon planner, the
-[region lifecycle contract](docs/region-streaming.md#region-lifecycle-contract)
-(PR #44), and package games streaming through disk regions (PR #45); see
-[region streaming](docs/region-streaming.md).
-
-**Merged in PR #47:** background preloading, per-region package files with
-the package pin (save format 14), regions declared only when needed,
-generated filler regions, and server-side asset palettes. A
-review of it found ten issues; branch `fix/review-4e` fixes them with
-regression tests, including the palette process test.
-
-**Palettes in the clients (slice 6)** are on branch `client/palettes`: a
-shared `Palette` and `AssetTable` in `client-common` (the connection asks for
-the palette again after a missed revision, and once per unexpected asset),
-asset words for surfaces and unnamed figures in the text client, and the
-palette in every headless output line; see
-[palettes in the clients](docs/protocol.md#palettes-in-the-clients). It needs
-a PR, CI on both platforms, and the maintainer's approval to merge. The ASCII
-glyph table belongs with the ASCII redesign, which stays deferred until after
-3s.
-
-**Still to do for 4e:** the performance comparison
-(`perf_compare.py` on the streaming cases against the pre-4e `main`), the
-launcher rebuild for format 14, and closing 4e in the roadmap. Run
-`scripts/verify.py quick` before each commit and `full` before pushing.
-**Merge only with the maintainer's approval.**
 **Interactive fiction parser** (PR #55): the text client's natural-language
 parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
-and [adventure commands](docs/text-adventure.md).
+and [adventure commands](docs/text-adventure.md). The resolver modules
+(`parser::scope`, `matcher`, `context`) are built and tested but not yet used:
+`Dialogue` still resolves names and pronouns itself.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),
@@ -222,15 +193,11 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Running until blocked and spatial narrative (in progress, branch `feature/run-until-blocked`).**
-The server pump and client travel cancellation are removed: the simulation runs until it
-needs client input, only the server interrupts journeys, and clients pace the display
-(protocol 20). Spatial narrative improvements unify multi-cell volumetric actors into
-coherent observed entities (filtering contiguous player cells while preserving portal
-self-sightings), derive navigable exits and openings from wall perimeters and constrictions,
-synthesize pure deterministic room prose from PlaceKey and palette assets, and provide
-deterministic place anchor fallback for unhinted regions. Verified across unit, integration,
-and process tests. It needs a PR, CI on both platforms, and the maintainer's approval to merge.
+**Running until blocked and spatial narrative** (PRs #57 and #58, protocol
+20): the simulation runs until it needs client input, only the server ends a
+journey, and clients pace the display; see
+[running until blocked](docs/run-until-blocked.md) and the
+[spatial narrative](docs/spatial-narrative-architecture.md).
 
 **Open performance items** are tracked in the
 [performance plan](docs/performance-persistence.md#open-work), including the

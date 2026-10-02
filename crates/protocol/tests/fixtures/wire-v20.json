@@ -1,0 +1,1426 @@
+{
+ "client": [
+  {
+   "frontend": "headless",
+   "protocol": 20,
+   "token": "a-sample-credential",
+   "type": "hello"
+  },
+  {
+   "request": {
+    "type": "continue"
+   },
+   "request_id": "sample-0",
+   "type": "request"
+  },
+  {
+   "request": {
+    "type": "save"
+   },
+   "request_id": "sample-1",
+   "type": "request"
+  },
+  {
+   "request": {
+    "before": null,
+    "branch": "branch-1",
+    "limit": 50,
+    "type": "history_branch"
+   },
+   "request_id": "sample-2",
+   "type": "request"
+  },
+  {
+   "request": {
+    "actor": 1,
+    "type": "attach"
+   },
+   "request_id": "sample-3",
+   "type": "request"
+  },
+  {
+   "request": {
+    "type": "acquire_control"
+   },
+   "request_id": "sample-4",
+   "type": "request"
+  },
+  {
+   "request": {
+    "type": "release_control"
+   },
+   "request_id": "sample-5",
+   "type": "request"
+  },
+  {
+   "request": {
+    "type": "snapshot"
+   },
+   "request_id": "sample-6",
+   "type": "request"
+  },
+  {
+   "request": {
+    "type": "palette"
+   },
+   "request_id": "sample-7",
+   "type": "request"
+  },
+  {
+   "request": {
+    "before": "entry-1",
+    "limit": 20,
+    "type": "history"
+   },
+   "request_id": "sample-8",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "expected_revision": 3,
+     "key": "place-key",
+     "name": "Lantern Hall",
+     "type": "rename_place"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-9",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "destination": "cell-key",
+     "expected_revision": 3,
+     "type": "travel"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-10",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "expected_revision": 3,
+     "operation": "rewind initial",
+     "type": "wizard"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-11",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "target": 2,
+      "type": "attack"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-12",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "door": 7,
+      "open": true,
+      "type": "set_door"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-13",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "direction": "north_east",
+      "type": "move"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-14",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "item": 4,
+      "quantity": 2,
+      "type": "take"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-15",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "item": 4,
+      "quantity": null,
+      "type": "drop"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-16",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "action": {
+      "type": "wait"
+     },
+     "expected_revision": 3,
+     "type": "act"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-17",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "anchor": {
+      "revision": 3,
+      "type": "state"
+     },
+     "audience": "private",
+     "category": "note",
+     "source": "user",
+     "text": "A note",
+     "type": "annotate"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-18",
+   "type": "request"
+  },
+  {
+   "request": {
+    "branch": "branch-1",
+    "command": {
+     "anchor": {
+      "id": "entry-1",
+      "type": "entry"
+     },
+     "audience": "actor",
+     "category": "explanation",
+     "source": "frontend",
+     "text": "An explanation",
+     "type": "annotate"
+    },
+    "type": "command"
+   },
+   "request_id": "sample-19",
+   "type": "request"
+  }
+ ],
+ "protocol": 20,
+ "server": [
+  {
+   "entry_id": null,
+   "request_id": "522f20d3-7aeb-4a35-a44b-30ee1f3421db",
+   "type": "ack"
+  },
+  {
+   "code": "invalid_action",
+   "message": "Action is unavailable",
+   "request_id": "49b00eee-b1f8-4613-b772-4f979f5f50b2",
+   "type": "error"
+  },
+  {
+   "page": {
+    "entries": [],
+    "older_before": null
+   },
+   "request_id": "0dc1efd8-09a9-4027-83fb-ad1196bb5087",
+   "type": "history"
+  },
+  {
+   "palette": {
+    "body": {
+     "assets": [
+      "creature.delver",
+      "creature.rat",
+      "item.coin",
+      "terrain.floor.cave",
+      "terrain.floor.marble",
+      "terrain.floor.stone",
+      "terrain.wall.cave",
+      "terrain.wall.marble",
+      "terrain.wall.stone"
+     ],
+     "type": "full"
+    },
+    "revision": 1
+   },
+   "request_id": null,
+   "type": "palette"
+  },
+  {
+   "request_id": "541013a6-dcac-412a-9896-5bb422ff1d51",
+   "snapshot": {
+    "actor": 1,
+    "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+    "cursor": {
+     "sequence": 3,
+     "tick": 100
+    },
+    "has_control": true,
+    "history": {
+     "entries": [
+      {
+       "actor": 1,
+       "audience": "actor",
+       "author": {
+        "type": "user",
+        "user": "local"
+       },
+       "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+       "content": {
+        "action": {
+         "direction": "east",
+         "type": "move"
+        },
+        "event": {
+         "direction": "east",
+         "type": "moved"
+        },
+        "type": "action"
+       },
+       "id": "3c202791-8595-47c9-8293-58153533b43d",
+       "tick": 0
+      }
+     ],
+     "older_before": null
+    },
+    "state": {
+     "observation": {
+      "actor": 1,
+      "combat": {
+       "actors": [],
+       "dead": false,
+       "hp": 20,
+       "max_hp": 20,
+       "messages": [],
+       "objective": null,
+       "preparation_active": false,
+       "preparation_remaining": null,
+       "recovery_remaining": 0,
+       "terminal": false,
+       "victory": false
+      },
+      "ground_items": [],
+      "inventory": [],
+      "places": [],
+      "position": {
+       "x": 0,
+       "y": 0,
+       "z": 0
+      },
+      "ready": true,
+      "tick": 100,
+      "visible_actors": [],
+      "visible_cells": [
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "31c0eef5619c300d64362e5bc4abb043336307b3",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -3,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "508d1ce3a1c468e40eb829fe222b072587a597cf",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -3,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "3f00d06288a0e92d7ce7727443ec63f4474c0239",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -3,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "c988eb1bbc927cc5b5d70e4338b73bd906a648c5",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -3,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "899ce04b08af5ee65b5ce2cda0a2daf0fd0aa972",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -3,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "982c06a77ebdc86beb35061ec24b9c3f09bc371e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -2,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "887014796d55dc32ca533699d2551bb4e67b2dfa",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -2,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "7e8549b51edf3747d5d5168605b077c0beb83090",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -2,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "c2a2f4a269a80c03007eedcb2ee11f6482ba0931",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -2,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "976e7c582c8bc70d7a15502d9a5342402b628690",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -2,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "5bd2851f7c7bfa4009f495543b0b3a8f7893a9c6",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -1,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "87ab826a55cf2d6afa16300bb157ee61f4a24bc7",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -1,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "e5e47734188fe7d810504c578b998aabdd111e28",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -1,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "59f3b7237017a4ee60ab7cf66150757f5a53262a",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -1,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "93e6c1e6923a9da66c1bf61b7fdf0f042739725e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": -1,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "ca11718aed8bd3a7c6aa024f7f5fc800b172083f",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 0,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "4365ea5fca35b9be78e81242820e2f543dd8bc0e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 0,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "e6eed9285891ce52d69b23fa24603b7278645f66",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 0,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "efe5fd1aba9f3a8311c320069099bda191cc2161",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 0,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "dd6e048199298eebb7000345c3538ced24d4468a",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 0,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "9c9e7af8589aacb7904edcc8d80542fe522462c5",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 1,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "65905949e234250fcc1dd86148e828f47859fee7",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 1,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "a8f1f5bf9f60a04b2188ec7408cab8da30970b2e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 1,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "caf30e3b67629a02e1659a4a7c01168c2c98fd31",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 1,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "c890d203afa87a4eb8057310bbfb4716a7dbd4f3",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 1,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "7430aa01af88e30bf196f3300ba77cb5e5b24571",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 2,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "1c881b8850e13412a158a817b2357d419ba4d427",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 2,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "4451e856b7aa4667c6385d8238bbad1f0725e3b6",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 2,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "e39bcbde55ff8f665eb252725190073693ddce77",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 2,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "b6b99d9e5c5ba559c91671a32116eb9344b2bbd0",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 2,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "34d84fc2bdd001edd82e4851ad6797aa9e4e7b71",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 3,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "8b6b26594bec8ebc4539a0c7a2b547e5bd29b287",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 3,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "5ac43e4b210b0d2745e04508900aec6a73fe3edc",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 3,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "4a2ff3e85dc5a54e67910d5473410ff644b1a492",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 3,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "31190db62809fe82d0c70e7078cdb3ee503afd09",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 3,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "2a9b980705c2f62c47ee33657e96f4d3b3350cb6",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 4,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "fbc772e4b5d23c430e6efdc04057a7dab3d70747",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 4,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "26454a7b8884d6fbdb7de69336011fb323b26499",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 4,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "d3149a7cf13b52057d4d256dee10de7718139c9e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 4,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "f9ee65651efd7220f22a317fcd9511237f770e40",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 4,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "66933921992e6526d8a86e283f0aa06e540cba7a",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 5,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "34d56bf82726fea41ccad019501e6701a77cd270",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 5,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "2026d37f55f66c3203a840efdc82e514b96e3781",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 5,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "7d1782d8b4c7638ccede11c0e02a90f63cf74d41",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 5,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "2fe56be2b7b826b814513c3ff65efc29ea2ada0b",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 5,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "ec5604cdd795309c4ad8942b8439782d2ba06901",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 6,
+         "y": -2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "e5f086bf8ade76f89cef3f62881b1c12ef0a117e",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 6,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "c62f52318dde8cd4d33458e1d57d3e6bbca970ff",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 6,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "932e5b3346a261b659e5280e7c62e4cd560290d5",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 6,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "5e9c1c19fbde96873300203096e5adb3bd895222",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 6,
+         "y": 2,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "efe2ddbc77fd075cd5e29fc3dae18f9a673ea0d4",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 7,
+         "y": -1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "d6c6eb798a15418736873e2415842f6f5d5fe2bc",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 7,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "0a550af11fdea6d63d8521d99f38a81aeeae4e31",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 7,
+         "y": 1,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       },
+       {
+        "asset": "terrain.floor.stone",
+        "door": null,
+        "key": "a70f5a629b600b232e8b14e01560ad3d16d581e3",
+        "material": "stone",
+        "place_hint": false,
+        "position": {
+         "x": 8,
+         "y": 0,
+         "z": 0
+        },
+        "stairs_down": false,
+        "stairs_up": false,
+        "wall": false
+       }
+      ]
+     },
+     "revision": 2,
+     "wizard_game": false
+    },
+    "travel": null
+   },
+   "type": "snapshot"
+  },
+  {
+   "type": "update",
+   "update": {
+    "actor": 1,
+    "body": {
+     "entry": {
+      "actor": 1,
+      "audience": "actor",
+      "author": {
+       "type": "user",
+       "user": "local"
+      },
+      "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+      "content": {
+       "anchor": {
+        "revision": 2,
+        "type": "state"
+       },
+       "category": "note",
+       "text": "Shared sample note",
+       "type": "annotation"
+      },
+      "id": "f53093ea-1573-4350-8100-2e3ca581eb2f",
+      "tick": 100
+     },
+     "type": "annotation"
+    },
+    "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+    "cursor": {
+     "sequence": 4,
+     "tick": 100
+    }
+   }
+  },
+  {
+   "type": "update",
+   "update": {
+    "actor": 1,
+    "body": {
+     "has_control": true,
+     "type": "control"
+    },
+    "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+    "cursor": {
+     "sequence": 1,
+     "tick": 0
+    }
+   }
+  },
+  {
+   "type": "update",
+   "update": {
+    "actor": 1,
+    "body": {
+     "event": {
+      "actor": 1,
+      "audience": "actor",
+      "author": {
+       "type": "user",
+       "user": "local"
+      },
+      "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+      "content": {
+       "action": {
+        "direction": "east",
+        "type": "move"
+       },
+       "event": {
+        "direction": "east",
+        "type": "moved"
+       },
+       "type": "action"
+      },
+      "id": "3c202791-8595-47c9-8293-58153533b43d",
+      "tick": 0
+     },
+     "state": {
+      "actor": 1,
+      "base_revision": 0,
+      "cells": {
+       "changed": [
+        {
+         "asset": "terrain.floor.stone",
+         "door": null,
+         "key": "ec5604cdd795309c4ad8942b8439782d2ba06901",
+         "material": "stone",
+         "place_hint": false,
+         "position": {
+          "x": 6,
+          "y": -2,
+          "z": 0
+         },
+         "stairs_down": false,
+         "stairs_up": false,
+         "wall": false
+        },
+        {
+         "asset": "terrain.floor.stone",
+         "door": null,
+         "key": "5e9c1c19fbde96873300203096e5adb3bd895222",
+         "material": "stone",
+         "place_hint": false,
+         "position": {
+          "x": 6,
+          "y": 2,
+          "z": 0
+         },
+         "stairs_down": false,
+         "stairs_up": false,
+         "wall": false
+        },
+        {
+         "asset": "terrain.floor.stone",
+         "door": null,
+         "key": "efe2ddbc77fd075cd5e29fc3dae18f9a673ea0d4",
+         "material": "stone",
+         "place_hint": false,
+         "position": {
+          "x": 7,
+          "y": -1,
+          "z": 0
+         },
+         "stairs_down": false,
+         "stairs_up": false,
+         "wall": false
+        },
+        {
+         "asset": "terrain.floor.stone",
+         "door": null,
+         "key": "0a550af11fdea6d63d8521d99f38a81aeeae4e31",
+         "material": "stone",
+         "place_hint": false,
+         "position": {
+          "x": 7,
+          "y": 1,
+          "z": 0
+         },
+         "stairs_down": false,
+         "stairs_up": false,
+         "wall": false
+        },
+        {
+         "asset": "terrain.floor.stone",
+         "door": null,
+         "key": "a70f5a629b600b232e8b14e01560ad3d16d581e3",
+         "material": "stone",
+         "place_hint": false,
+         "position": {
+          "x": 8,
+          "y": 0,
+          "z": 0
+         },
+         "stairs_down": false,
+         "stairs_up": false,
+         "wall": false
+        }
+       ],
+       "removed": [],
+       "shift": {
+        "x": -1,
+        "y": 0,
+        "z": 0
+       }
+      },
+      "combat": {
+       "actors": [],
+       "dead": false,
+       "hp": 20,
+       "max_hp": 20,
+       "messages": [],
+       "objective": null,
+       "preparation_active": false,
+       "preparation_remaining": null,
+       "recovery_remaining": 100,
+       "terminal": false,
+       "victory": false
+      },
+      "ground_items": [],
+      "inventory": [],
+      "places": [],
+      "position": {
+       "x": 0,
+       "y": 0,
+       "z": 0
+      },
+      "ready": false,
+      "revision": 1,
+      "tick": 0,
+      "visible_actors": [],
+      "wizard_game": false
+     },
+     "type": "observation_delta"
+    },
+    "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+    "cursor": {
+     "sequence": 2,
+     "tick": 0
+    }
+   }
+  },
+  {
+   "type": "update",
+   "update": {
+    "actor": 1,
+    "body": {
+     "entry": {
+      "actor": 1,
+      "audience": "actor",
+      "author": {
+       "type": "user",
+       "user": "local"
+      },
+      "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+      "content": {
+       "destination": "31c0eef5619c300d64362e5bc4abb043336307b3",
+       "type": "travel"
+      },
+      "id": "dce2cc2e-7032-460f-91b6-286cebb25c32",
+      "tick": 100
+     },
+     "status": {
+      "completed_steps": 0,
+      "destination": "31c0eef5619c300d64362e5bc4abb043336307b3",
+      "id": "dce2cc2e-7032-460f-91b6-286cebb25c32",
+      "phase": "active"
+     },
+     "type": "travel"
+    },
+    "branch": "6869cf62-1b41-437a-afee-f76cb50a59de",
+    "cursor": {
+     "sequence": 5,
+     "tick": 100
+    }
+   }
+  },
+  {
+   "actors": [
+    1
+   ],
+   "protocol": 20,
+   "role": "player",
+   "type": "welcome",
+   "user": "sample-user"
+  }
+ ]
+}

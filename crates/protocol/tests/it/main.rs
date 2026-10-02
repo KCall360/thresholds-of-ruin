@@ -2,4 +2,5 @@
 //! links one test executable instead of one per file.
 
 mod delta;
+mod samples;
 mod wire;

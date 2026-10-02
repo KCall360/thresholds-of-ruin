@@ -97,7 +97,7 @@ rotated joins. Simulation tests verify seen floor and ceiling cells and free
 rejected vertical movement. Server tests
 cover current rules, atomic setup, duplicate receipts, solid-cell rejection,
 rewind, and restart. Client tests cover surface prose and stale memory.
-`scripts/scenarios/material-volumes.json` and `scripts/test_material_process.py`
+`scripts/fixtures/material-volumes.json` and `scripts/test_material_process.py`
 exercise normal play plus wizard setup through real server/text/headless/native
 ASCII processes, including ceiling edits, stale memory, revisit, rewind, and resume.
 Existing CI discovery runs these on Windows and Linux in debug and release.

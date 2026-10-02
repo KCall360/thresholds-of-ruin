@@ -1,38 +1,19 @@
 """Portal geometry acceptance through server, text, headless and native ASCII."""
 import json
-from pathlib import Path
 import unittest
 
-import test_ascii_process as ascii_support
-import test_headless_process as headless_support
-import test_text_process as support
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, WIZARD_TOKEN, load_fixture
 
 
-class GeometryProcesses(unittest.TestCase):
-    launch = support.TextProcesses.launch
-    frame = headless_support.HeadlessProcesses.frame
-    command = headless_support.HeadlessProcesses.command
-    request = headless_support.HeadlessProcesses.request
-    client = headless_support.HeadlessProcesses.client
-    server = headless_support.HeadlessProcesses.server
-    ascii_frame = ascii_support.AsciiProcesses.frame
-
-    @classmethod
-    def setUpClass(cls):
-        ascii_support.AsciiProcesses.setUpClass.__func__(cls)
-
-    def setUp(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        self.save = Path(directory.name) / "geometry.json"
+class GeometryProcesses(ProcessTestCase):
+    graphical = True
 
     def test_wide_join_is_one_continuous_scene_in_every_frontend(self):
-        self.server(wizard=True, scenario="wide-join-setup")
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        fixture = json.loads((Path(__file__).parent / "scenarios/wide-join.json").read_text())
-        observer, seen = self.client(support.SPECTATOR_TOKEN)
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.save.parent / "wide.ppm"], token=support.SPECTATOR_TOKEN)
+        self.server(scenario="wide-join")
+        player, _ = self.client()
+        fixture = load_fixture("wide-join.json")
+        observer, seen = self.client(SPECTATOR_TOKEN)
+        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.save.parent / "wide.ppm"], token=SPECTATOR_TOKEN)
         frame = self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(frame["state"], seen["state"])
         o = seen["state"]["observation"]
@@ -44,48 +25,45 @@ class GeometryProcesses(unittest.TestCase):
                 self.assertIn((x, y), cells)
         for hidden in ("region", "portal", "quarter_turns", "West space", "East space"):
             self.assertNotIn(hidden, json.dumps(seen))
-        self.assertIn("offset (5, -1, 0)", wizard.command("look"))
-        for command in fixture["walk"]:
-            self.assertNotIn("Server error", wizard.command(command))
+        self.play(player, fixture["walk"])
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["inventory"][0]["name"], "stone tablet")
         self.assertEqual(arrived["state"]["observation"]["tick"], 650)
-        ascii_support.AsciiProcesses.key(self, ascii_client, "escape")
+        self.key(ascii_client, "escape")
         ascii_client.child.wait(timeout=10)
         self.assertTrue((self.save.parent / "wide.ppm").exists())
 
     def test_rotated_sight_occlusion_memory_stairs_rewind_and_resume(self):
-        server = self.server(wizard=True, scenario="portal-geometry-setup")
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        observer, initial = self.client(support.SPECTATOR_TOKEN)
-        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=support.SPECTATOR_TOKEN)
+        server = self.server(wizard=True, scenario="portal-geometry")
+        # The wizard also plays the character, so it keeps control.
+        wizard, _ = self.client(WIZARD_TOKEN)
+        observer, initial = self.client(SPECTATOR_TOKEN)
+        ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
         initial_ascii = self.ascii_frame(ascii_client, lambda frame: frame["state"] is not None and not frame["busy"])
-        fixture = json.loads((Path(__file__).parent / "scenarios/portal-geometry.json").read_text())
+        fixture = load_fixture("portal-geometry.json")
         visible = self.request(observer, {"type": "snapshot"})
         remote = {"x": 0, "y": -3, "z": 0}
         o = visible["state"]["observation"]
         self.assertTrue(any(item["position"] == remote for item in o["ground_items"]))
         self.assertTrue(all("region" not in item["position"] for item in o["ground_items"]))
         self.assertNotIn("known_places", o)
-        self.assertIn("offset (0, -3, 0)", wizard.command("look"))
-        self.assertIn("Server error", wizard.command("take tablet"))  # Visible is not reachable.
+        tablet = next(i["item"]["id"] for i in o["ground_items"] if i["position"] == remote)
+        self.assertIsNotNone(self.act(wizard, {"type": "take", "item": tablet})["error"])  # Visible is not reachable.
         ascii_seen = initial_ascii
         self.assertEqual(ascii_seen["state"], visible["state"])
-        self.assertNotIn("Server error", wizard.command("wizard wall 1 1 0 0 closed"))
+        self.wizard_command(wizard, "wall 1 1 0 0 closed")
         occluded = self.request(observer, {"type": "snapshot"})
         self.assertFalse(any(item["position"] == remote for item in occluded["state"]["observation"]["ground_items"]))
         old_memory = next(cell for cell in occluded["memory"] if cell["position"] == remote)
         self.assertEqual(len(old_memory["ground_items"]), 1)
-        self.assertIn("Server error", wizard.command("wizard teleport 1 1 1 0 0"))
-        wizard.command("wizard item token 3 1 2 1")
+        self.wizard_command(wizard, "teleport 1 1 1 0 0", succeeds=False)
+        self.wizard_command(wizard, "item token 3 1 2 1")
         hidden = self.request(observer, {"type": "snapshot"})
         self.assertEqual(next(cell for cell in hidden["memory"] if cell["position"] == remote), old_memory)
-        wizard.command("wizard wall 1 1 0 0 open")
+        self.wizard_command(wizard, "wall 1 1 0 0 open")
         refreshed = self.request(observer, {"type": "snapshot"})
         self.assertEqual(len(next(cell for cell in refreshed["memory"] if cell["position"] == remote)["ground_items"]), 2)
-        for command in fixture["walk"]:
-            self.assertNotIn("Server error", wizard.command(command))
+        self.play(wizard, fixture["walk"])
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["position"], fixture["destination"])
         self.assertEqual(arrived["state"]["observation"]["tick"], fixture["tick"])
@@ -95,15 +73,14 @@ class GeometryProcesses(unittest.TestCase):
             client.stop()
         server.stop()
         server = self.server(wizard=True)
-        wizard = self.launch("tor-client-text", ["--connect", self.address], token=headless_support.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        observer, resumed = self.client(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        observer, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], arrived["state"])
-        self.assertNotIn("Server error", wizard.command("wizard rewind initial"))
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer, {"type": "snapshot"})
         self.assertNotEqual(rewound["branch"], initial["branch"])
         self.assertEqual(rewound["state"]["observation"], initial["state"]["observation"])
-        self.assertNotIn("Server error", wizard.command("wizard teleport 1 3 1 2 1"))
+        self.wizard_command(wizard, "teleport 1 3 1 2 1")
 
 
 if __name__ == "__main__":

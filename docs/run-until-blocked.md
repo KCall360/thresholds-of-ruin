@@ -132,7 +132,7 @@ No save-format change was needed: travel status and jobs are session-local.
 
 ## Tests
 
-- **Session service tests** (`session.rs`, `travel_tests.rs`): AI turns run
+- **Session service tests** (`session.rs`, `run_tests.rs`): AI turns run
   until a controlled actor is due; AI doesn't play when nobody controls an
   actor; a full client queue pauses the run and it resumes without losing an
   update; a journey completes in one run; commands during a journey get
@@ -145,8 +145,11 @@ No save-format change was needed: travel status and jobs are session-local.
   timeout and the controller's journey finishes, over the real mailbox.
 - **Clients**: the ASCII presentation tests skip a journey and change the pace;
   the client-common travel tests use the remaining phases.
-- **Process**: the existing travel, adventure, dungeon, stream recovery and
-  WebSocket suites run against the new server.
+- **Process**: `scripts/test_run_until_blocked_process.py` pauses a real
+  spectator's connection while the player keeps acting: play continues, the
+  spectator is disconnected after the stall timeout, and a new spectator
+  starts at the committed state. The travel, adventure, dungeon and stream
+  recovery suites also run against the new server.
 
 ## Performance
 

@@ -1,27 +1,22 @@
 """Offline validation and ordinary package startup through actual executables."""
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import unittest
 
-import test_text_process as support
+from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
-class ScenarioPackageProcesses(unittest.TestCase):
-    setUpClass = classmethod(support.TextProcesses.setUpClass.__func__)
-
+class ScenarioPackageProcesses(ProcessTestCase):
     def test_validator_stale_rejection_and_ordinary_startup(self):
-        directory = support.ProcessTestDirectory()
-        self.addCleanup(directory.cleanup)
-        package = Path(directory.name) / 'package'
-        shutil.copytree(support.ROOT / 'scenarios/two-room', package)
+        package = self.directory / 'package'
+        shutil.copytree(ROOT / 'scenarios/two-room', package)
         env = {k:v for k,v in os.environ.items() if k not in ('TOR_WIZARD_TOKEN','TOR_SPECTATOR_TOKEN')}
-        env['TOR_SERVER_TOKEN'] = support.TOKEN
+        env['TOR_SERVER_TOKEN'] = TOKEN
         def start(*args):
             return subprocess.run([self.bin / ('tor-server' + self.suffix), *args,
-                                   '--save', Path(directory.name) / 'game.db'], env=env,
+                                   '--save', self.directory / 'game.db'], env=env,
                                   capture_output=True, text=True, timeout=15)
         # An edited manifest is stale when the package loads; an edited region
         # file when its region is built, which here is at the start.
@@ -37,18 +32,18 @@ class ScenarioPackageProcesses(unittest.TestCase):
         result = start('--scenario', package)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('changed since', result.stderr)
-        self.assertFalse((Path(directory.name) / 'game.db').exists())
+        self.assertFalse((self.directory / 'game.db').exists())
         result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         certificate = json.loads(result.stdout)
         self.assertEqual(certificate['regions'], 2)
         self.assertIn('all authored regions', certificate['coverage'])
-        server = support.Process(self.bin / ('tor-server' + self.suffix),
-                                 ['--listen','127.0.0.1:0','--scenario',package,'--save',Path(directory.name)/'game.db'])
+        server = Process(self.bin / ('tor-server' + self.suffix),
+                                 ['--listen','127.0.0.1:0','--scenario',package,'--save',self.directory/'game.db'])
         self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = support.Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
+        client = Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
         self.addCleanup(client.stop)
         client.until(lambda line: '"type":"ready"' in line)
         client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")
@@ -58,13 +53,13 @@ class ScenarioPackageProcesses(unittest.TestCase):
         client.stop(); server.stop()
         # Both regions were built at the start, so the save holds both region
         # files and resumes with the package gone.
-        moved = Path(directory.name) / 'moved'
+        moved = self.directory / 'moved'
         package.rename(moved)
-        server = support.Process(self.bin / ('tor-server' + self.suffix),
-                                 ['--listen','127.0.0.1:0','--save',Path(directory.name)/'game.db'])
+        server = Process(self.bin / ('tor-server' + self.suffix),
+                                 ['--listen','127.0.0.1:0','--save',self.directory/'game.db'])
         self.addCleanup(server.stop)
         address = json.loads(server.until(lambda line:line.startswith('{')))['address']
-        client = support.Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
+        client = Process(self.bin / ('tor-client-headless' + self.suffix), ['--connect', address])
         self.addCleanup(client.stop)
         client.until(lambda line: '"type":"ready"' in line)
         client.child.stdin.write(json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n")

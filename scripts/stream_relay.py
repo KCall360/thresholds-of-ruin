@@ -20,8 +20,13 @@ def exact(stream, size):
 
 
 class StreamRelay:
-    def __init__(self, upstream):
+    def __init__(self, upstream, receive_buffer=None):
+        """Relay a client to the server at `upstream`. A small `receive_buffer`
+        (bytes) on the relay's server connection keeps a paused relay from
+        absorbing the server's output in socket buffers, which Linux grows to
+        megabytes, so the server's own queue fills instead."""
         self.upstream = upstream
+        self.receive_buffer = receive_buffer
         self.gate = threading.Event()
         self.gate.set()
         self.held = threading.Event()
@@ -41,7 +46,12 @@ class StreamRelay:
             downstream, _ = self.listener.accept()
             self.sockets.append(downstream)
             host, port = self.upstream.rsplit(':', 1)
-            upstream = socket.create_connection((host, int(port)), timeout=10)
+            upstream = socket.socket()
+            if self.receive_buffer:
+                # Set before connecting so the advertised window starts small.
+                upstream.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.receive_buffer)
+            upstream.settimeout(10)
+            upstream.connect((host, int(port)))
             upstream.settimeout(None)
             self.sockets.append(upstream)
             sender = threading.Thread(target=self.forward, args=(downstream, upstream), daemon=True)

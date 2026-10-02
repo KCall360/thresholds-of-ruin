@@ -110,7 +110,7 @@ snapshot retention, rewind reset, reconnect, and atomic rejection of bad streams
 `scripts/test_headless_process.py` drives real server/headless/text processes for
 ordinary play, live spectator results, denied writes, control transfer, malformed
 input, authentication, save/resume, and wizard-based hidden changes and rewind.
-The versioned wizard script is `scripts/scenarios/perception-memory.json`.
+The versioned wizard script is `scripts/fixtures/perception-memory.json`.
 These tests join existing Windows/Linux discovery in debug and release; native
 text/ASCII process coverage remains required alongside this headless frontend.
 

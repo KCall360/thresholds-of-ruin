@@ -207,7 +207,7 @@ mod tests {
     use crate::parser::token::tokenize;
 
     #[test]
-    fn test_parse_simple_noun() {
+    fn parse_simple_noun() {
         let tokens = tokenize("the copper token");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert_eq!(np.determiner.as_deref(), Some("the"));
@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_quantity_noun() {
+    fn parse_quantity_noun() {
         let tokens = tokenize("3 arrows");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert_eq!(np.quantity, Some(3));
@@ -225,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ordinal() {
+    fn parse_ordinal_noun() {
         let tokens = tokenize("the second door");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert_eq!(np.ordinal, Some(2));
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_the_copper_one() {
+    fn parse_the_copper_one() {
         let tokens = tokenize("the copper one");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert_eq!(np.determiner.as_deref(), Some("the"));
@@ -243,14 +243,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_pronoun() {
+    fn parse_pronoun_noun() {
         let tokens = tokenize("it");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert_eq!(np.pronoun, Some(Pronoun::It));
     }
 
     #[test]
-    fn test_parse_all_except() {
+    fn parse_all_except() {
         let tokens = tokenize("all except the copper token");
         let np = parse_noun_phrase(&tokens).unwrap();
         assert!(np.all);
@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_conjunction() {
+    fn split_conjunction() {
         let tokens = tokenize("copper token, silver token, and stone tablet");
         let parts = split_conjunction_phrases(&tokens);
         assert_eq!(parts.len(), 3);

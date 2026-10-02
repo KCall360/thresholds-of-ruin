@@ -1,0 +1,28 @@
+{
+  "walk": [
+    {
+      "move": "north"
+    },
+    {
+      "move": "north"
+    },
+    {
+      "move": "north"
+    },
+    {
+      "take": "stone tablet"
+    },
+    {
+      "move": "down"
+    },
+    {
+      "move": "up"
+    }
+  ],
+  "destination": {
+    "x": 0,
+    "y": 0,
+    "z": 0
+  },
+  "tick": 550
+}

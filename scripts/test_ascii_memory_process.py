@@ -3,23 +3,14 @@ import json
 import os
 import shutil
 import unittest
-import test_text_process as support
-import test_headless_process as headless
-import test_ascii_process as ascii_support
+
+from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 
 
-class AsciiMemoryProcesses(unittest.TestCase):
-    setUpClass = classmethod(ascii_support.AsciiProcesses.setUpClass.__func__)
-    setUp = headless.HeadlessProcesses.setUp
-    launch = support.TextProcesses.launch
-    server = headless.HeadlessProcesses.server
-    client = headless.HeadlessProcesses.client
-    request = headless.HeadlessProcesses.request
-    command = headless.HeadlessProcesses.command
-    frame = headless.HeadlessProcesses.frame
-    key = ascii_support.AsciiProcesses.key
+class AsciiMemoryProcesses(ProcessTestCase):
+    graphical = True
 
-    def window(self, token=support.TOKEN):
+    def window(self, token=TOKEN):
         self.capture = self.save.parent / "memory.ppm"
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.capture], token=token)
         return window, self.frame(window, lambda f: f.get("state") and not f["busy"])
@@ -27,15 +18,9 @@ class AsciiMemoryProcesses(unittest.TestCase):
     def tile(self, frame, x, y=0, z=0):
         return next(t for t in frame["map_tiles"] if t["position"] == {"x":x,"y":y,"z":z})
 
-    def setup_wizard(self):
-        wizard = self.launch("tor-client-text", ["--connect",self.address], token=headless.WIZARD_TOKEN)
-        wizard.until(lambda line: line == "Ready.")
-        wizard.command("release")
-        return wizard
-
     def test_normal_occlusion_movement_pickup_refresh_and_fresh_resume(self):
         server = self.server()
-        observer, _ = self.client(support.SPECTATOR_TOKEN)
+        observer, _ = self.client(SPECTATOR_TOKEN)
         window, _ = self.window()
         for _ in range(3): self.key(window,"right")
         self.key(window,"close_door")
@@ -78,7 +63,7 @@ class AsciiMemoryProcesses(unittest.TestCase):
 
     def test_rotated_crossing_keeps_item_aligned_and_rewind_clears_chart(self):
         self.server(wizard=True, scenario="ascii-memory-rotated")
-        wizard = self.setup_wizard()
+        wizard = self.wizard()
         window, initial = self.window()
         self.assertEqual(self.tile(initial,-1)["glyph"],"!")
         self.key(window,"right")
@@ -87,28 +72,26 @@ class AsciiMemoryProcesses(unittest.TestCase):
         hidden = self.key(window,"left")
         self.assertEqual(self.tile(hidden,-3)["glyph"],"!")
         self.assertTrue(self.tile(hidden,-3)["remembered"])
-        wizard.command("sync")
-        self.assertNotIn("Server error",wizard.command("wizard rewind initial"))
+        self.wizard_command(wizard, "rewind initial")
         rewound = self.frame(window,lambda f:f.get("branch") != hidden["branch"])
         self.assertFalse(any(t["remembered"] for t in rewound["map_tiles"]))
 
     def test_spectator_hides_unseen_actor_but_retains_item_and_ignores_hidden_changes(self):
         self.server(wizard=True, scenario="ascii-memory-actors")
-        wizard = self.setup_wizard()
-        window, initial = self.window(support.SPECTATOR_TOKEN)
+        wizard = self.wizard()
+        window, initial = self.window(SPECTATOR_TOKEN)
         self.assertEqual(self.tile(initial,4)["glyph"],"&")
-        self.assertNotIn("Server error",wizard.command("wizard wall 3 2 0 0 closed"))
+        self.wizard_command(wizard, "wall 3 2 0 0 closed")
         hidden = self.frame(window,lambda f:f.get("state",{}).get("revision",0)>initial["state"]["revision"])
         self.assertEqual(self.tile(hidden,4)["glyph"],"!")
         self.assertTrue(self.tile(hidden,4)["remembered"])
         self.assertFalse(any(t["glyph"] == "&" for t in hidden["map_tiles"]))
-        self.assertNotIn("Server error",wizard.command("wizard item token 3 3 0 0"))
+        self.wizard_command(wizard, "item token 3 3 0 0")
         stale = self.frame(window,lambda f:f.get("state",{}).get("revision",0)>hidden["state"]["revision"])
         self.assertEqual(self.tile(stale,3)["glyph"],".")
         self.assertTrue(self.tile(stale,3)["remembered"])
         # Snapshot refresh cannot disclose the hidden new token.
-        wizard.command("sync")
-        self.assertNotIn("Server error",wizard.command("wizard wall 3 2 0 0 open"))
+        self.wizard_command(wizard, "wall 3 2 0 0 open")
         seen = self.frame(window,lambda f:f.get("state",{}).get("revision",0)>=hidden["state"]["revision"]+2)
         self.assertEqual(self.tile(seen,3)["glyph"],"!")
         self.assertFalse(self.tile(seen,3)["remembered"])

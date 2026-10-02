@@ -1,0 +1,13 @@
+# Ordinary authored scenario; validate after every edit.
+# Three-dimensional sight from a two-cell character's eye cell: a waist-high
+# wall it looks over, a creature hovering at head height, and a closed door
+# filling its two-cell doorway.
+format = 2
+id = "sight-3d"
+version = "1.0"
+ruleset = "dungeon-v17"
+default_character = 1
+themes = ["stone"]
+zones = { "hall" = {  } }
+archetypes = { "token" = { "name" = "copper token" }, "tablet" = { "name" = "stone tablet" } }
+characters = [{ "id" = 1, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0],[0,0,1]], eye = [0,0,1], mass = 80 } }]

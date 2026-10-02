@@ -485,7 +485,7 @@ mod tests {
     use crate::parser::token::tokenize;
 
     #[test]
-    fn test_directional() {
+    fn directional() {
         let tokens = tokenize("north");
         assert_eq!(
             match_sentence(&tokens).unwrap(),
@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transitive() {
+    fn transitive() {
         let tokens = tokenize("take the copper token");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Transitive { verb, direct } => {
@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiword_verbs() {
+    fn multiword_verbs() {
         let tokens = tokenize("pick up 3 arrows");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Transitive { verb, direct } => {
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ditransitive_combat() {
+    fn ditransitive_combat() {
         let tokens = tokenize("attack the goblin with iron sword");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Ditransitive {
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ditransitive_manipulation() {
+    fn ditransitive_manipulation() {
         let tokens = tokenize("take copper token from stone floor");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Ditransitive {
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_transitive() {
+    fn multi_transitive() {
         let tokens = tokenize("take sword and shield");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::MultiTransitive { verb, direct_list } => {
@@ -594,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clarification_noun_phrase() {
+    fn clarification_noun_phrase() {
         let tokens = tokenize("the copper one");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Clarification(np) => {
@@ -606,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expanded_verbs() {
+    fn expanded_verbs() {
         let tokens = tokenize("put on the iron ring");
         match match_sentence(&tokens).unwrap() {
             ParsedCommand::Transitive { verb, direct } => {
@@ -692,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_commands() {
+    fn session_commands() {
         let tokens = tokenize("save");
         assert_eq!(
             match_sentence(&tokens).unwrap(),
