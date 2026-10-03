@@ -97,7 +97,7 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, open or close <door>, attack <creature>, go to <thing>, a direction (north, ne, up...), wait, inventory, places, name room <name>, again and quit. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 /// What the game can't do yet, as the refusal says it.

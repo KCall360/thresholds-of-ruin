@@ -59,6 +59,8 @@ class AdventureProcesses(ProcessTestCase):
         help_text = self.say(player, "help")
         for extra in ("wizard", "control", "step", "sync", "history", "Ready."):
             self.assertNotIn(extra, help_text)
+        for command in ("go to exit", "go to start", "status", "brief, verbose"):
+            self.assertIn(command, help_text)
 
     def test_a_turn_ends_before_the_next_command_and_spectators_cannot_act(self):
         self.server()
