@@ -80,6 +80,7 @@ impl<'a> Columns<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Door {
+        id: u64,
         name: String,
         open: bool,
     },
@@ -104,12 +105,19 @@ impl Way {
     /// "an archway", "a closed wooden door".
     pub fn label(&self) -> String {
         match &self.kind {
-            Opening::Door { name, open } => super::prose::indefinite(&format!(
-                "{} {name}",
-                if *open { "open" } else { "closed" }
-            )),
-            Opening::Passage => "a passage".into(),
-            Opening::Archway => "an archway".into(),
+            Opening::Stairs => "stairs".into(),
+            _ => super::prose::indefinite(&self.kind_name()),
+        }
+    }
+
+    /// What it is, without an article: "archway", "open wooden door".
+    pub fn kind_name(&self) -> String {
+        match &self.kind {
+            Opening::Door { name, open, .. } => {
+                format!("{} {name}", if *open { "open" } else { "closed" })
+            }
+            Opening::Passage => "passage".into(),
+            Opening::Archway => "archway".into(),
             Opening::Stairs => "stairs".into(),
         }
     }
@@ -344,6 +352,7 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
         .unwrap_or(Direction::North);
     let kind = match door {
         Some(d) => Opening::Door {
+            id: d.id,
             name: if d.name.trim().is_empty() {
                 "door".into()
             } else {

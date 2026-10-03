@@ -8,8 +8,8 @@ class AdventureProcesses(ProcessTestCase):
     def test_ordinary_prose_examination_directional_travel_pickup_and_restart(self):
         server = self.server()
         player, welcome = self.adventure()
-        self.assertIn("stone floor", welcome)
-        self.assertIn("You can head east.", welcome)
+        self.assertIn("chamber of stone", welcome)
+        self.assertIn("An open wooden door leads east.", welcome)
         self.assertNotIn("You are in control", welcome)
         self.assertNotIn("north", welcome)
         self.assertNotIn("south", welcome)
@@ -34,7 +34,9 @@ class AdventureProcesses(ProcessTestCase):
     def test_approach_then_take_is_a_travel_request_and_ordinary_saved_actions(self):
         self.server()
         player, _ = self.adventure()
-        self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
+        # The tablet is in the next room, so arriving there describes it.
+        fetched = self.say(player, "get tablet")
+        self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\nHidden Promise\nYou are in "), fetched)
         observer, initial = self.client(SPECTATOR_TOKEN)
         self.assertEqual(initial["state"]["observation"]["tick"], 750)
         self.assertEqual([i["name"] for i in initial["state"]["observation"]["inventory"]], ["stone tablet"])
@@ -49,10 +51,9 @@ class AdventureProcesses(ProcessTestCase):
         for _ in range(3):
             self.say(player, "step east")
         description = self.say(player, "look")
-        self.assertIn("You see a copper token on the floor nearby.", description)
-        self.assertIn("You see a stone tablet to the east.", description)
-        self.assertIn("You can head east.", description)
-        self.assertNotIn("You can head west", description)
+        self.assertIn("A copper token lies on the floor nearby; a stone tablet lies to the east.", description)
+        self.assertIn("An open wooden door leads east.", description)
+        self.assertNotIn("west", description)
         self.assertEqual("You can't see a way north.\n> ", self.say(player, "north"))
         self.assertEqual("You walk over to the copper token and pick it up.\n> ", self.say(player, "get token"))
         help_text = self.say(player, "help")
@@ -89,9 +90,12 @@ class AdventureProcesses(ProcessTestCase):
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
         self.server(scenario="portal-geometry")
         player, welcome = self.adventure()
-        self.assertIn("walls of stone", welcome)
+        self.assertIn("chamber of stone", welcome)
         self.assertIn("made of stone", self.say(player, "examine walls"))
-        self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
+        fetched = self.say(player, "get tablet")
+        self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\n"), fetched)
+        # The first token is told plainly, a second one as another.
+        self.assertIn("A copper token lies on the floor nearby; another copper token lies to the south.", fetched)
         self.assertIn("You walk down.", self.say(player, "down"))
         self.assertIn("You walk up.", self.say(player, "up"))
         observer, state = self.client(SPECTATOR_TOKEN)
@@ -202,10 +206,12 @@ class AdventureProcesses(ProcessTestCase):
         self.server()
         player, _ = self.adventure()
         # Sensory inspection
+        # The place's own sound and smell, the same each time.
         listen = self.say(player, "listen")
-        self.assertTrue(any(word in listen.lower() for word in ("silence", "quiet", "sound", "hum", "hear")))
+        self.assertTrue(listen.endswith(".\n> ") and "can't" not in listen, listen)
+        self.assertEqual(listen, self.say(player, "listen"))
         smell = self.say(player, "smell")
-        self.assertTrue(any(word in smell.lower() for word in ("scent", "air", "smell", "dust", "stone", "damp")))
+        self.assertTrue(smell.endswith(".\n> ") and "can't" not in smell, smell)
         # Architectural examination
         self.assertIn("walls are made of stone", self.say(player, "examine walls"))
         self.assertIn("floor is made of stone", self.say(player, "examine floor"))
@@ -232,13 +238,13 @@ class AdventureProcesses(ProcessTestCase):
         self.assertNotIn("You see yourself at your feet", welcome)
         self.assertNotIn("delver", welcome)
         # Geometry-derived exits & spatial synthesis
-        self.assertIn("stone floor", welcome)
-        self.assertIn("You can head east.", welcome)
+        self.assertIn("chamber of stone", welcome)
+        self.assertIn("An open wooden door leads east.", welcome)
         # Directional navigation into Region 2 (Broken gallery)
         walk_east = self.say(player, "east")
         self.assertIn("You walk east.", walk_east)
         # In Region 2, Broken gallery is presented and includes an exit back west
-        self.assertIn("You can head", walk_east)
+        self.assertIn("An open wooden door leads west.", walk_east)
         # Moving back west through portal
         walk_west = self.say(player, "west")
         self.assertIn("You walk west.", walk_west)
@@ -265,16 +271,15 @@ class AdventureProcesses(ProcessTestCase):
         for passage in fight:
             self.assertTrue(passage.endswith("> "), passage)
             self.assertEqual(passage.count("> "), 1, passage)
-        self.assertEqual(
-            "You walk over to the ruin scout corpse and pick it up.\n> ",
-            self.say(player, "take corpse"),
-        )
+        # The corpse lies in the next room's doorway, so that room follows.
+        taken = self.say(player, "take corpse")
+        self.assertTrue(taken.startswith("You walk over to the ruin scout corpse and pick it up.\n"), taken)
         self.assertIn("ruin scout corpse", self.say(player, "inventory"))
 
     def test_rooms_are_described_from_their_extent_and_doors_are_their_ways(self):
         self.server()
         player, welcome = self.adventure()
-        self.assertRegex(welcome, r"You are in a small, \w+ chamber with a stone floor and walls of stone\. \S")
+        self.assertRegex(welcome, r"You are in a small, \w+ chamber of stone\. \S")
         self.assertNotIn("Stone Hall", welcome)
         # Atmosphere is fixed for the place.
         room = next(line for line in welcome.split("\n") if line.startswith("You are in"))
@@ -282,10 +287,33 @@ class AdventureProcesses(ProcessTestCase):
         # Through the open door, into the other room, and back.
         arrived = self.say(player, "east")
         self.assertIn("You walk east.", arrived)
-        self.assertIn("You can head west.", arrived)
+        self.assertIn("An open wooden door leads west.", arrived)
         self.assertIn("You walk west.", self.say(player, "west"))
         self.assertIn("You walk over to the wooden door and close it.", self.say(player, "close door"))
         self.assertEqual("The wooden door to the east is closed.\n> ", self.say(player, "east"))
+
+    def test_places_are_told_in_prose_and_named_briefly_when_seen_before(self):
+        self.server()
+        player, welcome = self.adventure()
+        self.assertIn("A copper token lies at your feet; a stone tablet lies to the east.", welcome)
+        for listing in ("You see", "You can head"):
+            self.assertNotIn(listing, welcome)
+        room = next(line for line in welcome.split("\n") if line.startswith("You are in"))
+        there = self.say(player, "east")
+        self.assertTrue(there.startswith("You walk east.\nHidden Promise\nYou are in "), there)
+        self.assertIn("An open wooden door leads west.", there)
+        # Back in a place already described: its name, ways and contents.
+        back = self.say(player, "west")
+        self.assertEqual(
+            "You walk west.\nHollow Promise\nAn open wooden door leads east.\n"
+            "A copper token lies on the floor nearby; a stone tablet lies to the east.\n> ",
+            back,
+        )
+        # Looking describes it in full, with the same atmosphere as before.
+        self.assertIn(room, self.say(player, "look"))
+        self.assertIn("every time", self.say(player, "verbose"))
+        self.say(player, "east")
+        self.assertIn(room, self.say(player, "west"))
 
 
 if __name__ == "__main__":

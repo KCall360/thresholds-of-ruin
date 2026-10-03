@@ -50,16 +50,21 @@ actually visible; an undisclosed cell or region boundary is not called a wall.
 
 The character is always in a *place*: the open floor reachable without passing
 a door or a narrow gap in the walls, worked out from what is seen (see
-[places and ways](if-engine.md#places-and-ways)). A description says what kind
-of place it is, its floor and walls, and where it goes on out of sight:
+[places and ways](if-engine.md#places-and-ways)). A description, in prose,
+says what kind of place it is and what it's made of, its atmosphere, where it
+goes on out of sight and its ways out, then who and what is in it:
 
 ```text
-You are in a small, dusty chamber with a stone floor and walls of stone. A quiet
-chill lingers among the stones, where faint echoes answer your breath.
-You see a copper token on the floor nearby.
-You see an open wooden door to the east.
-You can head east.
+Hollow Promise
+You are in a small, dusty chamber of stone. Motes of dust hang in the still
+air, stirring as you move. An open wooden door leads east.
+A copper token lies on the floor nearby; a stone tablet lies to the east.
 ```
+
+Arriving somewhere already described gives its name, ways and contents only;
+`verbose` describes every arrival in full, `superbrief` names places only, and
+`brief` returns to the default. `look` always describes in full. See
+[descriptions](if-engine.md#descriptions).
 
 Things inside the place are "at your feet" or "on the floor nearby"; anything
 outside it keeps its direction. The ways onward are the place's doors and gaps,
@@ -73,9 +78,10 @@ blocked journey says so, naming a creature in the way.
 Bearings follow the observer frame, including rotated joins. Diagonal sectors
 cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
 adds persistent mnemonic names and renaming. Descriptions never invent walls or
-region names the protocol doesn't disclose. Atmosphere (a mood word, a sentence
-of sound or scent) colours each place, has no effect on play, and is the same
-every time the place is described.
+region names the protocol doesn't disclose. Atmosphere (a mood word, the
+feel of the air, a smell or a sound) colours each place, has no effect on play,
+and is the same every time the place is described; see
+[atmosphere](if-engine.md#atmosphere).
 
 ## Commands
 
@@ -85,7 +91,9 @@ tablet` walks over first when it's out of reach. See the
 
 - `look` / `l`; `examine <thing>` / `x` / `look at`; `read <thing>`;
   `examine walls`, `floor` or `ceiling` for visible surface materials;
-  `examine me` and `diagnose` for the character's condition.
+  `examine me` and `diagnose` for the character's condition; `status` (or
+  `score`) adds the run's objective.
+- `brief`, `verbose` and `superbrief` choose how arrivals are described.
 - `inventory` / `i`.
 - `take` / `get` / `pick up` / `grab <thing>`; `drop` / `put down`; `put <thing>
   on floor`. Counts take from one stack: `take 3 arrows`.

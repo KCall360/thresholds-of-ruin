@@ -35,6 +35,9 @@ pub struct Episode {
     /// How its object was named when it began: "the copper token", "three
     /// arrows", "east".
     pub object: String,
+    /// Things taken or dropped: how many, and their singular name, so alike
+    /// things are counted together ("the 17 arrows").
+    pub counted: Option<(u64, String)>,
     /// Whether the character set off on a journey for it.
     pub approached: bool,
     pub beats: Vec<Beat>,
@@ -151,8 +154,8 @@ fn told(beat: &Beat) -> bool {
 pub fn compose(record: &Record) -> String {
     let mut blocks: Vec<String> = Vec::new();
     let mut teller = Teller::default();
-    let mut simple: Option<(&'static str, Vec<String>)> = None;
-    let flush_simple = |teller: &mut Teller, simple: &mut Option<(&'static str, Vec<String>)>| {
+    let mut simple: Option<(&'static str, Vec<Object>)> = None;
+    let flush_simple = |teller: &mut Teller, simple: &mut Option<(&'static str, Vec<Object>)>| {
         if let Some((verb, objects)) = simple.take() {
             teller.say(format!("you {verb} {}", prose::and_list(&alike(&objects))));
         }
@@ -162,10 +165,10 @@ pub fn compose(record: &Record) -> String {
         if let Entry::Episode(e) = entry {
             if let Some(verb) = simple_verb(e) {
                 match &mut simple {
-                    Some((v, objects)) if *v == verb => objects.push(e.object.clone()),
+                    Some((v, objects)) if *v == verb => objects.push(Object::of(e)),
                     _ => {
                         flush_simple(&mut teller, &mut simple);
-                        simple = Some((verb, vec![e.object.clone()]));
+                        simple = Some((verb, vec![Object::of(e)]));
                     }
                 }
                 continue;
@@ -199,20 +202,52 @@ pub fn compose(record: &Record) -> String {
     blocks.join("\n")
 }
 
-/// Repeated objects counted together: "the two copper tokens".
-fn alike(objects: &[String]) -> Vec<String> {
-    let mut counted: Vec<(&String, u64)> = Vec::new();
+/// What a plain pickup or drop was of.
+struct Object {
+    /// As named when it began: "the copper token".
+    named: String,
+    counted: Option<(u64, String)>,
+}
+
+impl Object {
+    fn of(e: &Episode) -> Self {
+        Object {
+            named: e.object.clone(),
+            counted: e.counted.clone(),
+        }
+    }
+}
+
+/// Alike things counted together: three stacks of arrows are "the 17
+/// arrows", two copper tokens taken one by one "the two copper tokens".
+fn alike(objects: &[Object]) -> Vec<String> {
+    let mut counted: Vec<(&str, u64, Option<&str>)> = Vec::new();
     for object in objects {
-        match counted.iter_mut().find(|(o, _)| *o == object) {
-            Some((_, n)) => *n += 1,
-            None => counted.push((object, 1)),
+        let (n, name) = match &object.counted {
+            Some((n, name)) => (*n, Some(name.as_str())),
+            None => (1, None),
+        };
+        let same = |(named, _, singular): &&mut (&str, u64, Option<&str>)| match name {
+            Some(name) => *singular == Some(name),
+            None => *named == object.named,
+        };
+        match counted.iter_mut().find(same) {
+            Some((_, total, _)) => *total += n,
+            None => counted.push((&object.named, n, name)),
         }
     }
     counted
         .into_iter()
-        .map(|(object, n)| match object.strip_prefix("the ") {
-            Some(name) if n > 1 => format!("the {} {}", prose::number(n), prose::plural(name)),
-            _ => object.clone(),
+        .map(|(named, n, singular)| match singular {
+            // Some of a stack is "two arrows"; a whole one "the two arrows".
+            Some(name) if named.starts_with("the ") => prose::counted_definite(n, name),
+            Some(name) => prose::counted(n, name),
+            None => match named.strip_prefix("the ") {
+                Some(name) if n > 1 => {
+                    format!("the {} {}", prose::number(n), prose::plural(name))
+                }
+                _ => named.to_owned(),
+            },
         })
         .collect()
 }
@@ -702,6 +737,7 @@ mod tests {
         Entry::Episode(Episode {
             goal,
             object: object.into(),
+            counted: None,
             approached,
             beats,
             end,

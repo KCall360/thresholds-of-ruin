@@ -262,7 +262,9 @@ pub fn parse_verb(word: &str) -> Option<Verb> {
         "talk" | "speak" | "chat" | "converse" | "greet" | "hello" | "hi" => Some(Verb::Talk),
         "ask" | "question" | "query" => Some(Verb::Ask),
         "tell" | "inform" => Some(Verb::Tell),
-        "diagnose" | "health" | "status" => Some(Verb::Diagnose),
+        "diagnose" | "health" | "status" | "score" | "objective" | "goal" | "quest" => {
+            Some(Verb::Diagnose)
+        }
         _ => None,
     }
 }

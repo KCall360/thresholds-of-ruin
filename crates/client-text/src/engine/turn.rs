@@ -311,6 +311,18 @@ fn object(goal: &Goal, scene: &Scene) -> String {
     .unwrap_or_else(|| "it".into())
 }
 
+/// How many things a take or drop is of, and their singular name.
+fn counted(goal: &Goal, scene: &Scene) -> Option<(u64, String)> {
+    match goal {
+        Goal::Take { item, quantity } | Goal::Drop { item, quantity } => {
+            let r = scene.get(Key::Item(*item))?;
+            let n = quantity.map_or(r.quantity, |q| q.min(r.quantity));
+            Some((n, r.name.clone()))
+        }
+        _ => None,
+    }
+}
+
 fn refusal(code: ErrorCode, goal: &Goal) -> String {
     match code {
         ErrorCode::InvalidAction => match goal {
@@ -359,11 +371,13 @@ pub async fn run_goal(
 ) -> Result<bool, Error> {
     let start = Scene::new(link.client().state(), link.palette());
     let object = object(&goal, &start);
+    let counted = counted(&goal, &start);
     let known = start.figure_ids();
     drop(start);
     let mut episode = Episode {
         goal: goal.clone(),
         object,
+        counted,
         approached: false,
         beats: Vec::new(),
         end: End::Done,

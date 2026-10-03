@@ -1,6 +1,7 @@
 //! The interactive fiction engine: what the player types becomes game
 //! actions, and everything that happens before the next prompt becomes one
 //! passage. See docs/if-engine.md.
+pub mod atmosphere;
 pub mod chronicle;
 pub mod narrate;
 pub mod place;
@@ -10,7 +11,7 @@ pub mod scene;
 pub mod turn;
 pub mod verbs;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use tor_protocol::*;
 
@@ -23,7 +24,7 @@ use narrate::{Entry, Record};
 use resolve::Referents;
 use scene::Scene;
 use turn::{Error, Link};
-use verbs::{Interpretation, Question};
+use verbs::{Interpretation, Question, Verbosity};
 
 /// What a line of input led to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +52,9 @@ pub struct Engine {
     pending: Option<Pending>,
     last_line: Option<String>,
     chronicler: Chronicler,
+    verbosity: Verbosity,
+    /// Places described in full, by key: a brief arrival there names them.
+    described: BTreeSet<String>,
 }
 
 /// The sentences of a line, each with its own text as typed, so names and
@@ -162,6 +166,38 @@ impl Engine {
         self.pending = None;
     }
 
+    /// The scene as the game opens.
+    pub fn welcome(&mut self, link: &impl Link) -> String {
+        self.note_described(link);
+        describe(link)
+    }
+
+    /// Remember that the place in view has been described in full.
+    fn note_described(&mut self, link: &impl Link) {
+        if let Some(key) = crate::narrative::current_place_key(link.client().state()) {
+            self.described.insert(key.to_owned());
+        }
+    }
+
+    /// The place on arriving there, as fully as the verbosity asks.
+    fn arrival(&mut self, link: &impl Link) -> String {
+        let state = link.client().state();
+        let known = crate::narrative::current_place_key(state)
+            .is_some_and(|key| self.described.contains(key));
+        match self.verbosity {
+            Verbosity::Superbrief => {
+                crate::adventure::brief_place_with(state, link.palette(), false)
+            }
+            Verbosity::Brief if known => {
+                crate::adventure::brief_place_with(state, link.palette(), true)
+            }
+            _ => {
+                self.note_described(link);
+                crate::adventure::describe_place_with(state, link.palette())
+            }
+        }
+    }
+
     /// Learn the names in the view in hand, so later beats can name them.
     pub fn learn(&mut self, link: &impl Link) {
         self.chronicler.learn(link.client().state(), link.palette());
@@ -183,6 +219,7 @@ impl Engine {
                 }
             }
         }
+        let start = crate::narrative::current_place_key(link.client().state()).map(str::to_owned);
         let mut chain: VecDeque<Result<Interpretation, String>> = VecDeque::new();
         if let Some(pending) = self.pending.take() {
             let current = link.client().state().revision == pending.revision;
@@ -251,12 +288,12 @@ impl Engine {
                 Flow::Continue => {}
                 Flow::Stop => break,
                 Flow::Quit => {
-                    self.finish(link, &mut record);
+                    self.finish(link, &mut record, start.as_deref());
                     return Ok(Outcome::Quit(narrate::compose(&record)));
                 }
             }
         }
-        self.finish(link, &mut record);
+        self.finish(link, &mut record, start.as_deref());
         Ok(Outcome::Passage(narrate::compose(&record)))
     }
 
@@ -273,7 +310,19 @@ impl Engine {
                 Flow::Continue
             }
             Interpretation::Look => {
-                record.entries.push(Entry::Description(describe(link)));
+                self.note_described(link);
+                record.entries.push(Entry::Description(look(link)));
+                Flow::Continue
+            }
+            Interpretation::Describe(verbosity) => {
+                self.verbosity = verbosity;
+                record.say(match verbosity {
+                    Verbosity::Brief => {
+                        "Places are described in full the first time you arrive, and named after that."
+                    }
+                    Verbosity::Verbose => "Places are described in full every time you arrive.",
+                    Verbosity::Superbrief => "Places are only named when you arrive.",
+                });
                 Flow::Continue
             }
             Interpretation::Ask(question) => {
@@ -312,7 +361,8 @@ impl Engine {
     ) -> Result<Flow, Error> {
         let request = match input {
             Input::Look => {
-                record.entries.push(Entry::Description(describe(link)));
+                self.note_described(link);
+                record.entries.push(Entry::Description(look(link)));
                 return Ok(Flow::Continue);
             }
             Input::Places => {
@@ -405,25 +455,49 @@ impl Engine {
     }
 
     /// End-of-turn additions: a description after a snapshot or on arriving
-    /// somewhere new.
-    fn finish(&mut self, link: &impl Link, record: &mut Record) {
+    /// somewhere new. `start` is the place the turn began in, if any.
+    fn finish(&mut self, link: &impl Link, record: &mut Record, start: Option<&str>) {
         let resynced = record.entries.iter().any(|e| match e {
             Entry::Episode(e) => e.beats.contains(&Beat::Resync),
             Entry::Beats(beats) => beats.contains(&Beat::Resync),
             _ => false,
         });
-        let arrived = record.entries.iter().any(|e| {
+        let went = record.entries.iter().any(|e| {
             matches!(e, Entry::Episode(e) if matches!(e.goal, verbs::Goal::Go { .. }) && e.end == narrate::End::Done)
         });
+        // Walking over to something can lead into another place too.
+        let here = crate::narrative::current_place_key(link.client().state());
+        let moved = start.is_some_and(|start| here.is_some_and(|here| here != start));
         if resynced {
+            self.note_described(link);
             record.entries.push(Entry::Description(describe(link)));
-        } else if arrived {
-            record
-                .entries
-                .push(Entry::Description(crate::adventure::describe_place_with(
-                    link.client().state(),
-                    link.palette(),
-                )));
+        } else if went || moved {
+            // The description says who is there; sightings on the way in
+            // would say it twice.
+            let present: BTreeSet<ActorId> = link
+                .client()
+                .state()
+                .observation
+                .visible_actors
+                .iter()
+                .map(|a| a.id)
+                .collect();
+            for entry in &mut record.entries {
+                let beats = match entry {
+                    // A sighting that cut a goal short is why it stopped.
+                    Entry::Episode(e) if e.end == narrate::End::Done => &mut e.beats,
+                    Entry::Beats(beats) => beats,
+                    _ => continue,
+                };
+                beats.retain(|b| match b {
+                    Beat::Appeared { figure, .. } | Beat::Vanished(figure) => {
+                        !present.contains(&figure.id)
+                    }
+                    _ => true,
+                });
+            }
+            let arrival = self.arrival(link);
+            record.entries.push(Entry::Description(arrival));
         }
     }
 
@@ -453,7 +527,7 @@ impl Engine {
         let mut record = Record::default();
         record.entries.push(Entry::Beats(beats));
         self.after_beats(link, &record);
-        self.finish(link, &mut record);
+        self.finish(link, &mut record, None);
         narrate::compose(&record)
     }
 }
@@ -464,7 +538,12 @@ enum Flow {
     Quit,
 }
 
-/// The scene described, as `look` shows it.
+/// The scene described in full, as the game opens or after a snapshot.
 pub fn describe(link: &impl Link) -> String {
     crate::adventure::describe_with(link.client().state(), link.palette())
+}
+
+/// The scene as `look` shows it.
+pub fn look(link: &impl Link) -> String {
+    crate::adventure::look_with(link.client().state(), link.palette())
 }

@@ -397,7 +397,15 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "get tablet").await;
-    assert_eq!(text, "You walk over to the stone tablet and pick it up.");
+    let (told, arrival) = text.split_once('\n').unwrap();
+    assert_eq!(told, "You walk over to the stone tablet and pick it up.");
+    // The tablet was in another place, so that place is described: the
+    // character was walked into it.
+    assert!(arrival.starts_with("You are in an open"), "{arrival}");
+    assert!(
+        arrival.contains("A copper token lies to the west."),
+        "{arrival}"
+    );
     assert!(is_travel(&link.sent[0]));
     assert!(is_act(
         &link.sent[1],
@@ -436,7 +444,10 @@ async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
     });
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "take tablet").await;
-    assert_eq!(text, "You walk over to the stone tablet and pick it up.");
+    assert_eq!(
+        text.lines().next(),
+        Some("You walk over to the stone tablet and pick it up.")
+    );
     assert_eq!(link.sent.len(), 2);
     assert_eq!(link.client.state().observation.inventory.len(), 1);
 }
@@ -497,10 +508,13 @@ async fn arriving_as_a_figure_appears_stops_short_of_the_pickup() {
     });
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "take the tablet").await;
+    // The sighting is why the pickup waits, so it's told even though the
+    // new place's description names the rat too.
     assert_eq!(
-        text,
-        "You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east."
+        text.lines().next(),
+        Some("You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east.")
     );
+    assert!(text.contains("There is a rat to the east."), "{text}");
     assert_eq!(link.sent.len(), 1);
 }
 
@@ -719,15 +733,112 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
         ("jump", "You can't jump yet."),
         ("push", "What do you want to push?"),
         (
-            "listen",
-            "You listen closely. Aside from the faint whisper of air across the stone, all is quiet.",
-        ),
-        (
             "frobnicate the token",
             "I don't understand \"frobnicate the token\".",
         ),
     ] {
         assert_eq!(play(&mut link, &mut engine, line).await, answer, "{line}");
     }
+    // Listening is answered by the place's atmosphere, and takes no time.
+    let heard = play(&mut link, &mut engine, "listen").await;
+    assert!(
+        !heard.is_empty() && !heard.starts_with("You can't"),
+        "{heard}"
+    );
     assert!(link.sent.is_empty());
+}
+
+#[tokio::test]
+async fn stacks_of_alike_things_are_counted_together() {
+    // Regression: three stacks of arrows were "the ten arrows, the five
+    // arrows, the two arrows", and two stacks of three potions "the two
+    // three red potionses".
+    let mut s = state();
+    let stack = |id: u64, name: &str, quantity: u64| {
+        serde_json::from_value::<GroundItemView>(serde_json::json!({
+            "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
+            "item": {"quantity": quantity, "appearance": "item", "identified": true,
+                "id": id, "name": name, "description": ""}}))
+        .unwrap()
+    };
+    s.observation.ground_items = vec![
+        stack(10, "arrow", 10),
+        stack(11, "arrow", 5),
+        stack(12, "arrow", 2),
+        stack(13, "red potion", 3),
+        stack(14, "red potion", 3),
+    ];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "take all").await,
+        "You pick up the 17 arrows and the six red potions."
+    );
+}
+
+#[tokio::test]
+async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
+    // Journeys go east to the second hinted place and back west.
+    let mut link = Scripted::new(state(), |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let there = now.observation.visible_cells[0].position.x != 0;
+            let (view, direction) = if there {
+                let mut back = now.clone();
+                for c in &mut back.observation.visible_cells {
+                    c.position.x += 6;
+                }
+                for g in &mut back.observation.ground_items {
+                    g.position.x += 6;
+                    g.reachable = g.position == Position { x: 0, y: 0, z: 0 };
+                }
+                back.observation.tick += 60;
+                (back, Direction::West)
+            } else {
+                (east(now.clone(), 6), Direction::East)
+            };
+            vec![
+                Frame::Ack,
+                Frame::View(view, Some(Event::Moved { direction })),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert!(engine.welcome(&link).contains("You are in an open"));
+    let there = play(&mut link, &mut engine, "east").await;
+    assert!(
+        there.starts_with("You walk east.\nYou are in an open"),
+        "{there}"
+    );
+    // Back where the game began: already described, so only named.
+    let back = play(&mut link, &mut engine, "west").await;
+    assert!(
+        back.starts_with("You walk west.\nYou are back in the open"),
+        "{back}"
+    );
+    assert!(back.contains("A copper token lies at your feet"), "{back}");
+    assert_eq!(
+        play(&mut link, &mut engine, "verbose").await,
+        "Places are described in full every time you arrive."
+    );
+    let again = play(&mut link, &mut engine, "east").await;
+    assert!(
+        again.starts_with("You walk east.\nYou are in an open"),
+        "{again}"
+    );
+    play(&mut link, &mut engine, "superbrief").await;
+    let named = play(&mut link, &mut engine, "west").await;
+    assert!(
+        named.starts_with("You walk west.\nYou are back in"),
+        "{named}"
+    );
+    assert!(!named.contains("You can head"), "{named}");
+    // Looking always describes in full.
+    assert!(play(&mut link, &mut engine, "look")
+        .await
+        .contains("You are in an open"));
 }

@@ -49,12 +49,27 @@ pub enum Goal {
     Wait,
 }
 
+/// How fully a place is described on arriving there. `look` always
+/// describes it in full.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verbosity {
+    /// In full the first time; after that, its name, ways and contents.
+    #[default]
+    Brief,
+    /// In full every time.
+    Verbose,
+    /// Its name and contents only, even the first time.
+    Superbrief,
+}
+
 /// What a sentence means, before anything runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Interpretation {
     /// An answer that takes no game time.
     Say(String),
     Look,
+    /// How fully places are described on arrival.
+    Describe(Verbosity),
     Goals(Vec<Goal>),
     Ask(Question),
     Tool(Input),
@@ -351,10 +366,12 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
         Verb::Inventory => say(inventory(scene)),
         Verb::Wait => goal(Goal::Wait),
         Verb::Quit => Interpretation::Quit,
-        Verb::Diagnose => say(diagnose(scene.state)),
-        Verb::Listen => say(crate::narrative::listen(scene.state)),
+        Verb::Diagnose => say(condition(scene.state)),
+        Verb::Listen => say(crate::narrative::listen(scene.state, scene.palette)),
         Verb::Smell => say(crate::narrative::smell(scene.state, scene.palette)),
-        Verb::Verbose | Verb::Brief | Verb::Superbrief => say("Descriptions are set."),
+        Verb::Verbose => Interpretation::Describe(Verbosity::Verbose),
+        Verb::Brief => Interpretation::Describe(Verbosity::Brief),
+        Verb::Superbrief => Interpretation::Describe(Verbosity::Superbrief),
         Verb::Go => say("Where do you want to go?"),
         Verb::Step => say("Which way do you want to step?"),
         verb if needs_object(verb) => say(format!("What do you want to {}?", verb.as_str())),
@@ -691,6 +708,24 @@ pub fn inventory(scene: &Scene) -> String {
 }
 
 /// The character's condition, without numbers beyond HP.
+/// How the character is, and what the run asks of them.
+fn condition(state: &StateView) -> String {
+    let objective = state
+        .observation
+        .combat
+        .as_ref()
+        .filter(|c| !c.dead && !c.victory)
+        .and_then(|c| c.objective);
+    match objective {
+        Some(o) => format!(
+            "{} {}",
+            diagnose(state),
+            tor_client_common::narration::objective(o)
+        ),
+        None => diagnose(state),
+    }
+}
+
 pub fn diagnose(state: &StateView) -> String {
     let Some(c) = &state.observation.combat else {
         return "You feel fine.".into();
@@ -746,7 +781,7 @@ fn session_command(session: &SessionCommand, state: &StateView) -> Interpretatio
         })),
         SessionCommand::Name { target, name } => {
             if matches!(target.as_str(), "room" | "place" | "here") {
-                match crate::narrative::current_place_key(state) {
+                match crate::narrative::named_place_key(state) {
                     Some(key) => tool(Input::Command(Command::RenamePlace {
                         expected_revision: state.revision,
                         key: key.into(),

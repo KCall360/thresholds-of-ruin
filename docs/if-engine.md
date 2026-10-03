@@ -232,21 +232,76 @@ not a doorway, with no wall seen above it.
 - **Beyond sight.** Unseen columns at the place's edge mean it goes on out of
   sight in their directions.
 
-`narrative::describe_place` says this in a sentence ("You are in a small
-chamber with a stone floor and walls of stone. It goes on out of sight to the
-north."), and `adventure::describe_place_with` adds the place's name, what is
-in it ("on the floor nearby" means inside the place), figures, doors and the
-ways onward. A direction picks the ways that way; a closed door answers "The
-oak door to the east is closed." A journey blocked next to a creature says it
-"bars the way". Descriptions add atmosphere that has no effect on play: a mood
-word ("a small, dusty chamber") and a sentence chosen by what the place is made
-of, both fixed by a hash of the place's anchor key so a place reads the same
-every time and in every client. `smell` and `listen` answer in the same spirit;
-`listen` only mentions creatures when some are in sight.
+### Descriptions
 
-`narrative::current_place_anchor` names the place for `name room` and the
-title: an authored place hint inside it, or else the open cell nearest the
-middle of what's seen of it.
+`adventure::describe_place_with` tells a place under its name in two
+paragraphs: the place and its ways out, then who and what is in it.
+
+```text
+Hidden Promise
+You are in a small, damp chamber of stone. A damp chill clings to the stones.
+Somewhere out of sight, water drips slowly. A passage leads north, an open
+oak door east, and a closed oak door south.
+There is a wounded ruin scout to the east. A copper token lies at your feet;
+two stone tablets lie on the floor nearby.
+```
+
+- **The place** (`narrative::describe_place`): its kind and size, what it's
+  made of ("of stone" when floor and walls match, otherwise "with a flagstone
+  floor and walls of dressed stone"), its atmosphere, a high ceiling, and where
+  it goes on out of sight (in "several directions" when that's four or more).
+- **Ways by kind.** Openings of one kind are named once with their directions,
+  and later kinds are gapped: "A passage leads north, and open oak doors east
+  and west." Directions with only a place seen beyond follow ("You can also
+  head south."). A walled place with no way out and nothing out of sight says
+  "You see no way out."
+- **Who and what is here.** Figures alike in one direction are counted
+  together, with injuries as adjectives ("two badly wounded rats"); healthy
+  figures get none. Things alike in one place are counted together, stacks
+  included ("At your feet lie 17 arrows"), and a name already told is
+  "another" or "more" ("another copper token lies to the south"). Doors in
+  sight that aren't ways out of this place come last ("You can also see an
+  open wooden door to the northeast.").
+
+`look` always describes the place in full, with HP but not the objective,
+which the opening description shows and `status` (or `score`) recalls.
+
+**Arrivals.** A turn that ends in another place than it began, whether by a
+direction or by walking over to something, describes the new place after the
+narration. Sightings during the turn of figures the description names are
+dropped, unless one cut a goal short ("as a rat comes into view"). How fully
+it's described depends on the verbosity, which the engine keeps with the set
+of places it has described in full:
+
+| Mode | First arrival | Later arrivals |
+| --- | --- | --- |
+| `brief` (default) | in full | name, ways, contents |
+| `verbose` | in full | in full |
+| `superbrief` | name and contents | name and contents |
+
+A place without a name says "You are back in the damp chamber." instead.
+This isn't game state: it's lost on restart, like the rest of `Engine`.
+
+### Atmosphere
+
+`engine::atmosphere` colours places without affecting play. Each place gets a
+*theme* for its fabric (stone, marble, timber, earth, or nothing seen), and a
+theme's mood words, air, smell and sound belong together: a "damp chamber"
+smells of wet stone, never of dust. The description gets the mood word, the
+air, sometimes a closeness note for narrow passages, and for a third of places
+each the smell or the sound. `smell` and `listen` answer with the place's own.
+
+Every choice is a separate hash of the place's key, so a place reads the same
+on every visit and from anywhere inside it, while neighbouring places rarely
+share a description. Stone alone has nine themes, each with two or three
+mood words and two choices per sense.
+
+The key (`narrative::current_place_anchor`) is the authored place hint inside
+the place with the lowest key, or else the place's open cell with the lowest
+key. Cell keys are fixed for a game (they're salted per save), so the same
+place reads alike for the whole game, but a new game may colour it
+differently. The hint's mnemonic name titles the place, and `name room`
+renames it; a place without a hint can't be named.
 
 ## Testing
 
@@ -278,42 +333,35 @@ Following the [testing policy](testing.md):
    and `parser::{scope, matcher, context}`.
 3. **Places, exits and room descriptions** (done): see
    [places and ways](#places-and-ways).
+4. **Prose descriptions, atmosphere and verbosity** (done): see
+   [descriptions](#descriptions) and [atmosphere](#atmosphere).
 
 ## Next steps
 
 These are the open items, roughly in order of value. Each needs only the code
 named unless it says otherwise.
 
-1. **Descriptions as prose, not lists.** `adventure::describe_place_with` still
-   prints one "You see ..." line per thing. Compose them into sentences ("A
-   copper token lies at your feet; a stone tablet stands against the east
-   wall."), group figures and their injuries, and name the ways by kind ("An
-   archway leads east, and an open oak door west."). Keep exact process
-   transcripts in step.
-2. **Brief and verbose descriptions.** `verbose`, `brief` and `superbrief` are
-   parsed but only answer "Descriptions are set." Keep a set of place keys
-   described in full in `Engine`, give a revisited place its name and contents
-   only in brief mode, and describe every arrival in verbose mode.
-3. **Remembered places.** `places` lists names, but `go to <place name>`
+1. **Remembered places.** `places` lists names, but `go to <place name>`
    doesn't travel to a remembered place out of sight. That needs a destination
    the server accepts: travel takes a known cell key, and remembered cells are
    in `ClientState::memory`.
-4. **Stable names for unhinted places.** Without a place hint, the anchor is
-   the open cell nearest the middle of what's seen, which moves as more is
-   seen. Choosing it from remembered cells, or asking scenario authors for
-   hints in every room, would make names stick.
-5. **Authored region names.** Regions have authored names ("Threshold") the
+2. **Stable keys for unhinted places.** Without a place hint, the key is the
+   lowest-keyed open cell seen in the place, which can change while more of
+   the place comes into sight (it's stable once all of it has been seen).
+   Choosing it from remembered cells, or asking scenario authors for hints in
+   every room, would fix it from the first sight.
+3. **Authored region names.** Regions have authored names ("Threshold") the
    protocol doesn't disclose, so titles are the character's mnemonic names.
    Disclosing them is a protocol change: ask the maintainer.
-6. **Knowing when it's this player's move.** A turn ends when the character is
+4. **Knowing when it's this player's move.** A turn ends when the character is
    ready, or after two quiet seconds when someone else's character is next.
    A server signal for "waiting on another client" would remove the timeout
    (a protocol change).
-7. **Verbs waiting for game rules.** When the game gains equipment,
+5. **Verbs waiting for game rules.** When the game gains equipment,
    consumables, containers, locks or speech, add the action to
    `engine::verbs::Goal`, map the verbs to it, run it in `engine::turn::step`,
    and narrate its event in `engine::chronicle` and `engine::narrate`.
-8. **Fewer surveys.** A `look` surveys the place three times (description,
+6. **Fewer surveys.** A `look` surveys the place three times (description,
    anchor, ways); cache one survey per state revision if descriptions get
    slower.
 
