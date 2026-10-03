@@ -274,9 +274,11 @@ class AdventureProcesses(ProcessTestCase):
     def test_rooms_are_described_from_their_extent_and_doors_are_their_ways(self):
         self.server()
         player, welcome = self.adventure()
-        self.assertIn("You are in a small chamber with a stone floor and walls of stone.", welcome)
-        for invented in ("dust", "chill", "Shadows", "Stone Hall"):
-            self.assertNotIn(invented, welcome)
+        self.assertRegex(welcome, r"You are in a small, \w+ chamber with a stone floor and walls of stone\. \S")
+        self.assertNotIn("Stone Hall", welcome)
+        # Atmosphere is fixed for the place.
+        room = next(line for line in welcome.split("\n") if line.startswith("You are in"))
+        self.assertIn(room, self.say(player, "look"))
         # Through the open door, into the other room, and back.
         arrived = self.say(player, "east")
         self.assertIn("You walk east.", arrived)

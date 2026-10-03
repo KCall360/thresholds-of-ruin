@@ -21,8 +21,10 @@ covers the language layer it starts from, and the
   a pickup).
 - **No mechanics on screen.** Ticks, readiness, revisions, ids and offsets
   stay underneath. HP is the one number shown, because the player plays by it.
-- **Only disclosed facts.** The engine reads the disclosed view; it never
-  invents causes, names, inscriptions or rooms.
+- **Only disclosed facts, with atmosphere.** The engine reads the disclosed
+  view; it never invents causes, names, inscriptions, rooms or anything that
+  would matter to play. Atmosphere (mood words, smells, sounds) colours places
+  but has no gameplay effect and is fixed per place.
 - **Deterministic.** The same game and the same input give the same text.
 
 ## Pipeline
@@ -114,7 +116,7 @@ Examples:
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
 | a direction; go, walk, head | way onward | `Approach(exit)`, then the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
-| examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene |
+| examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |
 | wear, eat, drink, give, throw, unlock, push, talk, search, pray, ... | anything | refusal once the object is found: "You can't wear anything yet." |
 
 A step's preconditions are checked again just before it runs, with the view
@@ -236,8 +238,11 @@ north."), and `adventure::describe_place_with` adds the place's name, what is
 in it ("on the floor nearby" means inside the place), figures, doors and the
 ways onward. A direction picks the ways that way; a closed door answers "The
 oak door to the east is closed." A journey blocked next to a creature says it
-"bars the way". Descriptions state only disclosed facts: no smells, draughts
-or invented epithets.
+"bars the way". Descriptions add atmosphere that has no effect on play: a mood
+word ("a small, dusty chamber") and a sentence chosen by what the place is made
+of, both fixed by a hash of the place's anchor key so a place reads the same
+every time and in every client. `smell` and `listen` answer in the same spirit;
+`listen` only mentions creatures when some are in sight.
 
 `narrative::current_place_anchor` names the place for `name room` and the
 title: an authored place hint inside it, or else the open cell nearest the

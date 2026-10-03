@@ -54,7 +54,8 @@ a door or a narrow gap in the walls, worked out from what is seen (see
 of place it is, its floor and walls, and where it goes on out of sight:
 
 ```text
-You are in a small chamber with a stone floor and walls of stone.
+You are in a small, dusty chamber with a stone floor and walls of stone. A quiet
+chill lingers among the stones, where faint echoes answer your breath.
 You see a copper token on the floor nearby.
 You see an open wooden door to the east.
 You can head east.
@@ -71,8 +72,10 @@ blocked journey says so, naming a creature in the way.
 
 Bearings follow the observer frame, including rotated joins. Diagonal sectors
 cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
-adds persistent mnemonic names and renaming. Descriptions never invent walls,
-smells or region names the protocol doesn't disclose.
+adds persistent mnemonic names and renaming. Descriptions never invent walls or
+region names the protocol doesn't disclose. Atmosphere (a mood word, a sentence
+of sound or scent) colours each place, has no effect on play, and is the same
+every time the place is described.
 
 ## Commands
 
@@ -95,7 +98,7 @@ tablet` walks over first when it's out of reach. See the
 - `wait` / `z`.
 - `again` / `g` repeats the last command.
 - Chains: `take sword. go east. open door`, or `take key, then go north`.
-- `listen` and `smell` answer that nothing is out of the ordinary.
+- `listen` and `smell` describe the place's atmosphere.
 - `places`, `name room <name>`, `name <number> <name>`.
 - Session tools are in `help session`: `control`, `release`, `sync`, `save`,
   `history`, `note`, `bookmark`, `pace` and `wizard`. `quit` disconnects.

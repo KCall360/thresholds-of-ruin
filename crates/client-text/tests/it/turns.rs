@@ -718,7 +718,10 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
         ("talk to me", "You can't talk with anyone yet."),
         ("jump", "You can't jump yet."),
         ("push", "What do you want to push?"),
-        ("listen", "You hear nothing out of the ordinary."),
+        (
+            "listen",
+            "You listen closely. Aside from the faint whisper of air across the stone, all is quiet.",
+        ),
         (
             "frobnicate the token",
             "I don't understand \"frobnicate the token\".",

@@ -688,7 +688,7 @@ fn a_room_is_described_from_its_own_extent_and_its_openings_are_its_ways() {
     ]);
     let prose = describe(&s);
     assert!(
-        prose.contains("You are in a chamber with a stone floor and walls of stone."),
+        prose.contains("chamber with a stone floor and walls of stone."),
         "{prose}"
     );
     // Only the opening is a way; the token beyond it is in another place.
@@ -719,8 +719,30 @@ fn a_room_seen_in_part_goes_on_out_of_sight() {
     let s = walled(&["#####", "#.@..", "#...."]);
     let prose = describe(&s);
     assert!(prose.contains("It goes on out of sight to the"), "{prose}");
-    // Nothing invented: no smells, draughts or epithets.
-    for invented in ["dust", "chill", "Shadows", "scent", "drafty"] {
-        assert!(!prose.contains(invented), "{prose}");
-    }
+}
+
+#[test]
+fn atmosphere_colours_a_place_the_same_way_every_time() {
+    let s = walled(&["#####", "#.@.#", "#####"]);
+    let prose = describe(&s);
+    // A mood word and a sentence of stone atmosphere, fixed for the place.
+    let stone = [
+        "ancient dust",
+        "faint echoes",
+        "corners of the masonry",
+        "quarried rock",
+    ];
+    assert!(stone.iter().any(|s| prose.contains(s)), "{prose}");
+    let moods = [
+        "quiet", "dim", "shadowed", "cold", "drafty", "dusty", "still", "echoing",
+    ];
+    assert!(
+        moods
+            .iter()
+            .any(|m| prose.contains(&format!("a narrow, {m} passage with a stone floor"))),
+        "{prose}"
+    );
+    assert_eq!(describe(&s), prose);
+    assert!(said("smell", &s).contains("quarried stone"));
+    assert!(said("listen", &s).contains("all is quiet"));
 }
