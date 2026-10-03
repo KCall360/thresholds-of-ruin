@@ -204,10 +204,51 @@ agreement for the self and others.
 The narration also updates pronoun referents, so the player can refer to what
 was just described.
 
+### Places and ways
+
+`engine::place` works out the place the character is in from the disclosed
+cells alone. The body stands on the open cells at its own level (z = 0) with
+headroom above (z = 1). A column is open when its z = 0 cell is seen, open and
+not a doorway, with no wall seen above it.
+
+- **Extent.** The place is the open columns reachable from the character's
+  without crossing a door or a *gap*: an open column with closed or unseen
+  columns on both sides along one axis, at most two wide. Unseen columns close
+  gaps because nothing is disclosed beside an opening where regions join.
+  Standing in a gap, the place is the passage of gaps it belongs to. With no
+  walls in sight at all (raw diagnostic regions), gaps mean nothing and the
+  place is the open ground nearest the same authored place hint.
+- **Ways.** Doors and open columns at the edge of the place, grouped where they
+  touch, are its openings: a door, a passage (more gaps beyond) or an archway.
+  A journey through one ends at the farthest seen open cell up to three steps
+  beyond it. Stairs at the character's cell are ways up or down. When no
+  opening lies in a direction, an authored anchor seen that way in another
+  place is the fallback.
+- **Form.** No walls seen: an open space. Standing in a gap, or a place at most
+  two columns wide and four long: a passage. Up to 6 columns: an alcove; up to
+  40: a chamber (small up to 15); more: a large hall.
+- **Beyond sight.** Unseen columns at the place's edge mean it goes on out of
+  sight in their directions.
+
+`narrative::describe_place` says this in a sentence ("You are in a small
+chamber with a stone floor and walls of stone. It goes on out of sight to the
+north."), and `adventure::describe_place_with` adds the place's name, what is
+in it ("on the floor nearby" means inside the place), figures, doors and the
+ways onward. A direction picks the ways that way; a closed door answers "The
+oak door to the east is closed." A journey blocked next to a creature says it
+"bars the way". Descriptions state only disclosed facts: no smells, draughts
+or invented epithets.
+
+`narrative::current_place_anchor` names the place for `name room` and the
+title: an authored place hint inside it, or else the open cell nearest the
+middle of what's seen of it.
+
 ## Testing
 
 Following the [testing policy](testing.md):
 
+- **Place tests** (`engine::place` and `tests/it/adventure.rs`): extents,
+  gaps, passages, doors, ways beyond sight, and descriptions from walled maps.
 - **Unit tests** for each layer: scene construction and grouping, resolution
   (synonyms, preferences, groups, `all`/`except`, pronouns, questions), verb
   plans, chronicle beats from pairs of views, prose utilities and composition
@@ -230,7 +271,44 @@ Following the [testing policy](testing.md):
 2. **The engine core** (done): scene, resolution, verb plans, turn execution,
    chronicle and composition replace `Dialogue` and the old presentation loop,
    and `parser::{scope, matcher, context}`.
-3. **Places, exits and room descriptions** (next): describe the place the
-   character is in rather than everything visible, offer only ways that lead
-   somewhere, and say what blocks a way. Room descriptions and exits still come
-   from `adventure.rs` and `narrative.rs`.
+3. **Places, exits and room descriptions** (done): see
+   [places and ways](#places-and-ways).
+
+## Next steps
+
+These are the open items, roughly in order of value. Each needs only the code
+named unless it says otherwise.
+
+1. **Descriptions as prose, not lists.** `adventure::describe_place_with` still
+   prints one "You see ..." line per thing. Compose them into sentences ("A
+   copper token lies at your feet; a stone tablet stands against the east
+   wall."), group figures and their injuries, and name the ways by kind ("An
+   archway leads east, and an open oak door west."). Keep exact process
+   transcripts in step.
+2. **Brief and verbose descriptions.** `verbose`, `brief` and `superbrief` are
+   parsed but only answer "Descriptions are set." Keep a set of place keys
+   described in full in `Engine`, give a revisited place its name and contents
+   only in brief mode, and describe every arrival in verbose mode.
+3. **Remembered places.** `places` lists names, but `go to <place name>`
+   doesn't travel to a remembered place out of sight. That needs a destination
+   the server accepts: travel takes a known cell key, and remembered cells are
+   in `ClientState::memory`.
+4. **Stable names for unhinted places.** Without a place hint, the anchor is
+   the open cell nearest the middle of what's seen, which moves as more is
+   seen. Choosing it from remembered cells, or asking scenario authors for
+   hints in every room, would make names stick.
+5. **Authored region names.** Regions have authored names ("Threshold") the
+   protocol doesn't disclose, so titles are the character's mnemonic names.
+   Disclosing them is a protocol change: ask the maintainer.
+6. **Knowing when it's this player's move.** A turn ends when the character is
+   ready, or after two quiet seconds when someone else's character is next.
+   A server signal for "waiting on another client" would remove the timeout
+   (a protocol change).
+7. **Verbs waiting for game rules.** When the game gains equipment,
+   consumables, containers, locks or speech, add the action to
+   `engine::verbs::Goal`, map the verbs to it, run it in `engine::turn::step`,
+   and narrate its event in `engine::chronicle` and `engine::narrate`.
+8. **Fewer surveys.** A `look` surveys the place three times (description,
+   anchor, ways); cache one survey per state revision if descriptions get
+   slower.
+

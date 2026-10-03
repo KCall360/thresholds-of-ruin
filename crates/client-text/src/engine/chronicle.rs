@@ -79,6 +79,8 @@ pub enum Beat {
         phase: TravelPhase,
     },
     Control(bool),
+    /// A figure stands where a blocked journey would have gone.
+    Barred(Figure),
     /// The state was replaced, as by a rewind or resynchronization.
     Resync,
 }

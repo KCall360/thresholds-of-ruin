@@ -69,63 +69,59 @@ fn whereabouts(p: Position) -> String {
     )
 }
 
-// Use the same visible-anchor grouping for both exits and item descriptions.
-fn place_at(state: &StateView, position: Position) -> Option<&str> {
-    let authored = state
+/// A way onward in one direction.
+pub(crate) struct Exit {
+    /// Where a journey that way ends.
+    pub destination: Option<String>,
+    /// "an archway to the east".
+    pub label: String,
+    /// A closed door: the way is there, but shut.
+    pub closed: bool,
+}
+
+/// Ways onward in a direction: the place's openings, or else an authored
+/// anchor in another place seen that way.
+pub(crate) fn exits(state: &StateView, direction: Direction) -> Vec<Exit> {
+    exits_from(&crate::engine::place::survey(state), state, direction)
+}
+
+/// [`exits`] for a place already surveyed.
+fn exits_from(
+    place: &crate::engine::place::Place,
+    state: &StateView,
+    direction: Direction,
+) -> Vec<Exit> {
+    use crate::engine::place::Opening;
+    let toward = match direction {
+        Direction::Up | Direction::Down => direction_name(direction).to_owned(),
+        _ => format!("to the {}", direction_name(direction)),
+    };
+    let ways: Vec<Exit> = place
+        .ways(direction)
+        .map(|w| Exit {
+            destination: w.destination.clone(),
+            label: format!("{} {toward}", w.label()),
+            closed: matches!(w.kind, Opening::Door { open: false, .. }),
+        })
+        .collect();
+    if !ways.is_empty() {
+        return ways;
+    }
+    let mut seen = BTreeSet::new();
+    let mut anchors: Vec<_> = state
         .observation
         .visible_cells
-        .iter()
-        .filter(|c| c.place_hint && !c.wall && c.position.z == position.z)
-        .min_by_key(|c| {
-            (
-                (i64::from(c.position.x) - i64::from(position.x)).unsigned_abs()
-                    + (i64::from(c.position.y) - i64::from(position.y)).unsigned_abs(),
-                &c.key,
-            )
-        })
-        .map(|c| c.key.as_str());
-    if authored.is_some() {
-        return authored;
-    }
-    crate::narrative::current_place_key(state)
-}
-
-pub(crate) fn in_current_place(state: &StateView, position: Position) -> bool {
-    let origin = Position { x: 0, y: 0, z: 0 };
-    position.z == 0 && place_at(state, position) == place_at(state, origin)
-}
-
-struct Destination {
-    key: String,
-    label: String,
-}
-
-/// Ways onward in a direction: each journey's destination cell key and how
-/// it's described.
-pub(crate) fn exits(state: &StateView, direction: Direction) -> Vec<(String, String)> {
-    destinations(state, direction)
-        .into_iter()
-        .map(|d| (d.key, d.label))
-        .collect()
-}
-
-fn destinations(state: &StateView, direction: Direction) -> Vec<Destination> {
-    let cells = &state.observation.visible_cells;
-    let origin = cells.iter().find(|c| distance(c.position) == 0);
-    let current = place_at(state, Position { x: 0, y: 0, z: 0 });
-    let mut seen = BTreeSet::new();
-    let mut anchors: Vec<_> = cells
         .iter()
         .filter(|c| {
             !c.wall
                 && c.place_hint
+                && c.position.z == 0
                 && bearing(c.position) == Some(direction)
-                && origin.is_none_or(|o| o.key != c.key)
-                && current.is_none_or(|key| key != c.key)
+                && !place.contains(c.position)
         })
         .collect();
     anchors.sort_by_key(|c| (distance(c.position), &c.key));
-    let result: Vec<_> = anchors
+    anchors
         .into_iter()
         .filter(|c| seen.insert(c.key.clone()))
         .map(|c| {
@@ -134,159 +130,16 @@ fn destinations(state: &StateView, direction: Direction) -> Vec<Destination> {
                 .ground_items
                 .iter()
                 .find(|i| i.position == c.position);
-            Destination {
-                key: c.key.clone(),
+            Exit {
+                destination: Some(c.key.clone()),
                 label: item.map_or_else(
-                    || format!("an open place to the {}", direction_name(direction)),
+                    || format!("an open place {toward}"),
                     |i| format!("the place by the {}", safe(&i.item.name)),
                 ),
+                closed: false,
             }
         })
-        .collect();
-    if !result.is_empty() {
-        return result;
-    }
-    // Tier 2: Disclosed doors
-    let mut doors: Vec<Destination> = Vec::new();
-    for cell in cells {
-        if cell.position.z == 0 && bearing(cell.position) == Some(direction) {
-            if let Some(door) = &cell.door {
-                if seen.insert(cell.key.clone()) {
-                    let status = if door.open { "open" } else { "closed" };
-                    doors.push(Destination {
-                        key: cell.key.clone(),
-                        label: format!(
-                            "{} to the {}",
-                            indefinite(&format!("{status} {}", door.name)),
-                            direction_name(direction)
-                        ),
-                    });
-                }
-            }
-        }
-    }
-    if !doors.is_empty() {
-        doors.sort_by_key(|d| d.label.clone());
-        return doors;
-    }
-
-    // Tier 3: Perimeter wall breaks / constrictions (archways, passages)
-    let wall_map: BTreeSet<(i32, i32)> = cells
-        .iter()
-        .filter(|c| c.wall && c.position.z == 0)
-        .map(|c| (c.position.x, c.position.y))
-        .collect();
-
-    if !wall_map.is_empty() {
-        let is_constriction = |x: i32, y: i32| {
-            // 1-wide horizontal opening (flanked by north and south walls)
-            (wall_map.contains(&(x, y - 1)) && wall_map.contains(&(x, y + 1)))
-                // 1-wide vertical opening (flanked by west and east walls)
-                || (wall_map.contains(&(x - 1, y)) && wall_map.contains(&(x + 1, y)))
-                // 2-wide horizontal opening
-                || (wall_map.contains(&(x, y - 1)) && wall_map.contains(&(x, y + 2)))
-                || (wall_map.contains(&(x, y - 2)) && wall_map.contains(&(x, y + 1)))
-                // 2-wide vertical opening
-                || (wall_map.contains(&(x - 1, y)) && wall_map.contains(&(x + 2, y)))
-                || (wall_map.contains(&(x - 2, y)) && wall_map.contains(&(x + 1, y)))
-        };
-
-        let mut constriction_cells: Vec<&CellView> = cells
-            .iter()
-            .filter(|c| {
-                !c.wall
-                    && c.position.z == 0
-                    && bearing(c.position) == Some(direction)
-                    && is_constriction(c.position.x, c.position.y)
-            })
-            .collect();
-
-        if !constriction_cells.is_empty() {
-            let mut openings: Vec<Vec<&CellView>> = Vec::new();
-            while let Some(cell) = constriction_cells.pop() {
-                let mut group = vec![cell];
-                let mut queue = vec![cell];
-                while let Some(curr) = queue.pop() {
-                    let mut i = 0;
-                    while i < constriction_cells.len() {
-                        let other = constriction_cells[i];
-                        if (curr.position.x - other.position.x).abs() <= 1
-                            && (curr.position.y - other.position.y).abs() <= 1
-                        {
-                            constriction_cells.swap_remove(i);
-                            group.push(other);
-                            queue.push(other);
-                        } else {
-                            i += 1;
-                        }
-                    }
-                }
-                openings.push(group);
-            }
-
-            openings.sort_by_key(|g| {
-                let target = g.iter().max_by_key(|c| distance(c.position)).unwrap();
-                (
-                    distance(target.position),
-                    target.position.x,
-                    target.position.y,
-                )
-            });
-
-            let mut exits: Vec<Destination> = Vec::new();
-            for group in openings {
-                let target = group.iter().max_by_key(|c| distance(c.position)).unwrap();
-                if seen.insert(target.key.clone()) {
-                    let label = if group.len() <= 2 {
-                        format!("an open archway to the {}", direction_name(direction))
-                    } else {
-                        format!("a narrow passage to the {}", direction_name(direction))
-                    };
-                    exits.push(Destination {
-                        key: target.key.clone(),
-                        label,
-                    });
-                }
-            }
-            if !exits.is_empty() {
-                if exits.len() > 1 && exits[0].label == exits[1].label {
-                    for (idx, exit) in exits.iter_mut().enumerate() {
-                        exit.label = format!("{} ({})", exit.label, idx + 1);
-                    }
-                }
-                return exits;
-            }
-        }
-    }
-
-    // Bare floor is movement within a place, not evidence of a way onward.
-    // Stairs provide an explicit exception even in an unhinted space.
-    if matches!(direction, Direction::Up | Direction::Down)
-        && origin.is_some_and(|c| {
-            if direction == Direction::Up {
-                c.stairs_up
-            } else {
-                c.stairs_down
-            }
-        })
-    {
-        if let Some(c) = cells
-            .iter()
-            .filter(|c| {
-                !c.wall
-                    && c.position.x == 0
-                    && c.position.y == 0
-                    && bearing(c.position) == Some(direction)
-            })
-            .min_by_key(|c| distance(c.position))
-        {
-            return vec![Destination {
-                key: c.key.clone(),
-                label: format!("the stairs {}", direction_name(direction)),
-            }];
-        }
-    }
-    vec![]
+        .collect()
 }
 
 /// Words for the assets this client knows. A lookup falls back through dotted
@@ -327,12 +180,6 @@ pub(crate) fn open_surface<'a>(palette: &Palette, cell: &'a CellView) -> Option<
         .resolve(words(), cell.asset.as_deref())
         .copied()
         .or_else(|| (!cell.material.is_empty()).then_some(cell.material.as_str()))
-}
-
-/// The floor under an open cell: the seen solid cell below it, or, in raw
-/// diagnostic regions without one, what the open cell itself shows.
-pub(crate) fn floor_material<'a>(cells: &'a [CellView], cell: &'a CellView) -> Option<&'a str> {
-    floor_material_with(&Palette::default(), cells, cell)
 }
 
 /// The floor under an open cell: the seen solid cell below it, or, in raw
@@ -533,7 +380,8 @@ pub fn describe_place_with(state: &StateView, palette: &Palette) -> String {
     if let Some(title) = crate::narrative::place_title(state) {
         lines.push(title);
     }
-    lines.push(crate::narrative::synthesize_room(state, palette));
+    lines.push(crate::narrative::describe_place(state, palette));
+    let place = crate::engine::place::survey(state);
     let mut seen = BTreeSet::new();
     // Things alike in the same place are counted together.
     let mut things: Vec<(String, String, String, u64)> = Vec::new();
@@ -541,7 +389,7 @@ pub fn describe_place_with(state: &StateView, palette: &Palette) -> String {
         if seen.insert(item.item.id) {
             let place = if item.reachable {
                 "at your feet".into()
-            } else if in_current_place(state, item.position) {
+            } else if place.contains(item.position) {
                 "on the floor nearby".into()
             } else {
                 whereabouts(item.position)
@@ -608,7 +456,7 @@ pub fn describe_place_with(state: &StateView, palette: &Palette) -> String {
         Direction::Down,
     ]
     .into_iter()
-    .filter(|d| !destinations(state, *d).is_empty())
+    .filter(|d| exits_from(&place, state, *d).iter().any(|e| !e.closed))
     .map(direction_name)
     .collect();
     if !ways.is_empty() {

@@ -370,13 +370,23 @@ fn directional(direction: Direction, scene: &Scene) -> Interpretation {
             destination: key.to_owned(),
         })
     };
-    match ways.as_slice() {
-        [] => say(format!(
+    // A closed door is a way, but not one a journey can take.
+    let (shut, open): (Vec<_>, Vec<_>) = ways.into_iter().partition(|w| w.closed);
+    let open: Vec<_> = open
+        .into_iter()
+        .filter_map(|w| w.destination.map(|key| (key, w.label)))
+        .collect();
+    match (open.as_slice(), shut.first()) {
+        ([], Some(door)) => say(format!(
+            "{} is closed.",
+            prose::capitalize(&door.label.replacen("a closed ", "the ", 1))
+        )),
+        ([], None) => say(format!(
             "You can't see a way {}.",
             super::scene::direction_name(direction)
         )),
-        [(key, _)] => go(key),
-        many => {
+        ([(key, _)], _) => go(key),
+        (many, _) => {
             let choices: Vec<Choice> = many
                 .iter()
                 .map(|(key, label)| Choice {

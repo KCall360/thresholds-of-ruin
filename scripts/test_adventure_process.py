@@ -271,6 +271,20 @@ class AdventureProcesses(ProcessTestCase):
         )
         self.assertIn("ruin scout corpse", self.say(player, "inventory"))
 
+    def test_rooms_are_described_from_their_extent_and_doors_are_their_ways(self):
+        self.server()
+        player, welcome = self.adventure()
+        self.assertIn("You are in a small chamber with a stone floor and walls of stone.", welcome)
+        for invented in ("dust", "chill", "Shadows", "Stone Hall"):
+            self.assertNotIn(invented, welcome)
+        # Through the open door, into the other room, and back.
+        arrived = self.say(player, "east")
+        self.assertIn("You walk east.", arrived)
+        self.assertIn("You can head west.", arrived)
+        self.assertIn("You walk west.", self.say(player, "west"))
+        self.assertIn("You walk over to the wooden door and close it.", self.say(player, "close door"))
+        self.assertEqual("The wooden door to the east is closed.\n> ", self.say(player, "east"))
+
 
 if __name__ == "__main__":
     unittest.main()

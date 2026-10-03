@@ -120,9 +120,12 @@ move. Protocol 21 sends combat facts instead of prose. See the
 [IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
 [adventure commands](docs/text-adventure.md). Decisions agreed with the
 maintainer: the server sends facts, never sentences; verbs the game can't carry
-out yet are recognized and refused plainly, never narrated as if they worked.
-Next: places, exits and room descriptions (step 3 of the engine plan). The
-branch needs a PR, CI on both platforms, and the maintainer's approval to merge.
+out yet are recognized and refused plainly, never narrated as if they worked;
+descriptions state only disclosed facts (no invented smells or epithets).
+Places, ways and room descriptions come from `engine::place`. Pick up from the
+engine's [next steps](docs/if-engine.md#next-steps); items 5 and 6 there are
+protocol changes that need the maintainer's decision. The branch needs CI on
+both platforms and the maintainer's approval to merge.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),

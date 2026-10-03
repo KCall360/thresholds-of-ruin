@@ -48,31 +48,31 @@ actually visible; an undisclosed cell or region boundary is not called a wall.
 
 ## Places and directions
 
-Hints remain unnamed anchors, not regions, room extents, or discoveries of an
-entire area. The nearest visible anchor represents the local place for this
-initial heuristic, even when the actor moves away from its center to reach an
-object. Directional commands choose other visible anchors in that bearing,
-labeling them by a co-located visible item when possible. Multiple candidates
-ask a numbered/named clarification before sending a request. Repeated
-occurrences of one opaque cell are deduplicated. Items assigned to the same
-nearest visible anchor are described as on the floor nearby, or at your feet
-when reachable; directions are reserved for items in another place. With no
-visible anchors, same-elevation items are treated as nearby.
+The character is always in a *place*: the open floor reachable without passing
+a door or a narrow gap in the walls, worked out from what is seen (see
+[places and ways](if-engine.md#places-and-ways)). A description says what kind
+of place it is, its floor and walls, and where it goes on out of sight:
 
-Walkable floor within a place is not an exit. The two-room example therefore
-offers east only, and the other place offers west. There is no arbitrary floor-ray
-fallback. Without visible hints, compass travel is unavailable; object approach
-still works, and `step` remains an explicit fine-movement tool in session help.
-Vertical travel also accepts stairs at the actor's cell with a disclosed landing.
-The backend validates the actual known route; apparent adjacency does not give
-the frontend authority to invent a connection. Bearings follow the observer frame,
-including rotated joins.
+```text
+You are in a small chamber with a stone floor and walls of stone.
+You see a copper token on the floor nearby.
+You see an open wooden door to the east.
+You can head east.
+```
 
-This is a conservative visible-anchor grouping, not a general room segmentation
-algorithm. [Durable place knowledge](place-knowledge.md) adds persistent mnemonic names and
-renaming. Unhinted-place inference, remembered offscreen destinations and richer
-shape summaries remain future work. Descriptions do not
-invent enclosed walls or use internal region names.
+Things inside the place are "at your feet" or "on the floor nearby"; anything
+outside it keeps its direction. The ways onward are the place's doors and gaps,
+and stairs underfoot. Walkable floor inside a place is not an exit. A direction
+heads through the opening that way to the first open cells beyond it, asking
+which when there are several; a closed door answers "The wooden door to the
+east is closed." With no opening that way, an authored place hint seen in
+another place is the fallback. The server validates the actual route; a
+blocked journey says so, naming a creature in the way.
+
+Bearings follow the observer frame, including rotated joins. Diagonal sectors
+cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
+adds persistent mnemonic names and renaming. Descriptions never invent walls,
+smells or region names the protocol doesn't disclose.
 
 ## Commands
 

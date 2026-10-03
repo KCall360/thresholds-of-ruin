@@ -628,3 +628,99 @@ fn rooms_are_described_with_an_article_that_fits() {
         assert!(!prose.contains(" a echoing"), "{prose}");
     }
 }
+
+/// A walled view from a map: `#` wall, `.` open, `+` closed door, `'` open
+/// door, `@` the character, `i` a copper token, space unseen.
+fn walled(map: &[&str]) -> StateView {
+    let at = map
+        .iter()
+        .enumerate()
+        .find_map(|(y, row)| row.find('@').map(|x| (x as i32, y as i32)))
+        .unwrap();
+    let mut cells = Vec::new();
+    let mut items = Vec::new();
+    for (y, row) in map.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let (x, y) = (x as i32 - at.0, y as i32 - at.1);
+            if ch == ' ' {
+                continue;
+            }
+            if ch == 'i' {
+                items.push(serde_json::json!({"reachable": x == 0 && y == 0,
+                    "item": {"quantity": 1, "appearance": "item", "identified": true,
+                        "id": 1, "name": "copper token", "description": ""},
+                    "position": {"x": x, "y": y, "z": 0}}));
+            }
+            for z in [-1, 0, 1] {
+                let solid = ch == '#' || z == -1;
+                cells.push(serde_json::json!({
+                    "key": format!("{x},{y},{z}"),
+                    "position": {"x": x, "y": y, "z": z},
+                    "wall": solid,
+                    "material": "stone",
+                    "place_hint": false, "stairs_up": false, "stairs_down": false,
+                    "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
+                        "id": 9, "name": "oak door", "description": "",
+                        "open": ch == '\'', "reachable": false, "approaches": []
+                    })),
+                }));
+            }
+        }
+    }
+    serde_json::from_value(serde_json::json!({
+        "wizard_game": false, "revision": 0, "observation": {
+            "actor": 1, "tick": 0, "position": {"x": 0, "y": 0, "z": 0},
+            "ready": true, "places": [], "visible_cells": cells,
+            "ground_items": items, "inventory": [], "visible_actors": []
+        }
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_room_is_described_from_its_own_extent_and_its_openings_are_its_ways() {
+    let s = walled(&[
+        "#########     ",
+        "#.......#     ",
+        "#..@....... i ",
+        "#.......#     ",
+        "#########     ",
+    ]);
+    let prose = describe(&s);
+    assert!(
+        prose.contains("You are in a chamber with a stone floor and walls of stone."),
+        "{prose}"
+    );
+    // Only the opening is a way; the token beyond it is in another place.
+    assert!(prose.contains("You can head east."), "{prose}");
+    assert!(
+        prose.contains("You see a copper token to the east."),
+        "{prose}"
+    );
+    assert!(matches!(
+        goals("east", &s).as_slice(),
+        [Goal::Go { destination, .. }] if destination == "7,0,0"
+    ));
+    assert_eq!(said("north", &s), "You can't see a way north.");
+}
+
+#[test]
+fn a_closed_door_is_a_way_that_is_shut() {
+    let s = walled(&["#####", "#.@.+", "#####"]);
+    assert_eq!(said("east", &s), "The oak door to the east is closed.");
+    assert!(!describe(&s).contains("You can head"));
+    let open = walled(&["#####  ", "#.@.'..", "#####  "]);
+    assert!(describe(&open).contains("You can head east."));
+    assert!(matches!(goals("east", &open).as_slice(), [Goal::Go { .. }]));
+}
+
+#[test]
+fn a_room_seen_in_part_goes_on_out_of_sight() {
+    let s = walled(&["#####", "#.@..", "#...."]);
+    let prose = describe(&s);
+    assert!(prose.contains("It goes on out of sight to the"), "{prose}");
+    // Nothing invented: no smells, draughts or epithets.
+    for invented in ["dust", "chill", "Shadows", "scent", "drafty"] {
+        assert!(!prose.contains(invented), "{prose}");
+    }
+}

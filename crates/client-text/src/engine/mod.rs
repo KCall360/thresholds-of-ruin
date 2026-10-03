@@ -3,6 +3,7 @@
 //! passage. See docs/if-engine.md.
 pub mod chronicle;
 pub mod narrate;
+pub mod place;
 pub mod prose;
 pub mod resolve;
 pub mod scene;

@@ -142,6 +142,7 @@ fn told(beat: &Beat) -> bool {
             | Beat::AttackBegan
             | Beat::Journey { .. }
             | Beat::Hp { .. }
+            | Beat::Barred(_)
             | Beat::Resync
     )
 }
@@ -176,10 +177,17 @@ pub fn compose(record: &Record) -> String {
                 blocks.extend(teller.take());
                 blocks.push(text.clone());
             }
-            Entry::Episode(e) => episode(&mut teller, e),
+            Entry::Episode(e) => {
+                let e = Episode {
+                    beats: settled(&e.beats),
+                    ..e.clone()
+                };
+                episode(&mut teller, &e);
+            }
             Entry::Beats(beats) => {
-                own_actions(&mut teller, beats);
-                tell(&mut teller, beats);
+                let beats = settled(beats);
+                own_actions(&mut teller, &beats);
+                tell(&mut teller, &beats);
             }
         }
     }
@@ -206,6 +214,36 @@ fn alike(objects: &[String]) -> Vec<String> {
             Some(name) if n > 1 => format!("the {} {}", prose::number(n), prose::plural(name)),
             _ => object.clone(),
         })
+        .collect()
+}
+
+/// Sightings that cancel out: a figure lost from sight and seen again (or
+/// glimpsed and lost) within one passage is neither news nor gone.
+fn settled(beats: &[Beat]) -> Vec<Beat> {
+    let mut net: std::collections::BTreeMap<ActorId, (usize, usize)> = Default::default();
+    for beat in beats {
+        match beat {
+            Beat::Appeared { figure, .. } => net.entry(figure.id).or_default().0 += 1,
+            Beat::Vanished(figure) => net.entry(figure.id).or_default().1 += 1,
+            _ => {}
+        }
+    }
+    let died: BTreeSet<ActorId> = beats
+        .iter()
+        .filter_map(|b| match b {
+            Beat::Died(Who::Figure(f)) => Some(f.id),
+            _ => None,
+        })
+        .collect();
+    let cancels =
+        |id: &ActorId| !died.contains(id) && net.get(id).is_some_and(|(seen, lost)| seen == lost);
+    beats
+        .iter()
+        .filter(|b| match b {
+            Beat::Appeared { figure, .. } | Beat::Vanished(figure) => !cancels(&figure.id),
+            _ => true,
+        })
+        .cloned()
         .collect()
 }
 
@@ -402,7 +440,17 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     }
                 }
                 TravelPhase::Blocked => {
-                    teller.say(format!("{intent}, but the way is blocked"));
+                    let barred = travel.iter().find_map(|b| match b {
+                        Beat::Barred(figure) => Some(figure.clone()),
+                        _ => None,
+                    });
+                    match barred {
+                        Some(figure) => {
+                            let who = teller.the(&figure);
+                            teller.say(format!("{intent}, but {who} bars the way"));
+                        }
+                        None => teller.say(format!("{intent}, but the way is blocked")),
+                    }
                     tell(teller, travel);
                 }
                 TravelPhase::DecisionRequired => {
@@ -632,6 +680,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::AttackBegan
             | Beat::Journey { .. }
             | Beat::Hp { .. }
+            | Beat::Barred(_)
             | Beat::Resync => {}
         }
         i += 1;
@@ -685,6 +734,29 @@ mod tests {
                 End::Stopped(TravelPhase::Blocked)
             )]),
             "You head toward the copper token, intent on picking it up, but the way is blocked."
+        );
+    }
+
+    #[test]
+    fn whoever_bars_a_blocked_way_is_named() {
+        let journey = vec![
+            Beat::Barred(scout()),
+            Beat::Journey {
+                phase: TravelPhase::Blocked,
+            },
+        ];
+        assert_eq!(
+            told(vec![episode(
+                Goal::Go {
+                    direction: Direction::West,
+                    destination: "x".into()
+                },
+                "west",
+                true,
+                journey,
+                End::Stopped(TravelPhase::Blocked)
+            )]),
+            "You set off west, but the ruin scout bars the way."
         );
     }
 

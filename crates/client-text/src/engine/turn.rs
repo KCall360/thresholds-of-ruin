@@ -438,7 +438,22 @@ pub async fn run_goal(
                             episode.end = End::Wary;
                         }
                     }
-                    Settled::Journey(phase) => episode.end = End::Stopped(phase),
+                    Settled::Journey(phase) => {
+                        if phase == TravelPhase::Blocked {
+                            // Name who's in the way, when someone is.
+                            let now = Scene::new(link.client().state(), link.palette());
+                            let blocker = now.of(Kind::Figure).find(|r| r.reachable);
+                            if let Some(r) = blocker {
+                                if let Key::Actor(id) = r.key {
+                                    reader.beats.push(Beat::Barred(super::chronicle::Figure {
+                                        id,
+                                        name: r.name.clone(),
+                                    }));
+                                }
+                            }
+                        }
+                        episode.end = End::Stopped(phase);
+                    }
                     Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
                     Settled::Rejected(code) => {
                         episode.approached = false;
