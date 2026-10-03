@@ -394,6 +394,14 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
 }
 
 fn directional(direction: Direction, scene: &Scene) -> Interpretation {
+    // Stairs are taken in one move, wherever they lead.
+    if matches!(direction, Direction::Up | Direction::Down)
+        && super::place::survey(scene.state)
+            .ways(direction)
+            .any(|w| w.kind == super::place::Opening::Stairs)
+    {
+        return goal(Goal::Step { direction });
+    }
     let ways = crate::adventure::exits(scene.state, direction);
     let go = |key: &str| {
         goal(Goal::Go {

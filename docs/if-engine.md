@@ -120,6 +120,7 @@ Examples:
 | | a remembered place, by name | `Travel` to the key it was learned at; "You're already in ..." when there |
 | | `start`, `the beginning` (also `go back to ...`) | `Travel` to the cell the character stood on when the client began |
 | | `exit`, `the way out` | `Travel` to the objective's exit cell, when the objective is disclosed |
+| up, down | stairs underfoot | `Act(Move)`: one step, wherever the stairs lead ("You go up.") |
 | a direction; go, walk, head | way onward | `Approach(exit)`, then on while there's nothing to see (see [walking on](#walking-on)); the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
 | examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |

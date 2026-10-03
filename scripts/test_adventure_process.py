@@ -98,8 +98,8 @@ class AdventureProcesses(ProcessTestCase):
         self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\n"), fetched)
         # The first token is told plainly, a second one as another.
         self.assertIn("A copper token lies on the floor nearby; another copper token lies to the south.", fetched)
-        self.assertIn("You walk down.", self.say(player, "down"))
-        self.assertIn("You walk up.", self.say(player, "up"))
+        self.assertIn("You go down.", self.say(player, "down"))
+        self.assertIn("You go up.", self.say(player, "up"))
         observer, state = self.client(SPECTATOR_TOKEN)
         self.assertEqual(state["state"]["observation"]["tick"], 550)
         self.assertEqual([i["name"] for i in state["state"]["observation"]["inventory"]], ["stone tablet"])
@@ -349,6 +349,17 @@ class AdventureProcesses(ProcessTestCase):
         # Through the doorway's portal, into the next room.
         self.assertTrue(stepped.startswith("You step southeast.\nBroken gallery\n"), stepped)
 
+
+    def test_stairs_are_taken_wherever_they_lead(self):
+        # Regression: stairs that lead up diagonally said "Stairs lead up",
+        # but `up` couldn't find a way there.
+        self.server(scenario="diagonal-stairs")
+        player, welcome = self.adventure()
+        self.assertIn("Stairs lead up.", welcome)
+        climbed = self.say(player, "up")
+        self.assertTrue(climbed.startswith("You go up.\nYou are in "), climbed)
+        self.assertIn("Stairs lead down.", climbed)
+        self.assertTrue(self.say(player, "down").startswith("You go down.\n"))
 
 if __name__ == "__main__":
     unittest.main()
