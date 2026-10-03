@@ -22,11 +22,11 @@ use crate::{
     safe,
 };
 
-/// The cell that stands for the place the character is in: an authored place
-/// hint inside the place, or else one of its open cells. Either way it's the
-/// one with the lowest key, so it doesn't depend on where in the place the
-/// character stands, and keys are fixed for the game, so neither does it
-/// change between visits.
+/// The cell that stands for the place the character is in: the nearest
+/// authored place hint inside the place (a room has one), or else its open
+/// cell with the lowest key, which doesn't depend on where in the place the
+/// character stands. Keys are fixed for the game, so neither changes between
+/// visits.
 pub fn current_place_anchor(state: &StateView) -> Option<(&str, Position)> {
     current_place_anchor_in(state, &place::survey(state))
 }
@@ -40,7 +40,8 @@ fn current_place_anchor_in<'a>(state: &'a StateView, place: &Place) -> Option<(&
         .iter()
         .filter(inside)
         .filter(|c| c.place_hint)
-        .min_by_key(|c| (&c.key, distance(c.position)))
+        // The nearest, should what's seen join two rooms into one place.
+        .min_by_key(|c| (distance(c.position), &c.key))
         .or_else(|| {
             cells
                 .iter()
@@ -107,7 +108,12 @@ impl Places {
                     && place.columns.contains(&(c.position.x, c.position.y))
             })
             .collect();
-        if let Some(hint) = cells.iter().filter(|c| c.place_hint).min_by_key(|c| &c.key) {
+        // The nearest hint, should what's seen join two rooms into one place.
+        if let Some(hint) = cells
+            .iter()
+            .filter(|c| c.place_hint)
+            .min_by_key(|c| (distance(c.position), &c.key))
+        {
             return Some(hint.key.clone());
         }
         // Open ground without walls or hints has no bounds to tell one part

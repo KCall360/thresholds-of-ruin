@@ -217,7 +217,10 @@ was just described.
 ### Places and ways
 
 `engine::place` works out the place the character is in from the disclosed
-cells alone. The body stands on the open cells at its own level (z = 0) with
+cells alone: those in sight, and those remembered from earlier views of this
+connection, aligned to this one (`engine::seen`, from the client's map
+memory). So a doorway seen a moment ago is still a way out when the angle
+hides its floor. Things and figures are only what's in sight. The body stands on the open cells at its own level (z = 0) with
 headroom above (z = 1). A column is open when its z = 0 cell is seen, open and
 not a doorway, with no wall seen above it.
 
@@ -230,6 +233,10 @@ not a doorway, with no wall seen above it.
   place is the open ground nearest the same authored place hint.
 - **Ways.** Doors and open columns at the edge of the place, grouped where they
   touch, are its openings: a door, a passage (more gaps beyond) or an archway.
+  An opening is named by the side of the place it's in, so the doorway in the
+  east wall leads east wherever the character stands; it also answers to its
+  bearing from the character ("southeast", standing beside it) when no
+  opening is named that way.
   A journey through one ends at the farthest seen open cell up to three steps
   beyond it. Stairs at the character's cell are ways up or down. When no
   opening lies in a direction, an authored anchor seen that way in another
@@ -338,7 +345,8 @@ on every visit and from anywhere inside it, while neighbouring places rarely
 share a description. Stone alone has nine themes, each with two or three
 mood words and two choices per sense.
 
-A place's key is its authored place hint with the lowest key. A place
+A place's key is its authored place hint (the nearest, should what's seen
+join two rooms into one place, as it can across a doorway). A place
 without a hint is known by the key most of its cells were first seen under,
 which `narrative::Places` remembers in the engine; a place seen for the first
 time takes its lowest open cell key. So a corridor seen in part keeps its key

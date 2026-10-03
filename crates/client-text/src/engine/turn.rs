@@ -463,7 +463,7 @@ pub async fn run_goal(
                 let (mut destination, mut branch, mut revision) = (destination, branch, revision);
                 let mut legs = 0;
                 loop {
-                    let before = link.client().state().clone();
+                    let before = super::seen(link.client());
                     let request = Request::Command {
                         branch,
                         command: Command::Travel {
@@ -487,15 +487,17 @@ pub async fn run_goal(
                             let Goal::Go { direction, .. } = &episode.goal else {
                                 unreachable!("a walk")
                             };
-                            let now = link.client().state();
-                            let new = crate::adventure::sights(now)
+                            // What's new is what's in sight; where to go on
+                            // is read from what's remembered too.
+                            let new = crate::adventure::sights(link.client().state())
                                 .into_iter()
                                 .find(|(id, ..)| !seen.contains(id));
                             if let Some((_, what, whereabouts)) = new {
                                 reader.beats.push(Beat::Spotted { what, whereabouts });
                             } else if legs < MAX_LEGS {
+                                let now = super::seen(link.client());
                                 if let Some((way, to)) =
-                                    crate::adventure::onward(&before, now, *direction)
+                                    crate::adventure::onward(&before, &now, *direction)
                                 {
                                     episode.goal = Goal::Go {
                                         direction: way,

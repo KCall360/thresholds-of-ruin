@@ -172,12 +172,12 @@ impl Engine {
     pub fn welcome(&mut self, link: &impl Link) -> String {
         self.places.begin(link.client().state());
         self.note_described(link);
-        crate::adventure::describe_in(link.client().state(), link.palette(), &self.places)
+        crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places)
     }
 
     /// The key of the place the character is in, as first seen.
     fn place_key(&mut self, link: &impl Link) -> Option<String> {
-        self.places.learn(link.client().state())
+        self.places.learn(&seen(link.client()))
     }
 
     /// Remember that the place in view has been described in full.
@@ -189,8 +189,9 @@ impl Engine {
 
     /// The scene as `look` shows it.
     fn look(&mut self, link: &impl Link) -> String {
-        self.places.learn(link.client().state());
-        crate::adventure::look_with(link.client().state(), link.palette(), &self.places)
+        let state = seen(link.client());
+        self.places.learn(&state);
+        crate::adventure::look_with(&state, link.palette(), &self.places)
     }
 
     /// The place on arriving there, as fully as the verbosity asks.
@@ -198,7 +199,8 @@ impl Engine {
         let known = self
             .place_key(link)
             .is_some_and(|key| self.described.contains(&key));
-        let (state, palette, places) = (link.client().state(), link.palette(), &self.places);
+        let state = seen(link.client());
+        let (state, palette, places) = (&state, link.palette(), &self.places);
         match self.verbosity {
             Verbosity::Superbrief => {
                 crate::adventure::brief_place_with(state, palette, places, false)
@@ -287,11 +289,8 @@ impl Engine {
                             break;
                         }
                         Ok(command) => {
-                            let scene = Scene::remembering(
-                                link.client().state(),
-                                link.palette(),
-                                &self.places,
-                            );
+                            let state = seen(link.client());
+                            let scene = Scene::remembering(&state, link.palette(), &self.places);
                             verbs::interpret(&command, &scene, &mut self.referents)
                         }
                         Err(message) => {
@@ -490,7 +489,7 @@ impl Engine {
         if resynced {
             self.note_described(link);
             let text =
-                crate::adventure::describe_in(link.client().state(), link.palette(), &self.places);
+                crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places);
             record.entries.push(Entry::Description(text));
         } else if moved {
             // The description says who is there; sightings on the way in
@@ -558,6 +557,42 @@ enum Flow {
     Continue,
     Stop,
     Quit,
+}
+
+/// The view places and ways are read from: what's in sight, and the cells
+/// remembered from earlier views, aligned to this one, where nothing is in
+/// sight. So a doorway seen a moment ago is still a way out when the angle
+/// hides its floor. Things and figures are only what's in sight; remembered
+/// doors are as last seen.
+pub fn seen(client: &tor_client_common::ClientState) -> StateView {
+    let mut state = client.state().clone();
+    let shown: BTreeSet<Position> = state
+        .observation
+        .visible_cells
+        .iter()
+        .map(|c| c.position)
+        .collect();
+    for cell in client.map_memory() {
+        if shown.contains(&cell.position) {
+            continue;
+        }
+        state.observation.visible_cells.push(CellView {
+            door: cell.door.clone().map(|door| DoorView {
+                reachable: false,
+                approaches: Vec::new(),
+                ..door
+            }),
+            material: cell.material.clone(),
+            key: cell.key.clone(),
+            stairs_up: cell.stairs_up,
+            stairs_down: cell.stairs_down,
+            position: cell.position,
+            wall: cell.wall,
+            place_hint: cell.place_hint,
+            asset: None,
+        });
+    }
+    state
 }
 
 /// The scene described in full, as the game opens or after a snapshot, with

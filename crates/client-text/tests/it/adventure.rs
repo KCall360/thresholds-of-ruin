@@ -648,7 +648,7 @@ fn rooms_are_described_with_an_article_that_fits() {
 /// door, `@` the character, `i` a copper token, `r` a rat, space unseen.
 /// Cell keys are map coordinates, so they stay with the cell wherever the
 /// character stands, as the server's do.
-fn walled(map: &[&str]) -> StateView {
+pub(crate) fn walled(map: &[&str]) -> StateView {
     let at = map
         .iter()
         .enumerate()
@@ -1121,4 +1121,27 @@ fn names_the_game_made_up_are_left_unsaid() {
         describe(&s)
     );
     assert_eq!(tor_client_text::places(&s), "1. Antechamber (in sight)");
+}
+
+#[test]
+fn a_place_joined_with_the_next_room_is_known_by_its_nearest_hint() {
+    // Regression: seen across a doorway, two rooms can survey as one place
+    // holding both their hints; keyed by the lowest key, stepping into the
+    // next room didn't count as arriving anywhere.
+    let mut s = walled(&["###########", "#.......@..", "###########"]);
+    for cell in &mut s.observation.visible_cells {
+        let (x, y, z) = (cell.position.x, cell.position.y, cell.position.z);
+        // "7,1,0" is next to the character; "2,1,0" is farther, with the
+        // lower key.
+        cell.place_hint = z == 0 && y == 0 && (x == -1 || x == -6);
+    }
+    let near = s
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| c.place_hint && c.position.x == -1)
+        .unwrap()
+        .key
+        .clone();
+    assert_eq!(NO_PLACES.key(&s), Some(near));
 }

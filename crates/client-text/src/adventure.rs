@@ -114,7 +114,10 @@ fn exits_from(
     if !ways.is_empty() {
         return ways;
     }
+    let open = place.form == crate::engine::place::Form::Open;
     let mut seen = BTreeSet::new();
+    // Places seen elsewhere guide the way only across open ground; within
+    // walls the ways out are the openings.
     let mut anchors: Vec<_> = state
         .observation
         .visible_cells
@@ -125,10 +128,10 @@ fn exits_from(
                 && c.position.z == 0
                 && bearing(c.position) == Some(direction)
                 && !place.contains(c.position)
+                && open
         })
         .collect();
     anchors.sort_by_key(|c| (distance(c.position), &c.key));
-    let open = place.form == crate::engine::place::Form::Open;
     if anchors.is_empty() && (open || place.continues.contains(&direction)) {
         // Where the place goes on into darkness, or across open ground, a
         // direction leads as far as can be seen that way, keeping as

@@ -1125,3 +1125,29 @@ async fn a_turn_ends_when_the_server_says_another_player_is_next() {
         "the rat's arrival waits for between turns"
     );
 }
+
+#[tokio::test]
+async fn a_doorway_out_of_sight_a_moment_later_is_still_a_way_out() {
+    // Regression: beside the wall, only the head-height cell of a doorway
+    // was in sight, so the room had no way out until the character moved.
+    let room = ["#####", "#.@.'..", "#####"];
+    let start = crate::adventure::walled(&room);
+    let mut hidden = start.clone();
+    // The doorway's floor drops out of sight.
+    hidden
+        .observation
+        .visible_cells
+        .retain(|c| !(c.position.x == 2 && c.position.y == 0 && c.position.z == 0));
+    let mut link = Scripted::new(start, move |request, _| match request {
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => vec![Frame::View(hidden.clone(), Some(Event::Waited)), Frame::Ack],
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    play(&mut link, &mut engine, "wait").await;
+    let look = play(&mut link, &mut engine, "look").await;
+    assert!(look.contains("An open oak door leads east."), "{look}");
+}
