@@ -1171,3 +1171,28 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
         "You drop two arrows."
     );
 }
+
+#[tokio::test]
+async fn a_move_told_between_turns_describes_where_it_arrives() {
+    // Regression: a spectator saw "You move east." but never the room the
+    // watched character walked into.
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    let before = link.client.state().clone();
+    let mut after = east(before.clone(), 6);
+    after.revision = 1;
+    let message = link.update(
+        60,
+        UpdateBody::Observation {
+            state: Box::new(after),
+            event: None,
+        },
+    );
+    if let ServerMessage::Update { update } = &message {
+        link.client.apply(*update.clone()).unwrap();
+    }
+    let beats = engine.between_turns(&link, &before, &message);
+    let passage = engine.passage(&link, beats);
+    assert!(passage.contains("You are in an open"), "{passage}");
+}

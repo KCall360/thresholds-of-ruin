@@ -57,6 +57,9 @@ pub struct Engine {
     described: BTreeSet<String>,
     /// The keys places were first seen under.
     places: crate::narrative::Places,
+    /// The place the character was in when the last passage ended, so
+    /// moves told between turns (a spectator's) can arrive somewhere too.
+    last_place: Option<String>,
 }
 
 /// The sentences of a line, each with its own text as typed, so names and
@@ -172,6 +175,7 @@ impl Engine {
     pub fn welcome(&mut self, link: &impl Link) -> String {
         self.places.begin(link.client().state());
         self.note_described(link);
+        self.last_place = self.place_key(link);
         crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places)
     }
 
@@ -485,6 +489,7 @@ impl Engine {
         // walking over to something; a direction across open ground can
         // leave the character in the same place.
         let here = self.place_key(link);
+        self.last_place.clone_from(&here);
         let moved = start.is_some_and(|start| here.is_some_and(|here| here != start));
         if resynced {
             self.note_described(link);
@@ -549,7 +554,8 @@ impl Engine {
         let mut record = Record::default();
         record.entries.push(Entry::Beats(beats));
         self.after_beats(link, &record);
-        self.finish(link, &mut record, None);
+        let start = self.last_place.clone();
+        self.finish(link, &mut record, start.as_deref());
         narrate::compose(&record)
     }
 }
