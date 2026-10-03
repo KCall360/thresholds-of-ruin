@@ -119,7 +119,7 @@ Examples:
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
 | | a remembered place, by name | `Travel` to the key it was learned at; "You're already in ..." when there |
 | | `start`, `the beginning` (also `go back to ...`) | `Travel` to the cell the character stood on when the client began |
-| a direction; go, walk, head | way onward | `Approach(exit)`, then the new place is described |
+| a direction; go, walk, head | way onward | `Approach(exit)`, then on while there's nothing to see (see [walking on](#walking-on)); the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
 | examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |
 | wear, eat, drink, give, throw, unlock, push, talk, search, pray, ... | anything | refusal once the object is found: "You can't wear anything yet." |
@@ -240,6 +240,32 @@ not a doorway, with no wall seen above it.
   40: a chamber (small up to 15); more: a large hall.
 - **Beyond sight.** Unseen columns at the place's edge mean it goes on out of
   sight in their directions, where some of the place is seen that way.
+
+### Walking on
+
+A direction is a walk, not one journey. When a journey ends and nothing new
+has come into view, the client sends another, leg after leg, so the player
+isn't asked to type `east` across featureless ground
+(`adventure::onward`, run by `engine::turn`):
+
+- **Into darkness.** Where the place fades into darkness that way, or across
+  open ground, the next leg goes to the farthest floor seen that way.
+- **Along a corridor.** Standing where exactly two ways lead off and one is
+  ahead, the walk follows the corridor round its bends
+  (`place::corridor_ahead`) to just before a junction, a door beside the way,
+  a dead end or unseen floor.
+- **It stops** when a creature comes into view (the server stops the journey
+  too), when a thing or door not seen when the walk began comes into view
+  ("You walk east, then north, until you see a copper token to the north."),
+  on entering a room or a place with another authored hint, at an opening
+  or door ahead, where there's nowhere further to go, or after twelve legs.
+
+The narration is one sentence however many legs it took: the direction set
+off in, the one the walk ended up heading if a bend changed it, and what
+made it stop.
+
+Open ground with no walls or hints in sight has no bounds to tell one part
+from another, so it is all one place, with one atmosphere.
 
 ### Descriptions
 

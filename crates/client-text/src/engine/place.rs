@@ -157,6 +157,87 @@ fn position((x, y): Column) -> Position {
     Position { x, y, z: 0 }
 }
 
+/// Where a corridor leads when walking it in `heading`: the farthest cell
+/// reached by stepping along open floor while there's exactly one way on,
+/// and the bearing of that cell. The character must stand in a corridor
+/// (two ways off its cell, one of them ahead). The walk stops before a
+/// junction, a door beside the way, a dead end or unseen floor.
+pub fn corridor_ahead(state: &StateView, heading: Direction) -> Option<(Direction, String)> {
+    let cols = Columns::new(state);
+    let open_steps = |(x, y): Column| -> Vec<Column> {
+        STEPS
+            .iter()
+            .map(|(dx, dy)| (x + dx, y + dy))
+            .filter(|c| cols.open(*c))
+            .collect()
+    };
+    let beside_door = |(x, y): Column| {
+        STEPS
+            .iter()
+            .any(|(dx, dy)| cols.door((x + dx, y + dy)).is_some())
+    };
+    let origin = (0, 0);
+    let here = open_steps(origin);
+    if here.len() != 2 {
+        return None;
+    }
+    let ahead: Vec<Column> = here
+        .iter()
+        .copied()
+        .filter(|c| bearing(position(*c)).is_some_and(|d| eighths(d, heading) <= 2))
+        .collect();
+    let [mut current] = ahead.as_slice() else {
+        return None;
+    };
+    let mut previous = origin;
+    for _ in 0..16 {
+        if beside_door(current) {
+            break;
+        }
+        let on: Vec<Column> = open_steps(current)
+            .into_iter()
+            .filter(|c| *c != previous)
+            .collect();
+        // A cell with unseen neighbours is where sight ends.
+        let (x, y) = current;
+        let edge = STEPS.iter().any(|(dx, dy)| !cols.seen((x + dx, y + dy)));
+        match on.as_slice() {
+            [next] if !edge => {
+                previous = current;
+                current = *next;
+            }
+            _ => break,
+        }
+    }
+    let direction = bearing(position(current))?;
+    Some((direction, cols.key(current)?.to_owned()))
+}
+
+/// Eighths of a turn between two horizontal directions, 0 to 4; 4 for any
+/// vertical one.
+pub fn eighths(a: Direction, b: Direction) -> usize {
+    const ROSE: [Direction; 8] = [
+        Direction::North,
+        Direction::NorthEast,
+        Direction::East,
+        Direction::SouthEast,
+        Direction::South,
+        Direction::SouthWest,
+        Direction::West,
+        Direction::NorthWest,
+    ];
+    match (
+        ROSE.iter().position(|x| *x == a),
+        ROSE.iter().position(|x| *x == b),
+    ) {
+        (Some(a), Some(b)) => {
+            let d = a.abs_diff(b);
+            d.min(8 - d)
+        }
+        _ => 4,
+    }
+}
+
 /// Work out the place from what the character sees.
 pub fn survey(state: &StateView) -> Place {
     let cols = Columns::new(state);

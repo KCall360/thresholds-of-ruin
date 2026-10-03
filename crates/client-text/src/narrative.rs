@@ -62,6 +62,9 @@ pub struct Places {
     pub start: Option<String>,
 }
 
+/// The key of open ground that has no authored hint.
+const OPEN_GROUND: &str = "open ground";
+
 /// No places remembered.
 pub static NO_PLACES: Places = Places {
     by_cell: BTreeMap::new(),
@@ -106,6 +109,11 @@ impl Places {
             .collect();
         if let Some(hint) = cells.iter().filter(|c| c.place_hint).min_by_key(|c| &c.key) {
             return Some(hint.key.clone());
+        }
+        // Open ground without walls or hints has no bounds to tell one part
+        // from another: it's all one place, with one atmosphere.
+        if place.form == Form::Open {
+            return Some(OPEN_GROUND.to_owned());
         }
         let mut votes: BTreeMap<&str, usize> = BTreeMap::new();
         for cell in &cells {

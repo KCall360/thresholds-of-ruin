@@ -1025,3 +1025,70 @@ async fn a_creature_in_the_way_is_named() {
         "You head toward the stone tablet, intent on picking it up, but the ruin guard bars the way."
     );
 }
+
+/// A server for walks across open ground: each journey goes six cells east
+/// and reveals six more cells beyond, and on the `find`th journey a pebble
+/// comes into view ahead.
+fn open_ground(find: usize) -> Scripted {
+    let mut start = state();
+    for cell in &mut start.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    start.observation.ground_items.clear();
+    let legs = std::cell::Cell::new(0usize);
+    Scripted::new(start, move |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            legs.set(legs.get() + 1);
+            let mut there = east(now.clone(), 6);
+            let mut far = there.observation.visible_cells[0].clone();
+            for x in 1..=6 {
+                far.key = format!("far-{}-{x}", legs.get());
+                far.position.x = x;
+                there.observation.visible_cells.push(far.clone());
+            }
+            if legs.get() == find {
+                there.observation.ground_items.push(
+                    serde_json::from_value(serde_json::json!({
+                        "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
+                        "item": {"quantity": 1, "appearance": "item", "identified": true,
+                            "id": 7, "name": "pebble", "description": ""}}))
+                    .unwrap(),
+                );
+            }
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    })
+}
+
+#[tokio::test]
+async fn a_walk_into_darkness_goes_on_until_something_comes_into_view() {
+    let mut link = open_ground(3);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "east").await,
+        "You walk east until you see a pebble to the east."
+    );
+    assert_eq!(link.sent.len(), 3);
+    assert!(link.sent.iter().all(is_travel));
+}
+
+#[tokio::test]
+async fn a_walk_with_nothing_to_find_stops_in_the_end() {
+    let mut link = open_ground(usize::MAX);
+    let mut engine = Engine::default();
+    assert_eq!(play(&mut link, &mut engine, "east").await, "You walk east.");
+    assert_eq!(link.sent.len(), 12);
+}

@@ -334,7 +334,7 @@ const UNKNOWN: &[Theme] = &[
         sound: &["All is quiet.", "It is very quiet."],
     },
     Theme {
-        moods: &["drafty", "open"],
+        moods: &["drafty", "airy"],
         air: &["A faint breeze moves the air.", "Cool air drifts past you."],
         smell: &[
             "The moving air smells clean.",

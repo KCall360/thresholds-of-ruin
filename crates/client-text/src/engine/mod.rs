@@ -514,6 +514,7 @@ impl Engine {
                     Beat::Appeared { figure, .. } | Beat::Vanished(figure) => {
                         !present.contains(&figure.id)
                     }
+                    Beat::Spotted { .. } => false,
                     _ => true,
                 });
             }

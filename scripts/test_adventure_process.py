@@ -325,9 +325,15 @@ class AdventureProcesses(ProcessTestCase):
         self.server(scenario="streaming-corridor")
         player, welcome = self.adventure()
         self.assertIn("Open ground stretches away into darkness on every side.", welcome)
+        # The walk goes on through the dark until something comes into view.
+        self.assertEqual(
+            "You set off east. A warden comes into view to the east, and you stop warily.\n> ",
+            self.say(player, "east"),
+        )
         # The same open place throughout: no new description on arrival.
-        self.assertEqual("You walk east.\n> ", self.say(player, "east"))
-        self.assertEqual("You walk west.\n> ", self.say(player, "west"))
+        back = self.say(player, "west")
+        self.assertTrue(back.startswith("You walk west"), back)
+        self.assertNotIn("You are in", back)
 
     def test_a_journey_goes_round_a_doorway_corner_a_body_cannot_cut(self):
         # Regression: from beside the wall, the route cut the doorway's corner

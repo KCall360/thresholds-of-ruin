@@ -186,6 +186,81 @@ fn exits_from(
         .collect()
 }
 
+/// The authored hint inside a place, if it has one.
+fn hint<'a>(state: &'a StateView, place: &Place) -> Option<&'a str> {
+    state
+        .observation
+        .visible_cells
+        .iter()
+        .filter(|c| c.place_hint && !c.wall && place.contains(c.position))
+        .map(|c| c.key.as_str())
+        .min()
+}
+
+/// Where a walk in `direction` goes next, after a leg that began in `before`
+/// and ended in `now`, when there's nothing yet worth stopping for: the way
+/// it took, and where that leg ends. A walk goes on into darkness, and along
+/// a corridor while there's one way on, following its bends. It stops on
+/// entering a room, at a junction or a door, or where the way runs out.
+/// Whether something came into view is the caller's to judge.
+pub fn onward(
+    before: &StateView,
+    now: &StateView,
+    direction: Direction,
+) -> Option<(Direction, String)> {
+    use crate::engine::place::{survey, Form};
+    let (was, is) = (survey(before), survey(now));
+    let here = crate::narrative::here_key(now)?;
+    // Arriving somewhere new is a place to stop.
+    let roomy = !matches!(is.form, Form::Passage | Form::Open);
+    let new_hint = hint(now, &is).is_some_and(|h| hint(before, &was) != Some(h));
+    if new_hint || (roomy && was.form != is.form) {
+        return None;
+    }
+    // On into the dark, unless an opening lies that way.
+    if is.ways(direction).next().is_none()
+        && (is.form == Form::Open || is.continues.contains(&direction))
+    {
+        return exits_from(&is, now, direction)
+            .into_iter()
+            .find_map(|e| e.destination)
+            .filter(|d| d != here)
+            .map(|d| (direction, d));
+    }
+    // Along a corridor, following its bends, to just before anything that
+    // asks for a choice.
+    crate::engine::place::corridor_ahead(now, direction).filter(|(_, to)| to != here)
+}
+
+/// What a walk would stop to look at, if it came into view: things and
+/// doors, with how to name them and where they are.
+pub(crate) fn sights(state: &StateView) -> Vec<(String, String, String)> {
+    let o = &state.observation;
+    let mut seen = Vec::new();
+    for item in &o.ground_items {
+        seen.push((
+            format!("item:{}", item.item.id),
+            prose::counted(item.item.quantity, &safe(&item.item.name)),
+            whereabouts(item.position),
+        ));
+    }
+    for cell in &o.visible_cells {
+        if let Some(door) = &cell.door {
+            let name = if door.name.trim().is_empty() {
+                "door".to_owned()
+            } else {
+                safe(&door.name)
+            };
+            seen.push((
+                format!("door:{}", door.id),
+                prose::indefinite(&name),
+                whereabouts(cell.position),
+            ));
+        }
+    }
+    seen
+}
+
 /// Words for the assets this client knows. A lookup falls back through dotted
 /// prefixes, so `terrain.floor.stone`, which has no entry, reads as
 /// `terrain.floor`. A thing whose asset has no word, or isn't in the palette,

@@ -102,7 +102,9 @@ tablet` walks over first when it's out of reach. See the
   the key`, `take tokens`.
 - `open` / `close` a door, walking over first when needed.
 - `attack` / `kill` / `hit <creature>`, closing in first when needed.
-- A direction (`east`, `ne`, `up`), or `go east`: head for a way onward.
+- A direction (`east`, `ne`, `up`), or `go east`: head for a way onward, and
+  keep walking through darkness or along a corridor until something comes
+  into view or the way needs a choice.
   `go to <thing>` walks over without acting on it, and `go to <place name>`
   goes back to a place listed by `places`; `go to start` (or `go back to the
   start`) returns to where the character stood when the client began.

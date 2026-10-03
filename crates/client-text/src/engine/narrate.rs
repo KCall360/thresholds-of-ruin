@@ -146,6 +146,7 @@ fn told(beat: &Beat) -> bool {
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
+            | Beat::Spotted { .. }
             | Beat::Resync
     )
 }
@@ -380,7 +381,24 @@ fn episode(teller: &mut Teller, e: &Episode) {
                 Goal::Go { .. } | Goal::Visit { .. } => {
                     teller.say(match &e.goal {
                         Goal::Go { direction, .. } => {
-                            format!("you walk {}", direction_name(*direction))
+                            // A walk that followed a bend says where it ended
+                            // up heading, and what made it stop.
+                            let last = direction_name(*direction);
+                            let mut walk = format!("you walk {object}");
+                            if last != object {
+                                walk.push_str(&format!(", then {last}"));
+                            }
+                            let spotted = e.beats.iter().find_map(|b| match b {
+                                Beat::Spotted { what, whereabouts } => Some((what, whereabouts)),
+                                _ => None,
+                            });
+                            if let Some((what, whereabouts)) = spotted {
+                                let comma = if last != object { "," } else { "" };
+                                walk.push_str(&format!(
+                                    "{comma} until you see {what} {whereabouts}"
+                                ));
+                            }
+                            walk
                         }
                         _ => format!("you make your way back to {object}"),
                     });
@@ -459,6 +477,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     None => format!("you head toward {object}"),
                 },
             };
+            let mut after = after.to_vec();
             match phase {
                 TravelPhase::Hazard => {
                     teller.say(intent);
@@ -476,6 +495,26 @@ fn episode(teller: &mut Teller, e: &Episode) {
                                 ));
                             }
                             beat => tell(teller, std::slice::from_ref(beat)),
+                        }
+                    }
+                    // The sighting that stopped the journey can arrive just
+                    // after it ended.
+                    if !stopped {
+                        if let Some(at) = after
+                            .iter()
+                            .position(|b| matches!(b, Beat::Appeared { .. }))
+                        {
+                            if let Beat::Appeared {
+                                figure,
+                                whereabouts,
+                            } = after.remove(at)
+                            {
+                                stopped = true;
+                                let who = teller.a(&figure);
+                                teller.say(format!(
+                                    "{who} comes into view {whereabouts}, and you stop warily"
+                                ));
+                            }
                         }
                     }
                     if !stopped {
@@ -538,7 +577,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     tell(teller, travel);
                 }
             }
-            tell(teller, after);
+            tell(teller, &after);
         }
         (End::Wary, _) => {
             let appeared = e
@@ -741,6 +780,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
+            | Beat::Spotted { .. }
             | Beat::Resync => {}
         }
         i += 1;

@@ -1032,3 +1032,28 @@ fn going_to_the_start_returns_to_where_the_character_began() {
     // A client that never saw the start can't go back to it.
     assert_eq!(said("go to start", &moved), "You can't see any start here.");
 }
+
+#[test]
+fn a_walk_follows_a_passage_and_stops_where_it_opens_out() {
+    use tor_client_text::adventure::onward;
+    // Map coordinates: the character walks a passage that bends south.
+    let before = walled(&["##########", "#@.....  #", "#######. #", "      #. #"]);
+    let along = walled(&[
+        "##########",
+        "#......@##",
+        "#######.##",
+        "      #.# ",
+        "      #.# ",
+    ]);
+    // The only way on bends south; the walk follows it.
+    assert!(matches!(
+        onward(&before, &along, Direction::East),
+        Some((Direction::South, _))
+    ));
+    // A side passage makes a junction: stop there.
+    let junction = walled(&["##########", "#......@..", "#######.##", "      #.# "]);
+    assert_eq!(onward(&before, &junction, Direction::East), None);
+    // Coming out into a room: stop to look at it.
+    let room = walled(&["#######", "#.....#", "...@..#", "#.....#", "#######"]);
+    assert_eq!(onward(&before, &room, Direction::East), None);
+}

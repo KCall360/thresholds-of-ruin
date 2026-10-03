@@ -56,6 +56,11 @@ pub enum Beat {
         figure: Figure,
         whereabouts: String,
     },
+    /// A walk stopped because this came into view: "a copper token".
+    Spotted {
+        what: String,
+        whereabouts: String,
+    },
     Vanished(Figure),
     /// A door changed state, not by the character's hand.
     DoorChanged {
