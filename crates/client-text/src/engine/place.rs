@@ -212,7 +212,11 @@ pub fn survey(state: &StateView) -> Place {
             if cols.door(next).is_some() || (walls && cols.open(next)) {
                 edge.insert(next);
             } else if !cols.seen(next) {
-                if let Some(d) = bearing(position(next)) {
+                // Only where some of the place is seen that way, so there
+                // is somewhere to walk toward the dark.
+                if let Some(d) = bearing(position(next))
+                    .filter(|d| columns.iter().any(|c| bearing(position(*c)) == Some(*d)))
+                {
                     continues.insert(direction_order(d));
                 }
             }
@@ -281,11 +285,7 @@ pub fn survey(state: &StateView) -> Place {
         columns,
         form,
         ways,
-        continues: if walls {
-            continues.into_iter().map(direction_from).collect()
-        } else {
-            Vec::new()
-        },
+        continues: continues.into_iter().map(direction_from).collect(),
     }
 }
 

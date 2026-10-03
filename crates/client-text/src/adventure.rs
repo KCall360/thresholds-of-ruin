@@ -128,9 +128,11 @@ fn exits_from(
         })
         .collect();
     anchors.sort_by_key(|c| (distance(c.position), &c.key));
-    if anchors.is_empty() && place.form == crate::engine::place::Form::Open {
-        // In open ground with no walls in sight, a direction leads as far as
-        // can be seen that way, keeping as straight as it can.
+    let open = place.form == crate::engine::place::Form::Open;
+    if anchors.is_empty() && (open || place.continues.contains(&direction)) {
+        // Where the place goes on into darkness, or across open ground, a
+        // direction leads as far as can be seen that way, keeping as
+        // straight as it can and, within walls, inside the place.
         let straight = |p: Position| match direction {
             Direction::North | Direction::South => p.x.unsigned_abs(),
             Direction::East | Direction::West => p.y.unsigned_abs(),
@@ -145,6 +147,7 @@ fn exits_from(
                     && c.door.is_none()
                     && c.position.z == 0
                     && bearing(c.position) == Some(direction)
+                    && (open || place.contains(c.position))
             })
             .min_by_key(|c| {
                 (
@@ -569,15 +572,14 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
         parts.extend(clauses[1..].iter().map(|(s, t, _)| format!("{s} {t}")));
         sentences.push(prose::sentence(&gapped(&parts)));
     }
+    // Directions into darkness were told with the place.
     let elsewhere: Vec<String> = DIRECTIONS
         .into_iter()
-        .filter(|d| place.ways(*d).next().is_none())
+        .filter(|d| place.ways(*d).next().is_none() && !place.continues.contains(d))
         .filter(|d| !exits_from(place, state, *d).is_empty())
         .map(|d| direction_name(d).to_owned())
         .collect();
-    if elsewhere.len() == 8 {
-        sentences.push("You can head off in any direction.".into());
-    } else if !elsewhere.is_empty() {
+    if !elsewhere.is_empty() {
         let also = if sentences.is_empty() { "" } else { "also " };
         sentences.push(format!(
             "You can {also}head {}.",

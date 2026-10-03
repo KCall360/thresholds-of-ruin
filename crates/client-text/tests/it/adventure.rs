@@ -326,7 +326,7 @@ fn directions_head_for_ways_onward_and_floor_is_not_one() {
     // With no walls or hints in sight, a direction crosses open ground as far
     // as can be seen that way, and nothing seen is no way.
     assert!(
-        describe(&s).contains("You can head east."),
+        describe(&s).contains("To the east it fades into darkness."),
         "{}",
         describe(&s)
     );
@@ -735,7 +735,15 @@ fn a_closed_door_is_a_way_that_is_shut() {
 fn a_room_seen_in_part_goes_on_out_of_sight() {
     let s = walled(&["#####", "#.@..", "#...."]);
     let prose = describe(&s);
-    assert!(prose.contains("It goes on out of sight"), "{prose}");
+    assert!(prose.contains("it fades into darkness."), "{prose}");
+    // Each way into the dark can be walked, toward the farthest seen floor.
+    assert!(matches!(
+        goals("east", &s).as_slice(),
+        [Goal::Go {
+            direction: Direction::East,
+            ..
+        }]
+    ));
     // It isn't called a dead end.
     assert!(!prose.contains("no way out"), "{prose}");
 }
@@ -915,14 +923,20 @@ fn look_leaves_the_objective_to_status() {
 }
 
 #[test]
-fn a_carried_thing_and_its_twin_on_the_floor_need_no_question_to_examine() {
-    // Regression: "x token" asked "the copper token you're carrying or the
-    // copper token at your feet?" though they look the same.
+fn a_carried_thing_and_its_twin_on_the_floor_are_told_apart_by_where_they_are() {
+    // They look alike, but they're two things in two places, and the player
+    // can't know they're identical: ask which, by where each is.
     let mut s = state();
     let token = s.observation.ground_items[0].item.clone();
     s.observation.inventory.push(ItemView { id: 9, ..token });
-    assert_eq!(said("examine token", &s), "A small copper disc.");
-    // Going to it means the one on the floor; taking it too.
+    assert_eq!(
+        question("examine token", &s),
+        [
+            "the copper token you're carrying",
+            "the copper token at your feet"
+        ]
+    );
+    // Taking prefers what isn't carried, so it needs no question.
     assert_eq!(
         goals("take token", &s),
         [Goal::Take {
@@ -930,7 +944,6 @@ fn a_carried_thing_and_its_twin_on_the_floor_need_no_question_to_examine() {
             quantity: None
         }]
     );
-    assert_eq!(said("go to token", &s), "The copper token is right here.");
 }
 
 #[test]

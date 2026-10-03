@@ -68,7 +68,8 @@ Arriving somewhere already described gives its name, ways and contents only;
 
 Things inside the place are "at your feet" or "on the floor nearby"; anything
 outside it keeps its direction. The ways onward are the place's doors and gaps,
-and stairs underfoot. Walkable floor inside a place is not an exit. A direction
+stairs underfoot, and the directions in which the place fades into darkness
+(out of sight), which lead as far as can be seen that way. Walkable floor inside a place is not an exit. A direction
 heads through the opening that way to the first open cells beyond it, asking
 which when there are several; a closed door answers "The wooden door to the
 east is closed." With no opening that way, an authored place hint seen in

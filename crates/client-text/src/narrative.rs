@@ -327,15 +327,17 @@ pub fn describe_surveyed(
             sentences.push("The ceiling is high above you.".into());
         }
     }
+    // What isn't seen fades into darkness, and each such way can be walked.
     match place.continues.as_slice() {
         [] => {}
-        ways if ways.len() >= 4 => {
-            sentences.push("It goes on out of sight in several directions.".into())
+        all if all.len() == 8 && place.form == Form::Open => {
+            sentences.push("Open ground stretches away into darkness on every side.".into())
         }
+        all if all.len() == 8 => sentences.push("It fades into darkness on every side.".into()),
         ways => {
             let ways: Vec<String> = ways.iter().map(|d| direction_name(*d).to_owned()).collect();
             sentences.push(format!(
-                "It goes on out of sight to the {}.",
+                "To the {} it fades into darkness.",
                 prose::and_list(&ways)
             ));
         }

@@ -81,6 +81,9 @@ Inform's:
   not carried, `drop` carried things, `attack` figures, `open` doors.
 - **Indistinguishable things never cause a question.** `take token` with two
   identical tokens takes one; `take tokens` or `take all tokens` takes both.
+  Things that look alike but are in different places, one carried and one on
+  the floor, are still asked about by where they are: the player can't know
+  they're identical.
 - `all`, `everything` and `all except …` expand within the verb's domain:
   for `take`, things here and not carried; for `drop`, carried things.
 - Pronouns: `it` is the last thing or door mentioned *by the player or the
@@ -228,14 +231,15 @@ not a doorway, with no wall seen above it.
   A journey through one ends at the farthest seen open cell up to three steps
   beyond it. Stairs at the character's cell are ways up or down. When no
   opening lies in a direction, an authored anchor seen that way in another
-  place is the fallback. In open ground (no walls in sight), a direction
-  without either leads to the farthest open cell seen that way, keeping as
-  straight as it can, so the character can cross it.
+  place is the fallback. Where the place goes on out of sight, or in open
+  ground (no walls in sight), a direction without either leads to the
+  farthest open cell seen that way (inside the place, within walls), keeping
+  as straight as it can, so the character can walk on into the unseen.
 - **Form.** No walls seen: an open space. Standing in a gap, or a place at most
   two columns wide and four long: a passage. Up to 6 columns: an alcove; up to
   40: a chamber (small up to 15); more: a large hall.
 - **Beyond sight.** Unseen columns at the place's edge mean it goes on out of
-  sight in their directions.
+  sight in their directions, where some of the place is seen that way.
 
 ### Descriptions
 
@@ -254,7 +258,9 @@ two stone tablets lie on the floor nearby.
 - **The place** (`narrative::describe_place`): its kind and size, what it's
   made of ("of stone" when floor and walls match, otherwise "with a flagstone
   floor and walls of dressed stone"), its atmosphere, a high ceiling, and where
-  it goes on out of sight (in "several directions" when that's four or more).
+  it fades into darkness ("To the north and east it fades into darkness.";
+  "Open ground stretches away into darkness on every side."). Each of those
+  directions can be walked.
 - **Ways by kind.** Openings of one kind are named once with their directions,
   and later kinds are gapped: "A passage leads north, and open oak doors east
   and west." Directions with only a place seen beyond follow ("You can also
