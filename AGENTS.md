@@ -113,25 +113,24 @@ validators share `workload_report.py`; protocol messages have recorded wire
 samples; test packages are named for what they set up. See the
 [testing policy](docs/testing.md).
 
-**Interactive fiction engine (in progress, branch `feature/if-prose`).** The
-engine core, structured combat facts and places merged in PR #60. The text client's
-`engine` module replaces `Dialogue`: everything between two prompts is one
-passage, and the prompt returns only when it's the player's move. See the
+**Interactive fiction engine (text client).** The engine core and places
+merged in PR #60; prose descriptions, walking, protocol 22 and the corner rule
+in PR #61. The text client's `engine` module turns input into game actions and
+everything between two prompts into one passage; the prompt returns when the
+server's `waiting` signal says it's the player's move. See the
 [IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
 [adventure commands](docs/text-adventure.md). Decisions agreed with the
 maintainer: the server sends facts, never sentences; verbs the game can't carry
-out yet are recognized and refused plainly, never narrated as if they worked;
-descriptions state only disclosed facts, coloured by atmosphere (mood words,
-smells, sounds) that has no gameplay effect and is fixed per place.
+out yet are recognized and refused plainly; descriptions state only disclosed
+facts, coloured by atmosphere (mood words, smells, sounds) that has no
+gameplay effect and is fixed per place; scenarios name places (authored
+names), and the text client leaves invented names unsaid; a direction keeps
+walking through darkness and along corridors until there's something to see.
 
-On `feature/if-prose`: prose descriptions with themed atmosphere
-(`engine::atmosphere`), place keys that stay put (`narrative::Places`),
-brief/verbose/superbrief, `go to <place name>` and `go to start`, directions
-across open ground, and playtest fixes, including player journeys planned
-for the walker's body (`Game::walking_route`). Pick up from the engine's
-[next steps](docs/if-engine.md#next-steps): items 1, 2 and 4–6 need the
-maintainer's decision (protocol or replay-affecting changes). The branch needs
-CI on both platforms and the maintainer's approval to merge.
+Places and ways are read from what's in sight plus remembered cells
+(`engine::seen`). Pick up from the engine's
+[next steps](docs/if-engine.md#next-steps). Playtest the text client directly
+(through the real server, as the process tests do) and fix what reads badly.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),
