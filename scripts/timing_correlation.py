@@ -10,7 +10,13 @@ from pathlib import Path
 
 
 def events(path):
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.startswith('{')]
+    text = path.read_text()
+    lines = text.splitlines()
+    # Processes are killed when a run ends, which can cut off the line being
+    # written: a line without its newline is incomplete, never evidence.
+    if lines and not text.endswith("\n"):
+        lines.pop()
+    rows = [json.loads(line) for line in lines if line.startswith('{')]
     return [r for r in rows if r.get('timing_version') == 1]
 
 
