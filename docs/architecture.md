@@ -176,6 +176,15 @@ unbounded buffering. Reconnection resumes a retained stream or requests a fresh
 snapshot. Snapshot publication and subsequent updates must have a consistent
 boundary.
 
+The server caches each actor's observation and exact projected scene at the
+committed boundary. Revision comparison, navigation refresh, and publication
+reuse that derived work where valid. Candidate views are published only after
+persistence admission; region transitions invalidate pre-transition views.
+Caches are absent from saved state and rewind boundaries. A broadcast shares
+disclosed actor state across watchers while each connection retains its own
+sequence, delta base, and control state. Private annotations remain separately
+filtered by actor and user.
+
 ASCII presentation receives ordered disclosed updates, not whole historical-memory
 copies. A bounded channel backpressures its dedicated connection worker; the
 native loop limits update work per turn before handling input. Every received

@@ -6,6 +6,28 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_many_watchers_keep_independent_bases_when_a_late_watcher_joins(self):
+        self.server()
+        player, initial = self.client()
+        watchers = [self.client(SPECTATOR_TOKEN)[0] for _ in range(3)]
+        first = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(first["error"])
+        for watcher in watchers:
+            seen = self.frame(watcher, lambda f: f["state"]["revision"] == first["state"]["revision"])
+            self.assertEqual(seen["state"], first["state"])
+        late, attached = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(attached["state"], first["state"])
+        second = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(second["error"])
+        sequences = []
+        for watcher in [*watchers, late]:
+            seen = self.frame(watcher, lambda f: f["state"]["revision"] == second["state"]["revision"])
+            self.assertEqual(seen["state"], second["state"])
+            sequences.append(seen["message"]["update"]["cursor"]["sequence"])
+        self.assertEqual(sequences[:3], [sequences[0]] * 3)
+        self.assertGreater(sequences[0], sequences[-1])
+        self.assertGreater(second["state"]["revision"], initial["state"]["revision"])
+
     def test_normal_play_spectator_stream_denials_and_resume(self):
         server = self.server()
         player, initial = self.client()

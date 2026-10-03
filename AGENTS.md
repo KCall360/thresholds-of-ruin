@@ -105,6 +105,16 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
+**Architecture refactor (active).** The maintainer authorized the
+[refactor plan](docs/refactoring.md). Work is isolated from the original dirty
+interactions checkout. Explicit command mappings and derived boundary observation
+reuse are the first checkpoint, verified by the full Windows debug/release suite
+and release comparisons. Centralized mutation and derived indexes are next.
+Gameplay must admit intentions to simulation-owned
+scheduling. Derived topology indexes stay backend-only. Text-client fixes and
+runtime selection/implementation for scripting are deferred. No format versions
+have changed at this checkpoint.
+
 **Test suite rationalization (complete, PR #59).** Process tests share
 `scripts/process_harness.py` and use the headless client for wizard setup;
 every scenario package is checked by the
@@ -175,9 +185,11 @@ The server reads a package's index, which is proportional to its region
 count, and saves keep a copy of it; everything else a game holds or saves
 grows with the regions played.
 
-The desktop launchers run the 4e build. The IF prose branch changes the save
-format to 15 and the ruleset to `dungeon-v18`, so rebuild them after it merges;
-playtest saves from before it won't resume.
+The three desktop launchers use a separate verified refactor build and copied
+scenario package, selected through their local helper configuration. Existing
+binaries and saves are retained, and helper backups are available. Real text,
+ASCII spectator, and headless client connections and frames were checked after
+deployment. Launchers remain outside Git.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

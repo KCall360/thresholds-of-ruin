@@ -40,6 +40,11 @@ only; wizard history is bounded; generated regions are limited to rooms and
 corridors between authored ones; and the ASCII client doesn't draw from asset
 palettes yet.
 
+The [architecture refactor](refactoring.md) is active. Its initial scope removes
+implicit command conversions and repeated per-client observation work. Text-client
+fixes and scripting runtime selection remain deferred. Format versions above are
+unchanged; queued intention admission and the remaining refactor stages are pending.
+
 ## Completed milestones
 
 ### 0 — Repository and architectural boundaries

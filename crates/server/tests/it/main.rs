@@ -3,6 +3,7 @@
 
 mod background_save;
 mod checkpoints;
+mod command_boundary;
 mod descriptions;
 mod doors;
 mod dungeon;

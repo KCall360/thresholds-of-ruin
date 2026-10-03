@@ -3,7 +3,7 @@ use std::fmt;
 use std::fs;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,145 @@ mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = crate::scenario_package::RULESET;
+
+#[cfg(test)]
+mod observation_reuse_tests {
+    use super::*;
+
+    fn assert_matches_uncached(engine: &Engine, actor: ActorId) {
+        assert_eq!(
+            engine.state(actor).unwrap(),
+            engine.diagnostic_copy().state(actor).unwrap()
+        );
+        let before = tor_simulation::diagnostics::work_counts();
+        engine.state(actor).unwrap();
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations
+        );
+    }
+
+    #[test]
+    fn wizard_mutation_rewind_notes_and_seeded_fixtures_never_retain_stale_views() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        assert_matches_uncached(&engine, actor);
+        let branch = engine.branch().clone();
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "teleport",
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    operation: WizardOperation::Teleport {
+                        actor,
+                        position: Position {
+                            region: 2,
+                            x: 1,
+                            y: 1,
+                            z: 0,
+                        },
+                    },
+                },
+            )
+            .unwrap();
+        assert_matches_uncached(&engine, actor);
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "rewind",
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    operation: WizardOperation::Rewind { target: None },
+                },
+            )
+            .unwrap();
+        assert_matches_uncached(&engine, actor);
+        let state = engine.state(actor).unwrap();
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "note",
+                &engine.branch().clone(),
+                Command::Annotate {
+                    anchor: Anchor::State {
+                        revision: state.revision,
+                    },
+                    text: "private note".into(),
+                    source: ClientSource::User,
+                    audience: Audience::Private,
+                    category: AnnotationCategory::Note,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.state(actor).unwrap(), state);
+        assert_matches_uncached(&engine, actor);
+        engine.seed_profile_history(3).unwrap();
+        assert_matches_uncached(&engine, actor);
+    }
+
+    #[test]
+    fn repeated_reads_reuse_the_boundary_and_committed_actions_replace_it() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let initial = engine.state(actor).unwrap();
+        let before = tor_simulation::diagnostics::work_counts();
+        assert_eq!(engine.state(actor).unwrap(), initial);
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations
+        );
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "move",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: initial.revision,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        let before = tor_simulation::diagnostics::work_counts();
+        let moved = engine.state(actor).unwrap();
+        assert_ne!(moved, initial);
+        assert_eq!(engine.state(actor).unwrap(), moved);
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations,
+            "reuse the post-action view used for revision comparison"
+        );
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "wait",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: moved.revision,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let waited = engine.state(actor).unwrap();
+        assert!(waited.observation.tick > moved.observation.tick);
+        assert_eq!(engine.state(actor).unwrap(), waited);
+    }
+}
 
 #[cfg(test)]
 mod seed_equivalence_tests {
@@ -450,6 +589,7 @@ struct Candidate {
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     revisions: Revisions,
+    observations: BTreeMap<ActorId, Arc<RevisionView>>,
     /// Region records this command's transition made.
     made: Vec<(
         tor_simulation::RecordId,
@@ -464,6 +604,7 @@ impl Candidate {
             boundaries: engine.boundaries.clone(),
             game: engine.game.clone(),
             revisions: engine.revisions.clone(),
+            observations: BTreeMap::new(),
             made: Vec::new(),
         }
     }
@@ -484,6 +625,7 @@ impl Candidate {
         engine.boundaries = self.boundaries;
         engine.game = self.game;
         engine.revisions = self.revisions;
+        engine.observations.replace(self.observations);
         let regions = engine.regions.as_mut()?;
         regions.publish(self.made);
         regions.preload(&engine.game)
@@ -563,6 +705,10 @@ impl Candidate {
             profile.regions_prepared += work.prepared;
         }
         if let Some(before) = work.before {
+            // Loading, detaching, or activating regions can change both the
+            // projected scene and scheduler readiness. Recompute at the new
+            // boundary instead of publishing a pre-transition observation.
+            self.observations.clear();
             // Only observers whose view the transition changed move on, so
             // an update never discloses a change nobody could see.
             let stayed: Vec<_> = self
@@ -585,12 +731,49 @@ impl Candidate {
     }
 }
 
-type RevisionView = (tor_simulation::Observation, Vec<tor_world::SightCell>, bool);
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RevisionView {
+    observation: tor_simulation::Observation,
+    scene: Vec<tor_world::SightCell>,
+    ready: bool,
+}
+
+/// Derived views of the committed boundary, never encoded into a save or a
+/// rewind snapshot. The mutex preserves Engine's thread-safe read interface.
+#[derive(Debug, Default)]
+struct ObservationCache(Mutex<BTreeMap<ActorId, Arc<RevisionView>>>);
+
+impl ObservationCache {
+    fn view(&self, game: &Game, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+        let mut views = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(view) = views.get(&actor) {
+            return Ok(view.clone());
+        }
+        let view = Arc::new(revision_view(game, actor)?);
+        views.insert(actor, view.clone());
+        Ok(view)
+    }
+
+    fn replace(&mut self, views: BTreeMap<ActorId, Arc<RevisionView>>) {
+        *self
+            .0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = views;
+    }
+}
+
 fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
     let (view, scene) = game
         .observe_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
-    Ok((view, scene, game.next_actor() == Some(SimActor(actor.0))))
+    Ok(RevisionView {
+        observation: view,
+        scene,
+        ready: game.next_actor() == Some(SimActor(actor.0)),
+    })
 }
 
 /// Durable chronological journal, including retained futures and explicit forks.
@@ -603,6 +786,7 @@ pub struct Engine {
     game: Game,
     archive: Archive,
     revisions: Revisions,
+    observations: ObservationCache,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
@@ -669,6 +853,7 @@ impl Engine {
             game,
             revisions,
             receipts: BTreeMap::new(),
+            observations: ObservationCache::default(),
             path: None,
             lock: None,
             store: None,
@@ -1016,7 +1201,7 @@ impl Engine {
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
         self.revision(actor)?;
-        let (view, scene, ready) = self.revision_view(actor)?;
+        let view = self.revision_view(actor)?;
         let package = self.archive.scenario.package.as_deref();
         let terrain = |region: tor_world::RegionId| {
             package
@@ -1025,8 +1210,13 @@ impl Engine {
                     [t.floor.clone(), t.wall.clone(), t.door.clone()]
                 })
         };
-        let mut observation =
-            adapt::observation(view, scene, &self.archive.view_salt, ready, &terrain);
+        let mut observation = adapt::observation(
+            view.observation.clone(),
+            view.scene.clone(),
+            &self.archive.view_salt,
+            view.ready,
+            &terrain,
+        );
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -1042,8 +1232,8 @@ impl Engine {
             .collect();
         Ok(observation)
     }
-    fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
-        revision_view(&self.game, actor)
+    fn revision_view(&self, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+        self.observations.view(&self.game, actor)
     }
 
     /// The assets an actor's client may soon need: those of the themes of
@@ -1342,6 +1532,9 @@ impl Engine {
         }
         let start = self.archive.records.len();
         let end = start.checked_add(count).ok_or_else(invalid_archive)?;
+        if count > 0 {
+            self.observations.replace(BTreeMap::new());
+        }
         if count >= REWIND_BOUNDARIES {
             self.boundaries.clear();
         }
@@ -1678,18 +1871,18 @@ impl Engine {
                         profile.perception += perception_started.elapsed();
                         profile.actors_observed += 1;
                     }
-                    if navigation_changed || after.1 != old.1 {
+                    if navigation_changed || after.scene != old.scene {
                         navigation_refreshed = true;
                         let started = Instant::now();
                         candidate
                             .game
-                            .refresh_navigation_scene(SimActor(actor.0), &after.1);
+                            .refresh_navigation_scene(SimActor(actor.0), &after.scene);
                         if let Some(profile) = profile.as_deref_mut() {
                             profile.navigation_refresh += started.elapsed();
                         }
                     }
                     let started = Instant::now();
-                    let changed = after != old;
+                    let changed = after != *old;
                     if changed {
                         let revision = candidate.revisions.get_mut(&actor).expect("known actor");
                         *revision = revision.checked_add(1).ok_or_else(|| {
@@ -1700,6 +1893,7 @@ impl Engine {
                         profile.revision_detection += started.elapsed();
                         profile.revision_comparisons += 1;
                     }
+                    candidate.observations.insert(actor, Arc::new(after));
                 }
                 (
                     Author::User {
@@ -1911,6 +2105,7 @@ impl Engine {
             archive: self.archive.clone(),
             revisions: self.revisions.clone(),
             receipts: self.receipts.clone(),
+            observations: ObservationCache::default(),
             path: self.path.clone(),
             lock: self.lock.clone(),
             store: self.store.clone(),

@@ -510,10 +510,20 @@ impl Service {
             .iter()
             .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
             .collect();
+        // Disclosed state belongs to an actor at this boundary, not to a
+        // connection. Keep stream bases and sequencing per client, but resolve
+        // perception only once for everyone watching the same actor.
+        let states: BTreeMap<_, _> = recipients
+            .iter()
+            .map(|(_, actor)| *actor)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|actor| (actor, self.engine.state(actor).ok()))
+            .collect();
         for (recipient, observer) in recipients {
             // Region streaming can unload an actor nobody keeps in play (an
             // AI actor a spectator watches); its clients must reattach.
-            let Ok(state) = self.engine.state(observer) else {
+            let Some(state) = states[&observer].as_ref() else {
                 self.detach_unloaded(recipient);
                 continue;
             };
@@ -521,7 +531,7 @@ impl Service {
                 self.update(
                     recipient,
                     UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: Box::new(state.clone()),
                         event: (observer == entry.actor).then(|| Box::new(entry.clone())),
                     },
                 );
@@ -1154,6 +1164,78 @@ impl Service {
 mod tests {
     use super::*;
     use crate::Scenario;
+
+    #[test]
+    fn action_broadcast_observes_once_per_actor_with_independent_client_streams() {
+        for watchers in [1, 8] {
+            let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+            let account = Account {
+                role: AccessRole::Spectator,
+                user: "observer".into(),
+                token: "test-only".into(),
+                actors: BTreeSet::from([ActorId(1)]),
+            };
+            let mut connections = Vec::new();
+            for index in 0..watchers {
+                let mut client = service
+                    .connect(&account, format!("observer-{index}"))
+                    .unwrap();
+                client.messages.try_recv().unwrap();
+                service.handle(
+                    client.id,
+                    "attach".into(),
+                    Request::Attach { actor: ActorId(1) },
+                );
+                let ServerMessage::Snapshot { snapshot, .. } = client.messages.try_recv().unwrap()
+                else {
+                    panic!("initial snapshot");
+                };
+                connections.push((client, snapshot));
+            }
+            let revisions = BTreeMap::from([(ActorId(1), 0)]);
+            let result = service
+                .engine
+                .command(
+                    "test",
+                    "test",
+                    ActorId(1),
+                    "wait",
+                    &service.engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: 0,
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+            let before = tor_simulation::diagnostics::work_counts();
+            service
+                .action_update(&revisions, &result.entry.disclosed())
+                .unwrap();
+            let after = tor_simulation::diagnostics::work_counts();
+            assert_eq!(
+                after.observations - before.observations,
+                1,
+                "watchers: {watchers}"
+            );
+            let expected = service.engine.state(ActorId(1)).unwrap();
+            for (mut client, snapshot) in connections {
+                let ServerMessage::Update { update } = client.messages.try_recv().unwrap() else {
+                    panic!("observation update");
+                };
+                assert_eq!(update.cursor.sequence, snapshot.cursor.sequence + 1);
+                assert_eq!(update.branch, snapshot.branch);
+                let (state, event) = match update.body {
+                    UpdateBody::Observation { state, event } => (*state, event),
+                    UpdateBody::ObservationDelta { state, event } => {
+                        (state.apply(&snapshot.state).unwrap(), event)
+                    }
+                    _ => panic!("observation body"),
+                };
+                assert_eq!(state, expected);
+                assert_eq!(event.unwrap().id, result.entry.id);
+            }
+        }
+    }
 
     #[test]
     fn slow_controller_during_rewind_cannot_send_control_into_the_old_branch() {

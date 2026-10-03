@@ -46,6 +46,7 @@ authoritative until the guide is corrected.
 | Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
 | Privileged setup for testing | [Wizard mode](wizard-mode.md) |
 | Accepted future requirements | [Game design plan](game-design-plan.md) |
+| Accepted refactor scope and implementation status | [Refactor plan](refactoring.md) |
 
 Historical findings, closeout audits, session handoffs, and raw measurements
 from before 2026-09-28 are preserved in the

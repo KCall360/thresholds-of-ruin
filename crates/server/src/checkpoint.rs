@@ -237,6 +237,7 @@ impl DiskCheckpoint {
             game,
             archive,
             revisions: self.revisions,
+            observations: ObservationCache::default(),
             receipts,
             path: None,
             lock: None,
