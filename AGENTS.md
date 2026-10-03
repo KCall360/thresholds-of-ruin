@@ -112,8 +112,10 @@ reuse are the first checkpoint, verified by the full Windows debug/release suite
 and release comparisons. A private item store now centralizes mutations and
 maintains derived ground-location and inventory-owner indexes, verified by full
 Windows debug/release checks and release comparisons. Transfer overhead and
-candidate-count improvements are recorded in the plan. Actor-body and history
-indexes, then the admission/scheduler split, are next.
+candidate-count improvements are recorded in the plan. Derived history indexes
+now centralize entry lookup and privacy-scoped pagination, verified by full
+Windows debug/release checks. Actor-body indexes, then the admission/scheduler
+split, are next.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
 runtime selection/implementation for scripting are deferred. No format versions

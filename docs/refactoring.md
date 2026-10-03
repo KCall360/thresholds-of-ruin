@@ -110,8 +110,25 @@ unchanged. Reference-scan, interrupted-edit, clone-isolation, portal-transfer,
 checkpoint, and actual-client save/resume/drop tests cover the new store.
 Scaling regressions at 16, 256, and 4,096 unrelated items and regions examine one
 disclosed candidate, zero candidates for an empty destination inventory, and one
-matching ground stack. Actor-body occupancy and historical-query indexes remain
-pending.
+matching ground stack. Actor-body occupancy remains pending.
+
+Historical queries now use a derived entry-ID lookup and ordered buckets for
+each branch, actor, and private author. Pages merge actor-wide and own-private
+entries in journal order; pagination anchors still require branch and disclosure
+checks. Annotation anchors and replay duplicate-ID checks use the same lookup.
+One append boundary updates both history and receipt indexes. Ordinary candidate
+transactions do not copy the indexes, and checkpoint restoration rebuilds them
+from retained journal records. No entries are pruned and the saved representation
+is unchanged.
+
+Reference-filter comparisons cover interleaved branches, actors, user/frontend/
+backend authors, privacy, limits, and anchors. Scaling regressions with 16, 256,
+and 4,096 unrelated private entries visit one returned record, or two records
+when a pagination anchor is supplied. This count excludes the logarithmic bucket
+search and entry-ID lookup. Checkpoint/tail replay and actual-client restart
+tests cover pagination and rejection of inaccessible anchors. The index itself
+uses memory proportional to retained entries; storage-backed history and direct
+resident-memory measurement remain pending.
 
 The full Windows verification tier passed in debug and release. Tests of the
 deployed text, ASCII spectator, and headless executables also passed. Linux CI is
@@ -163,3 +180,28 @@ increased dense p95 by 11%; ordered bucket merging and the complete-view fast pa
 removed most of that overhead. Dense falling resume p95 increased from 248.3 to
 256.1 ms. Save timings varied widely, so these runs do not establish a save-time
 improvement. Server index memory has not been measured directly.
+
+### History-index release comparison
+
+Three interleaved rounds compared history indexing with the item-store checkpoint
+on the same Windows host. Command samples number 915 on each side of each case;
+restart samples number only three. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 100 entries, memory / command | 915 | 0.546 → 0.541 | 0.800 → 0.811 | 1.719 → 2.726 |
+| 10,000 entries, memory / command | 915 | 0.536 → 0.533 | 0.767 → 0.757 | 1.530 → 1.220 |
+| 10,000 entries, durable / command | 915 | 0.520 → 0.521 | 0.737 → 0.740 | 2.358 → 1.028 |
+| 100 entries, memory / restart | 3 | 163.2 → 164.2 | 165.5 → 169.3 | 165.5 → 169.3 |
+| 10,000 entries, memory / restart | 3 | 682.2 → 417.7 | 693.2 → 428.4 | 693.2 → 428.4 |
+| 10,000 entries, durable / restart | 3 | 390.6 → 382.1 | 408.9 → 391.9 | 408.9 → 391.9 |
+
+All runs validated. Saved bytes, history, memory, derived-work counts, and replay
+record counts were unchanged. The long memory case replays 10,305 records; its
+median restart time fell by 38.8%. The durable case restores a checkpoint and
+replays 304 records, with a smaller improvement. Small-history command p95 rose
+by eleven microseconds and its maximum increased, so these runs do not establish
+an improvement in every timing statistic. Restart samples are too few to establish
+stable tail behavior. Page-request latency and resident index memory were not
+measured; bounded page work is established by the scaling regressions above.
+These remain diagnostic local measurements, with raw samples unpublished.

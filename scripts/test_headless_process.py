@@ -6,6 +6,40 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_private_history_pagination_and_anchors_survive_restart(self):
+        server = self.server()
+        player, initial = self.client()
+        # The initial snapshot holds at most 100 entries; leave an older page.
+        for n in range(104):
+            result = self.request(player, {
+                "type": "command", "branch": initial["branch"],
+                "command": {"type": "annotate", "anchor": {"type": "state", "revision": 0},
+                            "text": f"Note {n}", "source": "user", "category": "note",
+                            "audience": "actor" if n % 9 == 0 else "private"}})
+            self.assertIsNone(result["error"])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        player, resumed = self.client()
+        self.assertEqual(len(resumed["history"]), 100)
+        player.write(json.dumps({"type": "request", "request": {
+            "type": "history", "limit": 10, "before": resumed["history"][0]["id"]}}))
+        response = self.frame(player, lambda frame: frame["type"] == "response"
+                              and frame["message"]["type"] == "history")
+        older = self.frame(player, lambda frame: frame["type"] == "ready")
+        self.assertIsNone(older["error"])
+        self.assertEqual([entry["content"]["text"] for entry in response["message"]["page"]["entries"]],
+                         [f"Note {n}" for n in range(4)])
+        self.assertIsNone(response["message"]["page"]["older_before"])
+        observer, public = self.client(SPECTATOR_TOKEN)
+        self.assertEqual([entry["content"]["text"] for entry in public["history"]],
+                         [f"Note {n}" for n in range(0, 104, 9)])
+        denied = self.request(observer, {"type": "history", "limit": 1,
+                                        "before": resumed["history"][0]["id"]})
+        self.assertIn("InvalidAnchor", denied["error"])
+        self.assertEqual(denied["history"], public["history"])
+
     def test_item_location_indexes_survive_inventory_save_and_drop(self):
         server = self.server()
         player, initial = self.client()

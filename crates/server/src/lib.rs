@@ -4,6 +4,7 @@ mod adapt;
 mod developer;
 mod engine;
 pub mod generator;
+mod history_index;
 pub mod journal;
 pub mod performance_fixture;
 mod preload;

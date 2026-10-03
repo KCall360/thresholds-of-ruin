@@ -787,6 +787,7 @@ pub struct Engine {
     archive: Archive,
     revisions: Revisions,
     observations: ObservationCache,
+    history_index: crate::history_index::HistoryIndex,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
@@ -854,6 +855,7 @@ impl Engine {
             revisions,
             receipts: BTreeMap::new(),
             observations: ObservationCache::default(),
+            history_index: crate::history_index::HistoryIndex::default(),
             path: None,
             lock: None,
             store: None,
@@ -1070,11 +1072,7 @@ impl Engine {
         }
         for record in records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
-                || engine
-                    .archive
-                    .records
-                    .iter()
-                    .any(|old| old.entry.id == record.entry.id)
+                || engine.history_index.find(&record.entry.id).is_some()
             {
                 return Err(invalid_archive());
             }
@@ -1324,27 +1322,28 @@ impl Engine {
                 "Invalid history page size",
             ));
         }
-        let visible: Vec<_> = self
-            .archive
-            .records
-            .iter()
-            .map(|record| &record.entry)
-            .filter(|entry| &entry.branch == branch && entry.visible_to(actor, user))
-            .collect();
         let end = match before {
-            Some(id) => visible
-                .iter()
-                .position(|entry| &entry.id == id)
-                .ok_or_else(invalid_anchor)?,
-            None => visible.len(),
+            Some(id) => {
+                let position = self.history_index.find(id).ok_or_else(invalid_anchor)?;
+                let entry = &self.archive.records[position].entry;
+                #[cfg(test)]
+                HISTORY_RECORD_VISITS.with(|visits| visits.set(visits.get() + 1));
+                if &entry.branch != branch || !entry.visible_to(actor, user) {
+                    return Err(invalid_anchor());
+                }
+                position
+            }
+            None => self.archive.records.len(),
         };
-        let start = end.saturating_sub(limit);
+        let (positions, older) = self.history_index.page(actor, user, branch, end, limit);
+        #[cfg(test)]
+        HISTORY_RECORD_VISITS.with(|visits| visits.set(visits.get() + positions.len()));
         Ok(HistoryPage {
-            entries: visible[start..end]
+            entries: positions
                 .iter()
-                .map(|entry| entry.disclosed())
+                .map(|&position| self.archive.records[position].entry.disclosed())
                 .collect(),
-            older_before: (start > 0).then(|| visible[start].id.clone()),
+            older_before: older.then(|| self.archive.records[positions[0]].entry.id.clone()),
         })
     }
 
@@ -1582,11 +1581,7 @@ impl Engine {
                     action: tor_protocol::Action::Wait,
                 },
             };
-            self.receipts.insert(
-                (receipt.user.clone(), receipt.request_id.clone()),
-                self.archive.records.len(),
-            );
-            self.archive.records.push(Record {
+            self.append_record(Record {
                 entry: entry.clone(),
                 receipt: Some(receipt),
             });
@@ -1985,11 +1980,7 @@ impl Engine {
             profile.preload_regions_expanded += preload.regions_expanded;
             profile.preload_links_examined += preload.links_examined;
         }
-        self.receipts.insert(
-            (receipt.user.clone(), receipt.request_id.clone()),
-            self.archive.records.len(),
-        );
-        self.archive.records.push(record);
+        self.append_record(record);
         if let Some(profile) = profile {
             profile.publication += started.elapsed();
         }
@@ -2047,7 +2038,7 @@ impl Engine {
         };
         let copied = self.admit(&record, &Candidate::capture(self), None)?;
         self.mark_saved(copied);
-        self.archive.records.push(record);
+        self.append_record(record);
         Ok(entry)
     }
 
@@ -2074,13 +2065,8 @@ impl Engine {
         match anchor {
             Anchor::State { revision: target } if *target <= revision => Ok(()),
             Anchor::Entry { id } => {
-                let entry = self
-                    .archive
-                    .records
-                    .iter()
-                    .map(|r| &r.entry)
-                    .find(|entry| &entry.id == id)
-                    .ok_or_else(invalid_anchor)?;
+                let position = self.history_index.find(id).ok_or_else(invalid_anchor)?;
+                let entry = &self.archive.records[position].entry;
                 if &entry.branch != self.branch()
                     || !entry.visible_to(actor, user)
                     || (audience == Audience::Actor && entry.audience == Audience::Private)
@@ -2091,6 +2077,16 @@ impl Engine {
             }
             _ => Err(invalid_anchor()),
         }
+    }
+
+    fn append_record(&mut self, record: Record) {
+        let position = self.archive.records.len();
+        self.history_index.append(&record.entry, position);
+        if let Some(receipt) = &record.receipt {
+            self.receipts
+                .insert((receipt.user.clone(), receipt.request_id.clone()), position);
+        }
+        self.archive.records.push(record);
     }
 
     // Full history copies are confined to detached diagnostics. Ordinary command
@@ -2106,6 +2102,7 @@ impl Engine {
             revisions: self.revisions.clone(),
             receipts: self.receipts.clone(),
             observations: ObservationCache::default(),
+            history_index: self.history_index.clone(),
             path: self.path.clone(),
             lock: self.lock.clone(),
             store: self.store.clone(),
@@ -2533,8 +2530,65 @@ impl Candidate {
 }
 
 #[cfg(test)]
+thread_local! {
+    static HISTORY_RECORD_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod scaling_tests {
     use super::*;
+
+    #[test]
+    fn history_page_work_does_not_scan_other_users_private_entries() {
+        for hidden in [16, 256, 4096] {
+            let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+            let mut append = |user: &str, request: &str, audience| {
+                engine
+                    .command(
+                        user,
+                        "history-index",
+                        ActorId(1),
+                        request,
+                        &engine.branch().clone(),
+                        Command::Annotate {
+                            anchor: Anchor::State { revision: 0 },
+                            category: AnnotationCategory::Note,
+                            source: ClientSource::User,
+                            audience,
+                            text: request.into(),
+                        },
+                    )
+                    .unwrap()
+                    .entry
+                    .id
+            };
+            let first = append("alice", "own-private", Audience::Private);
+            let second = append("alice", "public", Audience::Actor);
+            for index in 0..hidden {
+                append("bob", &format!("hidden-{index}"), Audience::Private);
+            }
+            let before = HISTORY_RECORD_VISITS.with(|visits| visits.get());
+            let page = engine.history(ActorId(1), "alice", None, 1).unwrap();
+            assert_eq!(page.entries.len(), 1);
+            assert_eq!(page.entries[0].id, second);
+            assert_eq!(page.older_before, Some(second.clone()));
+            assert_eq!(
+                HISTORY_RECORD_VISITS.with(|visits| visits.get()) - before,
+                1,
+                "private entries: {hidden}"
+            );
+            let before = HISTORY_RECORD_VISITS.with(|visits| visits.get());
+            let page = engine
+                .history(ActorId(1), "alice", Some(&second), 1)
+                .unwrap();
+            assert_eq!(page.entries[0].id, first);
+            assert_eq!(page.older_before, None);
+            assert_eq!(
+                HISTORY_RECORD_VISITS.with(|visits| visits.get()) - before,
+                2
+            );
+        }
+    }
     use tor_test_support::performance::Trace;
 
     fn checked_action(engine: &mut Engine, actor: ActorId, action: Action, request: usize) {
