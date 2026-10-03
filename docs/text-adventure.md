@@ -127,7 +127,8 @@ first: "You can't see any lamp here."
 ### Names, questions and pronouns
 
 Every word must name the thing; the last can be a synonym (`body` for a corpse,
-`door` for a gate). The verb's preferences come first: `take scout` means the
+`door` for a gate). Things in sight can also be named by where they lie: `open the
+east door`, `attack the rat to the north`. The verb's preferences come first: `take scout` means the
 scout's corpse, `attack scout` the scout.
 
 Things the player can't tell apart are interchangeable: with two copper tokens

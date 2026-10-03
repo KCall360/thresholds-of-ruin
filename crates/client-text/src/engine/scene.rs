@@ -311,6 +311,13 @@ impl<'a> Scene<'a> {
             position: None,
             open: None,
         });
+        // Things, doors and figures in sight can be named by where they lie:
+        // "the east door", "the rat to the north".
+        for r in &mut referents {
+            if let Some(d) = r.position.and_then(bearing) {
+                r.words.push(direction_name(d).to_owned());
+            }
+        }
         Self {
             state,
             palette,

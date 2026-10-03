@@ -432,6 +432,28 @@ pub fn match_sentence_with_raw(
     Err("I don't understand that sentence. Type help for things you can try.".into())
 }
 
+/// `<thing> to [the] <direction>` as `<direction> <thing>`.
+fn where_it_lies(tokens: &[Token]) -> Option<Vec<Token>> {
+    let to = tokens
+        .iter()
+        .position(|t| t.as_word() == Some("to"))
+        .filter(|&i| i > 0)?;
+    let rest: Vec<&Token> = tokens[to + 1..]
+        .iter()
+        .filter(|t| t.as_word() != Some("the"))
+        .collect();
+    let [direction] = rest.as_slice() else {
+        return None;
+    };
+    direction.as_word().and_then(parse_direction)?;
+    // After an article, if there is one: "the east door".
+    let article = usize::from(matches!(tokens[0].as_word(), Some("the" | "a" | "an")));
+    let mut reordered = tokens[..article].to_vec();
+    reordered.push((*direction).clone());
+    reordered.extend(tokens[article..to].iter().cloned());
+    Some(reordered)
+}
+
 /// Helper to parse the remainder of a command as either:
 /// 1. Ditransitive: `<direct> <prep> <indirect>` (e.g. "goblin with iron sword")
 /// 2. MultiTransitive: `<noun1> and <noun2>` (e.g. "copper token and stone tablet")
@@ -440,6 +462,25 @@ fn parse_transitive_or_ditransitive(verb: Verb, tokens: &[Token]) -> Result<Pars
     if tokens.is_empty() {
         return Err(format!("What do you want to {}?", verb.as_str()));
     }
+    // A preposition right after the verb belongs to it: "knock on the door".
+    let tokens = match tokens {
+        [first, rest @ ..]
+            if !rest.is_empty() && first.as_word().and_then(parse_preposition).is_some() =>
+        {
+            rest
+        }
+        _ => tokens,
+    };
+    // "the door to the east" names the door by where it lies, as "the east
+    // door" does.
+    let placed: Vec<Token>;
+    let tokens = match where_it_lies(tokens) {
+        Some(reordered) => {
+            placed = reordered;
+            &placed[..]
+        }
+        None => tokens,
+    };
 
     // Search for a preposition that separates direct and indirect objects
     // We scan from index 1 to tokens.len() - 1 so both sides are non-empty

@@ -1182,3 +1182,37 @@ fn stairs_underfoot_are_one_step_up() {
     );
     assert!(describe(&s).contains("Stairs lead up."), "{}", describe(&s));
 }
+
+#[test]
+fn things_can_be_named_by_where_they_lie() {
+    // Regression: "open the east door" wasn't understood.
+    let mut s = walled(&["#######", "'..@..+", "#######"]);
+    // Two doors, one each way: give them their own ids.
+    for cell in &mut s.observation.visible_cells {
+        if let Some(door) = &mut cell.door {
+            if cell.position.x < 0 {
+                door.id = 8;
+            }
+        }
+    }
+    let door = |id| Goal::Door {
+        door: id,
+        open: true,
+    };
+    assert_eq!(goals("open the east door", &s), [door(9)]);
+    assert_eq!(goals("open the door to the east", &s), [door(9)]);
+    assert_eq!(
+        said("open the west door", &s),
+        "The oak door is already open."
+    );
+}
+
+#[test]
+fn a_verb_keeps_its_preposition() {
+    // Regression: "knock on door" answered "You can't see any on door here."
+    let s = walled(&["#####", "#.@.+", "#####"]);
+    assert_eq!(
+        said("knock on the door", &s),
+        "You can't knock on anything yet."
+    );
+}
