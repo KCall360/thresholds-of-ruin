@@ -255,7 +255,7 @@ class StreamingProcesses(ProcessTestCase):
         player, welcome = self.adventure()
         self.assertIn("flagstone floor", welcome)
         examined = self.say(player, "examine floor")
-        self.assertIn("The visible floor is made of flagstone.", examined)
+        self.assertIn("The floor is made of flagstone.", examined)
         # The headless client reports the palette it holds, not just messages.
         observer = self.launch("tor-client-headless", ["--connect", self.address, "--observe"])
         before = self.frame(observer, lambda f: f["type"] == "ready")

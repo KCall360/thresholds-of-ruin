@@ -18,15 +18,15 @@ class PhysicsProcesses(ProcessTestCase):
     def test_text_falling_narration_and_saved_continuation(self):
         player, _ = self.adventure()
         self.assertIn("can't go", self.say(player, 'step east').lower(), 'unsupported walking is free')
-        self.assertIn('move involuntarily', self.say(player, 'wait'))
+        self.assertIn('moved against your will', self.say(player, 'wait'))
         self.say(player, 'save')
         player.stop()
         self.game.stop()
         self.start()
         player, _ = self.adventure()
         transcript = '\n'.join(self.say(player, 'wait') for _ in range(5))
-        self.assertIn('collide with an obstruction', transcript)
-        self.assertIn('move east', self.say(player, 'step east'))
+        self.assertIn('slam into something solid', transcript)
+        self.assertIn('You step east.', self.say(player, 'step east'))
 
     def test_ascii_discloses_body_cells_and_updates_falling_state(self):
         player = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])

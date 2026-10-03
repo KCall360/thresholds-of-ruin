@@ -59,29 +59,32 @@ class AdventureProcesses(ProcessTestCase):
         for extra in ("wizard", "control", "step", "sync", "history", "Ready."):
             self.assertNotIn(extra, help_text)
 
-    def test_stop_skips_the_journey_and_discards_pickup_and_spectator_cannot_travel(self):
+    def test_a_turn_ends_before_the_next_command_and_spectators_cannot_act(self):
         self.server()
         player, _ = self.adventure()
         spectator, _ = self.adventure(SPECTATOR_TOKEN)
         self.flush_save()
         before = self.save.read_bytes()
         self.assertIn("read-only", self.say(spectator, "take tablet"))
-        self.assertIn("read-only", self.say(spectator, "stop"))
         self.assertEqual(self.save.read_bytes(), before)
-        self.assertIn("1000 ms", self.say(player, "pace 1000"))
+        # Typed ahead, the next command waits for the whole turn.
         self.send(player, "take tablet")
-        stopped = self.say(player, "stop")
-        self.assertIn("can't stop partway", stopped)
-        self.assertNotIn("pick it up", stopped)
+        self.send(player, "inventory")
+        told = player.until(lambda line: "You are carrying" in line)
+        taken = told.index("You walk over to the stone tablet and pick it up.")
+        self.assertLess(taken, told.index("You are carrying a stone tablet."))
+        # The spectator is told what the player did.
+        spectator.until(lambda line: "pick up a stone tablet" in line)
         observer, initial = self.client(SPECTATOR_TOKEN)
         self.assertEqual(initial["travel"]["phase"], "arrived")
-        self.assertEqual(initial["state"]["observation"]["inventory"], [])
-        self.assertIn("empty-handed", self.say(player, "inventory"))
 
     def test_directional_interruption_is_one_narrative_response(self):
         self.server(scenario="text-adventure-hazard")
         player, _ = self.adventure()
-        self.assertEqual("You start walking east, but stop when a figure comes into view.\n> ", self.say(player, "go east"))
+        self.assertEqual(
+            "You set off east. A figure comes into view to the east, and you stop warily.\n> ",
+            self.say(player, "go east"),
+        )
 
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
         self.server(scenario="portal-geometry")
@@ -115,14 +118,14 @@ class AdventureProcesses(ProcessTestCase):
                 player, welcome = self.adventure()
                 self.assertNotIn("figure", welcome)
                 interrupted = self.say(player, "take tablet")
-                self.assertIn("stop when a figure comes into view", interrupted)
-                self.assertNotIn("You arrive", interrupted)
-                self.assertNotIn("pick it up", interrupted)
+                self.assertIn("figure comes into view to the east", interrupted)
+                self.assertIn("picking it up", interrupted)
+                self.assertNotIn("and pick it up", interrupted)
                 observer, state = self.client(SPECTATOR_TOKEN)
                 self.assertEqual(state["travel"]["phase"], expected_phase)
                 self.assertEqual(state["travel"]["completed_steps"], 1)
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
-                self.assertIn("unremarkable figure", self.say(player, "examine figure"))
+                self.assertIn("nothing special about the figure", self.say(player, "examine figure"))
                 for process in (player, observer, server): process.stop()
 
     def test_clarification_is_free_and_wizard_rewind_clears_pending_pickup(self):
@@ -131,8 +134,8 @@ class AdventureProcesses(ProcessTestCase):
         player, _ = self.adventure()
         self.flush_save()
         before = self.save.read_bytes()
-        question = self.say(player, "take token")
-        self.assertIn("Which do you mean?", question)
+        question = self.say(player, "take thing")
+        self.assertIn("Which do you mean, the copper token or the stone tablet?", question)
         self.assertNotIn("#", question)
         self.assertEqual(before, self.save.read_bytes())
         self.assertIn("You pick up the copper token", self.say(player, "1"))
@@ -161,43 +164,39 @@ class AdventureProcesses(ProcessTestCase):
         self.server()
         player, _ = self.adventure()
         # Diagnose
-        self.assertIn("good health", self.say(player, "diagnose"))
+        self.assertIn("You feel fine.", self.say(player, "diagnose"))
         # Read
         self.assertIn("worn spiral", self.say(player, "read copper token"))
-        self.assertIn("There is nothing written there.", self.say(player, "read floor"))
+        self.assertIn("There's nothing written on the floor.", self.say(player, "read floor"))
         # Command repetition with again and g
         self.assertIn("Time passes.", self.say(player, "wait"))
         self.assertIn("Time passes.", self.say(player, "again"))
         self.assertIn("Time passes.", self.say(player, "g"))
         # Ditransitive put on floor
         self.assertIn("You pick up the copper token.", self.say(player, "take copper token"))
-        self.assertIn("You drop 1 x copper token.", self.say(player, "put copper token on floor"))
-        # Conversational interaction with self
-        self.assertIn("madness", self.say(player, "talk to myself"))
+        self.assertIn("You drop the copper token.", self.say(player, "put copper token on floor"))
+        # What the game can't do yet is said plainly.
+        self.assertIn("You can't talk with anyone yet.", self.say(player, "talk to myself"))
 
     def test_conversational_clarification_and_pronouns_in_real_process(self):
         self.server(wizard=True, scenario="text-adventure-clarification")
         player, _ = self.adventure()
-        # 1. Ambiguous noun triggers clarification question
-        question = self.say(player, "take token")
-        self.assertIn("Which do you mean?", question)
-        # 2. Invalid option politely re-prompts without crashing or clearing choices
+        # 1. Things that can be told apart need a choice; asking takes no time.
+        question = self.say(player, "take thing")
+        self.assertIn("Which do you mean, the copper token or the stone tablet?", question)
+        # 2. An answer that fits nothing asks again without forgetting.
         invalid = self.say(player, "gold")
-        self.assertIn("There is no matching option. Which do you mean?", invalid)
-        # 3. Conversational natural language ordinal resolution
-        first_pickup = self.say(player, "the first one")
-        self.assertIn("You pick up the copper token.", first_pickup)
-        # 4. Follow-up disambiguation resolved with ordinal / candidate number
-        question2 = self.say(player, "take token")
-        self.assertIn("Which do you mean?", question2)
-        second_pickup = self.say(player, "2")
-        self.assertIn("You pick up the copper token.", second_pickup)
-        # 5. Plural pronoun 'them' drops the carried items
-        drop_response = self.say(player, "drop them")
-        self.assertIn("You drop 1 x copper token.", drop_response)
-        # 6. Singular pronoun 'it' picks the dropped item back up
-        take_response = self.say(player, "take it")
-        self.assertIn("You pick up the copper token.", take_response)
+        self.assertIn("Please choose the copper token or the stone tablet", invalid)
+        # 3. An ordinal answers it.
+        self.assertIn("You pick up the copper token.", self.say(player, "the first one"))
+        # 4. Alike things need no choice: either copper token will do.
+        self.assertIn("You pick up the copper token.", self.say(player, "take token"))
+        # 5. A plural names them all, and "them" refers back to them.
+        self.assertIn("You drop the two copper tokens.", self.say(player, "drop tokens"))
+        self.assertIn("You pick up the two copper tokens.", self.say(player, "take them"))
+        # 6. "It" is the last thing mentioned.
+        self.say(player, "examine tablet")
+        self.assertIn("You walk over to the stone tablet and pick it up.", self.say(player, "take it"))
 
     def test_session_commands_and_sensory_in_real_process(self):
         self.server()
@@ -243,6 +242,48 @@ class AdventureProcesses(ProcessTestCase):
         # Moving back west through portal
         walk_west = self.say(player, "west")
         self.assertIn("You walk west.", walk_west)
+
+    def test_a_fight_is_told_blow_by_blow_and_the_corpse_can_be_taken(self):
+        # Regression: after a fight, "take corpse" walked over and then gave
+        # up because the character was still recovering.
+        self.server(scenario="first-dungeon")
+        player, _ = self.adventure()
+        self.assertEqual(
+            "You set off east. A ruin scout comes into view to the east, and you stop warily.\n> ",
+            self.say(player, "east"),
+        )
+        fight = []
+        for _ in range(12):
+            fight.append(self.say(player, "attack scout"))
+            if "falls dead" in fight[-1]:
+                break
+        told = "".join(fight)
+        self.assertIn("falls dead", told)
+        for mechanic in ("tick", "must wait", "act again", "preparation", "Recovering"):
+            self.assertNotIn(mechanic, told)
+        # Each turn is one passage ending with the prompt.
+        for passage in fight:
+            self.assertTrue(passage.endswith("> "), passage)
+            self.assertEqual(passage.count("> "), 1, passage)
+        self.assertEqual(
+            "You walk over to the ruin scout corpse and pick it up.\n> ",
+            self.say(player, "take corpse"),
+        )
+        self.assertIn("ruin scout corpse", self.say(player, "inventory"))
+
+    def test_rooms_are_described_from_their_extent_and_doors_are_their_ways(self):
+        self.server()
+        player, welcome = self.adventure()
+        self.assertIn("You are in a small chamber with a stone floor and walls of stone.", welcome)
+        for invented in ("dust", "chill", "Shadows", "Stone Hall"):
+            self.assertNotIn(invented, welcome)
+        # Through the open door, into the other room, and back.
+        arrived = self.say(player, "east")
+        self.assertIn("You walk east.", arrived)
+        self.assertIn("You can head west.", arrived)
+        self.assertIn("You walk west.", self.say(player, "west"))
+        self.assertIn("You walk over to the wooden door and close it.", self.say(player, "close door"))
+        self.assertEqual("The wooden door to the east is closed.\n> ", self.say(player, "east"))
 
 
 if __name__ == "__main__":

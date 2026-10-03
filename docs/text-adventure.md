@@ -1,35 +1,30 @@
 # Text adventure slice
 
 The normal text client presents places, objects and intentions rather than grid
-coordinates. Start it with the command in [the text guide](text-client.md). The server remains authoritative; text travel
-uses the same ordinary saved moves as ASCII travel. The examples on this page use
-the small `scenarios/two-room` package.
+coordinates. Start it with the command in [the text guide](text-client.md). The
+server remains authoritative; text travel uses the same ordinary saved moves as
+ASCII travel. How commands become game actions and narration is described in
+[the IF engine](if-engine.md).
 
 ```text
-You stand in a space with a stone floor.
-You see a copper token at your feet.
-You see a stone tablet to the east.
-You can head east.
->
-examine token
+> examine token
 A small copper disc, stamped with a worn spiral.
->
-get token
-You pick up the copper token.
->
-get tablet
-You walk over to the stone tablet and pick it up.
->
-west
-You walk west.
-You stand in a space with a stone floor.
-You can head east.
->
+> get token and tablet
+You pick up the copper token. You walk over to the stone tablet and pick it up.
+> east
+You set off east. A ruin scout comes into view to the east, and you stop warily.
+> attack it
+You ready an attack on the ruin scout. It strikes you, spoiling your attack.
+HP 48/50
+> again
+You strike the ruin scout, and it falls dead.
+> take corpse
+You walk over to the ruin scout corpse and pick it up.
 ```
 
-An interrupted journey is also one response, for example:
-`You start walking east, but stop when a figure comes into view.` The actor's
-name comes from disclosed appearance; the client does not invent monsters.
+Everything that happens between two prompts is one passage, and the prompt
+returns only when it's the player's move again. Names come from disclosed
+appearance; the client doesn't invent monsters, causes or rooms.
 
 ## Descriptive facts
 
@@ -40,8 +35,9 @@ as potentially stale sightings. No world-wide appearance catalog is sent.
 
 This is a deliberately small cosmetic foundation: all existing floor/wall cells
 use stone; the three token materials and stone tablet have authored examination
-text; other item names receive a neutral fallback. Actors are generic figures;
-repeated views of the observing actor identify itself. These stubs add no item
+text; other items and all actors have no authored description, and the client
+says so in its own words. The observing actor's own body, seen from another
+cell, is identified by its id, never listed as a figure in the room. These stubs add no item
 abilities, identification rules, hardness, digging, lighting, or material editing.
 Existing opaque wall terrain supplies the actual sight and movement obstruction.
 
@@ -52,121 +48,111 @@ actually visible; an undisclosed cell or region boundary is not called a wall.
 
 ## Places and directions
 
-Hints remain unnamed anchors, not regions, room extents, or discoveries of an
-entire area. The nearest visible anchor represents the local place for this
-initial heuristic, even when the actor moves away from its center to reach an
-object. Directional commands choose other visible anchors in that bearing,
-labeling them by a co-located visible item when possible. Multiple candidates
-ask a numbered/named clarification before sending a request. Repeated
-occurrences of one opaque cell are deduplicated. Items assigned to the same
-nearest visible anchor are described as on the floor nearby, or at your feet
-when reachable; directions are reserved for items in another place. With no
-visible anchors, same-elevation items are treated as nearby.
+The character is always in a *place*: the open floor reachable without passing
+a door or a narrow gap in the walls, worked out from what is seen (see
+[places and ways](if-engine.md#places-and-ways)). A description says what kind
+of place it is, its floor and walls, and where it goes on out of sight:
 
-Walkable floor within a place is not an exit. The two-room example therefore
-offers east only, and the other place offers west. There is no arbitrary floor-ray
-fallback. Without visible hints, compass travel is unavailable; object approach
-still works, and `step` remains an explicit fine-movement tool in session help.
-Vertical travel also accepts stairs at the actor's cell with a disclosed landing.
-The backend validates the actual known route; apparent adjacency does not give
-the frontend authority to invent a connection. Bearings follow the observer frame,
-including rotated joins.
+```text
+You are in a small chamber with a stone floor and walls of stone.
+You see a copper token on the floor nearby.
+You see an open wooden door to the east.
+You can head east.
+```
 
-This is a conservative visible-anchor grouping, not a general room segmentation
-algorithm. [Durable place knowledge](place-knowledge.md) adds persistent mnemonic names and
-renaming. Unhinted-place inference, remembered offscreen destinations and richer
-shape summaries remain future work. Descriptions do not
-invent enclosed walls or use internal region names.
+Things inside the place are "at your feet" or "on the floor nearby"; anything
+outside it keeps its direction. The ways onward are the place's doors and gaps,
+and stairs underfoot. Walkable floor inside a place is not an exit. A direction
+heads through the opening that way to the first open cells beyond it, asking
+which when there are several; a closed door answers "The wooden door to the
+east is closed." With no opening that way, an authored place hint seen in
+another place is the fallback. The server validates the actual route; a
+blocked journey says so, naming a creature in the way.
 
-## Intentions and conversation
+Bearings follow the observer frame, including rotated joins. Diagonal sectors
+cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
+adds persistent mnemonic names and renaming. Descriptions never invent walls,
+smells or region names the protocol doesn't disclose.
 
-The text client includes a dedicated natural language Interactive Fiction (IF)
-parser (see [IF parser architecture](if-parser-architecture.md)) supporting full
-sentence structures, prepositions, multi-object conjunctions, compound sentence
-chaining, and contextual pronouns.
+## Commands
 
-- `places`: list learned names, marked in sight or remembered.
-- `name <place number> <new name>` or `name room <new name>`: rename a listed place or current room without taking a turn.
-- `look` / `l`: describe current sight and visible ways onward.
-- `examine <thing>` / `x <thing>` / `look at <thing>`: inspect disclosed appearance;
-  `examine walls`, `examine floor`, and `examine ceiling` describe visible surface materials.
-- `listen` / `smell`: perceive local auditory and olfactory environmental ambiance.
-- `diagnose`: check physical condition, wounds, and combat injuries.
-- `search`: inspect immediate surroundings for noteworthy details.
-- `again` / `g`: repeat the previous gameplay command.
-- `inventory` / `i`: list carried names and quantities.
-- `take 3 arrows` / `drop 2 arrows`: transfer a requested quantity from a selected
-  stack; omit the count to transfer the whole stack.
-- `take token and brass key`: pick up multiple distinct items sequentially.
-- `take all except stone tablet`: acquire all co-located items while excluding specific entities.
-- `put iron sword on floor`: ditransitive item placement.
-- `attack goblin with iron sword`: ready a carried weapon for combat.
-- `unlock oak door with brass key`: open or unlock a door using a carried key.
-- `drink healing potion` / `eat iron ration`: consume carried supplies (see [client simulation hooks](if-parser-architecture.md#5-client-side-narrative-vs-server-side-world-mutations)).
-- `wear ring` / `wield sword` / `remove ring`: manipulate equipment.
-- `talk to <actor>` / `ask <actor> about <topic>`: conversational engagement.
-- Compound sentence chains: `take sword. go east. open oak door` or `take key and then unlock door`.
-- Diagonal names and `ne`/`se`/`sw`/`nw` work with travel and `step`; descriptions
-  use eight horizontal bearings (diagonal sectors cover ratios from 1:2 to 2:1).
-- Directions / `go east`: travel to a visible destination as described above.
-- `go to tablet` / `approach tablet`: travel to a visible ground item, without
-  manipulating it on arrival.
-- `take tablet`: take it immediately if reachable, otherwise travel to its current
-  disclosed cell and attempt ordinary pickup on arrival.
-- `stop` / `cancel`: journeys can't be stopped partway; this shows the rest of
-  the current one at once.
-- `pace [milliseconds]`: show or set the time between shown journey steps
-  (default 75, or `--pace` at startup; `0` shows each step as it arrives).
-- `step east`: explicitly request one ordinary movement action.
-- `wait`, `control`, `release`, `sync`, `note <text>`, `history` and `wizard` commands retain
-  their existing authority and timing rules; `quit` disconnects.
+Many words share one action, and one command may need several actions: `take
+tablet` walks over first when it's out of reach. See the
+[IF engine](if-engine.md#verb-semantics-and-plans) for the full verb table.
 
-### Clarification and pronouns
+- `look` / `l`; `examine <thing>` / `x` / `look at`; `read <thing>`;
+  `examine walls`, `floor` or `ceiling` for visible surface materials;
+  `examine me` and `diagnose` for the character's condition.
+- `inventory` / `i`.
+- `take` / `get` / `pick up` / `grab <thing>`; `drop` / `put down`; `put <thing>
+  on floor`. Counts take from one stack: `take 3 arrows`.
+- Several things: `take token and tablet`, `take all`, `drop everything except
+  the key`, `take tokens`.
+- `open` / `close` a door, walking over first when needed.
+- `attack` / `kill` / `hit <creature>`, closing in first when needed.
+- A direction (`east`, `ne`, `up`), or `go east`: head for a way onward.
+  `go to <thing>` walks over without acting on it. `step east` makes one step.
+- `wait` / `z`.
+- `again` / `g` repeats the last command.
+- Chains: `take sword. go east. open door`, or `take key, then go north`.
+- `listen` and `smell` answer that nothing is out of the ordinary.
+- `places`, `name room <name>`, `name <number> <name>`.
+- Session tools are in `help session`: `control`, `release`, `sync`, `save`,
+  `history`, `note`, `bookmark`, `pace` and `wizard`. `quit` disconnects.
 
-When a noun phrase matches multiple candidates, the parser prompts for clarification:
-> *"Which do you mean? 1) copper token (count 1); 2) silver token (count 1)"*
+Verbs the game has no rules for yet (`wear`, `wield`, `eat`, `drink`, `give`,
+`throw`, `unlock`, `push`, `talk`, `search`, `pray` and others) are recognized
+and refused plainly: "You can't wear anything yet." A missing object is named
+first: "You can't see any lamp here."
 
-Clarification accepts:
-- A listed number (`1`, `2`)
-- An ordinal phrase (`the first one`, `the 2nd token`)
-- Distinguishing adjectives or nouns (`copper`, `the silver one`)
+### Names, questions and pronouns
 
-Entering an invalid candidate politely prompts again without discarding the choice context.
-Entering an action command (e.g. `look`, `inventory`) cancels the pending question.
+Every word must name the thing; the last can be a synonym (`body` for a corpse,
+`door` for a gate). The verb's preferences come first: `take scout` means the
+scout's corpse, `attack scout` the scout.
 
-Pronouns resolve contextually:
-- `it`: refers to the most recently examined, manipulated, or targeted entity.
-- `them`: refers to plural item collections (e.g. `take arrows` -> `drop them`).
-- `him` / `her`: refers to the most recently inspected or targeted actor (e.g. `examine goblin sentry` -> `attack him`).
+Things the player can't tell apart are interchangeable: with two copper tokens
+at your feet, `take token` takes one without asking. Things that differ need a
+choice:
 
-The prompt is `> `, with the cursor immediately after the space, and returns when
-the intention has completed or
-been interrupted, not when the server accepts a travel request. The server
-finishes a journey as soon as nothing else needs to act; the client shows its
-steps at the chosen pace. Input remains live: another command first shows the
-rest of the journey at once, then runs. Piped commands that intend sequential
-journeys must wait for the completion prompt.
+```text
+> take thing
+Which do you mean, the copper token or the stone tablet?
+> the first one
+You pick up the copper token.
+```
 
-Successful approach-and-pickup produces one sentence. Directional arrival reports
-the direction and describes the destination once. Interruptions summarize the
-attempt and why it stopped; internal moves, arrival status, and scheduling are
-not printed as separate responses. Nearby pickup does not claim the actor walked.
-Normal startup omits control-acquisition chatter, and basic help contains gameplay
-commands only. `help session` exposes connection/history tools and fine movement.
+An answer can be a number, an ordinal or words that pick one choice. Anything
+else asks again; a new command abandons the question. An answered question
+continues the rest of its chain. Asking takes no game time.
 
-Outside compound journeys, shared narration reports newly perceived figures,
-loss of sight, and changes to continuously visible doors. It never names an
-undisclosed cause or claims a disappearing actor died. Unchanged observations
-from another actor no longer repeat the entire room description. Explicit `look`
-and snapshots still describe the scene. See [narration and stream recovery](narration-and-recovery.md).
+`it` is the last thing mentioned by the player or by the narration, so after
+"A ruin scout comes into view", `attack it` means the scout. `them` is the last
+group, and `him` and `her` the last creature.
 
-A pending pickup is connection-local and tied to the exact travel receipt and
-branch. It is discarded on `stop`, any non-arrival termination, snapshot,
-rewind, control loss, replacement intent, or disconnect. Arrival rechecks control,
-readiness, item identity and reach. Even if backend arrival takes precedence over
-a newly visible actor, text pauses without pickup. Every eventual pickup is a
-normal revision-checked server command. Restart never resumes compound intentions.
-Spectators receive prose but remain read-only.
+### Turns and narration
+
+A turn runs every command on the line, then composes one passage. The prompt
+returns when the game is waiting for this player, never while a journey or an
+attack is still unfolding; commands typed meanwhile run afterwards. Journeys
+can't be stopped partway, so `stop` has nothing to do.
+
+- A journey and what it was for are one sentence: "You walk over to the stone
+  tablet and pick it up."
+- An interrupted journey keeps its purpose and says why it stopped: "You head
+  toward the stone tablet, intent on picking it up. A figure comes into view to
+  the east, and you stop warily."
+- Arriving as someone new comes into view never authorizes the next action,
+  even when the server reports arrival.
+- A pickup after a journey waits until the character is ready, as after a fight.
+- Blows, deaths and HP are told in order; ticks, readiness and recovery never
+  are. HP follows the passage when it changed.
+- Arriving somewhere new by a direction describes the place.
+
+Updates that arrive between turns (another player acting, or the watched player
+for a spectator) are told the same way above a fresh prompt. Spectators can't
+act. Nothing of a turn survives a restart, and a snapshot or rewind ends the
+turn and describes the scene again.
 
 ## Compatibility and acceptance
 
@@ -180,13 +166,13 @@ Existing wizard/geometry process scenarios explicitly select it. Ordinary startu
 and the desktop launchers select the adventure interface. Explicit `history` remains
 a detailed reference tool, including IDs needed for annotation/rewind anchors.
 
-Behavior tests cover nouns, pronouns, clarification invalidation, ambiguous places,
-disclosure, repeated views, and floor-versus-exit distinctions. The actual-process
-suite `scripts/test_adventure_process.py` verifies normal play, travel then pickup,
-exact successful/interrupted transcripts, prompt boundaries, pacing,
-spectators, persistence, and wizard-authored geometry/hazards using
-`scenarios/tests/text-adventure-*`, `wide-join`, and `portal-geometry`.
-The existing discovery runs these tests in debug and release on Windows and Linux.
+The engine's tests are listed in [the IF engine](if-engine.md#testing). The
+actual-process suite `scripts/test_adventure_process.py` verifies normal play,
+travel then pickup, exact successful and interrupted transcripts, prompt
+boundaries, spectators, persistence, the first dungeon's fight and corpse pickup,
+and wizard-authored geometry and hazards using `scenarios/tests/text-adventure-*`,
+`wide-join` and `portal-geometry`. The existing discovery runs these tests in
+debug and release on Windows and Linux.
 
 ## Door interactions
 

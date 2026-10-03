@@ -258,7 +258,8 @@ impl Canvas {
         self.text(44, 532, "RECENT HISTORY", MUTED, 1, 70);
         if let Some(state) = &app.state {
             let o = &state.state().observation;
-            if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective.as_ref()) {
+            if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective) {
+                let objective = tor_client_common::narration::objective(objective);
                 self.text(28, 72, objective, MUTED, 1, 120);
             }
             self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
@@ -374,7 +375,11 @@ impl Canvas {
                         self.text(
                             804,
                             220 + index * 16,
-                            &format!("{}: {}", view.name, actor.injury),
+                            &format!(
+                                "{}: {}",
+                                view.name,
+                                tor_client_common::narration::injury(actor.injury)
+                            ),
                             TEXT,
                             1,
                             44,

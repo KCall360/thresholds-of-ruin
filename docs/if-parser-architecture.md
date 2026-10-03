@@ -32,7 +32,7 @@ modern IF design (Inform 7, TADS 3).
    - **Pronouns & Context**: Pronoun tracking (`it`, `them`, `him`, `her`) updated
      dynamically as entities are mentioned, examined, or manipulated.
    - **Conversational Disambiguation**: Natural in-world clarification prompts
-     (*"Which token do you mean: the copper token or the silver token?"*)
+     (*"Which do you mean, the copper token or the silver token?"*)
      resolved seamlessly on the next turn (*"the copper one"* or *"copper"*)
      without numeric IDs or technical menus.
    - **Literary Feedback**: Classic IF responses and failure descriptions
@@ -43,15 +43,10 @@ modern IF design (Inform 7, TADS 3).
 ## 2. Architecture Overview
 
 ```mermaid
-flowchart TD
-    RawInput["Raw Player Input<br/>('take sword and lamp then go north')"] --> Lexer["1. Tokenizer & Sentence Splitter<br/>(Normalizes text, splits on '.', ';', 'then')"]
-    Lexer --> Queue["2. Command Queue<br/>[Command 1, Command 2]"]
-    Queue --> Parser["3. Grammar & Syntax Parser<br/>(Matches verb patterns, prepositions, noun phrases)"]
-    Parser --> Resolver["4. Scope & Entity Resolver<br/>(Binds noun phrases to visible objects, actors, doors, exits)"]
-    Resolver -->|Ambiguous| Clarify["Conversational Disambiguation<br/>('Which do you mean...?')"]
-    Clarify --> Context["Conversation & Pronoun Context<br/>(Tracks 'it', 'him', 'her', 'them', pending choices)"]
-    Resolver -->|Resolved| Synthesizer["5. Intention & Simulation Synthesizer<br/>(Translates intent to Move, Take, Drop, Door, Attack, or Travel)"]
-    Synthesizer --> Engine["Simulation / Server Connection"]
+flowchart LR
+    RawInput["Raw Player Input<br/>('take sword and lamp then go north')"] --> Lexer["Tokenizer & Sentence Splitter<br/>(splits on '.', ';', 'then')"]
+    Lexer --> Parser["Grammar & Syntax Parser<br/>(verb patterns, prepositions, noun phrases)"]
+    Parser --> Engine["IF engine<br/>(resolution, verb meaning, turns, narration)"]
 ```
 
 ---
@@ -80,19 +75,12 @@ The grammar defines accepted sentence structures declaratively through syntax
 rules.
 
 - **Parts of Speech**:
-  - **Verbs**: Primary action indicators with rich synonym sets:
-    - *Examine*: `examine`, `x`, `look at`, `inspect`, `read`, `study`, `search`.
-    - *Take*: `take`, `get`, `pick up`, `grab`, `carry`.
-    - *Drop*: `drop`, `put down`, `discard`, `leave`.
-    - *Open / Close*: `open`, `close`, `shut`.
-    - *Combat*: `attack`, `kill`, `hit`, `fight`, `strike`, `slay`.
-    - *Movement*: `go`, `walk`, `head`, `run`, `climb`, `enter`, `exit`.
-    - *Intransitive*: `look`/`l`, `inventory`/`i`, `wait`/`z`, `quit`/`q`, `again`/`g`, `diagnose`, `help`.
-    - *Sensory & Environment*: `listen`/`hear`, `smell`/`sniff`, `search`.
-    - *Consumables*: `drink`/`quaff`/`sip`, `eat`/`taste`/`consume`.
-    - *Equipment*: `wear`/`don`/`put on`, `wield`/`equip`/`brandish`, `remove`/`doff`/`take off`.
-    - *Manipulation*: `put`, `give`, `insert`, `push`/`shove`, `pull`/`drag`, `turn`/`rotate`, `unlock`, `lock`.
-    - *Social*: `talk to`/`speak to`, `ask <actor> about <topic>`.
+  - **Verbs**: about seventy verbs with their synonyms, drawn from MDL Zork and
+    NetHack, are in `parser::lexicon` (`take`/`get`/`grab`/`pick up`,
+    `attack`/`kill`/`hit`, `examine`/`x`/`look at` and so on). Multi-word verbs
+    such as `pick up`, `put down`, `put on`, `take off`, `turn on`, `blow out`,
+    `talk to` and `look around` are recognized first. A bare verb parses as
+    intransitive; the engine asks for an object when it needs one.
   - **Prepositions**: Words defining spatial and instrumental relations:
     `with`, `using`, `in`, `into`, `inside`, `on`, `onto`, `upon`, `under`, `behind`, `from`, `to`, `at`, `through`, `off`, `about`.
   - **Determiners**: Noise words ignored during matching: `the`, `a`, `an`, `some`, `this`, `that`.
@@ -106,131 +94,52 @@ rules.
   3. `Transitive(Verb, NounPhrase)`: E.g., `take brass lantern`, `read tablet`, `drink potion`, `wear ring`, `wield sword`, `talk to goblin`.
   4. `Ditransitive(Verb, NounPhrase, Preposition, NounPhrase)`:
      E.g., `hit goblin with iron sword`, `take coin from floor`, `put sword on floor`, `give ring to goblin`, `ask goblin about key`.
-  5. `CompoundTransitive(Verb, Vec<NounPhrase>)`: E.g., `take sword and shield`.
+  5. `MultiTransitive(Verb, Vec<NounPhrase>)`: E.g., `take sword and shield`.
 
-### 3.3 Noun Phrases and Scope Binding (`parser::noun_phrase`, `parser::scope`, `parser::matcher`)
-
-> **Status:** `parser::scope`, `parser::matcher` and `parser::context` (3.4) are
-> built and unit tested but not yet used by the game. Until `Dialogue` in
-> `adventure.rs` is moved onto them, it resolves names, pronouns and
-> clarification answers itself, and its own tests in
-> `crates/client-text/tests/it/adventure.rs` are what cover play. Tests of the
-> resolver modules cover only those modules.
+### 3.3 Noun phrases
 
 A noun phrase represents the player's reference to one or more game entities:
 
 ```rust
 pub struct NounPhrase {
-    pub determiner: Option<Determiner>,
-    pub quantity: Option<Quantity>,
-    pub adjectives: Vec<String>,
+    pub raw: String,
     pub head: Option<String>,
+    pub adjectives: Vec<String>,
+    pub determiner: Option<String>,
+    pub quantity: Option<u64>,
     pub ordinal: Option<usize>,
     pub pronoun: Option<Pronoun>,
-    pub exception: Option<Box<NounPhrase>>,
+    pub all: bool,
+    pub is_one: bool,
+    pub except: Option<Box<NounPhrase>>,
 }
 ```
 
-#### World Scope
-Scope represents all entities the player can currently perceive or interact with,
-constructed directly from the disclosed `StateView`:
-1. **Carried items**: Items in `observation.inventory`.
-2. **Ground items**: Items in `observation.ground_items` (reachable or visible).
-3. **Doors**: Doors in `observation.visible_cells`.
-4. **Actors**: Other figures in `observation.visible_actors`.
-5. **Surfaces / Scenery**: Visible walls, floor, and ceiling.
-6. **Exits / Places**: Disclosed navigation anchors and bearings.
-
-#### Matching & Scoring
-Candidate entities are scored against the noun phrase:
-- **Exact word matches**: Adjectives and head nouns compared against object names and descriptions.
-- **Pronoun expansion**: Replacing `it`/`them`/`him`/`her` with current contextual referents.
-- **Plural & Quantifiers**: Resolving `all` or `everything` into all suitable objects in scope (e.g. all ground items for `take all`).
-
-### 3.4 Context Memory & Conversational Disambiguation (`parser::context`)
-
-The conversation context preserves state between user turns:
-- **Pronoun referents**:
-  - `it`: Last referenced inanimate entity (e.g., `copper token`, `door`).
-  - `him` / `her`: Last referenced person or creature.
-  - `them`: Last referenced group or plural items.
-- **Pending Disambiguation**:
-  - If a noun phrase matches multiple distinct entities (e.g., `copper token` and `silver token` for `take token`), the parser generates a conversational question:
-    > *"Which token do you mean: the copper token or the silver token?"*
-  - The context stores the partially completed command and candidate set.
-  - On the following turn, an input such as *"the copper one"*, *"copper"*, or *"the first one"* completes the pending command naturally.
-
-### 3.5 Simulation Synthesis (`adventure`)
-
-The resolved IF command is converted into backend simulation commands:
-- **Immediate vs. Compound Travel**:
-  - If a target entity is already reachable (or adjacent), issue the direct action (`Action::Take`, `Action::SetDoor`, `Action::Attack`).
-  - If the target entity is visible but out of reach, issue a `Command::Travel` to approach it, chaining the action upon arrival (e.g. *"You walk over to the stone tablet and pick it up."*).
-- **Interruption Handling**:
-  - If travel is interrupted by a hazard or block, narrative feedback explains why and cancels any pending chained actions and queued commands.
-- **Command Queue Execution**:
-  - Queued commands from multi-command inputs execute sequentially as each action finishes, pausing when player interaction or clarification is needed.
-
----
+The parser stops here. What a phrase refers to, pronouns, questions, what a
+verb means and how its actions run and are narrated belong to the
+[IF engine](if-engine.md): `engine::scene` builds the referents,
+`engine::resolve` binds phrases to them, `engine::verbs` gives verbs their
+meaning, and `engine::turn` and `engine::narrate` run and tell each turn.
 
 ## 4. Testing Strategy
 
 Following the repository [testing policy](testing.md):
+
 1. **Parser unit tests** (`#[cfg(test)]` modules in `parser/`): tokenizing,
-   sentences, noun phrases, grammar, and the resolver modules.
+   sentences, noun phrases and grammar.
 2. **Parser pipeline tests** (`crates/client-text/tests/it/parser.rs`): whole
-   sentences through tokenizing and grammar, and the resolver's scope,
-   matching and pronouns.
-3. **Adventure tests** (`crates/client-text/tests/it/adventure.rs`): what
-   `Dialogue` does with each input, as protocol actions or narration, and the
-   narrative descriptions. These cover play as it is today.
-4. **Actual-process acceptance tests** (`scripts/test_adventure_process.py`):
-   natural transcripts through the real text client and server.
+   sentences through the parser, and what the engine's resolver binds them to.
+3. The engine's own tests are listed in [the IF engine](if-engine.md#testing).
 
----
+## 5. Verbs the game doesn't support yet
 
-## 5. Client-Side Narrative vs. Server-Side World Mutations
-
-A foundational principle of `tor-client-text` is delivering an authentic, immersive
-Interactive Fiction experience matching MDL Zork and Inform 7 even when the underlying
-simulation engine has not yet implemented specific backend mutation subsystems.
-
-### Current Protocol Scope (Milestone 4e)
-The server-authoritative protocol currently defines the following `Action` mutations:
-- `Action::Move { direction }` (discrete grid displacement and step execution)
-- `Action::Take { item, quantity }` (inventory acquisition from ground)
-- `Action::Drop { item, quantity }` (inventory placement to ground)
-- `Action::SetDoor { door, open }` (door opening and closing)
-- `Action::Attack { target }` (combat engagement against visible actors)
-- `Action::Wait` (turn advancement and combat continuation)
-
-### Simulated Client Narrative Actions
-To preserve natural IF interaction depth without waiting for server-side equipment,
-alchemy, or hunger systems, `tor-client-text` provides simulated literary feedback:
-1. **Equipment Operations**:
-   - `wear` / `don` -> *"You put on the <item>."*
-   - `wield` / `equip` -> *"You ready the <item> for combat."*
-   - `remove` / `doff` -> *"You take off the <item>."*
-2. **Consumables**:
-   - `drink` / `quaff` -> *"You take a sip of the <item>. It is refreshing, though it has no further effect right now."*
-   - `eat` / `consume` -> *"You sample the <item>. It sustains you, though it has no further effect right now."*
-3. **Physical Manipulation**:
-   - `push` / `pull` / `turn` -> Contextual feedback for scenery, doors, and actors.
-4. **Social & Speech**:
-   - `talk to` / `ask <actor> about <topic>` -> Authentic NPC silence/glare feedback.
-
-### Engine Integration Hook Points
-When future engine milestones implement server-authoritative equipment slots and
-consumable item effects, the client implementation in [`adventure.rs`](../crates/client-text/src/adventure.rs)
-is explicitly annotated with structured hook comments:
-- `// HOOK[engine:equipment]`: In `fn object()`, replace the simulated `Intent::Say(...)`
-  branches for `wear`, `wield`, and `remove` with `Intent::Action(Action::Equip { item: id, slot })`
-  and `Intent::Action(Action::Unequip { item: id })`.
-- `// HOOK[engine:consumables]`: In `fn object()`, replace simulated `drink` and `eat`
-  branches with `Intent::Action(Action::Consume { item: id })`.
-- `// HOOK[engine:social]`: In `fn talk_to()`, replace conversational defaults with
-  dialogue requests once an NPC dialogue tree protocol is established.
-
-Because client presentation is entirely derived from disclosed `StateView` updates,
-upgrading these hook points from client narrative to backend actions will require
-zero changes to the parsing, disambiguation, or pronoun tracking pipelines.
+The lexicon recognizes verbs from MDL Zork and NetHack that the game has no
+rules for yet: `wear`, `wield`, `remove`, `eat`, `drink`, `give`, `show`,
+`throw`, `fire`, `unlock`, `lock`, `push`, `pull`, `turn`, `kick`, `break`,
+`cut`, `burn`, `light`, `extinguish`, `dig`, `fill`, `pour`, `use`, `engrave`,
+`zap`, `rub`, `tie`, `untie`, `wave`, `knock`, `sit`, `jump`, `swim`, `sleep`,
+`pray`, `talk`, `ask`, `tell`, `say`, `search`, `climb`, `enter` and `exit`.
+They parse like any other verb, the engine resolves their objects, and then
+says plainly that it can't be done: "You can't wear anything yet." The client
+never narrates an effect the game didn't have. When the game gains an action,
+supporting its verbs is one entry in the engine's verb table.

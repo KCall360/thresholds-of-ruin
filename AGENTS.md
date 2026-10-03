@@ -105,20 +105,27 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
-**Test suite rationalization (in progress, branch `tests/rationalize`).**
-Process tests share `scripts/process_harness.py` and use the headless client
-for wizard setup; every scenario package is checked by the
+**Test suite rationalization (complete, PR #59).** Process tests share
+`scripts/process_harness.py` and use the headless client for wizard setup;
+every scenario package is checked by the
 [package invariants](docs/testing.md#package-invariants); the workload
 validators share `workload_report.py`; protocol messages have recorded wire
 samples; test packages are named for what they set up. See the
-[testing policy](docs/testing.md). It needs a PR, CI on both platforms, and
-the maintainer's approval to merge.
+[testing policy](docs/testing.md).
 
-**Interactive fiction parser** (PR #55): the text client's natural-language
-parser and narration; see the [parser architecture](docs/if-parser-architecture.md)
-and [adventure commands](docs/text-adventure.md). The resolver modules
-(`parser::scope`, `matcher`, `context`) are built and tested but not yet used:
-`Dialogue` still resolves names and pronouns itself.
+**Interactive fiction engine (in progress, branch `feature/if-engine`).** The
+text client's `engine` module replaces `Dialogue`: everything between two
+prompts is one passage, and the prompt returns only when it's the player's
+move. Protocol 21 sends combat facts instead of prose. See the
+[IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
+[adventure commands](docs/text-adventure.md). Decisions agreed with the
+maintainer: the server sends facts, never sentences; verbs the game can't carry
+out yet are recognized and refused plainly, never narrated as if they worked;
+descriptions state only disclosed facts (no invented smells or epithets).
+Places, ways and room descriptions come from `engine::place`. Pick up from the
+engine's [next steps](docs/if-engine.md#next-steps); items 5 and 6 there are
+protocol changes that need the maintainer's decision. The branch needs CI on
+both platforms and the maintainer's approval to merge.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),
@@ -193,9 +200,9 @@ of it. If a build fails with "memory allocation failed", lower
 `CARGO_BUILD_JOBS` and rerun the failed step; never start a build while another
 build or test suite is running.
 
-**Running until blocked and spatial narrative** (PRs #57 and #58, protocol
-20): the simulation runs until it needs client input, only the server ends a
-journey, and clients pace the display; see
+**Running until blocked and spatial narrative** (PRs #57 and #58): the
+simulation runs until it needs client input, only the server ends a journey,
+and clients pace the display; see
 [running until blocked](docs/run-until-blocked.md) and the
 [spatial narrative](docs/spatial-narrative-architecture.md).
 

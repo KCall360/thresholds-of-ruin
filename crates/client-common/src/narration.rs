@@ -33,7 +33,12 @@ pub fn observation(
     }
     if let Some(combat) = &after.combat {
         if before.tick != after.tick || before.combat != after.combat {
-            lines.extend(combat.messages.clone());
+            lines.extend(
+                combat
+                    .events
+                    .iter()
+                    .map(|event| combat_event(event, before, after)),
+            );
             if before.combat.as_ref().is_none_or(|c| {
                 c.hp != combat.hp || c.victory != combat.victory || c.dead != combat.dead
             }) {
@@ -42,6 +47,69 @@ pub fn observation(
         }
     }
     lines
+}
+
+/// A disclosed actor's name from either view, for an actor that may have
+/// just died or moved out of sight.
+fn actor_name(actor: ActorId, before: &Observation, after: &Observation) -> String {
+    after
+        .visible_actors
+        .iter()
+        .chain(&before.visible_actors)
+        .find(|a| a.id == actor && !a.name.trim().is_empty())
+        .map_or_else(|| "figure".into(), |a| label(&a.name, "figure"))
+}
+
+/// One line for a combat event, written from the observer's point of view.
+pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Observation) -> String {
+    let observer = after.actor;
+    let subject = |actor: Option<ActorId>| match actor {
+        Some(id) if id == observer => "You".to_owned(),
+        Some(id) => format!("The {}", actor_name(id, before, after)),
+        None => "Something".into(),
+    };
+    let object = |actor: Option<ActorId>| match actor {
+        Some(id) if id == observer => "you".to_owned(),
+        Some(id) => format!("the {}", actor_name(id, before, after)),
+        None => "something".into(),
+    };
+    match event {
+        CombatEventView::Attack {
+            attacker,
+            target,
+            outcome,
+        } => {
+            let (subject, object) = (subject(*attacker), object(*target));
+            match outcome {
+                AttackOutcome::Miss => format!("{subject} missed {object}."),
+                AttackOutcome::NoInjury => {
+                    format!("{subject} struck {object}, but caused no injury.")
+                }
+                AttackOutcome::Hit => format!("{subject} struck {object}."),
+            }
+        }
+        CombatEventView::Interrupted { .. } => "Your attack was interrupted.".into(),
+        CombatEventView::Died { actor } if *actor == observer => "You died.".into(),
+        CombatEventView::Died { actor } => format!("{} died.", subject(Some(*actor))),
+    }
+}
+
+/// The objective as a sentence.
+pub fn objective(kind: ObjectiveKind) -> &'static str {
+    match kind {
+        ObjectiveKind::RetrieveAndReturn => "Retrieve the objective item and return to the exit.",
+        ObjectiveKind::ReachExit => "Reach the exit.",
+    }
+}
+
+/// An injury level as an adjective phrase.
+pub fn injury(injury: Injury) -> &'static str {
+    match injury {
+        Injury::Healthy => "healthy",
+        Injury::Wounded => "wounded",
+        Injury::BadlyWounded => "badly wounded",
+        Injury::NearDeath => "near death",
+    }
 }
 
 pub fn combat_status(c: &CombatView) -> String {
@@ -307,6 +375,42 @@ mod tests {
     }
 
     #[test]
+    fn combat_lines_are_written_from_events_and_disclosed_names() {
+        let mut view = observation();
+        view.visible_actors.push(ActorView {
+            asset: None,
+            id: ActorId(2),
+            name: "ruin scout".into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        let after = observation();
+        let line = |event| combat_event(&event, &view, &after);
+        assert_eq!(
+            line(CombatEventView::Attack {
+                attacker: Some(ActorId(1)),
+                target: Some(ActorId(2)),
+                outcome: AttackOutcome::Hit,
+            }),
+            "You struck the ruin scout."
+        );
+        assert_eq!(
+            line(CombatEventView::Attack {
+                attacker: None,
+                target: Some(ActorId(1)),
+                outcome: AttackOutcome::Miss,
+            }),
+            "Something missed you."
+        );
+        assert_eq!(
+            line(CombatEventView::Died { actor: ActorId(2) }),
+            "The ruin scout died."
+        );
+        assert_eq!(objective(ObjectiveKind::ReachExit), "Reach the exit.");
+        assert_eq!(injury(Injury::BadlyWounded), "badly wounded");
+    }
+
+    #[test]
     fn readiness_changes_are_announced_without_inventing_an_unseen_action() {
         let before = observation();
         let mut waiting = before.clone();
@@ -327,7 +431,7 @@ mod tests {
                 preparation_active: false,
                 recovery_remaining: 0,
                 actors: vec![],
-                messages: vec![],
+                events: vec![],
                 objective: None,
                 victory: !dead,
                 dead,

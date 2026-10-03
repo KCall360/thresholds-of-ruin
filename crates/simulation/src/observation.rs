@@ -54,8 +54,8 @@ pub struct KnownPlace {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorView {
+    /// Empty when nothing names it.
     pub name: String,
-    pub description: &'static str,
     pub id: ActorId,
     pub location: Location,
     pub asset: Option<String>,
@@ -241,15 +241,10 @@ impl Game {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })
                         .map(move |(location, _)| ActorView {
-                            name: if other_id == id {
-                                "yourself".into()
-                            } else {
-                                other
-                                    .combat
-                                    .as_ref()
-                                    .map_or_else(|| "figure".into(), |c| c.spec.name.clone())
-                            },
-                            description: "An unremarkable figure is here.",
+                            name: other
+                                .combat
+                                .as_ref()
+                                .map_or_else(String::new, |c| c.spec.name.clone()),
                             id: other_id,
                             location,
                             asset: other.asset.clone(),
@@ -453,13 +448,14 @@ impl Game {
 }
 
 /// Initial authored appearance catalog. These cosmetic stubs do not add item rules.
+/// Empty when nothing is authored; clients decide how to say so.
 fn item_description(name: &str) -> String {
     match name {
         "copper token" => "A small copper disc, stamped with a worn spiral.",
         "silver token" => "A small silver disc, stamped with a worn spiral.",
         "iron token" => "A small iron disc, stamped with a worn spiral.",
         "stone tablet" => "A weathered slab of stone. Shallow marks run across its surface.",
-        _ => "You notice no further distinguishing details.",
+        _ => "",
     }
     .into()
 }

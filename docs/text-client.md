@@ -29,8 +29,10 @@ The client accepts a numeric loopback socket address, including `[::1]:4000`.
 The client attaches and requests control. `--observe` skips that request. If control
 is occupied, the client stays connected as an observer. The normal prompt is `>`.
 Try `look`, `examine <thing>`, `take <thing>`, a compass direction such as `east`,
-and `attack <name>`. Directions use backend travel; `stop` cancels, and `step east` requests one careful step. Read
-[adventure commands and behavior](text-adventure.md) before scripting this mode.
+and `attack <name>`. Directions use backend travel, and `step east` requests one
+careful step. Each command's turn ends before the next is read, so piped commands
+run in order. Read [adventure commands and behavior](text-adventure.md) before
+scripting this mode.
 
 ## Development scripting interface
 

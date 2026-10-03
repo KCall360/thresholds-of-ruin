@@ -2,6 +2,7 @@
 use tor_protocol::*;
 
 pub mod adventure;
+pub mod engine;
 pub mod narrative;
 pub mod parser;
 
@@ -286,8 +287,15 @@ pub fn describe(state: &StateView) -> String {
     )];
     if let Some(c) = &o.combat {
         lines.push(tor_client_common::narration::combat_status(c));
-        lines.extend(c.objective.clone());
-        lines.extend(c.messages.clone());
+        lines.extend(
+            c.objective
+                .map(|o| tor_client_common::narration::objective(o).to_owned()),
+        );
+        lines.extend(
+            c.events
+                .iter()
+                .map(|e| tor_client_common::narration::combat_event(e, o, o)),
+        );
     }
     for item in &o.ground_items {
         lines.push(format!(

@@ -317,7 +317,34 @@ pub fn match_sentence_with_raw(
             ("take", "off") => {
                 return parse_transitive_or_ditransitive(Verb::Remove, &tokens[2..]);
             }
-            ("talk", "to") | ("speak", "to") => {
+            ("put" | "blow", "out") | ("turn", "off") => {
+                return parse_transitive_or_ditransitive(Verb::Extinguish, &tokens[2..]);
+            }
+            ("turn", "on") => {
+                return parse_transitive_or_ditransitive(Verb::Light, &tokens[2..]);
+            }
+            ("set", "down") => {
+                return parse_transitive_or_ditransitive(Verb::Drop, &tokens[2..]);
+            }
+            ("get", "in" | "into") | ("go", "in" | "into" | "inside") => {
+                return parse_transitive_or_ditransitive(Verb::Enter, &tokens[2..]);
+            }
+            ("look", "around") if words.len() == 2 => {
+                return Ok(ParsedCommand::Intransitive { verb: Verb::Look });
+            }
+            ("sit", "down") | ("lie", "down") if words.len() == 2 => {
+                return Ok(ParsedCommand::Intransitive {
+                    verb: if words[0] == "sit" {
+                        Verb::Sit
+                    } else {
+                        Verb::Sleep
+                    },
+                });
+            }
+            ("get", "out") | ("go", "out") if words.len() == 2 => {
+                return Ok(ParsedCommand::Intransitive { verb: Verb::Exit });
+            }
+            ("talk", "to" | "with") | ("speak", "to" | "with") | ("chat", "with") => {
                 return parse_transitive_or_ditransitive(Verb::Talk, &tokens[2..]);
             }
             ("go", "to" | "toward" | "towards") => {
@@ -338,37 +365,14 @@ pub fn match_sentence_with_raw(
     if let Some(verb) = leading_verb {
         let rest = &tokens[1..];
 
-        // Intransitive cases
+        // A bare verb. Whether it needs an object is the engine's business.
         if rest.is_empty() {
-            return match verb {
-                Verb::Look => Ok(ParsedCommand::Intransitive { verb: Verb::Look }),
-                Verb::Inventory => Ok(ParsedCommand::Intransitive {
-                    verb: Verb::Inventory,
-                }),
-                Verb::Wait => Ok(ParsedCommand::Intransitive { verb: Verb::Wait }),
-                Verb::Quit => Ok(ParsedCommand::Intransitive { verb: Verb::Quit }),
-                Verb::Stop => Ok(ParsedCommand::Stop),
-                Verb::Again => Ok(ParsedCommand::Again),
-                Verb::Help => Ok(ParsedCommand::Help { topic: None }),
-                Verb::Diagnose => Ok(ParsedCommand::Intransitive {
-                    verb: Verb::Diagnose,
-                }),
-                Verb::Talk => Ok(ParsedCommand::Intransitive { verb: Verb::Talk }),
-                Verb::Listen => Ok(ParsedCommand::Intransitive { verb: Verb::Listen }),
-                Verb::Smell => Ok(ParsedCommand::Intransitive { verb: Verb::Smell }),
-                Verb::Search => Ok(ParsedCommand::Intransitive { verb: Verb::Search }),
-                Verb::Verbose => Ok(ParsedCommand::Intransitive {
-                    verb: Verb::Verbose,
-                }),
-                Verb::Brief => Ok(ParsedCommand::Intransitive { verb: Verb::Brief }),
-                Verb::Superbrief => Ok(ParsedCommand::Intransitive {
-                    verb: Verb::Superbrief,
-                }),
-                _ => Err(format!(
-                    "What do you want to {}?",
-                    first_token.as_word().unwrap_or("act on")
-                )),
-            };
+            return Ok(match verb {
+                Verb::Stop => ParsedCommand::Stop,
+                Verb::Again => ParsedCommand::Again,
+                Verb::Help => ParsedCommand::Help { topic: None },
+                verb => ParsedCommand::Intransitive { verb },
+            });
         }
 
         // Special handling for Help with topic
@@ -642,7 +646,7 @@ mod tests {
                 preposition,
                 indirect,
             } => {
-                assert_eq!(verb, Verb::Talk);
+                assert_eq!(verb, Verb::Ask);
                 assert_eq!(direct.head.as_deref(), Some("goblin"));
                 assert_eq!(preposition, Preposition::About);
                 assert_eq!(indirect.head.as_deref(), Some("key"));

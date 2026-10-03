@@ -31,15 +31,17 @@ class ItemProcesses(ProcessTestCase):
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
 
-    def test_adventure_quantity_survives_clarification_and_walk(self):
+    def test_adventure_quantities_count_from_one_stack(self):
         p, _ = self.adventure()
-        self.assertIn('Which', self.say(p, 'take 2 arrows'))
-        self.assertIn('pick up 2', self.say(p, '1'))
-        self.assertIn('2 x arrow', self.say(p, 'inventory'))
-        self.assertIn('drop 1', self.say(p, 'drop 1 arrow'))
-        self.assertIn('pick it up', self.say(p, 'take 1 #22'))
+        # The arrow stacks look alike, so a count comes from one of them
+        # without a question.
+        self.assertEqual('You pick up two arrows.\n> ', self.say(p, 'take 2 arrows'))
+        self.assertIn('two arrows', self.say(p, 'inventory'))
+        self.assertEqual('You drop an arrow.\n> ', self.say(p, 'drop 1 arrow'))
+        self.assertEqual('You pick up a red potion.\n> ', self.say(p, 'take 1 potion'))
         inventory = self.say(p, 'inventory')
-        self.assertIn('1 x red potion', inventory)
+        self.assertIn('a red potion', inventory)
+        self.assertIn('an arrow', inventory)
         self.assertNotIn('healing', inventory)
 
     def test_ascii_quantity_picker_and_drop_present_authoritative_counts(self):

@@ -109,19 +109,18 @@ class DoorProcesses(ProcessTestCase):
         wizard = self.wizard()
         player, _ = self.adventure()
         observer, initial = self.client(SPECTATOR_TOKEN)
-        # Journeys can't be cancelled, but a slow pace leaves time to drop
-        # what was to follow one.
-        self.say(player, "pace 1000")
+        # A turn runs to its end before the next command is read.
         self.send(player, "open door")
         self.send(player, "stop")
-        output = player.until(lambda line: line == "> ")
-        self.assertNotIn("and open it", output)
-        stopped = self.request(observer, {"type":"snapshot"})
-        self.assertFalse(door(stopped)["open"])
-        self.assertFalse(any(h["content"].get("action", {}).get("type") == "set_door" for h in stopped["history"]))
-        # Start the second journey from the beginning again.
+        output = player.until(lambda line: line == "There's nothing to stop.")
+        self.assertIn("You walk over to the wooden door and open it.", output)
+        opened = self.request(observer, {"type":"snapshot"})
+        self.assertTrue(door(opened)["open"])
+        # A slow display leaves the door action waiting while the wizard
+        # rewinds; the rewind ends the turn without it.
         self.wizard_command(wizard, "rewind initial")
         self.say(player, "look")
+        self.say(player, "pace 1000")
         self.send(player, "open door")
         self.frame(observer, lambda f: (f.get("travel") or {}).get("phase") == "active")
         # Sync the wizard before a revision-checked rewind while travel progresses.

@@ -89,3 +89,33 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
         "user":"test", "actors":[1]});
     assert!(serde_json::from_value::<ServerMessage>(old).is_err());
 }
+
+#[test]
+fn combat_facts_are_data_not_prose() {
+    let events: Vec<CombatEventView> = serde_json::from_str(
+        r#"[{"type":"attack","attacker":2,"target":null,"outcome":"no_injury"},
+            {"type":"interrupted","actor":1},{"type":"died","actor":2}]"#,
+    )
+    .unwrap();
+    assert_eq!(
+        events,
+        [
+            CombatEventView::Attack {
+                attacker: Some(ActorId(2)),
+                target: None,
+                outcome: AttackOutcome::NoInjury,
+            },
+            CombatEventView::Interrupted { actor: ActorId(1) },
+            CombatEventView::Died { actor: ActorId(2) },
+        ]
+    );
+    assert_eq!(
+        serde_json::to_string(&(Injury::BadlyWounded, ObjectiveKind::RetrieveAndReturn)).unwrap(),
+        r#"["badly_wounded","retrieve_and_return"]"#
+    );
+    // Prose fields are gone, and unknown event fields are refused.
+    assert!(serde_json::from_str::<CombatEventView>(
+        r#"{"type":"died","actor":2,"message":"The scout died."}"#
+    )
+    .is_err());
+}

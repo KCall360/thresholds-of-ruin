@@ -114,11 +114,10 @@ waits. That timer never advances the game.
   The client reads the next update only when it's due, so a slow display paces
   the server through the queue backpressure above.
 - `skip` shows what has arrived without waiting, until the next request.
-- The text and ASCII clients default to 75 ms (`--pace <ms>`); the text client's
-  `--script` mode and the headless client use 0. In the text client, `pace [ms]`
-  shows or changes it, and another command first shows the rest of a journey at
-  once. In the ASCII client, `[` and `]` step through 0–500 ms, and any key
-  during a journey shows the rest of it.
+- The ASCII client defaults to 75 ms (`--pace <ms>`); `[` and `]` step through
+  0–500 ms, and any key during a journey shows the rest of it. The text client
+  tells each turn as one passage once it has ended, so it defaults to 0; `pace
+  [ms]` can still slow its updates. The headless client uses 0.
 
 ## Protocol changes
 

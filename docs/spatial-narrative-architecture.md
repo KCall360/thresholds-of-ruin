@@ -2,6 +2,12 @@
 
 This document records the design discussion, structural diagnosis, and architectural plan for spatial narrative synthesis, client-spawned place hints, geometry-derived exits, and deterministic description permanence.
 
+> **Status:** superseded by the [IF engine](if-engine.md#places-and-ways).
+> Place extent, geometry-derived exits and unified actors are built there.
+> Pillar 3's atmospheric and themed prose was dropped: the engine states only
+> disclosed facts, so it no longer describes smells, draughts or epithets.
+> This page is kept as the record of the diagnosis.
+
 ---
 
 ## 1. Problem Statement & Diagnosis
