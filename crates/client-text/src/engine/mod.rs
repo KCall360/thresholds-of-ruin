@@ -534,6 +534,7 @@ impl Engine {
             beats: Vec::new(),
             pages: Vec::new(),
             resynced: false,
+            waiting: None,
         };
         reader.record(before, link, message);
         let beats = reader.beats;

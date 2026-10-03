@@ -1145,3 +1145,27 @@ fn a_place_joined_with_the_next_room_is_known_by_its_nearest_hint() {
         .clone();
     assert_eq!(NO_PLACES.key(&s), Some(near));
 }
+
+#[test]
+fn ways_alike_in_one_wall_are_asked_about_by_where_each_lies() {
+    // Regression: "Which way do you mean, a passage to the east or a
+    // passage to the east?"
+    let s = walled(&["#####", "#...'..", "#.@.#", "#...'..", "#####"]);
+    assert_eq!(
+        question("east", &s),
+        [
+            "an open oak door to the northeast",
+            "an open oak door to the southeast"
+        ]
+    );
+}
+
+#[test]
+fn a_place_dark_on_most_sides_names_the_sides_that_are_not() {
+    let s = walled(&["#######", ".......", "...@...", "......."]);
+    let prose = describe(&s);
+    assert!(
+        prose.contains("It fades into darkness on every side but the north"),
+        "{prose}"
+    );
+}

@@ -142,8 +142,8 @@ of that run, and again after a snapshot: `you` (this client controls the actor
 that's next), `others` (another client's actor is next), `unclaimed` (a
 character no client controls is next), `paused` (AI play waits for a
 controller's action or `continue`) or `stopped` (nothing can act). It's sent
-once per stop, so a client can end its turn on it instead of waiting for play to
-go quiet.
+once per stop, and again after every answered request, so a client can end its
+turn on it instead of waiting for play to go quiet.
 
 Every update has actor and branch identities, a connection-scoped sequence, and
 simulation tick. Multiple updates can share a tick. The stream sequence increments

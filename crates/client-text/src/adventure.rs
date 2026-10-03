@@ -103,11 +103,24 @@ fn exits_from(
         Direction::Up | Direction::Down => direction_name(direction).to_owned(),
         _ => format!("to the {}", direction_name(direction)),
     };
-    let ways: Vec<Exit> = place
-        .ways(direction)
+    let found: Vec<_> = place.ways(direction).collect();
+    // Several ways alike that way are told apart by where each lies from
+    // here, so a question can name them: "a passage to the northeast".
+    let alike = |w: &crate::engine::place::Way| {
+        found
+            .iter()
+            .filter(|o| o.kind_name() == w.kind_name())
+            .count()
+            > 1
+    };
+    let ways: Vec<Exit> = found
+        .iter()
         .map(|w| Exit {
             destination: w.destination.clone(),
-            label: format!("{} {toward}", w.label()),
+            label: match w.towards.filter(|_| alike(w)) {
+                Some(lies) => format!("{} to the {}", w.label(), direction_name(lies)),
+                None => format!("{} {toward}", w.label()),
+            },
             closed: matches!(w.kind, Opening::Door { open: false, .. }),
         })
         .collect();

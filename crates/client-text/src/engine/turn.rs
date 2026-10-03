@@ -90,6 +90,8 @@ pub struct Reader<'a> {
     /// History pages answered during the turn, as text.
     pub pages: Vec<String>,
     pub resynced: bool,
+    /// What the server last said play waits for.
+    pub waiting: Option<Waiting>,
 }
 
 impl Reader<'_> {
@@ -172,6 +174,9 @@ async fn settle(
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
         };
         reader.record(&before, link, &message);
+        if let ServerMessage::Waiting { on } = &message {
+            reader.waiting = Some(*on);
+        }
         match &message {
             ServerMessage::Error {
                 request_id, code, ..
@@ -306,7 +311,19 @@ fn object(goal: &Goal, scene: &Scene) -> String {
     match goal {
         Goal::Take { item, quantity } | Goal::Drop { item, quantity } => {
             match (scene.get(Key::Item(*item)), quantity) {
-                (Some(r), Some(q)) if *q < r.quantity => Some(prose::counted(*q, &r.name)),
+                // A count is "two arrows" unless it's every alike thing there
+                // is, whatever stacks they're in.
+                (Some(r), Some(q))
+                    if *q
+                        < scene
+                            .referents
+                            .iter()
+                            .filter(|o| o.identity == r.identity)
+                            .map(|o| o.quantity)
+                            .sum::<u64>() =>
+                {
+                    Some(prose::counted(*q, &r.name))
+                }
                 (Some(r), _) => Some(r.the()),
                 (None, _) => None,
             }
@@ -406,6 +423,7 @@ pub async fn run_goal(
         beats: Vec::new(),
         pages: Vec::new(),
         resynced: false,
+        waiting: None,
     };
     // After reconnecting during recovery, play resumes before anything new.
     let state = link.client().state();
@@ -418,7 +436,17 @@ pub async fn run_goal(
         if settle(link, &mut reader, Request::Continue, Until::Ready).await? == Settled::Lost {
             episode.end = End::Lost;
         } else if !link.client().state().observation.ready {
-            episode.end = End::Refused("It isn't your turn to act yet.".into());
+            // Say why play won't come round to this character.
+            episode.end = End::Refused(
+                match reader.waiting {
+                    Some(Waiting::Unclaimed) => {
+                        "Another character is to act first, and no one is controlling it."
+                    }
+                    Some(Waiting::Stopped) => "Nothing more can happen in this game.",
+                    _ => "Someone else is to act first.",
+                }
+                .into(),
+            );
         }
     }
     let mut acted = false;
@@ -591,6 +619,7 @@ pub async fn run_request(
         beats: Vec::new(),
         pages: Vec::new(),
         resynced: false,
+        waiting: None,
     };
     let settled = settle(link, &mut reader, request, Until::Answered).await?;
     let beats = std::mem::take(&mut reader.beats);

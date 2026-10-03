@@ -1034,11 +1034,13 @@ impl Service {
     }
 
     fn send(&mut self, id: u64, message: ServerMessage) {
-        // Anything that changes what a client knows needs a fresh word on
-        // whose move it is.
+        // Anything that changes what a client knows, and every answer to a
+        // request, needs a fresh word on whose move it is.
         if matches!(
             message,
-            ServerMessage::Update { .. } | ServerMessage::Snapshot { .. }
+            ServerMessage::Update { .. }
+                | ServerMessage::Snapshot { .. }
+                | ServerMessage::Ack { .. }
         ) {
             if let Some(client) = self.clients.get_mut(&id) {
                 client.waiting = None;

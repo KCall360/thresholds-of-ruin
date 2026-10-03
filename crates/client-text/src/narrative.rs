@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use tor_client_common::{surfaces, Palette};
-use tor_protocol::{Position, StateView};
+use tor_protocol::{Direction, Position, StateView};
 
 use crate::{
     adventure::{floor_material_with, surface},
@@ -352,6 +352,32 @@ pub fn describe_surveyed(
             sentences.push("Open ground stretches away into darkness on every side.".into())
         }
         all if all.len() == 8 => sentences.push("It fades into darkness on every side.".into()),
+        // Most sides: name the ones that don't.
+        dark if dark.len() >= 5 => {
+            let lit: Vec<String> = [
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
+                Direction::NorthEast,
+                Direction::SouthEast,
+                Direction::SouthWest,
+                Direction::NorthWest,
+            ]
+            .into_iter()
+            .filter(|d| !dark.contains(d))
+            .map(|d| direction_name(d).to_owned())
+            .collect();
+            let what = if place.form == Form::Open {
+                "Open ground stretches away into darkness"
+            } else {
+                "It fades into darkness"
+            };
+            sentences.push(format!(
+                "{what} on every side but the {}.",
+                prose::and_list(&lit)
+            ));
+        }
         ways => {
             let ways: Vec<String> = ways.iter().map(|d| direction_name(*d).to_owned()).collect();
             sentences.push(format!(

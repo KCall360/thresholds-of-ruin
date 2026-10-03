@@ -1151,3 +1151,23 @@ async fn a_doorway_out_of_sight_a_moment_later_is_still_a_way_out() {
     let look = play(&mut link, &mut engine, "look").await;
     assert!(look.contains("An open oak door leads east."), "{look}");
 }
+
+#[tokio::test]
+async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
+    // Regression: with a stack of two among 17 arrows carried, "drop 2
+    // arrows" said "You drop the two arrows".
+    let mut s = state();
+    let arrows = |id: u64, quantity: u64| {
+        serde_json::from_value::<ItemView>(serde_json::json!({
+            "quantity": quantity, "appearance": "item", "identified": true,
+            "id": id, "name": "arrow", "description": ""}))
+        .unwrap()
+    };
+    s.observation.inventory = vec![arrows(20, 2), arrows(21, 15)];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "drop 2 arrows").await,
+        "You drop two arrows."
+    );
+}

@@ -648,3 +648,30 @@ fn a_stopped_run_tells_each_client_whose_move_it_is_once() {
         act(&mut service, mover, next, Action::Wait);
     }
 }
+
+#[test]
+fn every_answered_request_is_followed_by_whose_move_it_is() {
+    // Regression: a `continue` that changed nothing got no fresh word, so a
+    // client waited out its safety timeout.
+    let (mut service, mut client) = fixture();
+    let mut other = second_player(&mut service, &mut client, 7);
+    service.run_until_blocked();
+    drain(&mut client);
+    drain(&mut other);
+    let next = service.engine.next_actor().unwrap();
+    let idle = if next == ActorId(1) {
+        &mut other
+    } else {
+        &mut client
+    };
+    service.handle(idle.id, "continue".into(), Request::Continue);
+    service.run_until_blocked();
+    let told: Vec<_> = drain(idle)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMessage::Waiting { on } => Some(on),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(told, [Waiting::Others]);
+}
