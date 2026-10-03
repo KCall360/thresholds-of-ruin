@@ -6,6 +6,7 @@ mod combat;
 mod diagonal;
 mod doors;
 mod enclosures;
+mod item_index;
 mod items;
 mod perception;
 mod physics;

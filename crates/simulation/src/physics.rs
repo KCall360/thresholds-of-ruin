@@ -533,10 +533,13 @@ impl Game {
                     i.motion.clone(),
                     tick,
                 );
-                let i = self.items.get_mut(&id).expect("scheduled item");
-                i.location = ItemLocation::Ground(at);
-                i.orientation = frame;
-                i.motion = motion;
+                self.items
+                    .edit(id, |i| {
+                        i.location = ItemLocation::Ground(at);
+                        i.orientation = frame;
+                        i.motion = motion;
+                    })
+                    .expect("scheduled item");
             }
             if !active {
                 break;

@@ -8,6 +8,7 @@ pub mod ai;
 pub mod combat;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
+mod item_store;
 mod items;
 pub use items::ItemSpec;
 pub mod checkpoint;
@@ -154,7 +155,7 @@ pub struct Game {
     seed: u64,
     tick: u64,
     actors: BTreeMap<ActorId, Actor>,
-    items: Shared<BTreeMap<ItemId, Item>>,
+    items: item_store::ItemStore,
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
@@ -224,7 +225,9 @@ impl Game {
             next
         };
         if let (Ok(item), Some(actor)) = (&result, owner) {
-            self.items.get_mut(item).expect("placed item").location = ItemLocation::Carried(actor);
+            self.items
+                .edit(*item, |item| item.location = ItemLocation::Carried(actor))
+                .expect("placed item");
         }
         result
     }
@@ -268,7 +271,7 @@ impl Game {
             seed,
             tick: 0,
             actors: BTreeMap::new(),
-            items: Shared::default(),
+            items: item_store::ItemStore::default(),
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
@@ -381,11 +384,7 @@ impl Game {
                 position: Position { z, ..base.position },
                 ..base
             };
-            self.occupied(cell)
-                || self
-                    .items
-                    .values()
-                    .any(|i| i.location == ItemLocation::Ground(cell))
+            self.occupied(cell) || self.items.at(ItemLocation::Ground(cell)).next().is_some()
         })
     }
     pub fn door_reachable_from(&self, from: Location, door: Location) -> bool {
@@ -493,8 +492,9 @@ impl Game {
             && (self.occupied(location)
                 || self
                     .items
-                    .values()
-                    .any(|item| item.location == ItemLocation::Ground(location)))
+                    .at(ItemLocation::Ground(location))
+                    .next()
+                    .is_some())
         {
             return Err(GameError::InvalidLocation);
         }

@@ -295,7 +295,13 @@ messages. Complete history remains in memory for existing queries and retries;
 ordinary command candidates contain only decision state, revisions and shared
 rewind boundaries. Retained records and receipt indexes stay owned by the engine;
 a single new record is admitted before publishing the candidate. World collections,
-items and actor navigation use deterministic copy-on-write ownership. Navigation
+items and actor navigation use deterministic copy-on-write ownership. The private
+item store owns all item insertions, removals, and edits; ground-location and
+inventory-owner indexes cannot be mutated separately. Ground keys are resolved
+region-local locations, including locations reached through portals. Observation
+and stack merging query these buckets in deterministic identity order. Indexes
+are derived backend data, rebuilt from authoritative items on checkpoint restore,
+and omitted from checkpoints and client messages. Navigation
 shares maps by source region, so discovering a local connection does not copy all
 remembered cells. This sharing
 never crosses the protocol boundary. Format-6 checkpoints also pool equal source-region

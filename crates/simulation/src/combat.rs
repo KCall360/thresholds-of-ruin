@@ -449,12 +449,15 @@ impl Game {
         let motion = actor.motion.clone();
         let orientation = actor.orientation;
         actor.motion = Default::default();
-        for item in self.items.values_mut() {
-            if item.location == ItemLocation::Carried(id) {
-                item.location = ItemLocation::Ground(location);
-                item.motion = motion.clone();
-                item.orientation = orientation;
-            }
+        let inventory: Vec<_> = self.items.at(ItemLocation::Carried(id)).collect();
+        for item in inventory {
+            self.items
+                .edit(item, |item| {
+                    item.location = ItemLocation::Ground(location);
+                    item.motion = motion.clone();
+                    item.orientation = orientation;
+                })
+                .expect("carried item");
         }
         let corpse_id = ItemId(self.next_item_id);
         self.next_item_id = self

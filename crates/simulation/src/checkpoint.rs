@@ -118,7 +118,9 @@ impl Game {
             seed: snapshot.seed,
             tick: snapshot.tick,
             actors: snapshot.actors,
-            items: Shared::new(shared.items.get(snapshot.items)?.clone()),
+            items: crate::item_store::ItemStore::from_entries(
+                shared.items.get(snapshot.items)?.clone(),
+            ),
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,

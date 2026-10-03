@@ -147,7 +147,7 @@ impl Game {
         let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
-        for (&item_id, item) in self.items.iter() {
+        for (item_id, item) in self.items.perceived(id, &cells) {
             crate::diagnostics::item_view(item.spec.concealed);
             let identified = !item.spec.concealed || actor.knowledge.contains(&item.spec.identity);
             let name = if identified {

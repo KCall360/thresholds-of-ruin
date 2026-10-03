@@ -6,6 +6,27 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_item_location_indexes_survive_inventory_save_and_drop(self):
+        server = self.server()
+        player, initial = self.client()
+        tablet = initial["state"]["observation"]["ground_items"][0]["item"]
+        taken = self.act(player, {"type": "take", "item": tablet["id"]})
+        self.assertIsNone(taken["error"])
+        self.assertIn(tablet, taken["state"]["observation"]["inventory"])
+        self.assertFalse(any(item["item"]["id"] == tablet["id"]
+                             for item in taken["state"]["observation"]["ground_items"]))
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        resumed, state = self.client()
+        self.assertEqual(state["state"], taken["state"])
+        dropped = self.act(resumed, {"type": "drop", "item": tablet["id"]})
+        self.assertIsNone(dropped["error"])
+        self.assertNotIn(tablet, dropped["state"]["observation"]["inventory"])
+        self.assertTrue(any(item["item"] == tablet
+                            for item in dropped["state"]["observation"]["ground_items"]))
+
     def test_many_watchers_keep_independent_bases_when_a_late_watcher_joins(self):
         self.server()
         player, initial = self.client()

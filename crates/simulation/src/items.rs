@@ -66,9 +66,12 @@ impl Game {
             return Err(GameError::InvalidQuantity);
         }
         let item = self.place_authored_item(id, at, spec.name.clone(), owner)?;
-        let entry = self.items.get_mut(&item).expect("placed item");
-        entry.spec = spec;
-        entry.quantity = quantity;
+        self.items
+            .edit(item, |entry| {
+                entry.spec = spec;
+                entry.quantity = quantity;
+            })
+            .expect("placed item");
         Ok(item)
     }
 
@@ -119,16 +122,18 @@ impl Game {
             return Err(GameError::InvalidQuantity);
         }
         let destination = if source.spec.stackable {
-            self.items.iter().find(|(_, i)| {
-                crate::diagnostics::stack_candidate();
-                i.location == to
-                    && i.spec == source.spec
-                    && (taking
-                        || (i.motion == self.actors[&actor].motion
-                            && i.orientation == self.actors[&actor].orientation)
-                        || (i.motion == crate::MotionState::default()
-                            && self.actors[&actor].motion == crate::MotionState::default()))
-            })
+            self.items
+                .at(to)
+                .map(|id| (id, &self.items[&id]))
+                .find(|(_, i)| {
+                    crate::diagnostics::stack_candidate();
+                    i.spec == source.spec
+                        && (taking
+                            || (i.motion == self.actors[&actor].motion
+                                && i.orientation == self.actors[&actor].orientation)
+                            || (i.motion == crate::MotionState::default()
+                                && self.actors[&actor].motion == crate::MotionState::default()))
+                })
         } else {
             None
         };
@@ -137,7 +142,7 @@ impl Game {
                 .quantity
                 .checked_add(quantity)
                 .ok_or(GameError::InvalidQuantity)?;
-            *id
+            id
         } else if quantity == source.quantity {
             item
         } else {
@@ -176,13 +181,13 @@ impl Game {
             _ => (crate::MotionState::default(), 0),
         };
         if source == result {
-            let item = self.items.get_mut(&source).expect("validated item");
-            item.motion = motion;
-            item.orientation = orientation;
             self.items
-                .get_mut(&source)
-                .expect("validated source")
-                .location = location;
+                .edit(source, |item| {
+                    item.motion = motion;
+                    item.orientation = orientation;
+                    item.location = location;
+                })
+                .expect("validated source");
             return;
         }
         let spec = self.items[&source].spec.clone();
@@ -191,13 +196,14 @@ impl Game {
             self.items.remove(&source);
         } else {
             self.items
-                .get_mut(&source)
-                .expect("validated source")
-                .quantity = remainder;
+                .edit(source, |item| item.quantity = remainder)
+                .expect("validated source");
         }
-        if let Some(existing) = self.items.get_mut(&result) {
-            existing.quantity += quantity;
-        } else {
+        if self
+            .items
+            .edit(result, |existing| existing.quantity += quantity)
+            .is_none()
+        {
             self.items.insert(
                 result,
                 Item {

@@ -96,6 +96,23 @@ already-computed post-action views. Region transitions invalidate those views,
 and load, rewind, and diagnostic seeding start from fresh derived data. The action
 queue and remaining items above are pending.
 
+Item mutations now pass through a private store that maintains ground-location
+and inventory-owner indexes. Observation, stack matching, corpse inventory
+release, and item occupancy checks use these indexes. Candidate and rewind clones
+share index storage; mutation copies the affected region map and location bucket.
+Partial views merge ordered bucket iterators without a temporary identity set.
+When those buckets cover every item, views iterate the authoritative item table
+directly, avoiding an identity lookup per disclosed item. Unrelated items never
+enter partial-view identification or rendering work.
+Checkpoint restoration rebuilds indexes from the unchanged authoritative item
+table. Item ordering, quantities, portal-local positions, and disclosure remain
+unchanged. Reference-scan, interrupted-edit, clone-isolation, portal-transfer,
+checkpoint, and actual-client save/resume/drop tests cover the new store.
+Scaling regressions at 16, 256, and 4,096 unrelated items and regions examine one
+disclosed candidate, zero candidates for an empty destination inventory, and one
+matching ground stack. Actor-body occupancy and historical-query indexes remain
+pending.
+
 The full Windows verification tier passed in debug and release. Tests of the
 deployed text, ASCII spectator, and headless executables also passed. Linux CI is
 still required before merge. No merge or raw-measurement publication has occurred.
@@ -118,3 +135,31 @@ cases; these measurements establish reduced derived work and lower sampled p95,
 not improvement in every timing statistic. Server cache memory has not yet been
 measured directly. Raw samples remain local; publication requires separate
 maintainer authorization under the performance policy.
+
+### Item-index release comparison
+
+Three interleaved rounds compared this item-store implementation with the earlier
+command-mapping and boundary-cache checkpoint. Timings are milliseconds; `n` is
+the command or transfer sample count on each side. These are diagnostic local
+measurements, not a published performance-ledger entry.
+
+| Case | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| Transfers, 16 items / 8 identities | 1,200 | 0.052 → 0.058 | 0.111 → 0.118 | 0.199 → 0.211 |
+| Transfers, 1,000 items / 256 identities | 1,200 | 0.603 → 0.616 | 0.724 → 0.743 | 0.994 → 0.956 |
+| 64 regions, 8 actors, 100 history entries | 7,500 | 0.025 → 0.026 | 2.561 → 2.544 | 7.334 → 6.868 |
+| Falling, 8 actors / 128 items / 8 body cells | 576 | 0.088 → 0.084 | 11.803 → 11.638 | 22.209 → 21.020 |
+
+All runs validated. Each item benchmark run contains 20 samples of 20 transfers.
+Stack candidates fell from 3,400 to 200 for the small pile, and from 200,200 to
+200 for the dense pile. Those fixtures disclose the whole pile, so observation
+and identity-work counts remain equal; the sparse-disclosure regressions prove
+bounded candidate work separately. Saved and disclosed byte counts, history,
+client memory, body-cell work, and physics steps were unchanged.
+
+Item transfers retain a small maintenance cost: dense p95 increased by 2.7% and
+small-pile p95 by seven microseconds. A temporary-set implementation initially
+increased dense p95 by 11%; ordered bucket merging and the complete-view fast path
+removed most of that overhead. Dense falling resume p95 increased from 248.3 to
+256.1 ms. Save timings varied widely, so these runs do not establish a save-time
+improvement. Server index memory has not been measured directly.
