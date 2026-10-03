@@ -567,10 +567,11 @@ enum Flow {
 }
 
 /// The view places and ways are read from: what's in sight, and the cells
-/// remembered from earlier views, aligned to this one, where nothing is in
-/// sight. So a doorway seen a moment ago is still a way out when the angle
-/// hides its floor. Things and figures are only what's in sight; remembered
-/// doors are as last seen.
+/// remembered from earlier views, aligned to this one, that fill out a column
+/// partly in sight or lie within two cells. So a doorway seen a moment ago is
+/// still a way out when standing beside it hides it. Only those: memory
+/// charts across portals can misplace cells farther off. Things and figures
+/// are only what's in sight; remembered doors are as last seen.
 pub fn seen(client: &tor_client_common::ClientState) -> StateView {
     let mut state = client.state().clone();
     let shown: BTreeSet<Position> = state
@@ -579,8 +580,11 @@ pub fn seen(client: &tor_client_common::ClientState) -> StateView {
         .iter()
         .map(|c| c.position)
         .collect();
+    let columns: BTreeSet<(i32, i32)> = shown.iter().map(|p| (p.x, p.y)).collect();
     for cell in client.map_memory() {
-        if shown.contains(&cell.position) {
+        let (x, y) = (cell.position.x, cell.position.y);
+        let near = x.abs() <= 2 && y.abs() <= 2;
+        if shown.contains(&cell.position) || !(near || columns.contains(&(x, y))) {
             continue;
         }
         state.observation.visible_cells.push(CellView {
