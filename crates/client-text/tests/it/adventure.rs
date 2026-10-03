@@ -1,5 +1,6 @@
 //! Descriptions of the scene, and what single commands mean in it.
 use tor_client_common::Palette;
+use tor_client_text::narrative::NO_PLACES;
 use tor_client_text::{
     adventure::{describe, describe_with},
     engine::{
@@ -322,8 +323,18 @@ fn directions_head_for_ways_onward_and_floor_is_not_one() {
     for c in &mut s.observation.visible_cells {
         c.place_hint = false;
     }
-    assert!(!describe(&s).contains("You can head"));
-    assert_eq!(said("east", &s), "You can't see a way east.");
+    // With no walls or hints in sight, a direction crosses open ground as far
+    // as can be seen that way, and nothing seen is no way.
+    assert!(
+        describe(&s).contains("You can head east."),
+        "{}",
+        describe(&s)
+    );
+    assert!(matches!(
+        goals("east", &s).as_slice(),
+        [Goal::Go { direction: Direction::East, destination }] if destination == "cell-6"
+    ));
+    assert_eq!(said("west", &s), "You can't see a way west.");
 }
 
 #[test]
@@ -733,7 +744,7 @@ fn a_room_seen_in_part_goes_on_out_of_sight() {
 fn atmosphere_colours_a_place_the_same_way_every_time() {
     let s = walled(&["#####", "#.@.#", "#####"]);
     let prose = describe(&s);
-    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default());
+    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
     // A mood word and the sentences of its theme.
     assert!(
         prose.starts_with(&format!(
@@ -749,6 +760,13 @@ fn atmosphere_colours_a_place_the_same_way_every_time() {
     // Smell and sound are the same place's.
     assert_eq!(said("smell", &s), mood.smell);
     assert_eq!(said("listen", &s), mood.sound);
+    // Listening with others about names them, and claims nothing of them.
+    let rats = walled(&["#######", "#.@r.r#", "#######"]);
+    let mood = tor_client_text::narrative::atmosphere(&rats, &Palette::default(), &NO_PLACES);
+    assert_eq!(
+        said("listen", &rats),
+        format!("{} You keep an ear on the two rats.", mood.sound)
+    );
 }
 
 #[test]
@@ -761,10 +779,10 @@ fn a_place_reads_the_same_from_anywhere_in_it() {
         let row: String = row.into_iter().collect();
         walled(&["#########", "#.......#", &row, "#.......#", "#########"])
     };
-    let first = tor_client_text::narrative::atmosphere(&room(1), &Palette::default());
+    let first = tor_client_text::narrative::atmosphere(&room(1), &Palette::default(), &NO_PLACES);
     for at in 2..8 {
         assert_eq!(
-            tor_client_text::narrative::atmosphere(&room(at), &Palette::default()),
+            tor_client_text::narrative::atmosphere(&room(at), &Palette::default(), &NO_PLACES),
             first
         );
     }
@@ -779,7 +797,7 @@ fn places_have_varied_atmospheres() {
             for cell in &mut s.observation.visible_cells {
                 cell.key = format!("{i}/{}", cell.key);
             }
-            let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default());
+            let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
             format!("{} {}", mood.mood, mood.description.join(" "))
         })
         .collect();
@@ -855,8 +873,9 @@ fn things_and_figures_are_told_in_sentences() {
 #[test]
 fn a_place_seen_before_is_named_briefly() {
     let s = walled(&["#####", "#.@.'", "#####"]);
-    let brief = tor_client_text::adventure::brief_place_with(&s, &Palette::default(), true);
-    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default());
+    let brief =
+        tor_client_text::adventure::brief_place_with(&s, &Palette::default(), &NO_PLACES, true);
+    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
     assert_eq!(
         brief,
         format!(
@@ -864,7 +883,8 @@ fn a_place_seen_before_is_named_briefly() {
             mood.mood
         )
     );
-    let superbrief = tor_client_text::adventure::brief_place_with(&s, &Palette::default(), false);
+    let superbrief =
+        tor_client_text::adventure::brief_place_with(&s, &Palette::default(), &NO_PLACES, false);
     assert!(superbrief.starts_with("You are back in"), "{superbrief}");
     assert!(!superbrief.contains("door"), "{superbrief}");
 }
@@ -881,7 +901,7 @@ fn look_leaves_the_objective_to_status() {
         .unwrap(),
     );
     assert!(describe(&s).contains("Reach the exit."));
-    let look = tor_client_text::adventure::look_with(&s, &Palette::default());
+    let look = tor_client_text::adventure::look_with(&s, &Palette::default(), &NO_PLACES);
     assert!(look.starts_with("HP 7/10\n"), "{look}");
     assert!(!look.contains("Reach the exit."), "{look}");
     for line in ["status", "score", "objective"] {
@@ -892,4 +912,76 @@ fn look_leaves_the_objective_to_status() {
         );
     }
     assert_eq!(said("examine me", &s), "You are wounded. (HP 7/10)");
+}
+
+#[test]
+fn a_carried_thing_and_its_twin_on_the_floor_need_no_question_to_examine() {
+    // Regression: "x token" asked "the copper token you're carrying or the
+    // copper token at your feet?" though they look the same.
+    let mut s = state();
+    let token = s.observation.ground_items[0].item.clone();
+    s.observation.inventory.push(ItemView { id: 9, ..token });
+    assert_eq!(said("examine token", &s), "A small copper disc.");
+    // Going to it means the one on the floor; taking it too.
+    assert_eq!(
+        goals("take token", &s),
+        [Goal::Take {
+            item: 1,
+            quantity: None
+        }]
+    );
+    assert_eq!(said("go to token", &s), "The copper token is right here.");
+}
+
+#[test]
+fn going_to_a_remembered_place_travels_to_where_it_was_learned() {
+    let mut s = state();
+    s.observation.places = vec![
+        PlaceView {
+            key: "cell-1".into(),
+            name: "Hollow Promise".into(),
+        },
+        PlaceView {
+            key: "far-away".into(),
+            name: "Vault of Whispers".into(),
+        },
+    ];
+    for line in ["go to vault of whispers", "go to the Vault of Whispers"] {
+        assert_eq!(
+            goals(line, &s),
+            [Goal::Visit {
+                destination: "far-away".into(),
+                name: "Vault of Whispers".into()
+            }],
+            "{line}"
+        );
+    }
+    // The place the character is in needs no journey.
+    assert_eq!(
+        said("go to hollow promise", &s),
+        "You're already in Hollow Promise."
+    );
+    // Things in sight still come first when no place has the name.
+    assert!(matches!(
+        goals("go to tablet", &s).as_slice(),
+        [Goal::Approach { .. }]
+    ));
+}
+
+#[test]
+fn a_place_keeps_the_key_it_was_first_seen_under() {
+    // A corridor seen in part, then all of it: its lowest cell key changes,
+    // but the place remembered keeps its first key, and so its atmosphere.
+    let part = walled(&["   ######   ", "   ..@...   ", "   ######   "]);
+    let whole = walled(&["############", "........@...", "############"]);
+    assert_ne!(NO_PLACES.key(&part), NO_PLACES.key(&whole));
+    let mut places = tor_client_text::narrative::Places::default();
+    places.learn(&part);
+    assert_eq!(places.key(&whole), places.key(&part));
+    places.learn(&whole);
+    let palette = Palette::default();
+    assert_eq!(
+        tor_client_text::narrative::atmosphere(&whole, &palette, &places),
+        tor_client_text::narrative::atmosphere(&part, &palette, &places)
+    );
 }

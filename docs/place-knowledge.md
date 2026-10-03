@@ -31,11 +31,12 @@ names; abandoned-future discoveries do not survive on the new branch. Removing a
 hint, covering its cell or changing unseen geometry does not erase the learned
 location or a player's name. This is historical knowledge, not live marker state.
 
-This slice adds listing and renaming only. It does not restore all client map
-memory after reconnect, infer places without hints, label room extents, or offer
-offscreen travel destinations. Existing visible-anchor direction travel remains
-unchanged. Future place travel can use remembered cells without new topology
-disclosure.
+This slice adds listing and renaming. It does not restore all client map
+memory after reconnect, infer places without hints, or label room extents.
+The text client's `go to <place name>` travels to a remembered place, in sight
+or not: it sends the place's key as an ordinary travel destination, which the
+server accepts because the character knows that cell, and routes only through
+what the character knows. That adds no topology disclosure.
 
 ## Boundaries and compatibility
 
@@ -50,7 +51,7 @@ names in `observation.places`; it sends no region coordinates or authored labels
 Simulation tests cover first sight, free reads, actor ownership, removal,
 validation and checkpoints. Server tests cover hidden anchors, rename retries,
 free timing, restart/replay and rewind. Client tests cover listing, renaming and
-the absence of offscreen travel selection. The versioned place-hint process
+travel to a remembered place by name. The versioned place-hint process
 scenario runs actual text, headless and native ASCII clients through discovery,
 renaming, spectators, stale knowledge, save/reconnect and rewind.
 

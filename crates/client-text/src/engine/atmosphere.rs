@@ -318,7 +318,8 @@ const EARTH: &[Theme] = &[
     },
 ];
 
-/// Places nothing is seen of: no surfaces to name, so nothing about stone.
+/// Open ground, and places nothing is seen of: no walls or corners, and
+/// nothing about stone.
 const UNKNOWN: &[Theme] = &[
     Theme {
         moods: &["quiet", "still"],
@@ -392,7 +393,9 @@ fn choose(key: &str, choice: &str, count: usize) -> usize {
 
 /// The atmosphere of the place with this key.
 pub fn of(key: &str, fabric: Fabric, form: Form, narrow: bool) -> Atmosphere {
+    // Open ground has no corners or walls to colour, whatever its floor.
     let themes = match fabric {
+        _ if form == Form::Open => UNKNOWN,
         Fabric::Stone => STONE,
         Fabric::Marble => MARBLE,
         Fabric::Timber => TIMBER,

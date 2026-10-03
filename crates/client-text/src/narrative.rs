@@ -6,6 +6,8 @@
 //! has no effect on play and never claims something the game hasn't
 //! disclosed.
 
+use std::collections::BTreeMap;
+
 use tor_client_common::{surfaces, Palette};
 use tor_protocol::{Position, StateView};
 
@@ -46,6 +48,74 @@ fn current_place_anchor_in<'a>(state: &'a StateView, place: &Place) -> Option<(&
                 .min_by_key(|c| (&c.key, distance(c.position)))
         })
         .map(|c| (c.key.as_str(), c.position))
+}
+
+/// Which place each cell was first seen as part of, so a place without an
+/// authored hint keeps the key it was first given while more of it comes
+/// into sight. A hinted place is always known by its hint. This isn't game
+/// state: a client that has forgotten it starts again from what it sees.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Places {
+    by_cell: BTreeMap<String, String>,
+}
+
+/// No places remembered.
+pub static NO_PLACES: Places = Places {
+    by_cell: BTreeMap::new(),
+};
+
+impl Places {
+    /// The key of the place the character is in.
+    pub fn key(&self, state: &StateView) -> Option<String> {
+        self.key_in(state, &place::survey(state))
+    }
+
+    /// [`Places::key`] for a place already surveyed: its hint, else the key
+    /// most of its cells were first seen under, else its lowest cell key.
+    pub fn key_in(&self, state: &StateView, place: &Place) -> Option<String> {
+        let cells: Vec<&tor_protocol::CellView> = state
+            .observation
+            .visible_cells
+            .iter()
+            .filter(|c| {
+                !c.wall
+                    && c.position.z == 0
+                    && place.columns.contains(&(c.position.x, c.position.y))
+            })
+            .collect();
+        if let Some(hint) = cells.iter().filter(|c| c.place_hint).min_by_key(|c| &c.key) {
+            return Some(hint.key.clone());
+        }
+        let mut votes: BTreeMap<&str, usize> = BTreeMap::new();
+        for cell in &cells {
+            if let Some(key) = self.by_cell.get(&cell.key) {
+                *votes.entry(key).or_default() += 1;
+            }
+        }
+        votes
+            .into_iter()
+            .max_by_key(|(key, n)| (*n, std::cmp::Reverse(*key)))
+            .map(|(key, _)| key.to_owned())
+            .or_else(|| cells.iter().map(|c| &c.key).min().cloned())
+    }
+
+    /// Remember the place the character is in under its key, and return
+    /// the key.
+    pub fn learn(&mut self, state: &StateView) -> Option<String> {
+        let place = place::survey(state);
+        let key = self.key_in(state, &place)?;
+        for cell in &state.observation.visible_cells {
+            if !cell.wall
+                && cell.position.z == 0
+                && place.columns.contains(&(cell.position.x, cell.position.y))
+            {
+                self.by_cell
+                    .entry(cell.key.clone())
+                    .or_insert_with(|| key.clone());
+            }
+        }
+        Some(key)
+    }
 }
 
 /// The anchor key of the character's current place.
@@ -104,42 +174,68 @@ fn narrow(place: &Place) -> bool {
     span(xs).min(span(ys)) <= 1
 }
 
-fn atmosphere_of(state: &StateView, palette: &Palette, place: &Place) -> Atmosphere {
+fn atmosphere_of(
+    state: &StateView,
+    palette: &Palette,
+    place: &Place,
+    places: &Places,
+) -> Atmosphere {
     let (floor, walls) = surfaces_here(state, palette);
     let fabric = Fabric::of(walls.iter().map(String::as_str), floor.as_deref());
-    let key = current_place_anchor_in(state, place).map_or("", |(k, _)| k);
-    atmosphere::of(key, fabric, place.form, narrow(place))
+    let key = places.key_in(state, place).unwrap_or_default();
+    atmosphere::of(&key, fabric, place.form, narrow(place))
 }
 
 /// The atmosphere of the place the character is in.
-pub fn atmosphere(state: &StateView, palette: &Palette) -> Atmosphere {
-    atmosphere_of(state, palette, &place::survey(state))
+pub fn atmosphere(state: &StateView, palette: &Palette, places: &Places) -> Atmosphere {
+    atmosphere_of(state, palette, &place::survey(state), places)
 }
 
 /// What `smell` notices here. Flavour only.
-pub fn smell(state: &StateView, palette: &Palette) -> String {
-    atmosphere(state, palette).smell.to_owned()
+pub fn smell(state: &StateView, palette: &Palette, places: &Places) -> String {
+    atmosphere(state, palette, places).smell.to_owned()
 }
 
 /// What `listen` hears here. Flavour only, and never a claim about what is
 /// happening: the place's own sound, and a reminder of whoever is in sight.
-pub fn listen(state: &StateView, palette: &Palette) -> String {
-    let mut text = atmosphere(state, palette).sound.to_owned();
-    let others = state
-        .observation
-        .visible_actors
+pub fn listen(state: &StateView, palette: &Palette, places: &Places) -> String {
+    let mut text = atmosphere(state, palette, places).sound.to_owned();
+    // Each figure once, however many cells it fills; alike ones counted.
+    let mut seen = std::collections::BTreeSet::new();
+    let mut names: Vec<(String, u64)> = Vec::new();
+    for a in &state.observation.visible_actors {
+        if a.id == state.observation.actor || !seen.insert(a.id) {
+            continue;
+        }
+        let name = safe(if a.name.is_empty() { "figure" } else { &a.name });
+        match names.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, count)) => *count += 1,
+            None => names.push((name, 1)),
+        }
+    }
+    let others: Vec<String> = names
         .iter()
-        .any(|a| a.id != state.observation.actor);
-    if others {
-        text.push_str(" You keep an ear on what else is here.");
+        .map(|(name, count)| prose::counted_definite(*count, name))
+        .collect();
+    if !others.is_empty() {
+        text.push_str(&format!(
+            " You keep an ear on {}.",
+            prose::and_list(&others)
+        ));
     }
     text
 }
 
 /// The place's kind with its mood word, "the dusty chamber", or with an
 /// indefinite article when `definite` isn't set.
-pub fn place_noun(state: &StateView, palette: &Palette, place: &Place, definite: bool) -> String {
-    let mood = atmosphere_of(state, palette, place).mood;
+pub fn place_noun(
+    state: &StateView,
+    palette: &Palette,
+    place: &Place,
+    places: &Places,
+    definite: bool,
+) -> String {
+    let mood = atmosphere_of(state, palette, place, places).mood;
     let phrase = noun(place, mood);
     match phrase.split_once(' ') {
         Some((_, rest)) if definite => format!("the {rest}"),
@@ -185,14 +281,19 @@ fn fabric_phrase(floor: Option<&str>, walls: &[String]) -> String {
 /// The place in a few sentences: what kind of place, what it's made of, its
 /// atmosphere, how high its ceiling is when that's notable, and where it goes
 /// on out of sight.
-pub fn describe_place(state: &StateView, palette: &Palette) -> String {
-    describe_surveyed(state, palette, &place::survey(state))
+pub fn describe_place(state: &StateView, palette: &Palette, places: &Places) -> String {
+    describe_surveyed(state, palette, &place::survey(state), places)
 }
 
 /// [`describe_place`] for a place already surveyed.
-pub fn describe_surveyed(state: &StateView, palette: &Palette, place: &Place) -> String {
+pub fn describe_surveyed(
+    state: &StateView,
+    palette: &Palette,
+    place: &Place,
+    places: &Places,
+) -> String {
     let (floor, walls) = surfaces_here(state, palette);
-    let mood = atmosphere_of(state, palette, place);
+    let mood = atmosphere_of(state, palette, place, places);
     let mut sentences = vec![format!(
         "You are in {}{}.",
         noun(place, mood.mood),

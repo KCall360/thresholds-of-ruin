@@ -102,7 +102,8 @@ tablet` walks over first when it's out of reach. See the
 - `open` / `close` a door, walking over first when needed.
 - `attack` / `kill` / `hit <creature>`, closing in first when needed.
 - A direction (`east`, `ne`, `up`), or `go east`: head for a way onward.
-  `go to <thing>` walks over without acting on it. `step east` makes one step.
+  `go to <thing>` walks over without acting on it, and `go to <place name>`
+  goes back to a place listed by `places`. `step east` makes one step.
 - `wait` / `z`.
 - `again` / `g` repeats the last command.
 - Chains: `take sword. go east. open door`, or `take key, then go north`.

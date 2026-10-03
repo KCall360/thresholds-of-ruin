@@ -280,8 +280,10 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
             None => Step::Finish(End::Gone),
         },
         Goal::Approach { target } if !approached => travel(*target),
-        Goal::Go { destination, .. } if !approached => Step::Travel(destination.clone()),
-        Goal::Approach { .. } | Goal::Go { .. } => Step::Finish(End::Done),
+        Goal::Go { destination, .. } | Goal::Visit { destination, .. } if !approached => {
+            Step::Travel(destination.clone())
+        }
+        Goal::Approach { .. } | Goal::Go { .. } | Goal::Visit { .. } => Step::Finish(End::Done),
         Goal::Step { direction } => act(Action::Move {
             direction: *direction,
         }),
@@ -303,6 +305,7 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         Goal::Door { door, .. } => named(Key::Door(*door)),
         Goal::Attack { target } => named(Key::Actor(*target)),
         Goal::Approach { target } => named(*target),
+        Goal::Visit { name, .. } => Some(name.clone()),
         Goal::Go { direction, .. } | Goal::Step { direction } => {
             Some(direction_name(*direction).to_owned())
         }
@@ -331,7 +334,9 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
             Goal::Door { .. } => "You can't reach it from here.",
             Goal::Attack { .. } => "You can't reach it from here.",
             Goal::Step { .. } => "You can't go that way.",
-            Goal::Go { .. } | Goal::Approach { .. } => "You can't find a way there.",
+            Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. } => {
+                "You can't find a way there."
+            }
             Goal::Wait => "You can't wait right now.",
         },
         ErrorCode::NotController | ErrorCode::ControlTaken => {
@@ -446,12 +451,21 @@ pub async fn run_goal(
                         let target_is_figure = matches!(goal, Goal::Attack { .. })
                             || matches!(goal, Goal::Approach { target } if now.get(target).is_some_and(|r| r.is(Kind::Figure)));
                         if newcomer
-                            && !matches!(goal, Goal::Go { .. } | Goal::Approach { .. })
+                            && !matches!(
+                                goal,
+                                Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. }
+                            )
                             && !target_is_figure
                         {
                             episode.end = End::Wary;
                         }
                     }
+                    // Closing in on a figure that steps up to meet you: the
+                    // way is "blocked" because it's here, so attack it.
+                    Settled::Journey(TravelPhase::Blocked)
+                        if matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
+                            .get(Key::Actor(target))
+                            .is_some_and(|r| r.reachable)) => {}
                     Settled::Journey(phase) => {
                         if phase == TravelPhase::Blocked {
                             // Name who's in the way, when someone is.

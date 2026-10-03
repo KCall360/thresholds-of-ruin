@@ -46,6 +46,12 @@ pub enum Goal {
     Step {
         direction: Direction,
     },
+    /// Travel to a place the character remembers by name.
+    Visit {
+        /// The cell key the place was learned at.
+        destination: String,
+        name: String,
+    },
     Wait,
 }
 
@@ -367,8 +373,16 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
         Verb::Wait => goal(Goal::Wait),
         Verb::Quit => Interpretation::Quit,
         Verb::Diagnose => say(condition(scene.state)),
-        Verb::Listen => say(crate::narrative::listen(scene.state, scene.palette)),
-        Verb::Smell => say(crate::narrative::smell(scene.state, scene.palette)),
+        Verb::Listen => say(crate::narrative::listen(
+            scene.state,
+            scene.palette,
+            scene.places,
+        )),
+        Verb::Smell => say(crate::narrative::smell(
+            scene.state,
+            scene.palette,
+            scene.places,
+        )),
         Verb::Verbose => Interpretation::Describe(Verbosity::Verbose),
         Verb::Brief => Interpretation::Describe(Verbosity::Brief),
         Verb::Superbrief => Interpretation::Describe(Verbosity::Superbrief),
@@ -509,6 +523,17 @@ fn transitive(
                 },
             )
         }
+        (Verb::Go, _) if remembered(direct, scene).is_some() => {
+            let (key, name) = remembered(direct, scene).expect("checked");
+            if crate::narrative::current_place_key(scene.state) == Some(key) {
+                say(format!("You're already in {name}."))
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name,
+                })
+            }
+        }
         (Verb::Go | Verb::Step, _) => bind(direct, scene, referents, Domain::Any, &|r| approach(r)),
         (verb, _) if unsupported(verb).is_some() => {
             // Name what's meant first: "You can't see any lamp here" comes
@@ -577,6 +602,25 @@ fn door(r: &Referent, open: bool) -> Interpretation {
             prose::capitalize(&r.the())
         )),
     }
+}
+
+/// A place the character remembers, named in full: its key and name. Names
+/// are matched whole and without regard to case, so "go to hollow promise"
+/// finds Hollow Promise.
+fn remembered<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<(&'s str, String)> {
+    let raw = np.raw.trim().to_lowercase();
+    let raw = raw.strip_prefix("the ").unwrap_or(&raw).trim().to_owned();
+    let words = phrase(np).to_lowercase();
+    scene
+        .state
+        .observation
+        .places
+        .iter()
+        .find(|p| {
+            let name = p.name.trim().to_lowercase();
+            !name.is_empty() && (name == raw || name == words)
+        })
+        .map(|p| (p.key.as_str(), crate::safe(&p.name)))
 }
 
 fn approach(r: &Referent) -> Interpretation {

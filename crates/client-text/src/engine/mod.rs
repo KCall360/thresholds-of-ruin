@@ -55,6 +55,8 @@ pub struct Engine {
     verbosity: Verbosity,
     /// Places described in full, by key: a brief arrival there names them.
     described: BTreeSet<String>,
+    /// The keys places were first seen under.
+    places: crate::narrative::Places,
 }
 
 /// The sentences of a line, each with its own text as typed, so names and
@@ -169,31 +171,44 @@ impl Engine {
     /// The scene as the game opens.
     pub fn welcome(&mut self, link: &impl Link) -> String {
         self.note_described(link);
-        describe(link)
+        crate::adventure::describe_in(link.client().state(), link.palette(), &self.places)
+    }
+
+    /// The key of the place the character is in, as first seen.
+    fn place_key(&mut self, link: &impl Link) -> Option<String> {
+        self.places.learn(link.client().state())
     }
 
     /// Remember that the place in view has been described in full.
     fn note_described(&mut self, link: &impl Link) {
-        if let Some(key) = crate::narrative::current_place_key(link.client().state()) {
-            self.described.insert(key.to_owned());
+        if let Some(key) = self.place_key(link) {
+            self.described.insert(key);
         }
+    }
+
+    /// The scene as `look` shows it.
+    fn look(&mut self, link: &impl Link) -> String {
+        self.places.learn(link.client().state());
+        crate::adventure::look_with(link.client().state(), link.palette(), &self.places)
     }
 
     /// The place on arriving there, as fully as the verbosity asks.
     fn arrival(&mut self, link: &impl Link) -> String {
-        let state = link.client().state();
-        let known = crate::narrative::current_place_key(state)
-            .is_some_and(|key| self.described.contains(key));
+        let known = self
+            .place_key(link)
+            .is_some_and(|key| self.described.contains(&key));
+        let (state, palette, places) = (link.client().state(), link.palette(), &self.places);
         match self.verbosity {
             Verbosity::Superbrief => {
-                crate::adventure::brief_place_with(state, link.palette(), false)
+                crate::adventure::brief_place_with(state, palette, places, false)
             }
             Verbosity::Brief if known => {
-                crate::adventure::brief_place_with(state, link.palette(), true)
+                crate::adventure::brief_place_with(state, palette, places, true)
             }
             _ => {
+                let text = crate::adventure::describe_place_with(state, palette, places);
                 self.note_described(link);
-                crate::adventure::describe_place_with(state, link.palette())
+                text
             }
         }
     }
@@ -219,7 +234,7 @@ impl Engine {
                 }
             }
         }
-        let start = crate::narrative::current_place_key(link.client().state()).map(str::to_owned);
+        let start = self.place_key(link);
         let mut chain: VecDeque<Result<Interpretation, String>> = VecDeque::new();
         if let Some(pending) = self.pending.take() {
             let current = link.client().state().revision == pending.revision;
@@ -271,7 +286,11 @@ impl Engine {
                             break;
                         }
                         Ok(command) => {
-                            let scene = Scene::new(link.client().state(), link.palette());
+                            let scene = Scene::remembering(
+                                link.client().state(),
+                                link.palette(),
+                                &self.places,
+                            );
                             verbs::interpret(&command, &scene, &mut self.referents)
                         }
                         Err(message) => {
@@ -311,7 +330,7 @@ impl Engine {
             }
             Interpretation::Look => {
                 self.note_described(link);
-                record.entries.push(Entry::Description(look(link)));
+                record.entries.push(Entry::Description(self.look(link)));
                 Flow::Continue
             }
             Interpretation::Describe(verbosity) => {
@@ -362,7 +381,7 @@ impl Engine {
         let request = match input {
             Input::Look => {
                 self.note_described(link);
-                record.entries.push(Entry::Description(look(link)));
+                record.entries.push(Entry::Description(self.look(link)));
                 return Ok(Flow::Continue);
             }
             Input::Places => {
@@ -462,16 +481,17 @@ impl Engine {
             Entry::Beats(beats) => beats.contains(&Beat::Resync),
             _ => false,
         });
-        let went = record.entries.iter().any(|e| {
-            matches!(e, Entry::Episode(e) if matches!(e.goal, verbs::Goal::Go { .. }) && e.end == narrate::End::Done)
-        });
-        // Walking over to something can lead into another place too.
-        let here = crate::narrative::current_place_key(link.client().state());
+        // Arriving somewhere else, whether by a direction, by name or by
+        // walking over to something; a direction across open ground can
+        // leave the character in the same place.
+        let here = self.place_key(link);
         let moved = start.is_some_and(|start| here.is_some_and(|here| here != start));
         if resynced {
             self.note_described(link);
-            record.entries.push(Entry::Description(describe(link)));
-        } else if went || moved {
+            let text =
+                crate::adventure::describe_in(link.client().state(), link.palette(), &self.places);
+            record.entries.push(Entry::Description(text));
+        } else if moved {
             // The description says who is there; sightings on the way in
             // would say it twice.
             let present: BTreeSet<ActorId> = link
@@ -538,12 +558,8 @@ enum Flow {
     Quit,
 }
 
-/// The scene described in full, as the game opens or after a snapshot.
+/// The scene described in full, as the game opens or after a snapshot, with
+/// no places remembered.
 pub fn describe(link: &impl Link) -> String {
     crate::adventure::describe_with(link.client().state(), link.palette())
-}
-
-/// The scene as `look` shows it.
-pub fn look(link: &impl Link) -> String {
-    crate::adventure::look_with(link.client().state(), link.palette())
 }

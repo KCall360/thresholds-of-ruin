@@ -254,17 +254,33 @@ pub fn resolve(
         };
     }
     // Indistinguishable things are interchangeable: one of a kind, chosen by
-    // reach and distance.
+    // reach and distance. When the verb doesn't care who holds a thing, one
+    // carried and one on the floor are alike too, and the one on the floor
+    // is chosen.
     let mut kinds: BTreeMap<&str, Vec<&Referent>> = BTreeMap::new();
     for r in &candidates {
-        kinds.entry(r.identity.as_str()).or_default().push(r);
+        let identity = match domain {
+            Domain::Any if r.is(Kind::Thing) => r
+                .identity
+                .rsplit_once('|')
+                .map_or(r.identity.as_str(), |(alike, _)| alike),
+            _ => r.identity.as_str(),
+        };
+        kinds.entry(identity).or_default().push(r);
     }
     let mut representatives: Vec<&Referent> = kinds
         .into_values()
         .map(|group| {
             *group
                 .iter()
-                .min_by_key(|r| (!r.reachable, r.position.map_or(0, distance), r.key))
+                .min_by_key(|r| {
+                    (
+                        r.carried,
+                        !r.reachable,
+                        r.position.map_or(0, distance),
+                        r.key,
+                    )
+                })
                 .expect("not empty")
         })
         .collect();

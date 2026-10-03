@@ -370,15 +370,16 @@ fn episode(teller: &mut Teller, e: &Episode) {
     match (&e.end, e.approached) {
         (End::Done, true) => {
             match &e.goal {
-                Goal::Go { direction, .. } => {
-                    teller.say(format!("you walk {}", direction_name(*direction)));
-                    // The new place's description shows who is there.
-                    let travel: Vec<Beat> = travel
-                        .iter()
-                        .filter(|b| !matches!(b, Beat::Appeared { .. }))
-                        .cloned()
-                        .collect();
-                    tell(teller, &travel);
+                Goal::Go { .. } | Goal::Visit { .. } => {
+                    teller.say(match &e.goal {
+                        Goal::Go { direction, .. } => {
+                            format!("you walk {}", direction_name(*direction))
+                        }
+                        _ => format!("you make your way back to {object}"),
+                    });
+                    // When a description of a new place follows, the engine
+                    // has already dropped sightings it repeats.
+                    tell(teller, travel);
                 }
                 Goal::Attack { target } => {
                     let who = teller.the(&Figure {
@@ -471,7 +472,21 @@ fn episode(teller: &mut Teller, e: &Episode) {
                         }
                     }
                     if !stopped {
-                        teller.say("something catches your eye, and you stop warily");
+                        // A blow on the way is reason enough to stop.
+                        let struck = travel.iter().any(|b| {
+                            matches!(
+                                b,
+                                Beat::Blow {
+                                    target: Who::Me,
+                                    ..
+                                }
+                            )
+                        });
+                        teller.say(if struck {
+                            "you stop short"
+                        } else {
+                            "something catches your eye, and you stop warily"
+                        });
                     }
                 }
                 TravelPhase::Blocked => {
@@ -922,6 +937,36 @@ mod tests {
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
             "The oak door to the west swings open. The ruin scout falls dead."
+        );
+    }
+
+    #[test]
+    fn a_journey_stopped_by_a_blow_says_so() {
+        // Regression: "Something catches your eye" when what stopped the
+        // journey was being struck.
+        let journey = vec![
+            Beat::Stepped(Direction::East),
+            Beat::Blow {
+                attacker: Who::Figure(scout()),
+                target: Who::Me,
+                outcome: AttackOutcome::Hit,
+            },
+            Beat::Journey {
+                phase: TravelPhase::Hazard,
+            },
+        ];
+        assert_eq!(
+            told(vec![episode(
+                Goal::Go {
+                    direction: Direction::East,
+                    destination: "far".into(),
+                },
+                "east",
+                true,
+                journey,
+                End::Stopped(TravelPhase::Hazard)
+            )]),
+            "You set off east. The ruin scout strikes you. You stop short."
         );
     }
 }

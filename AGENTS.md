@@ -124,7 +124,7 @@ out yet are recognized and refused plainly, never narrated as if they worked;
 descriptions state only disclosed facts, coloured by atmosphere (mood words,
 smells, sounds) that has no gameplay effect and is fixed per place.
 Places, ways and room descriptions come from `engine::place`. Pick up from the
-engine's [next steps](docs/if-engine.md#next-steps); items 3 and 4 there are
+engine's [next steps](docs/if-engine.md#next-steps); items 1 and 2 there are
 protocol changes that need the maintainer's decision. The branch needs CI on
 both platforms and the maintainer's approval to merge.
 

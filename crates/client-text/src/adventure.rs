@@ -9,6 +9,7 @@ use crate::{
         place::{Opening, Place},
         prose,
     },
+    narrative::Places,
     safe,
 };
 
@@ -127,6 +128,40 @@ fn exits_from(
         })
         .collect();
     anchors.sort_by_key(|c| (distance(c.position), &c.key));
+    if anchors.is_empty() && place.form == crate::engine::place::Form::Open {
+        // In open ground with no walls in sight, a direction leads as far as
+        // can be seen that way, keeping as straight as it can.
+        let straight = |p: Position| match direction {
+            Direction::North | Direction::South => p.x.unsigned_abs(),
+            Direction::East | Direction::West => p.y.unsigned_abs(),
+            _ => p.x.unsigned_abs().abs_diff(p.y.unsigned_abs()),
+        };
+        let far = state
+            .observation
+            .visible_cells
+            .iter()
+            .filter(|c| {
+                !c.wall
+                    && c.door.is_none()
+                    && c.position.z == 0
+                    && bearing(c.position) == Some(direction)
+            })
+            .min_by_key(|c| {
+                (
+                    straight(c.position),
+                    std::cmp::Reverse(distance(c.position)),
+                    &c.key,
+                )
+            });
+        return far
+            .map(|c| Exit {
+                destination: Some(c.key.clone()),
+                label: format!("open ground {toward}"),
+                closed: false,
+            })
+            .into_iter()
+            .collect();
+    }
     anchors
         .into_iter()
         .filter(|c| seen.insert(c.key.clone()))
@@ -540,7 +575,9 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
         .filter(|d| !exits_from(place, state, *d).is_empty())
         .map(|d| direction_name(d).to_owned())
         .collect();
-    if !elsewhere.is_empty() {
+    if elsewhere.len() == 8 {
+        sentences.push("You can head off in any direction.".into());
+    } else if !elsewhere.is_empty() {
         let also = if sentences.is_empty() { "" } else { "also " };
         sentences.push(format!(
             "You can {also}head {}.",
@@ -558,6 +595,11 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
 /// material or name.
 pub fn describe(state: &StateView) -> String {
     describe_with(state, &Palette::default())
+}
+
+/// [`describe_in`] with no places remembered.
+pub fn describe_with(state: &StateView, palette: &Palette) -> String {
+    describe_in(state, palette, &Places::default())
 }
 
 /// The character's condition, as the first lines of a description: HP and
@@ -589,24 +631,29 @@ fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
 /// The scene in prose, as the game opens: condition, objective and the
 /// place. Floors, walls and unnamed figures are described by their asset
 /// words where the palette holds their assets.
-pub fn describe_with(state: &StateView, palette: &Palette) -> String {
+pub fn describe_in(state: &StateView, palette: &Palette, places: &Places) -> String {
     let mut lines = status_lines(state, true);
-    lines.push(describe_place_with(state, palette));
+    lines.push(describe_place_with(state, palette, places));
     lines.join("\n")
 }
 
 /// The scene as `look` shows it: like [`describe_with`], without repeating
 /// the objective, which `objective` recalls.
-pub fn look_with(state: &StateView, palette: &Palette) -> String {
+pub fn look_with(state: &StateView, palette: &Palette, places: &Places) -> String {
     let mut lines = status_lines(state, false);
-    lines.push(describe_place_with(state, palette));
+    lines.push(describe_place_with(state, palette, places));
     lines.join("\n")
 }
 
 /// A place already described, on arriving again: its name (or what kind of
 /// place it is, when it has none), its ways out when `ways` is set, and who
 /// and what is in it.
-pub fn brief_place_with(state: &StateView, palette: &Palette, ways: bool) -> String {
+pub fn brief_place_with(
+    state: &StateView,
+    palette: &Palette,
+    places: &Places,
+    ways: bool,
+) -> String {
     let place = crate::engine::place::survey(state);
     let mut lines = Vec::new();
     let mut about = Vec::new();
@@ -614,7 +661,7 @@ pub fn brief_place_with(state: &StateView, palette: &Palette, ways: bool) -> Str
         Some(title) => lines.push(title),
         None => about.push(format!(
             "You are back in {}.",
-            crate::narrative::place_noun(state, palette, &place, true)
+            crate::narrative::place_noun(state, palette, &place, places, true)
         )),
     }
     if ways {
@@ -641,11 +688,13 @@ fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<Strin
 
 /// The place alone, as on arriving there: its name, a paragraph on the place
 /// and its ways out, and a paragraph on who and what is in it.
-pub fn describe_place_with(state: &StateView, palette: &Palette) -> String {
+pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places) -> String {
     let place = crate::engine::place::survey(state);
     let mut lines = Vec::new();
     lines.extend(crate::narrative::place_title(state));
-    let mut about = vec![crate::narrative::describe_surveyed(state, palette, &place)];
+    let mut about = vec![crate::narrative::describe_surveyed(
+        state, palette, &place, places,
+    )];
     about.extend(ways_sentences(state, &place));
     lines.push(prose::paragraph(&about));
     lines.extend(contents(state, palette, &place));

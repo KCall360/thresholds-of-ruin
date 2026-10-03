@@ -842,3 +842,123 @@ async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
         .await
         .contains("You are in an open"));
 }
+
+#[tokio::test]
+async fn a_remembered_place_is_travelled_to_by_name() {
+    let mut s = state();
+    s.observation.places = vec![PlaceView {
+        key: "cell-6".into(),
+        name: "Far Hall".into(),
+    }];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "go to far hall").await;
+    assert!(
+        text.starts_with(
+            "You make your way back to Far Hall.
+Far Hall
+You are in "
+        ),
+        "{text}"
+    );
+    assert!(matches!(
+        &link.sent[0],
+        Request::Command { command: Command::Travel { destination, .. }, .. } if destination == "cell-6"
+    ));
+}
+
+#[tokio::test]
+async fn walking_across_open_ground_stays_in_one_place() {
+    // No walls or hints: all of it is one open place, so arriving isn't a
+    // new place to describe, and a creature seen on the way is still told.
+    let mut s = state();
+    for cell in &mut s.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    let mut link = Scripted::new(s, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut there = east(now.clone(), 6);
+            there.observation.visible_actors.push(figure(2, "rat", 3));
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "east").await;
+    assert!(text.starts_with("You walk east."), "{text}");
+    assert!(text.contains("rat"), "{text}");
+    assert!(!text.contains("You are"), "{text}");
+}
+
+#[tokio::test]
+async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
+    // Regression: closing in on a figure that stepped into the way ended the
+    // turn with "the way is blocked", though it was right there.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin scout", 4));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut met = now.clone();
+            met.observation.visible_actors[0].position.x = 1;
+            vec![
+                Frame::Ack,
+                Frame::View(met, None),
+                Frame::Journey(TravelPhase::Blocked),
+            ]
+        }
+        Request::Command {
+            command:
+                Command::Act {
+                    action: Action::Attack { .. },
+                    ..
+                },
+            ..
+        } => {
+            let mut after = combat(
+                now.clone(),
+                50,
+                vec![
+                    CombatEventView::Attack {
+                        attacker: Some(ActorId(1)),
+                        target: Some(ActorId(2)),
+                        outcome: AttackOutcome::Hit,
+                    },
+                    CombatEventView::Died { actor: ActorId(2) },
+                ],
+            );
+            after.observation.visible_actors.clear();
+            vec![
+                Frame::Ack,
+                Frame::View(after, Some(Event::AttackStarted { target: ActorId(2) })),
+            ]
+        }
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack scout").await;
+    assert!(!text.contains("blocked"), "{text}");
+    assert!(
+        text.starts_with("You close in on the ruin scout."),
+        "{text}"
+    );
+    assert!(text.contains("falls dead"), "{text}");
+    assert_eq!(link.sent.len(), 2);
+}

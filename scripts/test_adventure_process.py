@@ -314,6 +314,32 @@ class AdventureProcesses(ProcessTestCase):
         self.assertIn("every time", self.say(player, "verbose"))
         self.say(player, "east")
         self.assertIn(room, self.say(player, "west"))
+        # A remembered place can be gone back to by name.
+        self.say(player, "brief")
+        self.say(player, "east")
+        back = self.say(player, "go to hollow promise")
+        self.assertTrue(back.startswith("You make your way back to Hollow Promise.\nHollow Promise\nAn open wooden door leads east."), back)
+        self.assertEqual("You're already in Hollow Promise.\n> ", self.say(player, "go to Hollow Promise"))
+
+    def test_directions_cross_open_ground_without_walls(self):
+        self.server(scenario="streaming-corridor")
+        player, welcome = self.adventure()
+        self.assertIn("You can head off in any direction.", welcome)
+        # The same open place throughout: no new description on arrival.
+        self.assertEqual("You walk east.\n> ", self.say(player, "east"))
+        self.assertEqual("You walk west.\n> ", self.say(player, "west"))
+
+    def test_a_journey_goes_round_a_doorway_corner_a_body_cannot_cut(self):
+        # Regression: from beside the wall, the route cut the doorway's corner
+        # diagonally, which a two-cell body may not, and stopped "blocked".
+        self.server(scenario="first-dungeon")
+        player, _ = self.adventure()
+        for step in ("step ne", "step e", "step e"):
+            self.say(player, step)
+        self.assertEqual(
+            "You set off east. A ruin scout comes into view to the east, and you stop warily.\n> ",
+            self.say(player, "east"),
+        )
 
 
 if __name__ == "__main__":
