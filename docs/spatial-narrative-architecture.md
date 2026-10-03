@@ -4,8 +4,9 @@ This document records the design discussion, structural diagnosis, and architect
 
 > **Status:** superseded by the [IF engine](if-engine.md#places-and-ways).
 > Place extent, geometry-derived exits and unified actors are built there.
-> Pillar 3's atmospheric and themed prose was dropped: the engine states only
-> disclosed facts, so it no longer describes smells, draughts or epithets.
+> Pillar 3's atmosphere is kept as flavour with no gameplay effect: a mood word
+> and a material-based sentence fixed per place; scenario themes and zones are
+> not used yet.
 > This page is kept as the record of the diagnosis.
 
 ---

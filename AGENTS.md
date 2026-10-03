@@ -121,7 +121,8 @@ move. Protocol 21 sends combat facts instead of prose. See the
 [adventure commands](docs/text-adventure.md). Decisions agreed with the
 maintainer: the server sends facts, never sentences; verbs the game can't carry
 out yet are recognized and refused plainly, never narrated as if they worked;
-descriptions state only disclosed facts (no invented smells or epithets).
+descriptions state only disclosed facts, coloured by atmosphere (mood words,
+smells, sounds) that has no gameplay effect and is fixed per place.
 Places, ways and room descriptions come from `engine::place`. Pick up from the
 engine's [next steps](docs/if-engine.md#next-steps); items 5 and 6 there are
 protocol changes that need the maintainer's decision. The branch needs CI on
