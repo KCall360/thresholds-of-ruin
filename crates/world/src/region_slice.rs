@@ -23,7 +23,8 @@ pub struct RegionSlice {
     cell_gravity: BTreeMap<Location, [i32; 3]>,
     #[serde(with = "crate::checkpoint_map")]
     terrain: BTreeMap<Location, Terrain>,
-    place_hints: BTreeSet<Location>,
+    #[serde(with = "crate::checkpoint_map")]
+    place_hints: BTreeMap<Location, String>,
 }
 
 impl RegionSlice {
@@ -71,7 +72,7 @@ impl RegionSlice {
                 .iter()
                 .all(|(at, g)| inside(at) && valid_gravity(*g))
             && self.terrain.keys().all(inside)
-            && self.place_hints.iter().all(inside)
+            && self.place_hints.keys().all(inside)
     }
 }
 
@@ -255,7 +256,7 @@ impl World {
             physical_vertical: take_set(physical_vertical, id),
             cell_gravity: take_region(cell_gravity, id),
             terrain: take_region(terrain, id),
-            place_hints: take_set(place_hints, id),
+            place_hints: take_region(place_hints, id),
             region,
         };
         if slice.chamber.is_some() {

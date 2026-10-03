@@ -59,7 +59,9 @@ Each region file holds one region's fields at its top level. Regions have stable
 All positions are region-local integer `[x, y, z]` triples. Chambers add a finite
 stone shell. Walls/openings explicitly alter cells. Named anchors are single-cell
 authoring references such as `1/start`; they are separate from disclosed place
-hints and do not reveal authored room names.
+hints. A place hint is a position, or a position with the name the character
+learns on seeing it: `places = [[3,2,0], { at = [5,1,0], name = "Threshold" }]`.
+Names follow the [place name](place-knowledge.md) rules.
 
 Outgoing portals specify `at`, cardinal/vertical `direction`, destination anchor
 `to`, and optional `turns`, `width`, `height` (defaults 0, 1, 1). Reverse portals

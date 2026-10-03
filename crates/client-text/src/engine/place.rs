@@ -80,6 +80,7 @@ impl<'a> Columns<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Door {
+        id: u64,
         name: String,
         open: bool,
     },
@@ -93,7 +94,11 @@ pub enum Opening {
 /// A way out of the place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Way {
+    /// The side of the place it's in, or its bearing when it has no one side.
     pub direction: Direction,
+    /// Its bearing from the character, when that's another direction: the
+    /// doorway in the east wall, seen from beside it, is also southeast.
+    pub towards: Option<Direction>,
     pub kind: Opening,
     /// Where a journey through it ends: the first seen open cell beyond, or
     /// the opening itself.
@@ -104,12 +109,19 @@ impl Way {
     /// "an archway", "a closed wooden door".
     pub fn label(&self) -> String {
         match &self.kind {
-            Opening::Door { name, open } => super::prose::indefinite(&format!(
-                "{} {name}",
-                if *open { "open" } else { "closed" }
-            )),
-            Opening::Passage => "a passage".into(),
-            Opening::Archway => "an archway".into(),
+            Opening::Stairs => "stairs".into(),
+            _ => super::prose::indefinite(&self.kind_name()),
+        }
+    }
+
+    /// What it is, without an article: "archway", "open wooden door".
+    pub fn kind_name(&self) -> String {
+        match &self.kind {
+            Opening::Door { name, open, .. } => {
+                format!("{} {name}", if *open { "open" } else { "closed" })
+            }
+            Opening::Passage => "passage".into(),
+            Opening::Archway => "archway".into(),
             Opening::Stairs => "stairs".into(),
         }
     }
@@ -140,13 +152,98 @@ impl Place {
         self.columns.contains(&(p.x, p.y)) && p.z == 0
     }
 
+    /// The ways that lead `direction`, or that lie that way from here.
     pub fn ways(&self, direction: Direction) -> impl Iterator<Item = &Way> {
-        self.ways.iter().filter(move |w| w.direction == direction)
+        let named = self.ways.iter().any(|w| w.direction == direction);
+        self.ways
+            .iter()
+            .filter(move |w| w.direction == direction || (!named && w.towards == Some(direction)))
     }
 }
 
 fn position((x, y): Column) -> Position {
     Position { x, y, z: 0 }
+}
+
+/// Where a corridor leads when walking it in `heading`: the farthest cell
+/// reached by stepping along open floor while there's exactly one way on,
+/// and the bearing of that cell. The character must stand in a corridor
+/// (two ways off its cell, one of them ahead). The walk stops before a
+/// junction, a door beside the way, a dead end or unseen floor.
+pub fn corridor_ahead(state: &StateView, heading: Direction) -> Option<(Direction, String)> {
+    let cols = Columns::new(state);
+    let open_steps = |(x, y): Column| -> Vec<Column> {
+        STEPS
+            .iter()
+            .map(|(dx, dy)| (x + dx, y + dy))
+            .filter(|c| cols.open(*c))
+            .collect()
+    };
+    let beside_door = |(x, y): Column| {
+        STEPS
+            .iter()
+            .any(|(dx, dy)| cols.door((x + dx, y + dy)).is_some())
+    };
+    let origin = (0, 0);
+    let here = open_steps(origin);
+    if here.len() != 2 {
+        return None;
+    }
+    let ahead: Vec<Column> = here
+        .iter()
+        .copied()
+        .filter(|c| bearing(position(*c)).is_some_and(|d| eighths(d, heading) <= 2))
+        .collect();
+    let [mut current] = ahead.as_slice() else {
+        return None;
+    };
+    let mut previous = origin;
+    for _ in 0..16 {
+        if beside_door(current) {
+            break;
+        }
+        let on: Vec<Column> = open_steps(current)
+            .into_iter()
+            .filter(|c| *c != previous)
+            .collect();
+        // A cell with unseen neighbours is where sight ends.
+        let (x, y) = current;
+        let edge = STEPS.iter().any(|(dx, dy)| !cols.seen((x + dx, y + dy)));
+        match on.as_slice() {
+            [next] if !edge => {
+                previous = current;
+                current = *next;
+            }
+            _ => break,
+        }
+    }
+    let direction = bearing(position(current))?;
+    Some((direction, cols.key(current)?.to_owned()))
+}
+
+/// Eighths of a turn between two horizontal directions, 0 to 4; 4 for any
+/// vertical one.
+pub fn eighths(a: Direction, b: Direction) -> usize {
+    const ROSE: [Direction; 8] = [
+        Direction::North,
+        Direction::NorthEast,
+        Direction::East,
+        Direction::SouthEast,
+        Direction::South,
+        Direction::SouthWest,
+        Direction::West,
+        Direction::NorthWest,
+    ];
+    match (
+        ROSE.iter().position(|x| *x == a),
+        ROSE.iter().position(|x| *x == b),
+    ) {
+        (Some(a), Some(b)) => {
+            let d = a.abs_diff(b);
+            d.min(8 - d)
+        }
+        _ => 4,
+    }
 }
 
 /// Work out the place from what the character sees.
@@ -204,7 +301,11 @@ pub fn survey(state: &StateView) -> Place {
             if cols.door(next).is_some() || (walls && cols.open(next)) {
                 edge.insert(next);
             } else if !cols.seen(next) {
-                if let Some(d) = bearing(position(next)) {
+                // Only where some of the place is seen that way, so there
+                // is somewhere to walk toward the dark.
+                if let Some(d) = bearing(position(next))
+                    .filter(|d| columns.iter().any(|c| bearing(position(*c)) == Some(*d)))
+                {
                     continues.insert(direction_order(d));
                 }
             }
@@ -243,6 +344,7 @@ pub fn survey(state: &StateView) -> Place {
                     .min_by_key(|c| c.position.z.abs());
                 ways.push(Way {
                     direction: if up { Direction::Up } else { Direction::Down },
+                    towards: None,
                     kind: Opening::Stairs,
                     destination: landing.map(|c| c.key.clone()),
                 });
@@ -273,11 +375,7 @@ pub fn survey(state: &StateView) -> Place {
         columns,
         form,
         ways,
-        continues: if walls {
-            continues.into_iter().map(direction_from).collect()
-        } else {
-            Vec::new()
-        },
+        continues: continues.into_iter().map(direction_from).collect(),
     }
 }
 
@@ -314,7 +412,8 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
     let mut seen: BTreeSet<Column> = group.iter().copied().collect();
     let mut frontier: Vec<Column> = group.to_vec();
     let mut beyond = Vec::new();
-    for _ in 0..3 {
+    let mut depth: BTreeMap<Column, usize> = BTreeMap::new();
+    for step in 1..=3 {
         let mut next = Vec::new();
         for &(x, y) in &frontier {
             for (dx, dy) in STEPS {
@@ -322,28 +421,64 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
                 if !place.contains(&c) && seen.insert(c) && cols.open(c) {
                     next.push(c);
                     beyond.push(c);
+                    depth.insert(c, step);
                 }
             }
         }
         frontier = next;
     }
-    let far = |c: &&Column| distance(position(**c));
-    let destination = beyond
-        .iter()
-        .max_by_key(|c| (far(c), **c))
-        .or_else(|| group.iter().filter(|c| cols.open(**c)).max_by_key(far))
-        .and_then(|c| cols.key(*c))
-        .map(str::to_owned);
     let nearest = group
         .iter()
         .min_by_key(|c| (distance(position(**c)), **c))
         .copied()
         .unwrap_or((0, 0));
-    let direction = bearing(position(nearest))
-        .or_else(|| beyond.first().and_then(|c| bearing(position(*c))))
-        .unwrap_or(Direction::North);
+    // An opening is named by the side of the place it's in, so the doorway in
+    // the east wall leads east wherever in the room the character stands;
+    // one that touches the place from more than one side takes its bearing.
+    let sides: BTreeSet<usize> = group
+        .iter()
+        .flat_map(|&(x, y)| {
+            STEPS
+                .iter()
+                .enumerate()
+                .filter(move |(_, (dx, dy))| place.contains(&(x - dx, y - dy)))
+                .map(|(side, _)| side)
+        })
+        .collect();
+    let facing = match sides.iter().collect::<Vec<_>>().as_slice() {
+        [side] => Some(
+            [
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
+            ][**side],
+        ),
+        _ => None,
+    };
+    let towards =
+        bearing(position(nearest)).or_else(|| beyond.first().and_then(|c| bearing(position(*c))));
+    let direction = facing.or(towards).unwrap_or(Direction::North);
+    // A journey through it ends as far beyond as is seen, up to three steps,
+    // and as straight out of the opening as it can.
+    let far = |c: &&Column| distance(position(**c));
+    let off_line = |&(x, y): &Column| -> i32 {
+        let across = |(gx, gy): &Column| match facing {
+            Some(Direction::North | Direction::South) => (x - gx).abs(),
+            Some(_) => (y - gy).abs(),
+            None => 0,
+        };
+        group.iter().map(across).min().unwrap_or(0)
+    };
+    let destination = beyond
+        .iter()
+        .max_by_key(|c| (depth[*c], std::cmp::Reverse(off_line(c)), far(c), **c))
+        .or_else(|| group.iter().filter(|c| cols.open(**c)).max_by_key(far))
+        .and_then(|c| cols.key(*c))
+        .map(str::to_owned);
     let kind = match door {
         Some(d) => Opening::Door {
+            id: d.id,
             name: if d.name.trim().is_empty() {
                 "door".into()
             } else {
@@ -359,6 +494,7 @@ fn way(cols: &Columns, place: &BTreeSet<Column>, group: &[Column], in_gap: bool)
     };
     Way {
         direction,
+        towards: towards.filter(|t| *t != direction),
         kind,
         destination,
     }
@@ -454,13 +590,30 @@ mod tests {
             .iter()
             .map(|w| (w.direction, w.label()))
             .collect();
+        // Both doors are in the east wall, so both lead east.
         assert_eq!(
             doors,
             [
-                (Direction::NorthEast, "an open oak door".to_owned()),
-                (Direction::SouthEast, "a closed oak door".to_owned())
+                (Direction::East, "an open oak door".to_owned()),
+                (Direction::East, "a closed oak door".to_owned())
             ]
         );
         assert_eq!(place.continues, [Direction::SouthEast, Direction::South]);
+    }
+
+    #[test]
+    fn a_doorway_leads_out_of_the_wall_it_is_in_wherever_you_stand() {
+        // Regression: standing beside the east wall, the doorway in it was
+        // "a passage southeast", and `east` found no way.
+        let place = survey(&view(&[
+            "########", "#....@#", "#.......", "#.....#", "########",
+        ]));
+        assert_eq!(
+            place.ways.iter().map(|w| w.direction).collect::<Vec<_>>(),
+            [Direction::East]
+        );
+        // It also lies southeast of here, so either direction finds it.
+        assert_eq!(place.ways(Direction::SouthEast).count(), 1);
+        assert_eq!(place.ways(Direction::East).count(), 1);
     }
 }

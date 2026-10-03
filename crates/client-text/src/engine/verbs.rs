@@ -46,7 +46,26 @@ pub enum Goal {
     Step {
         direction: Direction,
     },
+    /// Travel to a place the character remembers by name.
+    Visit {
+        /// The cell key the place was learned at.
+        destination: String,
+        name: String,
+    },
     Wait,
+}
+
+/// How fully a place is described on arriving there. `look` always
+/// describes it in full.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verbosity {
+    /// In full the first time; after that, its name, ways and contents.
+    #[default]
+    Brief,
+    /// In full every time.
+    Verbose,
+    /// Its name and contents only, even the first time.
+    Superbrief,
 }
 
 /// What a sentence means, before anything runs.
@@ -55,6 +74,8 @@ pub enum Interpretation {
     /// An answer that takes no game time.
     Say(String),
     Look,
+    /// How fully places are described on arrival.
+    Describe(Verbosity),
     Goals(Vec<Goal>),
     Ask(Question),
     Tool(Input),
@@ -76,7 +97,7 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, open or close <door>, attack <creature>, go to <thing>, a direction (north, ne, up...), wait, inventory, places, name room <name>, again and quit. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 /// What the game can't do yet, as the refusal says it.
@@ -351,10 +372,20 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
         Verb::Inventory => say(inventory(scene)),
         Verb::Wait => goal(Goal::Wait),
         Verb::Quit => Interpretation::Quit,
-        Verb::Diagnose => say(diagnose(scene.state)),
-        Verb::Listen => say("You hear nothing out of the ordinary."),
-        Verb::Smell => say("You smell nothing out of the ordinary."),
-        Verb::Verbose | Verb::Brief | Verb::Superbrief => say("Descriptions are set."),
+        Verb::Diagnose => say(condition(scene.state)),
+        Verb::Listen => say(crate::narrative::listen(
+            scene.state,
+            scene.palette,
+            scene.places,
+        )),
+        Verb::Smell => say(crate::narrative::smell(
+            scene.state,
+            scene.palette,
+            scene.places,
+        )),
+        Verb::Verbose => Interpretation::Describe(Verbosity::Verbose),
+        Verb::Brief => Interpretation::Describe(Verbosity::Brief),
+        Verb::Superbrief => Interpretation::Describe(Verbosity::Superbrief),
         Verb::Go => say("Where do you want to go?"),
         Verb::Step => say("Which way do you want to step?"),
         verb if needs_object(verb) => say(format!("What do you want to {}?", verb.as_str())),
@@ -492,6 +523,39 @@ fn transitive(
                 },
             )
         }
+        (Verb::Go, _) if exit(direct, scene).is_some() => {
+            let key = exit(direct, scene).expect("checked");
+            if crate::narrative::here_key(scene.state) == Some(key) {
+                say("You're already at the exit.")
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name: EXIT.into(),
+                })
+            }
+        }
+        (Verb::Go, _) if start(direct, scene).is_some() => {
+            let key = start(direct, scene).expect("checked");
+            if crate::narrative::here_key(scene.state) == Some(key) {
+                say("You're already where you started.")
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name: "where you started".into(),
+                })
+            }
+        }
+        (Verb::Go, _) if remembered(direct, scene).is_some() => {
+            let (key, name) = remembered(direct, scene).expect("checked");
+            if crate::narrative::current_place_key(scene.state) == Some(key) {
+                say(format!("You're already in {name}."))
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name,
+                })
+            }
+        }
         (Verb::Go | Verb::Step, _) => bind(direct, scene, referents, Domain::Any, &|r| approach(r)),
         (verb, _) if unsupported(verb).is_some() => {
             // Name what's meant first: "You can't see any lamp here" comes
@@ -560,6 +624,58 @@ fn door(r: &Referent, open: bool) -> Interpretation {
             prose::capitalize(&r.the())
         )),
     }
+}
+
+/// How the objective's exit is named.
+pub const EXIT: &str = "the exit";
+
+/// The phrase without "back to" and "the": "back to the start" is "start".
+fn bare(np: &NounPhrase) -> String {
+    let raw = np.raw.trim().to_lowercase();
+    let raw = ["back to ", "back "]
+        .iter()
+        .find_map(|p| raw.strip_prefix(p))
+        .unwrap_or(&raw);
+    raw.strip_prefix("the ").unwrap_or(raw).trim().to_owned()
+}
+
+/// The objective's exit, when the phrase asks for it and the objective is
+/// disclosed: `go to exit`, `go back to the way out`.
+fn exit<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
+    matches!(bare(np).as_str(), "exit" | "way out")
+        .then_some(())
+        .and(scene.state.observation.combat.as_ref()?.exit.as_deref())
+}
+
+/// Where the character began, when the phrase asks for it: `go to start`,
+/// `go back to the beginning`.
+fn start<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
+    matches!(
+        bare(np).as_str(),
+        "start" | "beginning" | "where i started" | "where i began"
+    )
+    .then_some(())
+    .and(scene.places.start.as_deref())
+}
+
+/// A place the character remembers, named in full: its key and name. Names
+/// are matched whole and without regard to case, so "go to the entry chamber"
+/// finds Entry chamber.
+fn remembered<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<(&'s str, String)> {
+    let raw = np.raw.trim().to_lowercase();
+    let raw = raw.strip_prefix("the ").unwrap_or(&raw).trim().to_owned();
+    let words = phrase(np).to_lowercase();
+    scene
+        .state
+        .observation
+        .places
+        .iter()
+        .filter(|p| p.origin != PlaceNameOrigin::Invented)
+        .find(|p| {
+            let name = p.name.trim().to_lowercase();
+            !name.is_empty() && (name == raw || name == words)
+        })
+        .map(|p| (p.key.as_str(), crate::safe(&p.name)))
 }
 
 fn approach(r: &Referent) -> Interpretation {
@@ -691,6 +807,24 @@ pub fn inventory(scene: &Scene) -> String {
 }
 
 /// The character's condition, without numbers beyond HP.
+/// How the character is, and what the run asks of them.
+fn condition(state: &StateView) -> String {
+    let objective = state
+        .observation
+        .combat
+        .as_ref()
+        .filter(|c| !c.dead && !c.victory)
+        .and_then(|c| c.objective);
+    match objective {
+        Some(o) => format!(
+            "{} {}",
+            diagnose(state),
+            tor_client_common::narration::objective(o)
+        ),
+        None => diagnose(state),
+    }
+}
+
 pub fn diagnose(state: &StateView) -> String {
     let Some(c) = &state.observation.combat else {
         return "You feel fine.".into();
@@ -746,7 +880,7 @@ fn session_command(session: &SessionCommand, state: &StateView) -> Interpretatio
         })),
         SessionCommand::Name { target, name } => {
             if matches!(target.as_str(), "room" | "place" | "here") {
-                match crate::narrative::current_place_key(state) {
+                match crate::narrative::named_place_key(state) {
                     Some(key) => tool(Input::Command(Command::RenamePlace {
                         expected_revision: state.revision,
                         key: key.into(),

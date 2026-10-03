@@ -8,8 +8,8 @@ class AdventureProcesses(ProcessTestCase):
     def test_ordinary_prose_examination_directional_travel_pickup_and_restart(self):
         server = self.server()
         player, welcome = self.adventure()
-        self.assertIn("stone floor", welcome)
-        self.assertIn("You can head east.", welcome)
+        self.assertIn("chamber of stone", welcome)
+        self.assertIn("An open wooden door leads east.", welcome)
         self.assertNotIn("You are in control", welcome)
         self.assertNotIn("north", welcome)
         self.assertNotIn("south", welcome)
@@ -34,7 +34,9 @@ class AdventureProcesses(ProcessTestCase):
     def test_approach_then_take_is_a_travel_request_and_ordinary_saved_actions(self):
         self.server()
         player, _ = self.adventure()
-        self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
+        # The tablet is in the next room, so arriving there describes it.
+        fetched = self.say(player, "get tablet")
+        self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\nGallery\nYou are in "), fetched)
         observer, initial = self.client(SPECTATOR_TOKEN)
         self.assertEqual(initial["state"]["observation"]["tick"], 750)
         self.assertEqual([i["name"] for i in initial["state"]["observation"]["inventory"]], ["stone tablet"])
@@ -49,15 +51,16 @@ class AdventureProcesses(ProcessTestCase):
         for _ in range(3):
             self.say(player, "step east")
         description = self.say(player, "look")
-        self.assertIn("You see a copper token on the floor nearby.", description)
-        self.assertIn("You see a stone tablet to the east.", description)
-        self.assertIn("You can head east.", description)
-        self.assertNotIn("You can head west", description)
+        self.assertIn("A copper token lies on the floor nearby; a stone tablet lies to the east.", description)
+        self.assertIn("An open wooden door leads east.", description)
+        self.assertNotIn("west", description)
         self.assertEqual("You can't see a way north.\n> ", self.say(player, "north"))
         self.assertEqual("You walk over to the copper token and pick it up.\n> ", self.say(player, "get token"))
         help_text = self.say(player, "help")
         for extra in ("wizard", "control", "step", "sync", "history", "Ready."):
             self.assertNotIn(extra, help_text)
+        for command in ("go to exit", "go to start", "status", "brief, verbose"):
+            self.assertIn(command, help_text)
 
     def test_a_turn_ends_before_the_next_command_and_spectators_cannot_act(self):
         self.server()
@@ -89,9 +92,12 @@ class AdventureProcesses(ProcessTestCase):
     def test_rotated_approach_and_stairs_use_ordinary_backend_routes(self):
         self.server(scenario="portal-geometry")
         player, welcome = self.adventure()
-        self.assertIn("walls of stone", welcome)
+        self.assertIn("chamber of stone", welcome)
         self.assertIn("made of stone", self.say(player, "examine walls"))
-        self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
+        fetched = self.say(player, "get tablet")
+        self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\n"), fetched)
+        # The first token is told plainly, a second one as another.
+        self.assertIn("A copper token lies on the floor nearby; another copper token lies to the south.", fetched)
         self.assertIn("You walk down.", self.say(player, "down"))
         self.assertIn("You walk up.", self.say(player, "up"))
         observer, state = self.client(SPECTATOR_TOKEN)
@@ -202,16 +208,18 @@ class AdventureProcesses(ProcessTestCase):
         self.server()
         player, _ = self.adventure()
         # Sensory inspection
+        # The place's own sound and smell, the same each time.
         listen = self.say(player, "listen")
-        self.assertTrue(any(word in listen.lower() for word in ("silence", "quiet", "sound", "hum", "hear")))
+        self.assertTrue(listen.endswith(".\n> ") and "can't" not in listen, listen)
+        self.assertEqual(listen, self.say(player, "listen"))
         smell = self.say(player, "smell")
-        self.assertTrue(any(word in smell.lower() for word in ("scent", "air", "smell", "dust", "stone", "damp")))
+        self.assertTrue(smell.endswith(".\n> ") and "can't" not in smell, smell)
         # Architectural examination
         self.assertIn("walls are made of stone", self.say(player, "examine walls"))
         self.assertIn("floor is made of stone", self.say(player, "examine floor"))
         # Places command: shows visible anchors
         places_out = self.say(player, "places")
-        self.assertIn("1. Hollow Promise (in sight)", places_out)
+        self.assertIn("1. Entry chamber (in sight)", places_out)
         # Name place by index
         self.say(player, "name 1 Vault of Whispers")
         self.assertIn("1. Vault of Whispers (in sight)", self.say(player, "places"))
@@ -232,13 +240,13 @@ class AdventureProcesses(ProcessTestCase):
         self.assertNotIn("You see yourself at your feet", welcome)
         self.assertNotIn("delver", welcome)
         # Geometry-derived exits & spatial synthesis
-        self.assertIn("stone floor", welcome)
-        self.assertIn("You can head east.", welcome)
+        self.assertIn("chamber of stone", welcome)
+        self.assertIn("An open wooden door leads east.", welcome)
         # Directional navigation into Region 2 (Broken gallery)
         walk_east = self.say(player, "east")
         self.assertIn("You walk east.", walk_east)
         # In Region 2, Broken gallery is presented and includes an exit back west
-        self.assertIn("You can head", walk_east)
+        self.assertIn("An open wooden door leads west.", walk_east)
         # Moving back west through portal
         walk_west = self.say(player, "west")
         self.assertIn("You walk west.", walk_west)
@@ -265,25 +273,81 @@ class AdventureProcesses(ProcessTestCase):
         for passage in fight:
             self.assertTrue(passage.endswith("> "), passage)
             self.assertEqual(passage.count("> "), 1, passage)
-        self.assertEqual(
-            "You walk over to the ruin scout corpse and pick it up.\n> ",
-            self.say(player, "take corpse"),
-        )
+        # The corpse lies in the next room's doorway, so that room follows.
+        taken = self.say(player, "take corpse")
+        self.assertTrue(taken.startswith("You walk over to the ruin scout corpse and pick it up.\n"), taken)
         self.assertIn("ruin scout corpse", self.say(player, "inventory"))
 
     def test_rooms_are_described_from_their_extent_and_doors_are_their_ways(self):
         self.server()
         player, welcome = self.adventure()
-        self.assertIn("You are in a small chamber with a stone floor and walls of stone.", welcome)
-        for invented in ("dust", "chill", "Shadows", "Stone Hall"):
-            self.assertNotIn(invented, welcome)
+        self.assertRegex(welcome, r"You are in a small, \w+ chamber of stone\. \S")
+        self.assertNotIn("Stone Hall", welcome)
+        # Atmosphere is fixed for the place.
+        room = next(line for line in welcome.split("\n") if line.startswith("You are in"))
+        self.assertIn(room, self.say(player, "look"))
         # Through the open door, into the other room, and back.
         arrived = self.say(player, "east")
         self.assertIn("You walk east.", arrived)
-        self.assertIn("You can head west.", arrived)
+        self.assertIn("An open wooden door leads west.", arrived)
         self.assertIn("You walk west.", self.say(player, "west"))
         self.assertIn("You walk over to the wooden door and close it.", self.say(player, "close door"))
         self.assertEqual("The wooden door to the east is closed.\n> ", self.say(player, "east"))
+
+    def test_places_are_told_in_prose_and_named_briefly_when_seen_before(self):
+        self.server()
+        player, welcome = self.adventure()
+        self.assertIn("A copper token lies at your feet; a stone tablet lies to the east.", welcome)
+        for listing in ("You see", "You can head"):
+            self.assertNotIn(listing, welcome)
+        room = next(line for line in welcome.split("\n") if line.startswith("You are in"))
+        there = self.say(player, "east")
+        self.assertTrue(there.startswith("You walk east.\nGallery\nYou are in "), there)
+        self.assertIn("An open wooden door leads west.", there)
+        # Back in a place already described: its name, ways and contents.
+        back = self.say(player, "west")
+        self.assertEqual(
+            "You walk west.\nEntry chamber\nAn open wooden door leads east.\n"
+            "A copper token lies on the floor nearby; a stone tablet lies to the east.\n> ",
+            back,
+        )
+        # Looking describes it in full, with the same atmosphere as before.
+        self.assertIn(room, self.say(player, "look"))
+        self.assertIn("every time", self.say(player, "verbose"))
+        self.say(player, "east")
+        self.assertIn(room, self.say(player, "west"))
+        # A remembered place can be gone back to by name.
+        self.say(player, "brief")
+        self.say(player, "east")
+        back = self.say(player, "go to entry chamber")
+        self.assertTrue(back.startswith("You make your way back to Entry chamber.\nEntry chamber\nAn open wooden door leads east."), back)
+        self.assertEqual("You're already in Entry chamber.\n> ", self.say(player, "go to Entry chamber"))
+
+    def test_directions_cross_open_ground_without_walls(self):
+        self.server(scenario="streaming-corridor")
+        player, welcome = self.adventure()
+        self.assertIn("Open ground stretches away into darkness on every side.", welcome)
+        # The walk goes on through the dark until something comes into view.
+        self.assertEqual(
+            "You set off east. A warden comes into view to the east, and you stop warily.\n> ",
+            self.say(player, "east"),
+        )
+        # The same open place throughout: no new description on arrival.
+        back = self.say(player, "west")
+        self.assertTrue(back.startswith("You walk west"), back)
+        self.assertNotIn("You are in", back)
+
+    def test_a_two_cell_body_steps_past_a_doorway_corner(self):
+        # Regression: a two-cell body needed both sides of a diagonal clear,
+        # so from beside the wall it couldn't step into the doorway, and
+        # journeys past the corner stopped "blocked".
+        self.server(wizard=True, scenario="first-dungeon")
+        wizard = self.wizard()
+        self.wizard_command(wizard, "teleport 1 1 6 1 0")
+        player, _ = self.adventure()
+        stepped = self.say(player, "step se")
+        # Through the doorway's portal, into the next room.
+        self.assertTrue(stepped.startswith("You step southeast.\nBroken gallery\n"), stepped)
 
 
 if __name__ == "__main__":

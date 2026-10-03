@@ -21,8 +21,10 @@ covers the language layer it starts from, and the
   a pickup).
 - **No mechanics on screen.** Ticks, readiness, revisions, ids and offsets
   stay underneath. HP is the one number shown, because the player plays by it.
-- **Only disclosed facts.** The engine reads the disclosed view; it never
-  invents causes, names, inscriptions or rooms.
+- **Only disclosed facts, with atmosphere.** The engine reads the disclosed
+  view; it never invents causes, names, inscriptions, rooms or anything that
+  would matter to play. Atmosphere (mood words, smells, sounds) colours places
+  but has no gameplay effect and is fixed per place.
 - **Deterministic.** The same game and the same input give the same text.
 
 ## Pipeline
@@ -79,6 +81,9 @@ Inform's:
   not carried, `drop` carried things, `attack` figures, `open` doors.
 - **Indistinguishable things never cause a question.** `take token` with two
   identical tokens takes one; `take tokens` or `take all tokens` takes both.
+  Things that look alike but are in different places, one carried and one on
+  the floor, are still asked about by where they are: the player can't know
+  they're identical.
 - `all`, `everything` and `all except …` expand within the verb's domain:
   for `take`, things here and not carried; for `drop`, carried things.
 - Pronouns: `it` is the last thing or door mentioned *by the player or the
@@ -110,11 +115,14 @@ Examples:
 | drop, put down, discard; put on the floor | carried thing | `Act(Drop)` |
 | open, close, shut | door within reach | `Act(SetDoor)` |
 | | door out of reach | `Approach(door)`, `Act(SetDoor)` |
-| attack, kill, hit, fight, strike | figure | `Approach(figure)` when not next to it, then `Act(Attack)` (which resumes interrupted preparation) |
+| attack, kill, hit, fight, strike | figure | `Approach(figure)` when not next to it, then `Act(Attack)` (which resumes interrupted preparation); an approach "blocked" by the figure stepping up next to the character goes on to the attack |
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
-| a direction; go, walk, head | way onward | `Approach(exit)`, then the new place is described |
+| | a remembered place, by name | `Travel` to the key it was learned at; "You're already in ..." when there |
+| | `start`, `the beginning` (also `go back to ...`) | `Travel` to the cell the character stood on when the client began |
+| | `exit`, `the way out` | `Travel` to the objective's exit cell, when the objective is disclosed |
+| a direction; go, walk, head | way onward | `Approach(exit)`, then on while there's nothing to see (see [walking on](#walking-on)); the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
-| examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene |
+| examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |
 | wear, eat, drink, give, throw, unlock, push, talk, search, pray, ... | anything | refusal once the object is found: "You can't wear anything yet." |
 
 A step's preconditions are checked again just before it runs, with the view
@@ -143,10 +151,11 @@ picking it up").
 character is next, then reports it `ready`. So an action step completes at the
 first update after its acknowledgement whose revision is newer and in which the
 character is ready, and a journey step at the first update in which its travel
-has ended and the character is ready. If play goes quiet for two seconds with
-the character still not ready, the step ends anyway: another player's
-character, or one nothing controls, is next. A journey still keeps the way it
-ended. That removes today's race, where the prompt returned at
+has ended and the character is ready. When play stops and the server's
+`waiting` message says it isn't this player's move (another player's
+character, one nobody controls, paused AI, or nothing left to act), the step
+ends there, and what follows is told between turns. A journey still keeps the
+way it ended. Ten silent seconds end it too, as a safety net. That removes today's race, where the prompt returned at
 the acknowledgement and the rest of the turn arrived after it, and the
 corpse bug, where a pickup after a journey was dropped because the character
 was still recovering.
@@ -185,7 +194,8 @@ The composer realizes the turn's intentions and beats as one passage:
    to the copper token and pick it up."
 3. **Interruptions keep the purpose:** "You walk toward the copper token,
    intent on picking it up. A ruin scout steps into view to the east, and you
-   stop warily."
+   stop warily." A journey stopped by a blow says so: "You set off east. The
+   ember wisp strikes you. You stop short."
 4. **Combat reads as an exchange,** in the order it happened, with pronouns for
    repeated subjects: "You strike the ruin scout. It lunges back and catches
    you." Deaths end the exchange: "The ruin scout collapses." HP follows once,
@@ -207,7 +217,10 @@ was just described.
 ### Places and ways
 
 `engine::place` works out the place the character is in from the disclosed
-cells alone. The body stands on the open cells at its own level (z = 0) with
+cells alone: those in sight, and those remembered from earlier views of this
+connection, aligned to this one (`engine::seen`, from the client's map
+memory). So a doorway seen a moment ago is still a way out when the angle
+hides its floor. Things and figures are only what's in sight. The body stands on the open cells at its own level (z = 0) with
 headroom above (z = 1). A column is open when its z = 0 cell is seen, open and
 not a doorway, with no wall seen above it.
 
@@ -220,28 +233,130 @@ not a doorway, with no wall seen above it.
   place is the open ground nearest the same authored place hint.
 - **Ways.** Doors and open columns at the edge of the place, grouped where they
   touch, are its openings: a door, a passage (more gaps beyond) or an archway.
+  An opening is named by the side of the place it's in, so the doorway in the
+  east wall leads east wherever the character stands; it also answers to its
+  bearing from the character ("southeast", standing beside it) when no
+  opening is named that way.
   A journey through one ends at the farthest seen open cell up to three steps
   beyond it. Stairs at the character's cell are ways up or down. When no
   opening lies in a direction, an authored anchor seen that way in another
-  place is the fallback.
+  place is the fallback. Where the place goes on out of sight, or in open
+  ground (no walls in sight), a direction without either leads to the
+  farthest open cell seen that way (inside the place, within walls), keeping
+  as straight as it can, so the character can walk on into the unseen.
 - **Form.** No walls seen: an open space. Standing in a gap, or a place at most
   two columns wide and four long: a passage. Up to 6 columns: an alcove; up to
   40: a chamber (small up to 15); more: a large hall.
 - **Beyond sight.** Unseen columns at the place's edge mean it goes on out of
-  sight in their directions.
+  sight in their directions, where some of the place is seen that way.
 
-`narrative::describe_place` says this in a sentence ("You are in a small
-chamber with a stone floor and walls of stone. It goes on out of sight to the
-north."), and `adventure::describe_place_with` adds the place's name, what is
-in it ("on the floor nearby" means inside the place), figures, doors and the
-ways onward. A direction picks the ways that way; a closed door answers "The
-oak door to the east is closed." A journey blocked next to a creature says it
-"bars the way". Descriptions state only disclosed facts: no smells, draughts
-or invented epithets.
+### Walking on
 
-`narrative::current_place_anchor` names the place for `name room` and the
-title: an authored place hint inside it, or else the open cell nearest the
-middle of what's seen of it.
+A direction is a walk, not one journey. When a journey ends and nothing new
+has come into view, the client sends another, leg after leg, so the player
+isn't asked to type `east` across featureless ground
+(`adventure::onward`, run by `engine::turn`):
+
+- **Into darkness.** Where the place fades into darkness that way, or across
+  open ground, the next leg goes to the farthest floor seen that way.
+- **Along a corridor.** Standing where exactly two ways lead off and one is
+  ahead, the walk follows the corridor round its bends
+  (`place::corridor_ahead`) to just before a junction, a door beside the way,
+  a dead end or unseen floor.
+- **It stops** when a creature comes into view (the server stops the journey
+  too), when a thing or door not seen when the walk began comes into view
+  ("You walk east, then north, until you see a copper token to the north."),
+  on entering a room or a place with another authored hint, at an opening
+  or door ahead, where there's nowhere further to go, or after twelve legs.
+
+The narration is one sentence however many legs it took: the direction set
+off in, the one the walk ended up heading if a bend changed it, and what
+made it stop.
+
+Open ground with no walls or hints in sight has no bounds to tell one part
+from another, so it is all one place, with one atmosphere.
+
+### Descriptions
+
+`adventure::describe_place_with` tells a place under its name in two
+paragraphs: the place and its ways out, then who and what is in it.
+
+```text
+Hidden Promise
+You are in a small, damp chamber of stone. A damp chill clings to the stones.
+Somewhere out of sight, water drips slowly. A passage leads north, an open
+oak door east, and a closed oak door south.
+There is a wounded ruin scout to the east. A copper token lies at your feet;
+two stone tablets lie on the floor nearby.
+```
+
+- **The place** (`narrative::describe_place`): its kind and size, what it's
+  made of ("of stone" when floor and walls match, otherwise "with a flagstone
+  floor and walls of dressed stone"), its atmosphere, a high ceiling, and where
+  it fades into darkness ("To the north and east it fades into darkness.";
+  "Open ground stretches away into darkness on every side."). Each of those
+  directions can be walked.
+- **Ways by kind.** Openings of one kind are named once with their directions,
+  and later kinds are gapped: "A passage leads north, and open oak doors east
+  and west." Directions with only a place seen beyond follow ("You can also
+  head south."). A walled place with no way out and nothing out of sight says
+  "You see no way onward."
+- **Who and what is here.** Figures alike in one direction are counted
+  together, with injuries as adjectives ("two badly wounded rats"); healthy
+  figures get none. Things alike in one place are counted together, stacks
+  included ("At your feet lie 17 arrows"), and a name already told is
+  "another" or "more" ("another copper token lies to the south"). Doors in
+  sight that aren't ways out of this place come last ("You can also see an
+  open wooden door to the northeast.").
+
+`look` always describes the place in full, with HP but not the objective,
+which the opening description shows and `status` (or `score`) recalls.
+
+**Arrivals.** A turn that ends in another place than it began, whether by a
+direction, by a place's name or by walking over to something, describes the
+new place after the narration. A direction across open ground can end in the
+same place, and isn't described again. Sightings during the turn of figures the description names are
+dropped, unless one cut a goal short ("as a rat comes into view"). How fully
+it's described depends on the verbosity, which the engine keeps with the set
+of places it has described in full:
+
+| Mode | First arrival | Later arrivals |
+| --- | --- | --- |
+| `brief` (default) | in full | name, ways, contents |
+| `verbose` | in full | in full |
+| `superbrief` | name and contents | name and contents |
+
+A place without a name says "You are back in the damp chamber." instead.
+This isn't game state: it's lost on restart, like the rest of `Engine`.
+
+### Atmosphere
+
+`engine::atmosphere` colours places without affecting play. Each place gets a
+*theme* for its fabric (stone, marble, timber, earth, or nothing seen), and a
+theme's mood words, air, smell and sound belong together: a "damp chamber"
+smells of wet stone, never of dust. The description gets the mood word, the
+air, sometimes a closeness note for narrow passages, and for a third of places
+each the smell or the sound. `smell` and `listen` answer with the place's own,
+and `listen` names whoever is in sight ("You keep an ear on the two rats.")
+without saying what they're doing.
+
+Every choice is a separate hash of the place's key, so a place reads the same
+on every visit and from anywhere inside it, while neighbouring places rarely
+share a description. Stone alone has nine themes, each with two or three
+mood words and two choices per sense.
+
+A place's key is its authored place hint (the nearest, should what's seen
+join two rooms into one place, as it can across a doorway). A place
+without a hint is known by the key most of its cells were first seen under,
+which `narrative::Places` remembers in the engine; a place seen for the first
+time takes its lowest open cell key. So a corridor seen in part keeps its key
+as the rest of it comes into sight. Cell keys are fixed for a game (they're
+salted per save), so a hinted place reads alike for the whole game, but a new
+game may colour it differently; an unhinted one reads alike until the client
+restarts. A hint's authored name, or the player's, titles the place (invented names
+are left unsaid), and `name room` renames it; a place without a hint can't be
+named. Open ground has its own themes,
+with nothing about walls or corners.
 
 ## Testing
 
@@ -265,7 +380,7 @@ Following the [testing policy](testing.md):
 
 ## Implementation order
 
-1. **Structured combat events** (done, protocol 21): blows, interruptions and
+1. **Structured combat events** (done): blows, interruptions and
    deaths reach clients as data; injury is a level and the objective a kind.
    The server sends no prose.
 2. **The engine core** (done): scene, resolution, verb plans, turn execution,
@@ -273,42 +388,22 @@ Following the [testing policy](testing.md):
    and `parser::{scope, matcher, context}`.
 3. **Places, exits and room descriptions** (done): see
    [places and ways](#places-and-ways).
+4. **Prose descriptions, atmosphere and verbosity** (done): see
+   [descriptions](#descriptions) and [atmosphere](#atmosphere).
+5. **Protocol 22** (done): the `waiting` signal ends turns, the objective's
+   exit is disclosed by key (`go to exit`; "The exit is to the west."), and
+   places carry authored names, with invented ones left unsaid.
 
 ## Next steps
 
 These are the open items, roughly in order of value. Each needs only the code
 named unless it says otherwise.
 
-1. **Descriptions as prose, not lists.** `adventure::describe_place_with` still
-   prints one "You see ..." line per thing. Compose them into sentences ("A
-   copper token lies at your feet; a stone tablet stands against the east
-   wall."), group figures and their injuries, and name the ways by kind ("An
-   archway leads east, and an open oak door west."). Keep exact process
-   transcripts in step.
-2. **Brief and verbose descriptions.** `verbose`, `brief` and `superbrief` are
-   parsed but only answer "Descriptions are set." Keep a set of place keys
-   described in full in `Engine`, give a revisited place its name and contents
-   only in brief mode, and describe every arrival in verbose mode.
-3. **Remembered places.** `places` lists names, but `go to <place name>`
-   doesn't travel to a remembered place out of sight. That needs a destination
-   the server accepts: travel takes a known cell key, and remembered cells are
-   in `ClientState::memory`.
-4. **Stable names for unhinted places.** Without a place hint, the anchor is
-   the open cell nearest the middle of what's seen, which moves as more is
-   seen. Choosing it from remembered cells, or asking scenario authors for
-   hints in every room, would make names stick.
-5. **Authored region names.** Regions have authored names ("Threshold") the
-   protocol doesn't disclose, so titles are the character's mnemonic names.
-   Disclosing them is a protocol change: ask the maintainer.
-6. **Knowing when it's this player's move.** A turn ends when the character is
-   ready, or after two quiet seconds when someone else's character is next.
-   A server signal for "waiting on another client" would remove the timeout
-   (a protocol change).
-7. **Verbs waiting for game rules.** When the game gains equipment,
+1. **Verbs waiting for game rules.** When the game gains equipment,
    consumables, containers, locks or speech, add the action to
    `engine::verbs::Goal`, map the verbs to it, run it in `engine::turn::step`,
    and narrate its event in `engine::chronicle` and `engine::narrate`.
-8. **Fewer surveys.** A `look` surveys the place three times (description,
+2. **Fewer surveys.** A `look` surveys the place three times (description,
    anchor, ways); cache one survey per state revision if descriptions get
    slower.
 

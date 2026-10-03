@@ -99,14 +99,8 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         ))
         .await
         .unwrap();
-    let frame = timeout(Duration::from_secs(5), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let ServerMessage::Snapshot { snapshot, .. } =
-        serde_json::from_str(frame.to_text().unwrap()).unwrap()
-    else {
+    let message = next_message(&mut socket).await;
+    let ServerMessage::Snapshot { snapshot, .. } = message else {
         panic!("snapshot required")
     };
     let branch = snapshot.branch;
@@ -149,12 +143,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
             .await
             .unwrap();
         loop {
-            let frame = timeout(Duration::from_secs(5), socket.next())
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-            match serde_json::from_str::<ServerMessage>(frame.to_text().unwrap()).unwrap() {
+            match next_message(&mut socket).await {
                 ServerMessage::Ack { request_id, .. } if request_id == id => break,
                 ServerMessage::Update { .. } => {}
                 other => panic!("{other:?}"),
@@ -183,14 +172,8 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         ))
         .await
         .unwrap();
-    let frame = timeout(Duration::from_secs(5), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let ServerMessage::Snapshot { snapshot, .. } =
-        serde_json::from_str(frame.to_text().unwrap()).unwrap()
-    else {
+    let message = next_message(&mut socket).await;
+    let ServerMessage::Snapshot { snapshot, .. } = message else {
         panic!("snapshot required")
     };
     assert_eq!(snapshot.branch, branch);
@@ -217,16 +200,30 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         .send(Message::Text(serde_json::to_string(&retry).unwrap().into()))
         .await
         .unwrap();
-    let frame = timeout(Duration::from_secs(5), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let message = next_message(&mut socket).await;
     assert_eq!(
-        serde_json::from_str::<ServerMessage>(frame.to_text().unwrap()).unwrap(),
+        message,
         ServerMessage::Ack {
             request_id: "wait".into(),
             entry_id: Some(snapshot.history.entries[0].id.clone()),
         }
     );
+}
+
+/// The next message, past `waiting` signals, which these tests don't watch.
+async fn next_message<S>(socket: &mut S) -> ServerMessage
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    loop {
+        let frame = timeout(Duration::from_secs(5), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        match serde_json::from_str(frame.to_text().unwrap()).unwrap() {
+            ServerMessage::Waiting { .. } => continue,
+            message => return message,
+        }
+    }
 }

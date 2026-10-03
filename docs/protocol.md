@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":21,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":22,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -136,6 +136,14 @@ Clients receive `update` messages without polling:
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
 | `control` | This connection gained or lost control |
+
+When play stops for input, the server sends `waiting { on }` after the updates
+of that run, and again after a snapshot: `you` (this client controls the actor
+that's next), `others` (another client's actor is next), `unclaimed` (a
+character no client controls is next), `paused` (AI play waits for a
+controller's action or `continue`) or `stopped` (nothing can act). It's sent
+once per stop, and again after every answered request, so a client can end its
+turn on it instead of waiting for play to go quiet.
 
 Every update has actor and branch identities, a connection-scoped sequence, and
 simulation tick. Multiple updates can share a tick. The stream sequence increments
@@ -430,7 +438,8 @@ historical rules implementations or save importers.
 ## Durable places
 
 `observation.places` is the complete authoritative list of learned anchor keys
-and character-owned mnemonic names. It includes offscreen knowledge, without
+and the names the character knows them by, each with its `origin`
+(`invented`, `authored` or `player`). It includes offscreen knowledge, without
 positions, bearings, authored region identities or reachability metadata.
 `rename_place { expected_revision, key, name }` requires control; names contain
 1–80 UTF-8 bytes with no controls or edge whitespace. The journaled command
@@ -461,7 +470,8 @@ Attack actions carry a disclosed target actor ID. Movement never implicitly
 attacks. Combat observations carry own HP, preparation/recovery, qualitative
 visible-actor injury (`healthy`, `wounded`, `badly_wounded`, `near_death`) and
 hostility, the objective's kind when enabled (`retrieve_and_return` or
-`reach_exit`), and durable victory/death status.
+`reach_exit`) with `exit`, the opaque key of the cell where it's met (the cell
+itself is disclosed only when seen), and durable victory/death status.
 
 They also carry `events`: what the action the view follows did, as far as the
 observer knows. An `attack` names its `attacker` and `target` and its `outcome`

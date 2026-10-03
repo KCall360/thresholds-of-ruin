@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 14;
+pub(crate) const ARCHIVE_VERSION: u32 = 15;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -1030,9 +1030,14 @@ impl Engine {
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
-            .map(|(location, name)| PlaceView {
+            .map(|(location, name, origin)| PlaceView {
                 key: adapt::cell_key(&self.archive.view_salt, actor.0, location),
                 name: name.into(),
+                origin: match origin {
+                    tor_simulation::NameOrigin::Invented => PlaceNameOrigin::Invented,
+                    tor_simulation::NameOrigin::Authored => PlaceNameOrigin::Authored,
+                    tor_simulation::NameOrigin::Player => PlaceNameOrigin::Player,
+                },
             })
             .collect();
         Ok(observation)
@@ -1520,10 +1525,10 @@ impl Engine {
                 let location = self
                     .game
                     .remembered_places(SimActor(receipt.actor.0))
-                    .find(|(location, _)| {
+                    .find(|(location, ..)| {
                         adapt::cell_key(&self.archive.view_salt, receipt.actor.0, *location) == *key
                     })
-                    .map(|(location, _)| location)
+                    .map(|(location, ..)| location)
                     .ok_or_else(|| {
                         Failure::new(ErrorCode::InvalidRequest, "Place or name is unavailable")
                     })?;

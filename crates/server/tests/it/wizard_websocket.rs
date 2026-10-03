@@ -11,7 +11,17 @@ use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOpera
 use tor_server::{serve, Account, Engine, Scenario, Service, Simulation};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// The next message, past `waiting` signals, which only some tests watch for
+/// (see [`receive_any`]).
 async fn receive(client: &mut Client) -> ServerMessage {
+    loop {
+        match receive_any(client).await {
+            ServerMessage::Waiting { .. } => continue,
+            message => return message,
+        }
+    }
+}
+async fn receive_any(client: &mut Client) -> ServerMessage {
     let message = timeout(Duration::from_secs(5), client.next())
         .await
         .unwrap()

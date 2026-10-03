@@ -136,7 +136,7 @@ class DoorProcesses(ProcessTestCase):
     def test_rotated_aperture_door_remains_an_ordinary_visible_object(self):
         self.server(scenario="doors-rotated")
         player, welcome = self.adventure()
-        self.assertIn("closed wooden door to the east", welcome)
+        self.assertIn("A closed wooden door leads east.", welcome)
         self.assertNotIn("stone tablet", welcome)
         self.assertEqual(self.say(player, "open door"), "You open the wooden door.\n> ")
         self.assertIn("stone tablet", self.say(player, "look"))

@@ -1,5 +1,5 @@
 use crate::support::{self, act, act_as, run_ai_turns};
-use tor_protocol::{Action, ActorId, Direction};
+use tor_protocol::{Action, ActorId, Direction, Position};
 use tor_server::{scenario_package, Engine};
 
 #[test]
@@ -171,7 +171,25 @@ fn optional_starting_ai_keeps_inventory_and_higher_id_human_gets_input_boundary(
     let view = engine.state(ActorId(7)).unwrap().observation;
     assert!(view.combat.as_ref().unwrap().victory);
     assert!(view.combat.as_ref().unwrap().objective.is_none());
+    // An undisclosed objective discloses no exit either.
+    assert!(view.combat.as_ref().unwrap().exit.is_none());
     assert!(!view.combat.as_ref().unwrap().terminal);
+}
+
+#[test]
+fn a_disclosed_objective_names_its_exit_cell_by_key() {
+    let root = support::package("dungeon-loop");
+    let engine = Engine::memory(scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+    let view = engine.state(ActorId(1)).unwrap().observation;
+    // The character starts on the exit, so its key is the cell underfoot.
+    let here = view
+        .visible_cells
+        .iter()
+        .find(|c| c.position == Position { x: 0, y: 0, z: 0 })
+        .unwrap();
+    let exit = view.combat.as_ref().unwrap().exit.clone().unwrap();
+    assert_eq!(exit, here.key);
+    assert!(engine.travel_route(ActorId(1), &exit).is_ok());
 }
 
 #[test]
@@ -306,4 +324,24 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
             .unwrap()
             .preparation_active
     );
+}
+
+#[test]
+fn a_two_cell_body_steps_diagonally_into_a_doorway_past_its_corner() {
+    // Regression: the delver needed both sides of a diagonal clear, so it
+    // couldn't step into a doorway from beside the wall. It starts beside
+    // the east wall, north of the doorway, whose gap is a portal to the
+    // next room; the scout there hasn't moved yet.
+    let root = support::package("first-dungeon");
+    let mut engine =
+        Engine::memory(scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+    engine.enable_wizard().unwrap();
+    support::wizard(&mut engine, ActorId(1), "teleport 1 1 6 1 0").unwrap();
+    act(
+        &mut engine,
+        Action::Move {
+            direction: Direction::SouthEast,
+        },
+    )
+    .unwrap();
 }

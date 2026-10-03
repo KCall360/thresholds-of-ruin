@@ -42,7 +42,7 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
         .await?;
     }
     engine.learn(&connection);
-    println!("{}", engine::describe(&connection));
+    println!("{}", engine.welcome(&connection));
     prompt()?;
     let (tx, mut rx) = mpsc::channel(16);
     std::thread::spawn(move || {

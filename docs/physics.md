@@ -24,8 +24,11 @@ introduced. A character can emerge horizontally through a sideways portal.
 
 Bodies may straddle regions. Every monotone topology route to an occupied offset
 must agree on location and frame; self-overlap, incomplete apertures, obstruction,
-or conflicting transforms reject placement. Translation checks all occupied cells
-and all component orderings for simultaneous diagonal moves. Closing a door,
+or conflicting transforms reject placement. Translation checks all occupied cells.
+A walking diagonal needs one ordering of its two component steps to carry the
+whole body clear, as for a single cell (both, if open, must agree); other
+simultaneous diagonal translations, such as falling while sliding, check all
+component orderings. Closing a door,
 placing a wall, and teleportation respect the full body.
 
 ## Gravity and deterministic time

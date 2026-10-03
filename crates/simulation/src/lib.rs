@@ -16,6 +16,7 @@ mod fixture;
 mod navigation_map;
 mod observation;
 mod places;
+pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
     MemoryRecords, PinWork, RecordId, RecordStore, ReferencePoint, ReferencePointId,
@@ -467,6 +468,20 @@ impl Game {
     }
 
     /// Map-authoring metadata; no action time, names, boundaries or travel rules.
+    /// A place hint the character learns by this authored name.
+    pub fn set_named_place_hint(
+        &mut self,
+        location: Location,
+        name: &str,
+    ) -> Result<(), GameError> {
+        if !places::valid_name(name) {
+            return Err(GameError::InvalidLocation);
+        }
+        self.world
+            .set_named_place_hint(location, name)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
     pub fn set_place_hint(&mut self, location: Location, present: bool) -> Result<(), GameError> {
         self.world
             .set_place_hint(location, present)

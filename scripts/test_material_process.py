@@ -21,7 +21,7 @@ class MaterialProcesses(ProcessTestCase):
     def test_normal_enclosure_surfaces_movement_and_resume(self):
         server = self.server()
         player, welcome = self.adventure()
-        self.assertIn("walls of stone", welcome)
+        self.assertIn("chamber of stone", welcome)
         self.assertIn("stone", self.say(player, "examine ceiling"))
         observer, initial = self.client(SPECTATOR_TOKEN)
         # Floors and ceilings are seen solid cells: stone underfoot, open
@@ -35,7 +35,7 @@ class MaterialProcesses(ProcessTestCase):
         self.assertIn("walk east", self.say(player, "east"))
         expected = self.request(observer, {"type": "snapshot"})["state"]
         player.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v17")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "dungeon-v18")
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], expected)
@@ -83,7 +83,7 @@ class MaterialProcesses(ProcessTestCase):
         fixture = load_fixture("material-volumes.json")
         observer, initial = self.client(SPECTATOR_TOKEN)
         text, welcome = self.adventure(SPECTATOR_TOKEN)
-        self.assertIn("stone floor", welcome)
+        self.assertIn("chamber of stone", welcome)
         self.assertIn("stone", self.say(text, "examine ceiling"))
         capture = Path(os.environ.get("TOR_MATERIAL_CAPTURE", str(self.save.parent / "material.ppm")))
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", capture], token=SPECTATOR_TOKEN)

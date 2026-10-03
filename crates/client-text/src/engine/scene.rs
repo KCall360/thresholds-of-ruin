@@ -188,11 +188,22 @@ pub fn whereabouts(p: Position) -> String {
 pub struct Scene<'a> {
     pub state: &'a StateView,
     pub palette: &'a Palette,
+    /// Places remembered, for the atmosphere of the place in view.
+    pub places: &'a crate::narrative::Places,
     pub referents: Vec<Referent>,
 }
 
 impl<'a> Scene<'a> {
     pub fn new(state: &'a StateView, palette: &'a Palette) -> Self {
+        Self::remembering(state, palette, &crate::narrative::NO_PLACES)
+    }
+
+    /// The scene, with the places the engine remembers.
+    pub fn remembering(
+        state: &'a StateView,
+        palette: &'a Palette,
+        places: &'a crate::narrative::Places,
+    ) -> Self {
         let o = &state.observation;
         let mut referents = Vec::new();
         for item in &o.inventory {
@@ -303,6 +314,7 @@ impl<'a> Scene<'a> {
         Self {
             state,
             palette,
+            places,
             referents,
         }
     }

@@ -16,6 +16,8 @@ enum Frame {
     View(StateView, Option<Event>),
     /// The status of the journey this request started.
     Journey(TravelPhase),
+    /// Play stopped; whose move it is.
+    Waiting(Waiting),
 }
 
 type Responder = Box<dyn FnMut(&Request, &StateView) -> Vec<Frame>>;
@@ -156,6 +158,7 @@ impl Link for Scripted {
                     code,
                     message: String::new(),
                 },
+                Frame::Waiting(on) => ServerMessage::Waiting { on },
                 Frame::View(mut state, event) => {
                     let (tick, revision) = self.last();
                     state.revision = revision + 1;
@@ -397,7 +400,15 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "get tablet").await;
-    assert_eq!(text, "You walk over to the stone tablet and pick it up.");
+    let (told, arrival) = text.split_once('\n').unwrap();
+    assert_eq!(told, "You walk over to the stone tablet and pick it up.");
+    // The tablet was in another place, so that place is described: the
+    // character was walked into it.
+    assert!(arrival.starts_with("You are in an open"), "{arrival}");
+    assert!(
+        arrival.contains("A copper token lies to the west."),
+        "{arrival}"
+    );
     assert!(is_travel(&link.sent[0]));
     assert!(is_act(
         &link.sent[1],
@@ -436,7 +447,10 @@ async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
     });
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "take tablet").await;
-    assert_eq!(text, "You walk over to the stone tablet and pick it up.");
+    assert_eq!(
+        text.lines().next(),
+        Some("You walk over to the stone tablet and pick it up.")
+    );
     assert_eq!(link.sent.len(), 2);
     assert_eq!(link.client.state().observation.inventory.len(), 1);
 }
@@ -497,10 +511,13 @@ async fn arriving_as_a_figure_appears_stops_short_of_the_pickup() {
     });
     let mut engine = Engine::default();
     let text = play(&mut link, &mut engine, "take the tablet").await;
+    // The sighting is why the pickup waits, so it's told even though the
+    // new place's description names the rat too.
     assert_eq!(
-        text,
-        "You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east."
+        text.lines().next(),
+        Some("You walk over to the stone tablet, but stop short of picking it up as a rat comes into view to the east.")
     );
+    assert!(text.contains("There is a rat to the east."), "{text}");
     assert_eq!(link.sent.len(), 1);
 }
 
@@ -718,7 +735,6 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
         ("talk to me", "You can't talk with anyone yet."),
         ("jump", "You can't jump yet."),
         ("push", "What do you want to push?"),
-        ("listen", "You hear nothing out of the ordinary."),
         (
             "frobnicate the token",
             "I don't understand \"frobnicate the token\".",
@@ -726,5 +742,432 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
     ] {
         assert_eq!(play(&mut link, &mut engine, line).await, answer, "{line}");
     }
+    // Listening is answered by the place's atmosphere, and takes no time.
+    let heard = play(&mut link, &mut engine, "listen").await;
+    assert!(
+        !heard.is_empty() && !heard.starts_with("You can't"),
+        "{heard}"
+    );
     assert!(link.sent.is_empty());
+}
+
+#[tokio::test]
+async fn stacks_of_alike_things_are_counted_together() {
+    // Regression: three stacks of arrows were "the ten arrows, the five
+    // arrows, the two arrows", and two stacks of three potions "the two
+    // three red potionses".
+    let mut s = state();
+    let stack = |id: u64, name: &str, quantity: u64| {
+        serde_json::from_value::<GroundItemView>(serde_json::json!({
+            "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
+            "item": {"quantity": quantity, "appearance": "item", "identified": true,
+                "id": id, "name": name, "description": ""}}))
+        .unwrap()
+    };
+    s.observation.ground_items = vec![
+        stack(10, "arrow", 10),
+        stack(11, "arrow", 5),
+        stack(12, "arrow", 2),
+        stack(13, "red potion", 3),
+        stack(14, "red potion", 3),
+    ];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "take all").await,
+        "You pick up the 17 arrows and the six red potions."
+    );
+}
+
+#[tokio::test]
+async fn a_place_is_described_in_full_once_and_then_named_unless_verbose() {
+    // Journeys go east to the second hinted place and back west.
+    let mut link = Scripted::new(state(), |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let there = now.observation.visible_cells[0].position.x != 0;
+            let (view, direction) = if there {
+                let mut back = now.clone();
+                for c in &mut back.observation.visible_cells {
+                    c.position.x += 6;
+                }
+                for g in &mut back.observation.ground_items {
+                    g.position.x += 6;
+                    g.reachable = g.position == Position { x: 0, y: 0, z: 0 };
+                }
+                back.observation.tick += 60;
+                (back, Direction::West)
+            } else {
+                (east(now.clone(), 6), Direction::East)
+            };
+            vec![
+                Frame::Ack,
+                Frame::View(view, Some(Event::Moved { direction })),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert!(engine.welcome(&link).contains("You are in an open"));
+    let there = play(&mut link, &mut engine, "east").await;
+    assert!(
+        there.starts_with("You walk east.\nYou are in an open"),
+        "{there}"
+    );
+    // Back where the game began: already described, so only named.
+    let back = play(&mut link, &mut engine, "west").await;
+    assert!(
+        back.starts_with("You walk west.\nYou are back in the open"),
+        "{back}"
+    );
+    assert!(back.contains("A copper token lies at your feet"), "{back}");
+    assert_eq!(
+        play(&mut link, &mut engine, "verbose").await,
+        "Places are described in full every time you arrive."
+    );
+    let again = play(&mut link, &mut engine, "east").await;
+    assert!(
+        again.starts_with("You walk east.\nYou are in an open"),
+        "{again}"
+    );
+    play(&mut link, &mut engine, "superbrief").await;
+    let named = play(&mut link, &mut engine, "west").await;
+    assert!(
+        named.starts_with("You walk west.\nYou are back in"),
+        "{named}"
+    );
+    assert!(!named.contains("You can head"), "{named}");
+    // Looking always describes in full.
+    assert!(play(&mut link, &mut engine, "look")
+        .await
+        .contains("You are in an open"));
+}
+
+#[tokio::test]
+async fn a_remembered_place_is_travelled_to_by_name() {
+    let mut s = state();
+    s.observation.places = vec![PlaceView {
+        key: "cell-6".into(),
+        name: "Far Hall".into(),
+        origin: PlaceNameOrigin::Authored,
+    }];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "go to far hall").await;
+    assert!(
+        text.starts_with(
+            "You make your way back to Far Hall.
+Far Hall
+You are in "
+        ),
+        "{text}"
+    );
+    assert!(matches!(
+        &link.sent[0],
+        Request::Command { command: Command::Travel { destination, .. }, .. } if destination == "cell-6"
+    ));
+}
+
+#[tokio::test]
+async fn walking_across_open_ground_stays_in_one_place() {
+    // No walls or hints: all of it is one open place, so arriving isn't a
+    // new place to describe, and a creature seen on the way is still told.
+    let mut s = state();
+    for cell in &mut s.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    let mut link = Scripted::new(s, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut there = east(now.clone(), 6);
+            there.observation.visible_actors.push(figure(2, "rat", 3));
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "east").await;
+    assert!(text.starts_with("You walk east."), "{text}");
+    assert!(text.contains("rat"), "{text}");
+    assert!(!text.contains("You are"), "{text}");
+}
+
+#[tokio::test]
+async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
+    // Regression: closing in on a figure that stepped into the way ended the
+    // turn with "the way is blocked", though it was right there.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin scout", 4));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut met = now.clone();
+            met.observation.visible_actors[0].position.x = 1;
+            vec![
+                Frame::Ack,
+                Frame::View(met, None),
+                Frame::Journey(TravelPhase::Blocked),
+            ]
+        }
+        Request::Command {
+            command:
+                Command::Act {
+                    action: Action::Attack { .. },
+                    ..
+                },
+            ..
+        } => {
+            let mut after = combat(
+                now.clone(),
+                50,
+                vec![
+                    CombatEventView::Attack {
+                        attacker: Some(ActorId(1)),
+                        target: Some(ActorId(2)),
+                        outcome: AttackOutcome::Hit,
+                    },
+                    CombatEventView::Died { actor: ActorId(2) },
+                ],
+            );
+            after.observation.visible_actors.clear();
+            vec![
+                Frame::Ack,
+                Frame::View(after, Some(Event::AttackStarted { target: ActorId(2) })),
+            ]
+        }
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    let text = play(&mut link, &mut engine, "attack scout").await;
+    assert!(!text.contains("blocked"), "{text}");
+    assert!(
+        text.starts_with("You close in on the ruin scout."),
+        "{text}"
+    );
+    assert!(text.contains("falls dead"), "{text}");
+    assert_eq!(link.sent.len(), 2);
+}
+
+#[tokio::test]
+async fn a_figure_that_backs_away_keeps_out_of_reach() {
+    // Regression: "You walk over to the ember wisp. You can't reach it from
+    // here." when it had moved off while the character closed in.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ember wisp", 4));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut there = east(now.clone(), 2);
+            there.observation.visible_actors[0].position.x = 3;
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => vec![Frame::Reject(ErrorCode::InvalidAction)],
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "attack wisp").await,
+        "You go after the ember wisp. It keeps out of reach."
+    );
+}
+
+#[tokio::test]
+async fn a_creature_in_the_way_is_named() {
+    // Regression: the creature barring a journey was found after the journey
+    // ended but looked for before, so it was never named.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin guard", 1));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => vec![Frame::Ack, Frame::Journey(TravelPhase::Blocked)],
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "take tablet").await,
+        "You head toward the stone tablet, intent on picking it up, but the ruin guard bars the way."
+    );
+}
+
+/// A server for walks across open ground: each journey goes six cells east
+/// and reveals six more cells beyond, and on the `find`th journey a pebble
+/// comes into view ahead.
+fn open_ground(find: usize) -> Scripted {
+    let mut start = state();
+    for cell in &mut start.observation.visible_cells {
+        cell.place_hint = false;
+    }
+    start.observation.ground_items.clear();
+    let legs = std::cell::Cell::new(0usize);
+    Scripted::new(start, move |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            legs.set(legs.get() + 1);
+            let mut there = east(now.clone(), 6);
+            let mut far = there.observation.visible_cells[0].clone();
+            for x in 1..=6 {
+                far.key = format!("far-{}-{x}", legs.get());
+                far.position.x = x;
+                there.observation.visible_cells.push(far.clone());
+            }
+            if legs.get() == find {
+                there.observation.ground_items.push(
+                    serde_json::from_value(serde_json::json!({
+                        "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
+                        "item": {"quantity": 1, "appearance": "item", "identified": true,
+                            "id": 7, "name": "pebble", "description": ""}}))
+                    .unwrap(),
+                );
+            }
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        other => obliging(other, now),
+    })
+}
+
+#[tokio::test]
+async fn a_walk_into_darkness_goes_on_until_something_comes_into_view() {
+    let mut link = open_ground(3);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "east").await,
+        "You walk east until you see a pebble to the east."
+    );
+    assert_eq!(link.sent.len(), 3);
+    assert!(link.sent.iter().all(is_travel));
+}
+
+#[tokio::test]
+async fn a_walk_with_nothing_to_find_stops_in_the_end() {
+    let mut link = open_ground(usize::MAX);
+    let mut engine = Engine::default();
+    assert_eq!(play(&mut link, &mut engine, "east").await, "You walk east.");
+    assert_eq!(link.sent.len(), 12);
+}
+
+#[tokio::test]
+async fn a_turn_ends_when_the_server_says_another_player_is_next() {
+    // The server's word ends the turn at once; what comes after it is
+    // another player's doing, told between turns.
+    let mut link = Scripted::new(state(), |request, now| match request {
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => {
+            let mut later = not_ready(now.clone());
+            later.observation.visible_actors.push(figure(2, "rat", 3));
+            vec![
+                Frame::View(not_ready(now.clone()), Some(Event::Waited)),
+                Frame::Ack,
+                Frame::Waiting(Waiting::Others),
+                Frame::View(later, None),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert_eq!(play(&mut link, &mut engine, "wait").await, "Time passes.");
+    assert_eq!(
+        link.queue.len(),
+        1,
+        "the rat's arrival waits for between turns"
+    );
+}
+
+#[tokio::test]
+async fn a_doorway_out_of_sight_a_moment_later_is_still_a_way_out() {
+    // Regression: beside the wall, only the head-height cell of a doorway
+    // was in sight, so the room had no way out until the character moved.
+    let room = ["#####", "#.@.'..", "#####"];
+    let start = crate::adventure::walled(&room);
+    let mut hidden = start.clone();
+    // The doorway's floor drops out of sight.
+    hidden
+        .observation
+        .visible_cells
+        .retain(|c| !(c.position.x == 2 && c.position.y == 0 && c.position.z == 0));
+    let mut link = Scripted::new(start, move |request, _| match request {
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => vec![Frame::View(hidden.clone(), Some(Event::Waited)), Frame::Ack],
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    play(&mut link, &mut engine, "wait").await;
+    let look = play(&mut link, &mut engine, "look").await;
+    assert!(look.contains("An open oak door leads east."), "{look}");
+}
+
+#[tokio::test]
+async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
+    // Regression: with a stack of two among 17 arrows carried, "drop 2
+    // arrows" said "You drop the two arrows".
+    let mut s = state();
+    let arrows = |id: u64, quantity: u64| {
+        serde_json::from_value::<ItemView>(serde_json::json!({
+            "quantity": quantity, "appearance": "item", "identified": true,
+            "id": id, "name": "arrow", "description": ""}))
+        .unwrap()
+    };
+    s.observation.inventory = vec![arrows(20, 2), arrows(21, 15)];
+    let mut link = Scripted::new(s, obliging);
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "drop 2 arrows").await,
+        "You drop two arrows."
+    );
 }

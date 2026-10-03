@@ -18,14 +18,14 @@ const DIRECTIONS: [Direction; 6] = [
 #[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
     pub(super) cells: RegionMap<Location, bool>,
-    pub(super) places: RegionMap<Location, String>,
+    pub(super) places: RegionMap<Location, crate::PlaceName>,
     pub(super) edges: RegionMap<(Location, Direction), (Location, u8)>,
 }
 
 impl Navigation {
     pub(crate) fn checkpoint_valid(&self, world: &tor_world::World) -> bool {
-        self.places.iter().all(|(location, name)| {
-            self.cells.contains_key(location) && crate::places::valid_name(name)
+        self.places.iter().all(|(location, place)| {
+            self.cells.contains_key(location) && crate::places::valid_name(&place.name)
         }) && self.cells.keys().all(|location| world.knows(*location))
             && self.edges.iter().all(|((from, _), (to, turns))| {
                 *turns < 24 && self.cells.contains_key(from) && self.cells.contains_key(to)
@@ -362,5 +362,81 @@ mod refresh_tests {
         )
         .unwrap();
         compare(&mut game);
+    }
+
+    #[test]
+    fn a_two_cell_body_walks_every_step_of_a_route_round_a_doorway() {
+        // Regression: a two-cell body needed both sides of a diagonal clear,
+        // so routes past a doorway's corner, planned with one clear side,
+        // stopped "blocked" beside the wall.
+        use tor_world::{Extent, Passage, Region, World};
+        // Two 7x5 chambers joined by a gap in the middle of a wall, as in
+        // the first dungeon.
+        let at = |region, x, y| Location {
+            region: RegionId(region),
+            position: Position { x, y, z: 0 },
+        };
+        let mut world = World::new(vec![], vec![]).unwrap();
+        for id in [1, 2] {
+            world
+                .add_chamber(Region {
+                    id: RegionId(id),
+                    name: format!("Room {id}"),
+                    bounds: Extent::new(7, 5, 2).unwrap(),
+                })
+                .unwrap();
+        }
+        for (from, direction, to) in [
+            (at(1, 6, 2), Direction::East, at(2, 0, 2)),
+            (at(2, 0, 2), Direction::West, at(1, 6, 2)),
+        ] {
+            world
+                .connect_area(
+                    Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                    1,
+                    2,
+                )
+                .unwrap();
+        }
+        let mut game = Game::new(world, 42);
+        // Beside the wall, north of the gap.
+        let actor = game
+            .spawn_actor(at(1, 5, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.set_body(
+            actor,
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [0, 0, 1]],
+                eye: [0, 0, 1],
+                mass: 80,
+            },
+        )
+        .unwrap();
+        game.refresh_navigation();
+        // Straight into the gap, past the wall's corner.
+        let mut corner = game.clone();
+        corner
+            .act(actor, Action::Move(Direction::SouthEast))
+            .unwrap();
+        let destinations: Vec<Location> = game.known_cells(actor).collect();
+        let mut routes = 0;
+        for destination in destinations {
+            let Ok(route) = game.travel_route(actor, destination) else {
+                continue;
+            };
+            let mut walker = game.clone();
+            for step in &route {
+                walker
+                    .act(actor, Action::Move(step.direction))
+                    .unwrap_or_else(|e| panic!("{destination:?} {step:?}: {e:?}"));
+            }
+            routes += 1;
+        }
+        assert!(routes > 20, "{routes}");
     }
 }

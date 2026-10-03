@@ -254,7 +254,9 @@ undiscovered terrain.
 Perceived anchors become character-owned remembered points, independent of region
 membership. The simulation stores names beside navigation in shared source-region
 maps, and learns only from authoritative perception boundaries. Deterministic
-mnemonics use seed/discovery order, never authored labels or hidden contents.
+mnemonics name unnamed hints by seed and discovery order, never by hidden
+contents; a hint the scenario names is learned by that name, and each name
+records its origin.
 Protocol observations carry opaque cell keys and names, without reconstructing
 unseen geometry. Rename is a controller-only, revision-checked, free journal
 command and rewind boundary. Checkpoints share remembered name maps across

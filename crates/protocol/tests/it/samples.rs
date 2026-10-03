@@ -93,6 +93,7 @@ fn server_kind(message: &ServerMessage) -> &'static str {
         ServerMessage::History { .. } => "history",
         ServerMessage::Error { .. } => "error",
         ServerMessage::Palette { .. } => "palette",
+        ServerMessage::Waiting { .. } => "waiting",
     }
 }
 

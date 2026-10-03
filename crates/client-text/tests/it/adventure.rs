@@ -1,5 +1,6 @@
 //! Descriptions of the scene, and what single commands mean in it.
 use tor_client_common::Palette;
+use tor_client_text::narrative::NO_PLACES;
 use tor_client_text::{
     adventure::{describe, describe_with},
     engine::{
@@ -51,20 +52,17 @@ fn items_in_the_current_place_are_nearby_but_other_places_keep_directions() {
     }
     let prose = describe(&s);
     assert!(
-        prose.contains("You see a copper token on the floor nearby."),
-        "{prose}"
-    );
-    assert!(
-        prose.contains("You see a stone tablet to the east."),
+        prose.contains("A copper token lies on the floor nearby; a stone tablet lies to the east."),
         "{prose}"
     );
     assert!(!prose.contains("token to the west"));
     for cell in &mut s.observation.visible_cells {
         cell.place_hint = false;
     }
-    assert!(describe(&s).contains("copper token on the floor nearby"));
+    // Without hints or walls it's all one place.
+    assert!(describe(&s).contains("A copper token and a stone tablet lie on the floor nearby."));
     s.observation.ground_items[0].position.z = 1;
-    assert!(describe(&s).contains("copper token above you"));
+    assert!(describe(&s).contains("a copper token is above you"));
 }
 
 #[test]
@@ -150,12 +148,14 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Player's own local physical body is filtered out
     assert!(!prose.contains("yourself"));
     assert!(!prose.contains("delver"));
-    // 2-cell humanoid has normal indefinite description
-    assert!(prose.contains("You see a scout to the east."));
-    // 3-cell high actor has "towering"
-    assert!(prose.contains("You see a towering giant to the east."));
-    // 2-cell wide actor has "massive"
-    assert!(prose.contains("You see a massive beast to the south."));
+    // A 2-cell humanoid is just a scout, a 3-cell high actor "towering" and
+    // a 2-cell wide one "massive"; figures in one place are told together.
+    assert!(
+        prose.contains(
+            "There is a scout and a towering giant to the east, and a massive beast to the south."
+        ),
+        "{prose}"
+    );
 }
 
 #[test]
@@ -201,7 +201,10 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     assert!(!prose.contains("yourself at your feet"));
     assert!(!prose.contains("yourself above you"));
     // Portal loop sighting IS preserved!
-    assert!(prose.contains("You see yourself to the east."));
+    assert!(
+        prose.contains("You can see yourself to the east."),
+        "{prose}"
+    );
 }
 
 fn palette(revision: u64, body: PaletteBody) -> PaletteUpdate {
@@ -320,8 +323,18 @@ fn directions_head_for_ways_onward_and_floor_is_not_one() {
     for c in &mut s.observation.visible_cells {
         c.place_hint = false;
     }
-    assert!(!describe(&s).contains("You can head"));
-    assert_eq!(said("east", &s), "You can't see a way east.");
+    // With no walls or hints in sight, a direction crosses open ground as far
+    // as can be seen that way, and nothing seen is no way.
+    assert!(
+        describe(&s).contains("To the east it fades into darkness."),
+        "{}",
+        describe(&s)
+    );
+    assert!(matches!(
+        goals("east", &s).as_slice(),
+        [Goal::Go { direction: Direction::East, destination }] if destination == "cell-6"
+    ));
+    assert_eq!(said("west", &s), "You can't see a way west.");
 }
 
 #[test]
@@ -336,7 +349,7 @@ fn doors_open_and_close_and_say_when_they_already_are() {
         reachable: false,
         approaches: vec!["cell-2".into(), "cell-4".into()],
     });
-    assert!(describe(&s).contains("a closed wooden door"));
+    assert!(describe(&s).contains("A closed wooden door leads east."));
     assert_eq!(said("examine door", &s), "An iron handle. It is closed.");
     assert_eq!(
         goals("open door", &s),
@@ -429,7 +442,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
         asset: Some("creature.rat".into()),
     });
     let plain = describe(&s);
-    assert!(plain.contains("a stone floor"), "{plain}");
+    assert!(plain.contains("passage of stone."), "{plain}");
     assert!(plain.contains("a figure"), "{plain}");
     let mut held = Palette::default();
     held.apply(&palette(
@@ -546,6 +559,7 @@ fn condition_and_inventory_are_told_without_numbers_beyond_hp() {
         actors: vec![],
         events: vec![],
         objective: None,
+        exit: None,
         victory: false,
         dead: false,
         terminal: false,
@@ -610,6 +624,7 @@ fn session_commands_and_naming_are_tools() {
     named.observation.places.push(PlaceView {
         key: "cell-1".into(),
         name: "Hallowed Crypt".into(),
+        origin: PlaceNameOrigin::Authored,
     });
     assert!(describe(&named).contains("Hallowed Crypt"));
     assert_eq!(
@@ -630,8 +645,10 @@ fn rooms_are_described_with_an_article_that_fits() {
 }
 
 /// A walled view from a map: `#` wall, `.` open, `+` closed door, `'` open
-/// door, `@` the character, `i` a copper token, space unseen.
-fn walled(map: &[&str]) -> StateView {
+/// door, `@` the character, `i` a copper token, `r` a rat, space unseen.
+/// Cell keys are map coordinates, so they stay with the cell wherever the
+/// character stands, as the server's do.
+pub(crate) fn walled(map: &[&str]) -> StateView {
     let at = map
         .iter()
         .enumerate()
@@ -639,11 +656,16 @@ fn walled(map: &[&str]) -> StateView {
         .unwrap();
     let mut cells = Vec::new();
     let mut items = Vec::new();
+    let mut actors = Vec::new();
     for (y, row) in map.iter().enumerate() {
         for (x, ch) in row.chars().enumerate() {
             let (x, y) = (x as i32 - at.0, y as i32 - at.1);
             if ch == ' ' {
                 continue;
+            }
+            if ch == 'r' {
+                actors.push(serde_json::json!({"id": 50 + actors.len(), "name": "rat",
+                    "description": "", "position": {"x": x, "y": y, "z": 0}}));
             }
             if ch == 'i' {
                 items.push(serde_json::json!({"reachable": x == 0 && y == 0,
@@ -654,7 +676,7 @@ fn walled(map: &[&str]) -> StateView {
             for z in [-1, 0, 1] {
                 let solid = ch == '#' || z == -1;
                 cells.push(serde_json::json!({
-                    "key": format!("{x},{y},{z}"),
+                    "key": format!("{},{},{z}", x + at.0, y + at.1),
                     "position": {"x": x, "y": y, "z": z},
                     "wall": solid,
                     "material": "stone",
@@ -671,7 +693,7 @@ fn walled(map: &[&str]) -> StateView {
         "wizard_game": false, "revision": 0, "observation": {
             "actor": 1, "tick": 0, "position": {"x": 0, "y": 0, "z": 0},
             "ready": true, "places": [], "visible_cells": cells,
-            "ground_items": items, "inventory": [], "visible_actors": []
+            "ground_items": items, "inventory": [], "visible_actors": actors
         }
     }))
     .unwrap()
@@ -687,19 +709,16 @@ fn a_room_is_described_from_its_own_extent_and_its_openings_are_its_ways() {
         "#########     ",
     ]);
     let prose = describe(&s);
-    assert!(
-        prose.contains("You are in a chamber with a stone floor and walls of stone."),
-        "{prose}"
-    );
+    assert!(prose.contains(" chamber of stone."), "{prose}");
     // Only the opening is a way; the token beyond it is in another place.
-    assert!(prose.contains("You can head east."), "{prose}");
+    assert!(prose.contains("A passage leads east."), "{prose}");
     assert!(
-        prose.contains("You see a copper token to the east."),
+        prose.contains("A copper token lies to the east."),
         "{prose}"
     );
     assert!(matches!(
         goals("east", &s).as_slice(),
-        [Goal::Go { destination, .. }] if destination == "7,0,0"
+        [Goal::Go { destination, .. }] if destination == "10,2,0"
     ));
     assert_eq!(said("north", &s), "You can't see a way north.");
 }
@@ -708,9 +727,9 @@ fn a_room_is_described_from_its_own_extent_and_its_openings_are_its_ways() {
 fn a_closed_door_is_a_way_that_is_shut() {
     let s = walled(&["#####", "#.@.+", "#####"]);
     assert_eq!(said("east", &s), "The oak door to the east is closed.");
-    assert!(!describe(&s).contains("You can head"));
+    assert!(describe(&s).contains("A closed oak door leads east."));
     let open = walled(&["#####  ", "#.@.'..", "#####  "]);
-    assert!(describe(&open).contains("You can head east."));
+    assert!(describe(&open).contains("An open oak door leads east."));
     assert!(matches!(goals("east", &open).as_slice(), [Goal::Go { .. }]));
 }
 
@@ -718,9 +737,435 @@ fn a_closed_door_is_a_way_that_is_shut() {
 fn a_room_seen_in_part_goes_on_out_of_sight() {
     let s = walled(&["#####", "#.@..", "#...."]);
     let prose = describe(&s);
-    assert!(prose.contains("It goes on out of sight to the"), "{prose}");
-    // Nothing invented: no smells, draughts or epithets.
-    for invented in ["dust", "chill", "Shadows", "scent", "drafty"] {
-        assert!(!prose.contains(invented), "{prose}");
+    assert!(prose.contains("it fades into darkness."), "{prose}");
+    // Each way into the dark can be walked, toward the farthest seen floor.
+    assert!(matches!(
+        goals("east", &s).as_slice(),
+        [Goal::Go {
+            direction: Direction::East,
+            ..
+        }]
+    ));
+    // It isn't called a dead end.
+    assert!(!prose.contains("no way onward"), "{prose}");
+}
+
+#[test]
+fn atmosphere_colours_a_place_the_same_way_every_time() {
+    let s = walled(&["#####", "#.@.#", "#####"]);
+    let prose = describe(&s);
+    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
+    // A mood word and the sentences of its theme.
+    assert!(
+        prose.starts_with(&format!(
+            "You are in a narrow, {} passage of stone.",
+            mood.mood
+        )),
+        "{prose}"
+    );
+    for sentence in &mood.description {
+        assert!(prose.contains(sentence), "{prose}");
     }
+    assert_eq!(describe(&s), prose);
+    // Smell and sound are the same place's.
+    assert_eq!(said("smell", &s), mood.smell);
+    assert_eq!(said("listen", &s), mood.sound);
+    // Listening with others about names them, and claims nothing of them.
+    let rats = walled(&["#######", "#.@r.r#", "#######"]);
+    let mood = tor_client_text::narrative::atmosphere(&rats, &Palette::default(), &NO_PLACES);
+    assert_eq!(
+        said("listen", &rats),
+        format!("{} You keep an ear on the two rats.", mood.sound)
+    );
+}
+
+#[test]
+fn a_place_reads_the_same_from_anywhere_in_it() {
+    // Regression: the atmosphere followed the cell nearest the middle of what
+    // was seen, so it changed as the character walked across the room.
+    let room = |at: usize| {
+        let mut row: Vec<char> = "#.......#".chars().collect();
+        row[at] = '@';
+        let row: String = row.into_iter().collect();
+        walled(&["#########", "#.......#", &row, "#.......#", "#########"])
+    };
+    let first = tor_client_text::narrative::atmosphere(&room(1), &Palette::default(), &NO_PLACES);
+    for at in 2..8 {
+        assert_eq!(
+            tor_client_text::narrative::atmosphere(&room(at), &Palette::default(), &NO_PLACES),
+            first
+        );
+    }
+}
+
+#[test]
+fn places_have_varied_atmospheres() {
+    // Rooms that differ only in where they are read differently.
+    let moods: std::collections::BTreeSet<String> = (0..40)
+        .map(|i| {
+            let mut s = walled(&["#####", "#.@.#", "#####"]);
+            for cell in &mut s.observation.visible_cells {
+                cell.key = format!("{i}/{}", cell.key);
+            }
+            let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
+            format!("{} {}", mood.mood, mood.description.join(" "))
+        })
+        .collect();
+    assert!(moods.len() >= 20, "{moods:?}");
+}
+
+#[test]
+fn ways_are_named_by_kind_and_a_closed_room_has_none() {
+    let s = walled(&[
+        "####.####",
+        "#.......#",
+        "#...@...'..",
+        "#.......#",
+        "####+####",
+    ]);
+    let prose = describe(&s);
+    assert!(
+        prose
+            .contains("A passage leads north, an open oak door east, and a closed oak door south."),
+        "{prose}"
+    );
+    let shut = walled(&["#####", "#.@.#", "#####"]);
+    assert!(describe(&shut).contains("You see no way onward."));
+}
+
+#[test]
+fn things_and_figures_are_told_in_sentences() {
+    let mut s = walled(&[
+        "#########",
+        "#.r.r...#",
+        "#..@....#",
+        "#.......#",
+        "#########",
+    ]);
+    let token = |id: u64, x: i32, quantity: u64| {
+        serde_json::from_value::<GroundItemView>(serde_json::json!({
+            "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
+            "item": {"quantity": quantity, "appearance": "item", "identified": true,
+                "id": id, "name": "copper token", "description": ""}}))
+        .unwrap()
+    };
+    s.observation.ground_items = vec![token(1, 0, 1), token(2, 0, 2), token(3, 3, 1)];
+    let prose = describe(&s);
+    // Two rats to the north: one is up and left, one up and right, so each
+    // has its own bearing.
+    assert!(
+        prose.contains("There is a rat to the northwest, and a rat to the northeast."),
+        "{prose}"
+    );
+    assert!(
+        prose.contains(
+            "Three copper tokens lie at your feet; another copper token lies on the floor nearby."
+        ),
+        "{prose}"
+    );
+    // Injuries go with the names.
+    s.observation.combat = Some(
+        serde_json::from_value(serde_json::json!({
+            "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "preparation_remaining": null, "preparation_active": false,
+            "recovery_remaining": 0, "events": [], "objective": null,
+            "actors": [{"actor": 50, "hostile": true, "injury": "badly_wounded"}]
+        }))
+        .unwrap(),
+    );
+    assert!(
+        describe(&s).contains("There is a badly wounded rat to the northwest"),
+        "{}",
+        describe(&s)
+    );
+}
+
+#[test]
+fn a_place_seen_before_is_named_briefly() {
+    let s = walled(&["#####", "#.@.'", "#####"]);
+    let brief =
+        tor_client_text::adventure::brief_place_with(&s, &Palette::default(), &NO_PLACES, true);
+    let mood = tor_client_text::narrative::atmosphere(&s, &Palette::default(), &NO_PLACES);
+    assert_eq!(
+        brief,
+        format!(
+            "You are back in the narrow, {} passage. An open oak door leads east.",
+            mood.mood
+        )
+    );
+    let superbrief =
+        tor_client_text::adventure::brief_place_with(&s, &Palette::default(), &NO_PLACES, false);
+    assert!(superbrief.starts_with("You are back in"), "{superbrief}");
+    assert!(!superbrief.contains("door"), "{superbrief}");
+}
+
+#[test]
+fn look_leaves_the_objective_to_status() {
+    let mut s = walled(&["#####", "#.@.#", "#####"]);
+    s.observation.combat = Some(
+        serde_json::from_value(serde_json::json!({
+            "hp": 7, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "preparation_remaining": null, "preparation_active": false,
+            "recovery_remaining": 0, "events": [], "objective": "reach_exit", "actors": []
+        }))
+        .unwrap(),
+    );
+    assert!(describe(&s).contains("Reach the exit."));
+    let look = tor_client_text::adventure::look_with(&s, &Palette::default(), &NO_PLACES);
+    assert!(look.starts_with("HP 7/10\n"), "{look}");
+    assert!(!look.contains("Reach the exit."), "{look}");
+    for line in ["status", "score", "objective"] {
+        assert_eq!(
+            said(line, &s),
+            "You are wounded. (HP 7/10) Reach the exit.",
+            "{line}"
+        );
+    }
+    assert_eq!(said("examine me", &s), "You are wounded. (HP 7/10)");
+}
+
+#[test]
+fn a_carried_thing_and_its_twin_on_the_floor_are_told_apart_by_where_they_are() {
+    // They look alike, but they're two things in two places, and the player
+    // can't know they're identical: ask which, by where each is.
+    let mut s = state();
+    let token = s.observation.ground_items[0].item.clone();
+    s.observation.inventory.push(ItemView { id: 9, ..token });
+    assert_eq!(
+        question("examine token", &s),
+        [
+            "the copper token you're carrying",
+            "the copper token at your feet"
+        ]
+    );
+    // Taking prefers what isn't carried, so it needs no question.
+    assert_eq!(
+        goals("take token", &s),
+        [Goal::Take {
+            item: 1,
+            quantity: None
+        }]
+    );
+}
+
+#[test]
+fn going_to_a_remembered_place_travels_to_where_it_was_learned() {
+    let mut s = state();
+    s.observation.places = vec![
+        PlaceView {
+            key: "cell-1".into(),
+            name: "Hollow Promise".into(),
+            origin: PlaceNameOrigin::Authored,
+        },
+        PlaceView {
+            key: "far-away".into(),
+            name: "Vault of Whispers".into(),
+            origin: PlaceNameOrigin::Authored,
+        },
+    ];
+    for line in ["go to vault of whispers", "go to the Vault of Whispers"] {
+        assert_eq!(
+            goals(line, &s),
+            [Goal::Visit {
+                destination: "far-away".into(),
+                name: "Vault of Whispers".into()
+            }],
+            "{line}"
+        );
+    }
+    // The place the character is in needs no journey.
+    assert_eq!(
+        said("go to hollow promise", &s),
+        "You're already in Hollow Promise."
+    );
+    // Things in sight still come first when no place has the name.
+    assert!(matches!(
+        goals("go to tablet", &s).as_slice(),
+        [Goal::Approach { .. }]
+    ));
+}
+
+#[test]
+fn a_place_keeps_the_key_it_was_first_seen_under() {
+    // A corridor seen in part, then all of it: its lowest cell key changes,
+    // but the place remembered keeps its first key, and so its atmosphere.
+    let part = walled(&["   ######   ", "   ..@...   ", "   ######   "]);
+    let whole = walled(&["############", "........@...", "############"]);
+    assert_ne!(NO_PLACES.key(&part), NO_PLACES.key(&whole));
+    let mut places = tor_client_text::narrative::Places::default();
+    places.learn(&part);
+    assert_eq!(places.key(&whole), places.key(&part));
+    places.learn(&whole);
+    let palette = Palette::default();
+    assert_eq!(
+        tor_client_text::narrative::atmosphere(&whole, &palette, &places),
+        tor_client_text::narrative::atmosphere(&part, &palette, &places)
+    );
+}
+
+#[test]
+fn going_to_the_start_returns_to_where_the_character_began() {
+    let begun = state();
+    let mut places = tor_client_text::narrative::Places::default();
+    places.begin(&begun);
+    let palette = Palette::default();
+    let meaning = |line: &str, s: &StateView| {
+        let scene = Scene::remembering(s, &palette, &places);
+        let command = match_sentence_with_raw(&tokenize(line), Some(line)).unwrap();
+        understand(&command, &scene, &mut Referents::default())
+    };
+    assert_eq!(
+        meaning("go to start", &begun),
+        Interpretation::Say("You're already where you started.".into())
+    );
+    // Two steps east, the start is a journey back.
+    let mut moved = state();
+    for cell in &mut moved.observation.visible_cells {
+        cell.position.x -= 2;
+    }
+    for line in ["go to start", "go back to the start", "go to the beginning"] {
+        assert_eq!(
+            meaning(line, &moved),
+            Interpretation::Goals(vec![Goal::Visit {
+                destination: "cell-0".into(),
+                name: "where you started".into(),
+            }]),
+            "{line}"
+        );
+    }
+    // A client that never saw the start can't go back to it.
+    assert_eq!(said("go to start", &moved), "You can't see any start here.");
+}
+
+#[test]
+fn a_walk_follows_a_passage_and_stops_where_it_opens_out() {
+    use tor_client_text::adventure::onward;
+    // Map coordinates: the character walks a passage that bends south.
+    let before = walled(&["##########", "#@.....  #", "#######. #", "      #. #"]);
+    let along = walled(&[
+        "##########",
+        "#......@##",
+        "#######.##",
+        "      #.# ",
+        "      #.# ",
+    ]);
+    // The only way on bends south; the walk follows it.
+    assert!(matches!(
+        onward(&before, &along, Direction::East),
+        Some((Direction::South, _))
+    ));
+    // A side passage makes a junction: stop there.
+    let junction = walled(&["##########", "#......@..", "#######.##", "      #.# "]);
+    assert_eq!(onward(&before, &junction, Direction::East), None);
+    // Coming out into a room: stop to look at it.
+    let room = walled(&["#######", "#.....#", "...@..#", "#.....#", "#######"]);
+    assert_eq!(onward(&before, &room, Direction::East), None);
+}
+
+#[test]
+fn a_disclosed_exit_is_described_and_can_be_gone_to() {
+    let mut s = state();
+    assert_eq!(said("go to exit", &s), "You can't see any exit here.");
+    s.observation.combat = Some(
+        serde_json::from_value(serde_json::json!({
+            "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "preparation_remaining": null, "preparation_active": false,
+            "recovery_remaining": 0, "events": [], "objective": "reach_exit",
+            "exit": "cell-3", "actors": []
+        }))
+        .unwrap(),
+    );
+    assert!(
+        describe(&s).contains("The exit is to the east."),
+        "{}",
+        describe(&s)
+    );
+    for line in ["go to exit", "go back to the exit", "go to the way out"] {
+        assert_eq!(
+            goals(line, &s),
+            [Goal::Visit {
+                destination: "cell-3".into(),
+                name: "the exit".into()
+            }],
+            "{line}"
+        );
+    }
+    s.observation.combat.as_mut().unwrap().exit = Some("cell-0".into());
+    assert_eq!(said("go to exit", &s), "You're already at the exit.");
+    assert!(describe(&s).contains("You are standing at the exit."));
+}
+
+#[test]
+fn names_the_game_made_up_are_left_unsaid() {
+    let mut s = state();
+    s.observation.places.push(PlaceView {
+        key: "cell-1".into(),
+        name: "Hollow Promise".into(),
+        origin: PlaceNameOrigin::Invented,
+    });
+    assert!(!describe(&s).contains("Hollow Promise"), "{}", describe(&s));
+    assert_eq!(
+        tor_client_text::places(&s),
+        "1. An unnamed place (in sight)\nName one with name <number> <name>."
+    );
+    assert_eq!(
+        said("go to hollow promise", &s),
+        "You can't see any hollow promise here."
+    );
+    // Once the player names it, it's theirs, and said.
+    s.observation.places[0].name = "Antechamber".into();
+    s.observation.places[0].origin = PlaceNameOrigin::Player;
+    assert!(
+        describe(&s).starts_with("Antechamber\n"),
+        "{}",
+        describe(&s)
+    );
+    assert_eq!(tor_client_text::places(&s), "1. Antechamber (in sight)");
+}
+
+#[test]
+fn a_place_joined_with_the_next_room_is_known_by_its_nearest_hint() {
+    // Regression: seen across a doorway, two rooms can survey as one place
+    // holding both their hints; keyed by the lowest key, stepping into the
+    // next room didn't count as arriving anywhere.
+    let mut s = walled(&["###########", "#.......@..", "###########"]);
+    for cell in &mut s.observation.visible_cells {
+        let (x, y, z) = (cell.position.x, cell.position.y, cell.position.z);
+        // "7,1,0" is next to the character; "2,1,0" is farther, with the
+        // lower key.
+        cell.place_hint = z == 0 && y == 0 && (x == -1 || x == -6);
+    }
+    let near = s
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| c.place_hint && c.position.x == -1)
+        .unwrap()
+        .key
+        .clone();
+    assert_eq!(NO_PLACES.key(&s), Some(near));
+}
+
+#[test]
+fn ways_alike_in_one_wall_are_asked_about_by_where_each_lies() {
+    // Regression: "Which way do you mean, a passage to the east or a
+    // passage to the east?"
+    let s = walled(&["#####", "#...'..", "#.@.#", "#...'..", "#####"]);
+    assert_eq!(
+        question("east", &s),
+        [
+            "an open oak door to the northeast",
+            "an open oak door to the southeast"
+        ]
+    );
+}
+
+#[test]
+fn a_place_dark_on_most_sides_names_the_sides_that_are_not() {
+    let s = walled(&["#######", ".......", "...@...", "......."]);
+    let prose = describe(&s);
+    assert!(
+        prose.contains("It fades into darkness on every side but the north"),
+        "{prose}"
+    );
 }

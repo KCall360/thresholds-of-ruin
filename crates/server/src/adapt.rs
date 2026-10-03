@@ -216,6 +216,7 @@ pub fn observation(
                 s::combat::ObjectiveKind::RetrieveAndReturn => p::ObjectiveKind::RetrieveAndReturn,
                 s::combat::ObjectiveKind::ReachExit => p::ObjectiveKind::ReachExit,
             }),
+            exit: c.exit.map(|at| cell_key(salt, view.actor.0, at)),
             victory: c.victory,
             dead: c.dead,
             terminal: c.terminal,

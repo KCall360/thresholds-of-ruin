@@ -433,6 +433,7 @@ mod tests {
                 actors: vec![],
                 events: vec![],
                 objective: None,
+                exit: None,
                 victory: !dead,
                 dead,
                 terminal: true,

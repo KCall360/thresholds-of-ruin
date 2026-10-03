@@ -35,6 +35,9 @@ pub struct Episode {
     /// How its object was named when it began: "the copper token", "three
     /// arrows", "east".
     pub object: String,
+    /// Things taken or dropped: how many, and their singular name, so alike
+    /// things are counted together ("the 17 arrows").
+    pub counted: Option<(u64, String)>,
     /// Whether the character set off on a journey for it.
     pub approached: bool,
     pub beats: Vec<Beat>,
@@ -143,6 +146,7 @@ fn told(beat: &Beat) -> bool {
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
+            | Beat::Spotted { .. }
             | Beat::Resync
     )
 }
@@ -151,8 +155,8 @@ fn told(beat: &Beat) -> bool {
 pub fn compose(record: &Record) -> String {
     let mut blocks: Vec<String> = Vec::new();
     let mut teller = Teller::default();
-    let mut simple: Option<(&'static str, Vec<String>)> = None;
-    let flush_simple = |teller: &mut Teller, simple: &mut Option<(&'static str, Vec<String>)>| {
+    let mut simple: Option<(&'static str, Vec<Object>)> = None;
+    let flush_simple = |teller: &mut Teller, simple: &mut Option<(&'static str, Vec<Object>)>| {
         if let Some((verb, objects)) = simple.take() {
             teller.say(format!("you {verb} {}", prose::and_list(&alike(&objects))));
         }
@@ -162,10 +166,10 @@ pub fn compose(record: &Record) -> String {
         if let Entry::Episode(e) = entry {
             if let Some(verb) = simple_verb(e) {
                 match &mut simple {
-                    Some((v, objects)) if *v == verb => objects.push(e.object.clone()),
+                    Some((v, objects)) if *v == verb => objects.push(Object::of(e)),
                     _ => {
                         flush_simple(&mut teller, &mut simple);
-                        simple = Some((verb, vec![e.object.clone()]));
+                        simple = Some((verb, vec![Object::of(e)]));
                     }
                 }
                 continue;
@@ -199,34 +203,70 @@ pub fn compose(record: &Record) -> String {
     blocks.join("\n")
 }
 
-/// Repeated objects counted together: "the two copper tokens".
-fn alike(objects: &[String]) -> Vec<String> {
-    let mut counted: Vec<(&String, u64)> = Vec::new();
+/// What a plain pickup or drop was of.
+struct Object {
+    /// As named when it began: "the copper token".
+    named: String,
+    counted: Option<(u64, String)>,
+}
+
+impl Object {
+    fn of(e: &Episode) -> Self {
+        Object {
+            named: e.object.clone(),
+            counted: e.counted.clone(),
+        }
+    }
+}
+
+/// Alike things counted together: three stacks of arrows are "the 17
+/// arrows", two copper tokens taken one by one "the two copper tokens".
+fn alike(objects: &[Object]) -> Vec<String> {
+    let mut counted: Vec<(&str, u64, Option<&str>)> = Vec::new();
     for object in objects {
-        match counted.iter_mut().find(|(o, _)| *o == object) {
-            Some((_, n)) => *n += 1,
-            None => counted.push((object, 1)),
+        let (n, name) = match &object.counted {
+            Some((n, name)) => (*n, Some(name.as_str())),
+            None => (1, None),
+        };
+        let same = |(named, _, singular): &&mut (&str, u64, Option<&str>)| match name {
+            Some(name) => *singular == Some(name),
+            None => *named == object.named,
+        };
+        match counted.iter_mut().find(same) {
+            Some((_, total, _)) => *total += n,
+            None => counted.push((&object.named, n, name)),
         }
     }
     counted
         .into_iter()
-        .map(|(object, n)| match object.strip_prefix("the ") {
-            Some(name) if n > 1 => format!("the {} {}", prose::number(n), prose::plural(name)),
-            _ => object.clone(),
+        .map(|(named, n, singular)| match singular {
+            // Some of a stack is "two arrows"; a whole one "the two arrows".
+            Some(name) if named.starts_with("the ") => prose::counted_definite(n, name),
+            Some(name) => prose::counted(n, name),
+            None => match named.strip_prefix("the ") {
+                Some(name) if n > 1 => {
+                    format!("the {} {}", prose::number(n), prose::plural(name))
+                }
+                _ => named.to_owned(),
+            },
         })
         .collect()
 }
 
-/// Sightings that cancel out: a figure lost from sight and seen again (or
-/// glimpsed and lost) within one passage is neither news nor gone.
+/// Sightings told by their net effect: a figure lost from sight and seen
+/// again (or glimpsed and lost) within one passage is neither news nor gone,
+/// and one that flickers in and out is told once, as it ended.
 fn settled(beats: &[Beat]) -> Vec<Beat> {
-    let mut net: std::collections::BTreeMap<ActorId, (usize, usize)> = Default::default();
-    for beat in beats {
-        match beat {
-            Beat::Appeared { figure, .. } => net.entry(figure.id).or_default().0 += 1,
-            Beat::Vanished(figure) => net.entry(figure.id).or_default().1 += 1,
-            _ => {}
-        }
+    // Per figure: whether it was in sight before the first sighting beat,
+    // and the index of its last one.
+    let mut net: std::collections::BTreeMap<ActorId, (bool, usize)> = Default::default();
+    for (i, beat) in beats.iter().enumerate() {
+        let (id, appeared) = match beat {
+            Beat::Appeared { figure, .. } => (figure.id, true),
+            Beat::Vanished(figure) => (figure.id, false),
+            _ => continue,
+        };
+        net.entry(id).or_insert((!appeared, i)).1 = i;
     }
     let died: BTreeSet<ActorId> = beats
         .iter()
@@ -235,15 +275,18 @@ fn settled(beats: &[Beat]) -> Vec<Beat> {
             _ => None,
         })
         .collect();
-    let cancels =
-        |id: &ActorId| !died.contains(id) && net.get(id).is_some_and(|(seen, lost)| seen == lost);
     beats
         .iter()
-        .filter(|b| match b {
-            Beat::Appeared { figure, .. } | Beat::Vanished(figure) => !cancels(&figure.id),
+        .enumerate()
+        .filter(|(i, b)| match b {
+            Beat::Appeared { figure, .. } | Beat::Vanished(figure) => {
+                let (before, last) = net[&figure.id];
+                let after = matches!(beats[last], Beat::Appeared { .. });
+                died.contains(&figure.id) || (*i == last && before != after)
+            }
             _ => true,
         })
-        .cloned()
+        .map(|(_, b)| b.clone())
         .collect()
 }
 
@@ -335,15 +378,37 @@ fn episode(teller: &mut Teller, e: &Episode) {
     match (&e.end, e.approached) {
         (End::Done, true) => {
             match &e.goal {
-                Goal::Go { direction, .. } => {
-                    teller.say(format!("you walk {}", direction_name(*direction)));
-                    // The new place's description shows who is there.
-                    let travel: Vec<Beat> = travel
-                        .iter()
-                        .filter(|b| !matches!(b, Beat::Appeared { .. }))
-                        .cloned()
-                        .collect();
-                    tell(teller, &travel);
+                Goal::Go { .. } | Goal::Visit { .. } => {
+                    teller.say(match &e.goal {
+                        Goal::Go { direction, .. } => {
+                            // A walk that followed a bend says where it ended
+                            // up heading, and what made it stop.
+                            let last = direction_name(*direction);
+                            let mut walk = format!("you walk {object}");
+                            if last != object {
+                                walk.push_str(&format!(", then {last}"));
+                            }
+                            let spotted = e.beats.iter().find_map(|b| match b {
+                                Beat::Spotted { what, whereabouts } => Some((what, whereabouts)),
+                                _ => None,
+                            });
+                            if let Some((what, whereabouts)) = spotted {
+                                let comma = if last != object { "," } else { "" };
+                                walk.push_str(&format!(
+                                    "{comma} until you see {what} {whereabouts}"
+                                ));
+                            }
+                            walk
+                        }
+                        // The exit isn't somewhere the character has been.
+                        _ if object == super::verbs::EXIT => {
+                            format!("you make your way to {object}")
+                        }
+                        _ => format!("you make your way back to {object}"),
+                    });
+                    // When a description of a new place follows, the engine
+                    // has already dropped sightings it repeats.
+                    tell(teller, travel);
                 }
                 Goal::Attack { target } => {
                     let who = teller.the(&Figure {
@@ -416,6 +481,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     None => format!("you head toward {object}"),
                 },
             };
+            let mut after = after.to_vec();
             match phase {
                 TravelPhase::Hazard => {
                     teller.say(intent);
@@ -435,12 +501,47 @@ fn episode(teller: &mut Teller, e: &Episode) {
                             beat => tell(teller, std::slice::from_ref(beat)),
                         }
                     }
+                    // The sighting that stopped the journey can arrive just
+                    // after it ended.
                     if !stopped {
-                        teller.say("something catches your eye, and you stop warily");
+                        if let Some(at) = after
+                            .iter()
+                            .position(|b| matches!(b, Beat::Appeared { .. }))
+                        {
+                            if let Beat::Appeared {
+                                figure,
+                                whereabouts,
+                            } = after.remove(at)
+                            {
+                                stopped = true;
+                                let who = teller.a(&figure);
+                                teller.say(format!(
+                                    "{who} comes into view {whereabouts}, and you stop warily"
+                                ));
+                            }
+                        }
+                    }
+                    if !stopped {
+                        // A blow on the way is reason enough to stop.
+                        let struck = travel.iter().any(|b| {
+                            matches!(
+                                b,
+                                Beat::Blow {
+                                    target: Who::Me,
+                                    ..
+                                }
+                            )
+                        });
+                        teller.say(if struck {
+                            "you stop short"
+                        } else {
+                            "something catches your eye, and you stop warily"
+                        });
                     }
                 }
                 TravelPhase::Blocked => {
-                    let barred = travel.iter().find_map(|b| match b {
+                    // Who's in the way is found once the journey has ended.
+                    let barred = e.beats.iter().find_map(|b| match b {
                         Beat::Barred(figure) => Some(figure.clone()),
                         _ => None,
                     });
@@ -480,7 +581,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     tell(teller, travel);
                 }
             }
-            tell(teller, after);
+            tell(teller, &after);
         }
         (End::Wary, _) => {
             let appeared = e
@@ -530,8 +631,10 @@ fn episode(teller: &mut Teller, e: &Episode) {
             tell(teller, &e.beats);
         }
         (End::Refused(text), approached) => {
-            if approached {
-                teller.say(format!("you walk over to {object}"));
+            match (&e.goal, approached) {
+                (Goal::Attack { .. }, true) => teller.say(format!("you go after {object}")),
+                (_, true) => teller.say(format!("you walk over to {object}")),
+                _ => {}
             }
             tell(teller, &e.beats);
             teller.say(text);
@@ -681,6 +784,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
+            | Beat::Spotted { .. }
             | Beat::Resync => {}
         }
         i += 1;
@@ -702,6 +806,7 @@ mod tests {
         Entry::Episode(Episode {
             goal,
             object: object.into(),
+            counted: None,
             approached,
             beats,
             end,
@@ -739,11 +844,12 @@ mod tests {
 
     #[test]
     fn whoever_bars_a_blocked_way_is_named() {
+        // As the turn records them: the journey ends, then who's in the way.
         let journey = vec![
-            Beat::Barred(scout()),
             Beat::Journey {
                 phase: TravelPhase::Blocked,
             },
+            Beat::Barred(scout()),
         ];
         assert_eq!(
             told(vec![episode(
@@ -887,5 +993,63 @@ mod tests {
             told(vec![Entry::Beats(beats)]),
             "The oak door to the west swings open. The ruin scout falls dead."
         );
+    }
+
+    #[test]
+    fn a_journey_stopped_by_a_blow_says_so() {
+        // Regression: "Something catches your eye" when what stopped the
+        // journey was being struck.
+        let journey = vec![
+            Beat::Stepped(Direction::East),
+            Beat::Blow {
+                attacker: Who::Figure(scout()),
+                target: Who::Me,
+                outcome: AttackOutcome::Hit,
+            },
+            Beat::Journey {
+                phase: TravelPhase::Hazard,
+            },
+        ];
+        assert_eq!(
+            told(vec![episode(
+                Goal::Go {
+                    direction: Direction::East,
+                    destination: "far".into(),
+                },
+                "east",
+                true,
+                journey,
+                End::Stopped(TravelPhase::Hazard)
+            )]),
+            "You set off east. The ruin scout strikes you. You stop short."
+        );
+    }
+
+    #[test]
+    fn a_figure_flickering_in_and_out_of_sight_is_told_once() {
+        // Regression: "The ember wisp is no longer in sight. You notice it to
+        // the west. It is no longer in sight."
+        let gone = Beat::Vanished(scout());
+        let back = Beat::Appeared {
+            figure: scout(),
+            whereabouts: "to the west".into(),
+        };
+        assert_eq!(
+            told(vec![Entry::Beats(vec![
+                gone.clone(),
+                back.clone(),
+                gone.clone()
+            ])]),
+            "The ruin scout is no longer in sight."
+        );
+        assert_eq!(
+            told(vec![Entry::Beats(vec![
+                back.clone(),
+                gone.clone(),
+                back.clone()
+            ])]),
+            "You notice a ruin scout to the west."
+        );
+        assert_eq!(told(vec![Entry::Beats(vec![gone, back])]), "");
     }
 }

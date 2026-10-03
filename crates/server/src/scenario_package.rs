@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v17";
-const VALIDATOR: &str = "tor-scenario-6";
+pub const RULESET: &str = "dungeon-v18";
+const VALIDATOR: &str = "tor-scenario-7";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -152,6 +152,22 @@ pub struct Objective {
     pub disclosed: bool,
     pub continue_play: bool,
 }
+/// A place hint: a position, or a position and the name the character
+/// learns on seeing it (`{ at = [3,2,0], name = "Threshold" }`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PlaceDef {
+    At([i32; 3]),
+    Named(NamedPlace),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedPlace {
+    pub at: [i32; 3],
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegionDef {
@@ -171,7 +187,7 @@ pub struct RegionDef {
     #[serde(default)]
     pub openings: Vec<[i32; 3]>,
     #[serde(default)]
-    pub places: Vec<[i32; 3]>,
+    pub places: Vec<PlaceDef>,
     #[serde(default)]
     pub portals: Vec<Portal>,
     #[serde(default)]
@@ -1828,8 +1844,13 @@ impl Package {
             .map_err(|e| fail(format!("Region {} portal to {}: {e:?}", r.id, p.to)))?;
         }
         for p in &r.places {
-            game.set_place_hint(loc(r.id, *p), true)
-                .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
+            match p {
+                PlaceDef::At(at) => game.set_place_hint(loc(r.id, *at), true),
+                PlaceDef::Named(place) => {
+                    game.set_named_place_hint(loc(r.id, place.at), &place.name)
+                }
+            }
+            .map_err(|e| fail(format!("Region {} place: {e:?}", r.id)))?;
         }
         let mut gravity_cells = BTreeSet::new();
         for g in &r.gravity_overrides {

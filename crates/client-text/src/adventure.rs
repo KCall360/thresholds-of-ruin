@@ -4,7 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use tor_client_common::{surfaces, AssetTable, Palette};
 use tor_protocol::*;
 
-use crate::safe;
+use crate::{
+    engine::{
+        place::{Opening, Place},
+        prose,
+    },
+    narrative::Places,
+    safe,
+};
 
 pub(crate) fn distance(p: Position) -> u64 {
     u64::from(p.x.unsigned_abs()) + u64::from(p.y.unsigned_abs()) + u64::from(p.z.unsigned_abs())
@@ -96,18 +103,34 @@ fn exits_from(
         Direction::Up | Direction::Down => direction_name(direction).to_owned(),
         _ => format!("to the {}", direction_name(direction)),
     };
-    let ways: Vec<Exit> = place
-        .ways(direction)
+    let found: Vec<_> = place.ways(direction).collect();
+    // Several ways alike that way are told apart by where each lies from
+    // here, so a question can name them: "a passage to the northeast".
+    let alike = |w: &crate::engine::place::Way| {
+        found
+            .iter()
+            .filter(|o| o.kind_name() == w.kind_name())
+            .count()
+            > 1
+    };
+    let ways: Vec<Exit> = found
+        .iter()
         .map(|w| Exit {
             destination: w.destination.clone(),
-            label: format!("{} {toward}", w.label()),
+            label: match w.towards.filter(|_| alike(w)) {
+                Some(lies) => format!("{} to the {}", w.label(), direction_name(lies)),
+                None => format!("{} {toward}", w.label()),
+            },
             closed: matches!(w.kind, Opening::Door { open: false, .. }),
         })
         .collect();
     if !ways.is_empty() {
         return ways;
     }
+    let open = place.form == crate::engine::place::Form::Open;
     let mut seen = BTreeSet::new();
+    // Places seen elsewhere guide the way only across open ground; within
+    // walls the ways out are the openings.
     let mut anchors: Vec<_> = state
         .observation
         .visible_cells
@@ -118,9 +141,46 @@ fn exits_from(
                 && c.position.z == 0
                 && bearing(c.position) == Some(direction)
                 && !place.contains(c.position)
+                && open
         })
         .collect();
     anchors.sort_by_key(|c| (distance(c.position), &c.key));
+    if anchors.is_empty() && (open || place.continues.contains(&direction)) {
+        // Where the place goes on into darkness, or across open ground, a
+        // direction leads as far as can be seen that way, keeping as
+        // straight as it can and, within walls, inside the place.
+        let straight = |p: Position| match direction {
+            Direction::North | Direction::South => p.x.unsigned_abs(),
+            Direction::East | Direction::West => p.y.unsigned_abs(),
+            _ => p.x.unsigned_abs().abs_diff(p.y.unsigned_abs()),
+        };
+        let far = state
+            .observation
+            .visible_cells
+            .iter()
+            .filter(|c| {
+                !c.wall
+                    && c.door.is_none()
+                    && c.position.z == 0
+                    && bearing(c.position) == Some(direction)
+                    && (open || place.contains(c.position))
+            })
+            .min_by_key(|c| {
+                (
+                    straight(c.position),
+                    std::cmp::Reverse(distance(c.position)),
+                    &c.key,
+                )
+            });
+        return far
+            .map(|c| Exit {
+                destination: Some(c.key.clone()),
+                label: format!("open ground {toward}"),
+                closed: false,
+            })
+            .into_iter()
+            .collect();
+    }
     anchors
         .into_iter()
         .filter(|c| seen.insert(c.key.clone()))
@@ -140,6 +200,81 @@ fn exits_from(
             }
         })
         .collect()
+}
+
+/// The authored hint inside a place, if it has one.
+fn hint<'a>(state: &'a StateView, place: &Place) -> Option<&'a str> {
+    state
+        .observation
+        .visible_cells
+        .iter()
+        .filter(|c| c.place_hint && !c.wall && place.contains(c.position))
+        .map(|c| c.key.as_str())
+        .min()
+}
+
+/// Where a walk in `direction` goes next, after a leg that began in `before`
+/// and ended in `now`, when there's nothing yet worth stopping for: the way
+/// it took, and where that leg ends. A walk goes on into darkness, and along
+/// a corridor while there's one way on, following its bends. It stops on
+/// entering a room, at a junction or a door, or where the way runs out.
+/// Whether something came into view is the caller's to judge.
+pub fn onward(
+    before: &StateView,
+    now: &StateView,
+    direction: Direction,
+) -> Option<(Direction, String)> {
+    use crate::engine::place::{survey, Form};
+    let (was, is) = (survey(before), survey(now));
+    let here = crate::narrative::here_key(now)?;
+    // Arriving somewhere new is a place to stop.
+    let roomy = !matches!(is.form, Form::Passage | Form::Open);
+    let new_hint = hint(now, &is).is_some_and(|h| hint(before, &was) != Some(h));
+    if new_hint || (roomy && was.form != is.form) {
+        return None;
+    }
+    // On into the dark, unless an opening lies that way.
+    if is.ways(direction).next().is_none()
+        && (is.form == Form::Open || is.continues.contains(&direction))
+    {
+        return exits_from(&is, now, direction)
+            .into_iter()
+            .find_map(|e| e.destination)
+            .filter(|d| d != here)
+            .map(|d| (direction, d));
+    }
+    // Along a corridor, following its bends, to just before anything that
+    // asks for a choice.
+    crate::engine::place::corridor_ahead(now, direction).filter(|(_, to)| to != here)
+}
+
+/// What a walk would stop to look at, if it came into view: things and
+/// doors, with how to name them and where they are.
+pub(crate) fn sights(state: &StateView) -> Vec<(String, String, String)> {
+    let o = &state.observation;
+    let mut seen = Vec::new();
+    for item in &o.ground_items {
+        seen.push((
+            format!("item:{}", item.item.id),
+            prose::counted(item.item.quantity, &safe(&item.item.name)),
+            whereabouts(item.position),
+        ));
+    }
+    for cell in &o.visible_cells {
+        if let Some(door) = &cell.door {
+            let name = if door.name.trim().is_empty() {
+                "door".to_owned()
+            } else {
+                safe(&door.name)
+            };
+            seen.push((
+                format!("door:{}", door.id),
+                prose::indefinite(&name),
+                whereabouts(cell.position),
+            ));
+        }
+    }
+    seen
 }
 
 /// Words for the assets this client knows. A lookup falls back through dotted
@@ -192,10 +327,6 @@ pub(crate) fn floor_material_with<'a>(
     surfaces::floor_below(cells, cell.position)
         .map(|floor| surface(palette, floor))
         .or_else(|| open_surface(palette, cell))
-}
-
-fn indefinite(name: &str) -> String {
-    crate::engine::prose::indefinite(&safe(name))
 }
 
 struct UnifiedActor<'a> {
@@ -257,17 +388,9 @@ fn unified_actors<'a>(actors: &'a [ActorView]) -> Vec<UnifiedActor<'a>> {
     result
 }
 
-fn format_actor(actor: &UnifiedActor, observer: ActorId, palette: &Palette) -> Option<String> {
-    if actor.id == observer {
-        if actor.cells.iter().any(|p| p.x == 0 && p.y == 0) {
-            return None;
-        } else {
-            return Some(format!(
-                "You see yourself {}.",
-                whereabouts(actor.base_position)
-            ));
-        }
-    }
+/// A figure's name, with its size when it fills more than one cell:
+/// "towering giant", "massive beast".
+fn figure_name(actor: &UnifiedActor, palette: &Palette) -> String {
     let base_name = if actor.name.is_empty() {
         palette
             .resolve(words(), actor.asset)
@@ -276,66 +399,289 @@ fn format_actor(actor: &UnifiedActor, observer: ActorId, palette: &Palette) -> O
     } else {
         actor.name
     };
-
-    let min_z = actor
-        .cells
-        .iter()
-        .map(|p| p.z)
-        .min()
-        .unwrap_or(actor.base_position.z);
-    let max_z = actor
-        .cells
-        .iter()
-        .map(|p| p.z)
-        .max()
-        .unwrap_or(actor.base_position.z);
-    let height = (max_z - min_z).abs() + 1;
-
-    let min_x = actor
-        .cells
-        .iter()
-        .map(|p| p.x)
-        .min()
-        .unwrap_or(actor.base_position.x);
-    let max_x = actor
-        .cells
-        .iter()
-        .map(|p| p.x)
-        .max()
-        .unwrap_or(actor.base_position.x);
-    let min_y = actor
-        .cells
-        .iter()
-        .map(|p| p.y)
-        .min()
-        .unwrap_or(actor.base_position.y);
-    let max_y = actor
-        .cells
-        .iter()
-        .map(|p| p.y)
-        .max()
-        .unwrap_or(actor.base_position.y);
-    let width = (max_x - min_x).abs().max((max_y - min_y).abs()) + 1;
-
-    let full_name = if height >= 3
-        && !base_name.contains("towering")
-        && width >= 2
-        && !base_name.contains("massive")
-    {
-        format!("towering, massive {base_name}")
-    } else if height >= 3 && !base_name.contains("towering") {
-        format!("towering {base_name}")
-    } else if width >= 2 && !base_name.contains("massive") {
-        format!("massive {base_name}")
-    } else {
-        base_name.to_string()
+    let span = |axis: fn(&Position) -> i32| {
+        let values = actor.cells.iter().map(axis);
+        values.clone().max().unwrap_or(0) - values.min().unwrap_or(0) + 1
     };
+    let height = span(|p| p.z);
+    let width = span(|p| p.x).max(span(|p| p.y));
+    let towering = height >= 3 && !base_name.contains("towering");
+    let massive = width >= 2 && !base_name.contains("massive");
+    let name = match (towering, massive) {
+        (true, true) => format!("towering, massive {base_name}"),
+        (true, false) => format!("towering {base_name}"),
+        (false, true) => format!("massive {base_name}"),
+        (false, false) => base_name.to_owned(),
+    };
+    safe(&name)
+}
 
-    Some(format!(
-        "You see {} {}.",
-        indefinite(&full_name),
-        whereabouts(actor.base_position)
-    ))
+/// An injury as a word before a figure's name; none when it's unhurt.
+fn injury_word(injury: Injury) -> Option<&'static str> {
+    match injury {
+        Injury::Healthy => None,
+        Injury::Wounded => Some("wounded"),
+        Injury::BadlyWounded => Some("badly wounded"),
+        Injury::NearDeath => Some("gravely wounded"),
+    }
+}
+
+/// Names counted and gathered by where they are, in the order each place
+/// was first named: [("to the east", [("scout", 1), ("rat", 2)], 3)].
+type Gathering = (String, Vec<(String, u64)>, u64);
+
+fn gathered(entries: Vec<(String, String, u64)>) -> Vec<Gathering> {
+    let mut counted: Vec<(String, String, u64)> = Vec::new();
+    for (place, name, count) in entries {
+        match counted
+            .iter_mut()
+            .find(|(p, n, _)| *p == place && *n == name)
+        {
+            Some((.., c)) => *c += count,
+            None => counted.push((place, name, count)),
+        }
+    }
+    let mut groups: Vec<Gathering> = Vec::new();
+    for (place, name, count) in counted {
+        match groups.iter_mut().find(|(p, ..)| *p == place) {
+            Some((_, names, total)) => {
+                names.push((name, count));
+                *total += count;
+            }
+            None => groups.push((place, vec![(name, count)], count)),
+        }
+    }
+    groups
+}
+
+/// "a rat and two scouts".
+fn counted_list(names: &[(String, u64)]) -> String {
+    let phrases: Vec<String> = names
+        .iter()
+        .map(|(name, count)| prose::counted(*count, name))
+        .collect();
+    prose::and_list(&phrases)
+}
+
+/// "There is a stone guardian to the east, and two wounded rats to the
+/// north." Figures alike in the same place are counted together, and their
+/// injuries go with their names.
+fn figures_sentence(state: &StateView, palette: &Palette) -> Vec<String> {
+    let o = &state.observation;
+    let mut sentences = Vec::new();
+    let mut entries = Vec::new();
+    for actor in unified_actors(&o.visible_actors) {
+        if actor.id == o.actor {
+            if !actor.cells.iter().any(|p| p.x == 0 && p.y == 0) {
+                sentences.push(format!(
+                    "You can see yourself {}.",
+                    whereabouts(actor.base_position)
+                ));
+            }
+            continue;
+        }
+        let injury = o
+            .combat
+            .as_ref()
+            .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
+            .and_then(|c| injury_word(c.injury));
+        let name = figure_name(&actor, palette);
+        let name = injury.map_or_else(|| name.clone(), |i| format!("{i} {name}"));
+        entries.push((whereabouts(actor.base_position), name, 1));
+    }
+    let groups = gathered(entries);
+    if let Some((_, first, _)) = groups.first() {
+        // "There is a scout and two rats", "There are two rats and a scout".
+        let verb = if first[0].1 == 1 { "is" } else { "are" };
+        let clauses: Vec<String> = groups
+            .iter()
+            .map(|(place, names, _)| format!("{} {place}", counted_list(names)))
+            .collect();
+        sentences.insert(0, format!("There {verb} {}.", gapped(&clauses)));
+    }
+    sentences
+}
+
+/// Clauses joined so each stands apart even when it holds a list of its own:
+/// "a token to the east", "a token to the east, and a key to the north",
+/// "a, b, and c".
+fn gapped(clauses: &[String]) -> String {
+    match clauses {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first}, and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+/// "A copper token lies at your feet; two stone tablets lie to the east."
+fn things_sentences(state: &StateView, place: &Place) -> Vec<String> {
+    let o = &state.observation;
+    let mut seen = BTreeSet::new();
+    let mut items: Vec<&GroundItemView> = o
+        .ground_items
+        .iter()
+        .filter(|i| seen.insert(i.item.id))
+        .collect();
+    // At your feet, then nearby, then farther off.
+    items.sort_by_key(|i| {
+        (
+            !i.reachable,
+            !place.contains(i.position),
+            distance(i.position),
+        )
+    });
+    // Things alike in the same place are counted together.
+    let entries = items
+        .into_iter()
+        .map(|item| {
+            let place = if item.reachable {
+                "at your feet".to_owned()
+            } else if place.contains(item.position) {
+                "on the floor nearby".to_owned()
+            } else {
+                whereabouts(item.position)
+            };
+            (place, safe(&item.item.name), item.item.quantity)
+        })
+        .collect();
+    let mut told: BTreeSet<String> = BTreeSet::new();
+    let clauses: Vec<String> = gathered(entries)
+        .into_iter()
+        .map(|(place, names, count)| {
+            // Things named before in another place are "another" or "more".
+            let phrases: Vec<String> = names
+                .iter()
+                .map(|(name, n)| match (told.insert(name.clone()), n) {
+                    (true, _) => prose::counted(*n, name),
+                    (false, 1) => format!("another {name}"),
+                    (false, n) => format!("{} more {}", prose::number(*n), prose::plural(name)),
+                })
+                .collect();
+            let list = prose::and_list(&phrases);
+            let level = !matches!(place.as_str(), "above you" | "below you");
+            let verb = match (level, count == 1) {
+                (true, true) => "lies",
+                (true, false) => "lie",
+                (false, true) => "is",
+                (false, false) => "are",
+            };
+            if list.starts_with(|c: char| c.is_ascii_digit()) {
+                // "At your feet lie 17 arrows", not "17 arrows lie at...".
+                format!("{place} {verb} {list}")
+            } else {
+                format!("{list} {verb} {place}")
+            }
+        })
+        .collect();
+    clauses.chunks(2).map(|pair| pair.join("; ")).collect()
+}
+
+/// Doors in sight that aren't ways out of this place.
+fn other_doors(state: &StateView, place: &Place) -> Option<String> {
+    let ways: BTreeSet<u64> = place
+        .ways
+        .iter()
+        .filter_map(|w| match w.kind {
+            Opening::Door { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect();
+    let mut doors = BTreeSet::new();
+    let mut entries = Vec::new();
+    let mut cells: Vec<&CellView> = state.observation.visible_cells.iter().collect();
+    cells.sort_by_key(|c| (distance(c.position), &c.key));
+    for cell in cells {
+        if let Some(door) = &cell.door {
+            if !ways.contains(&door.id) && doors.insert(door.id) {
+                let name = if door.name.trim().is_empty() {
+                    "door".to_owned()
+                } else {
+                    safe(&door.name)
+                };
+                let state = if door.open { "open" } else { "closed" };
+                entries.push((whereabouts(cell.position), format!("{state} {name}"), 1));
+            }
+        }
+    }
+    let clauses: Vec<String> = gathered(entries)
+        .iter()
+        .map(|(place, names, _)| format!("{} {place}", counted_list(names)))
+        .collect();
+    (!clauses.is_empty()).then(|| format!("You can also see {}.", gapped(&clauses)))
+}
+
+const DIRECTIONS: [Direction; 10] = [
+    Direction::North,
+    Direction::East,
+    Direction::South,
+    Direction::West,
+    Direction::NorthEast,
+    Direction::SouthEast,
+    Direction::SouthWest,
+    Direction::NorthWest,
+    Direction::Up,
+    Direction::Down,
+];
+
+/// The ways out by kind: "An archway leads east, a passage north, and open
+/// wooden doors south and west." Directions with no opening but a place seen
+/// that way follow: "You can also head east."
+fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
+    // Openings of one kind, with the directions they lead and how many.
+    let mut kinds: Vec<(String, Vec<Direction>)> = Vec::new();
+    for way in &place.ways {
+        let kind = way.kind_name();
+        match kinds.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, directions)) => directions.push(way.direction),
+            None => kinds.push((kind, vec![way.direction])),
+        }
+    }
+    let clauses: Vec<(String, String, bool)> = kinds
+        .iter()
+        .map(|(kind, directions)| {
+            let mut distinct: Vec<Direction> = directions.clone();
+            distinct.dedup();
+            let towards: Vec<String> = distinct
+                .iter()
+                .map(|d| direction_name(*d).to_owned())
+                .collect();
+            let stairs = kind == "stairs";
+            let (subject, plural) = match directions.len() {
+                _ if stairs => (kind.clone(), true),
+                1 => (prose::indefinite(kind), false),
+                n if distinct.len() == 1 => (prose::counted(n as u64, kind), true),
+                _ => (prose::plural(kind), true),
+            };
+            (subject, prose::and_list(&towards), plural)
+        })
+        .collect();
+    let mut sentences = Vec::new();
+    if let Some((subject, towards, plural)) = clauses.first() {
+        let verb = if *plural { "lead" } else { "leads" };
+        let mut parts = vec![format!("{subject} {verb} {towards}")];
+        parts.extend(clauses[1..].iter().map(|(s, t, _)| format!("{s} {t}")));
+        sentences.push(prose::sentence(&gapped(&parts)));
+    }
+    // Directions into darkness were told with the place.
+    let elsewhere: Vec<String> = DIRECTIONS
+        .into_iter()
+        .filter(|d| place.ways(*d).next().is_none() && !place.continues.contains(d))
+        .filter(|d| !exits_from(place, state, *d).is_empty())
+        .map(|d| direction_name(d).to_owned())
+        .collect();
+    if !elsewhere.is_empty() {
+        let also = if sentences.is_empty() { "" } else { "also " };
+        sentences.push(format!(
+            "You can {also}head {}.",
+            prose::or_list(&elsewhere)
+        ));
+    }
+    let walls = state.observation.visible_cells.iter().any(|c| c.wall);
+    if sentences.is_empty() && walls && place.continues.is_empty() {
+        sentences.push("You see no way onward.".into());
+    }
+    sentences
 }
 
 /// [`describe_with`] without a palette: every thing keeps its disclosed
@@ -344,12 +690,16 @@ pub fn describe(state: &StateView) -> String {
     describe_with(state, &Palette::default())
 }
 
-/// The scene in prose. Floors, walls and unnamed figures are described by
-/// their asset words where the palette holds their assets.
+/// [`describe_in`] with no places remembered.
 pub fn describe_with(state: &StateView, palette: &Palette) -> String {
-    let o = &state.observation;
+    describe_in(state, palette, &Places::default())
+}
+
+/// The character's condition, as the first lines of a description: HP and
+/// how the run stands. The objective too when `objective` is set.
+fn status_lines(state: &StateView, objective: bool) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some(c) = &o.combat {
+    if let Some(c) = &state.observation.combat {
         lines.push(format!("HP {}/{}", c.hp, c.max_hp));
         if c.dead {
             lines.push("You are dead. This run has ended.".into());
@@ -358,113 +708,105 @@ pub fn describe_with(state: &StateView, palette: &Palette) -> String {
         } else if c.victory {
             lines.push("Victory! You may keep exploring.".into());
         }
-        lines.extend(
-            c.objective
-                .map(|o| tor_client_common::narration::objective(o).to_owned()),
-        );
+        if objective {
+            lines.extend(
+                c.objective
+                    .map(|o| tor_client_common::narration::objective(o).to_owned()),
+            );
+        }
     }
     if state.wizard_game {
         lines.push("*** WIZARD GAME — permanently marked ***".into());
     }
-    lines.push(describe_place_with(state, palette));
-    lines.join(
-        "
-",
-    )
+    lines
 }
 
-/// The place alone, as on arriving there: no status lines.
-pub fn describe_place_with(state: &StateView, palette: &Palette) -> String {
-    let o = &state.observation;
-    let mut lines = Vec::new();
-    if let Some(title) = crate::narrative::place_title(state) {
-        lines.push(title);
-    }
-    lines.push(crate::narrative::describe_place(state, palette));
+/// The scene in prose, as the game opens: condition, objective and the
+/// place. Floors, walls and unnamed figures are described by their asset
+/// words where the palette holds their assets.
+pub fn describe_in(state: &StateView, palette: &Palette, places: &Places) -> String {
+    let mut lines = status_lines(state, true);
+    lines.push(describe_place_with(state, palette, places));
+    lines.join("\n")
+}
+
+/// The scene as `look` shows it: like [`describe_with`], without repeating
+/// the objective, which `objective` recalls.
+pub fn look_with(state: &StateView, palette: &Palette, places: &Places) -> String {
+    let mut lines = status_lines(state, false);
+    lines.push(describe_place_with(state, palette, places));
+    lines.join("\n")
+}
+
+/// A place already described, on arriving again: its name (or what kind of
+/// place it is, when it has none), its ways out when `ways` is set, and who
+/// and what is in it.
+pub fn brief_place_with(
+    state: &StateView,
+    palette: &Palette,
+    places: &Places,
+    ways: bool,
+) -> String {
     let place = crate::engine::place::survey(state);
-    let mut seen = BTreeSet::new();
-    // Things alike in the same place are counted together.
-    let mut things: Vec<(String, String, String, u64)> = Vec::new();
-    for item in &o.ground_items {
-        if seen.insert(item.item.id) {
-            let place = if item.reachable {
-                "at your feet".into()
-            } else if place.contains(item.position) {
-                "on the floor nearby".into()
-            } else {
-                whereabouts(item.position)
-            };
-            let name = safe(&item.item.name);
-            let identity = format!("{name}|{}|{}", item.item.description, item.item.appearance);
-            match things
-                .iter_mut()
-                .find(|(i, p, ..)| *i == identity && *p == place)
-            {
-                Some((.., count)) => *count += item.item.quantity,
-                None => things.push((identity, place, name, item.item.quantity)),
-            }
-        }
+    let mut lines = Vec::new();
+    let mut about = Vec::new();
+    match crate::narrative::place_title(state) {
+        Some(title) => lines.push(title),
+        None => about.push(format!(
+            "You are back in {}.",
+            crate::narrative::place_noun(state, palette, &place, places, true)
+        )),
     }
-    for (_, place, name, count) in things {
-        lines.push(format!(
-            "You see {} {place}.",
-            crate::engine::prose::counted(count, &name)
-        ));
+    if ways {
+        about.extend(ways_sentences(state, &place));
+        about.extend(exit_sentence(state));
     }
-    let mut doors = BTreeSet::new();
-    for cell in &o.visible_cells {
-        if let Some(door) = &cell.door {
-            if doors.insert(door.id) {
-                lines.push(format!(
-                    "You see {} {}.",
-                    indefinite(&format!(
-                        "{} {}",
-                        if door.open { "open" } else { "closed" },
-                        door.name
-                    )),
-                    whereabouts(cell.position)
-                ));
-            }
-        }
+    if !about.is_empty() {
+        lines.push(prose::paragraph(&about));
     }
-    let unified = unified_actors(&o.visible_actors);
-    for actor in &unified {
-        if let Some(desc) = format_actor(actor, o.actor, palette) {
-            lines.push(desc);
-            if let Some(injury) = o
-                .combat
-                .as_ref()
-                .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
-            {
-                lines.push(format!(
-                    "It looks {}.",
-                    tor_client_common::narration::injury(injury.injury)
-                ));
-            }
-        }
-    }
-    let ways: Vec<_> = [
-        Direction::North,
-        Direction::East,
-        Direction::South,
-        Direction::West,
-        Direction::NorthEast,
-        Direction::SouthEast,
-        Direction::SouthWest,
-        Direction::NorthWest,
-        Direction::Up,
-        Direction::Down,
-    ]
-    .into_iter()
-    .filter(|d| exits_from(&place, state, *d).iter().any(|e| !e.closed))
-    .map(direction_name)
-    .collect();
-    if !ways.is_empty() {
-        let ways: Vec<String> = ways.into_iter().map(String::from).collect();
-        lines.push(format!(
-            "You can head {}.",
-            crate::engine::prose::or_list(&ways)
-        ));
-    }
+    lines.extend(contents(state, palette, &place));
+    lines.join("\n")
+}
+
+/// Where the objective's exit is, when it's in sight.
+fn exit_sentence(state: &StateView) -> Option<String> {
+    let key = state.observation.combat.as_ref()?.exit.as_ref()?;
+    let cell = state
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| &c.key == key && !c.wall)?;
+    Some(if cell.position == (Position { x: 0, y: 0, z: 0 }) {
+        "You are standing at the exit.".into()
+    } else {
+        format!("The exit is {}.", whereabouts(cell.position))
+    })
+}
+
+/// Who and what is in the place, as a paragraph.
+fn contents(state: &StateView, palette: &Palette, place: &Place) -> Option<String> {
+    let mut sentences = figures_sentence(state, palette);
+    sentences.extend(
+        things_sentences(state, place)
+            .into_iter()
+            .map(|s| prose::sentence(&s)),
+    );
+    sentences.extend(other_doors(state, place));
+    (!sentences.is_empty()).then(|| prose::paragraph(&sentences))
+}
+
+/// The place alone, as on arriving there: its name, a paragraph on the place
+/// and its ways out, and a paragraph on who and what is in it.
+pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places) -> String {
+    let place = crate::engine::place::survey(state);
+    let mut lines = Vec::new();
+    lines.extend(crate::narrative::place_title(state));
+    let mut about = vec![crate::narrative::describe_surveyed(
+        state, palette, &place, places,
+    )];
+    about.extend(ways_sentences(state, &place));
+    about.extend(exit_sentence(state));
+    lines.push(prose::paragraph(&about));
+    lines.extend(contents(state, palette, &place));
     lines.join("\n")
 }

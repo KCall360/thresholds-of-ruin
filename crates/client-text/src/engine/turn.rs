@@ -17,10 +17,6 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// How long to wait for an answer before giving up on the server.
 const ANSWER: Duration = Duration::from_secs(10);
-/// How long play may stay quiet, with the character still not ready, before
-/// the turn ends anyway: another player's character, or one nothing
-/// controls, may be next.
-const QUIET: Duration = Duration::from_secs(2);
 
 /// The connection a turn runs over. Tests use scripted links.
 #[allow(async_fn_in_trait)]
@@ -94,6 +90,8 @@ pub struct Reader<'a> {
     /// History pages answered during the turn, as text.
     pub pages: Vec<String>,
     pub resynced: bool,
+    /// What the server last said play waits for.
+    pub waiting: Option<Waiting>,
 }
 
 impl Reader<'_> {
@@ -161,19 +159,24 @@ async fn settle(
     let mut ended = None;
     loop {
         let before = link.client().state().clone();
-        let wait = if acked { QUIET } else { ANSWER };
-        let Some(message) = link.next(wait).await? else {
+        // Play stopped, and not for this player: the turn is over.
+        let others = |ended: Option<TravelPhase>| match ended {
+            Some(phase) => Settled::Journey(phase),
+            None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
+            None => Settled::Done,
+        };
+        let Some(message) = link.next(ANSWER).await? else {
             if acked {
-                // Play went quiet without this player being next.
-                return Ok(match ended {
-                    Some(phase) => Settled::Journey(phase),
-                    None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
-                    None => Settled::Done,
-                });
+                // The server always says when play stops; this is only a
+                // safety net if that word never comes.
+                return Ok(others(ended));
             }
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
         };
         reader.record(&before, link, &message);
+        if let ServerMessage::Waiting { on } = &message {
+            reader.waiting = Some(*on);
+        }
         match &message {
             ServerMessage::Error {
                 request_id, code, ..
@@ -192,6 +195,17 @@ async fn settle(
                 return Ok(Settled::Done);
             }
             ServerMessage::Snapshot { .. } => return Ok(Settled::Lost),
+            ServerMessage::Waiting { on } if acked && *on != Waiting::You => {
+                if until == Until::Journey {
+                    ended = link
+                        .client()
+                        .travel()
+                        .filter(|t| Some(&t.id) == receipt.as_ref())
+                        .map(|t| t.phase)
+                        .filter(|phase| *phase != TravelPhase::Active);
+                }
+                return Ok(others(ended));
+            }
             ServerMessage::Update { update } => {
                 if let UpdateBody::Control { has_control: false } = update.body {
                     if until != Until::Answered {
@@ -280,8 +294,10 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
             None => Step::Finish(End::Gone),
         },
         Goal::Approach { target } if !approached => travel(*target),
-        Goal::Go { destination, .. } if !approached => Step::Travel(destination.clone()),
-        Goal::Approach { .. } | Goal::Go { .. } => Step::Finish(End::Done),
+        Goal::Go { destination, .. } | Goal::Visit { destination, .. } if !approached => {
+            Step::Travel(destination.clone())
+        }
+        Goal::Approach { .. } | Goal::Go { .. } | Goal::Visit { .. } => Step::Finish(End::Done),
         Goal::Step { direction } => act(Action::Move {
             direction: *direction,
         }),
@@ -295,7 +311,19 @@ fn object(goal: &Goal, scene: &Scene) -> String {
     match goal {
         Goal::Take { item, quantity } | Goal::Drop { item, quantity } => {
             match (scene.get(Key::Item(*item)), quantity) {
-                (Some(r), Some(q)) if *q < r.quantity => Some(prose::counted(*q, &r.name)),
+                // A count is "two arrows" unless it's every alike thing there
+                // is, whatever stacks they're in.
+                (Some(r), Some(q))
+                    if *q
+                        < scene
+                            .referents
+                            .iter()
+                            .filter(|o| o.identity == r.identity)
+                            .map(|o| o.quantity)
+                            .sum::<u64>() =>
+                {
+                    Some(prose::counted(*q, &r.name))
+                }
                 (Some(r), _) => Some(r.the()),
                 (None, _) => None,
             }
@@ -303,12 +331,25 @@ fn object(goal: &Goal, scene: &Scene) -> String {
         Goal::Door { door, .. } => named(Key::Door(*door)),
         Goal::Attack { target } => named(Key::Actor(*target)),
         Goal::Approach { target } => named(*target),
+        Goal::Visit { name, .. } => Some(name.clone()),
         Goal::Go { direction, .. } | Goal::Step { direction } => {
             Some(direction_name(*direction).to_owned())
         }
         Goal::Wait => None,
     }
     .unwrap_or_else(|| "it".into())
+}
+
+/// How many things a take or drop is of, and their singular name.
+fn counted(goal: &Goal, scene: &Scene) -> Option<(u64, String)> {
+    match goal {
+        Goal::Take { item, quantity } | Goal::Drop { item, quantity } => {
+            let r = scene.get(Key::Item(*item))?;
+            let n = quantity.map_or(r.quantity, |q| q.min(r.quantity));
+            Some((n, r.name.clone()))
+        }
+        _ => None,
+    }
 }
 
 fn refusal(code: ErrorCode, goal: &Goal) -> String {
@@ -319,7 +360,9 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
             Goal::Door { .. } => "You can't reach it from here.",
             Goal::Attack { .. } => "You can't reach it from here.",
             Goal::Step { .. } => "You can't go that way.",
-            Goal::Go { .. } | Goal::Approach { .. } => "You can't find a way there.",
+            Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. } => {
+                "You can't find a way there."
+            }
             Goal::Wait => "You can't wait right now.",
         },
         ErrorCode::NotController | ErrorCode::ControlTaken => {
@@ -359,11 +402,18 @@ pub async fn run_goal(
 ) -> Result<bool, Error> {
     let start = Scene::new(link.client().state(), link.palette());
     let object = object(&goal, &start);
+    let counted = counted(&goal, &start);
     let known = start.figure_ids();
+    // What a walk has seen already, so only what's new stops it.
+    let seen: std::collections::BTreeSet<String> = crate::adventure::sights(start.state)
+        .into_iter()
+        .map(|(id, ..)| id)
+        .collect();
     drop(start);
     let mut episode = Episode {
         goal: goal.clone(),
         object,
+        counted,
         approached: false,
         beats: Vec::new(),
         end: End::Done,
@@ -373,6 +423,7 @@ pub async fn run_goal(
         beats: Vec::new(),
         pages: Vec::new(),
         resynced: false,
+        waiting: None,
     };
     // After reconnecting during recovery, play resumes before anything new.
     let state = link.client().state();
@@ -385,7 +436,17 @@ pub async fn run_goal(
         if settle(link, &mut reader, Request::Continue, Until::Ready).await? == Settled::Lost {
             episode.end = End::Lost;
         } else if !link.client().state().observation.ready {
-            episode.end = End::Refused("It isn't your turn to act yet.".into());
+            // Say why play won't come round to this character.
+            episode.end = End::Refused(
+                match reader.waiting {
+                    Some(Waiting::Unclaimed) => {
+                        "Another character is to act first, and no one is controlling it."
+                    }
+                    Some(Waiting::Stopped) => "Nothing more can happen in this game.",
+                    _ => "Someone else is to act first.",
+                }
+                .into(),
+            );
         }
     }
     let mut acted = false;
@@ -410,56 +471,124 @@ pub async fn run_goal(
                 };
                 match settle(link, &mut reader, request, Until::Acted { revision }).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
-                    Settled::Rejected(code) => episode.end = End::Refused(refusal(code, &goal)),
+                    Settled::Rejected(code) => {
+                        // A figure that moved off while you closed in is out
+                        // of reach, not unreachable.
+                        let now = Scene::new(link.client().state(), link.palette());
+                        let away = matches!(goal, Goal::Attack { target }
+                            if code == ErrorCode::InvalidAction
+                                && now.get(Key::Actor(target)).is_some_and(|r| !r.reachable));
+                        episode.end = End::Refused(if away {
+                            "It keeps out of reach.".into()
+                        } else {
+                            refusal(code, &goal)
+                        });
+                    }
                     Settled::Lost => episode.end = End::Lost,
                 }
             }
             Step::Travel(destination) => {
-                let request = Request::Command {
-                    branch,
-                    command: Command::Travel {
-                        expected_revision: revision,
-                        destination,
-                    },
-                };
-                episode.approached = true;
-                match settle(link, &mut reader, request, Until::Journey).await? {
-                    Settled::Journey(TravelPhase::Arrived) => {
-                        // Arrival never authorizes what comes next if someone
-                        // new came into view.
-                        let now = Scene::new(link.client().state(), link.palette());
-                        let newcomer = now.figure_ids().difference(&known).next().is_some();
-                        let target_is_figure = matches!(goal, Goal::Attack { .. })
-                            || matches!(goal, Goal::Approach { target } if now.get(target).is_some_and(|r| r.is(Kind::Figure)));
-                        if newcomer
-                            && !matches!(goal, Goal::Go { .. } | Goal::Approach { .. })
-                            && !target_is_figure
+                let (mut destination, mut branch, mut revision) = (destination, branch, revision);
+                let mut legs = 0;
+                loop {
+                    let before = super::seen(link.client());
+                    let request = Request::Command {
+                        branch,
+                        command: Command::Travel {
+                            expected_revision: revision,
+                            destination,
+                        },
+                    };
+                    episode.approached = true;
+                    let mut next = None;
+                    match settle(link, &mut reader, request, Until::Journey).await? {
+                        // A walk in a direction goes on while there's nothing
+                        // to see, and stops at the first thing that comes into
+                        // view.
+                        Settled::Journey(TravelPhase::Arrived)
+                            if matches!(goal, Goal::Go { .. })
+                                && Scene::new(link.client().state(), link.palette())
+                                    .figure_ids()
+                                    .is_subset(&known) =>
                         {
-                            episode.end = End::Wary;
-                        }
-                    }
-                    Settled::Journey(phase) => {
-                        if phase == TravelPhase::Blocked {
-                            // Name who's in the way, when someone is.
-                            let now = Scene::new(link.client().state(), link.palette());
-                            let blocker = now.of(Kind::Figure).find(|r| r.reachable);
-                            if let Some(r) = blocker {
-                                if let Key::Actor(id) = r.key {
-                                    reader.beats.push(Beat::Barred(super::chronicle::Figure {
-                                        id,
-                                        name: r.name.clone(),
-                                    }));
+                            legs += 1;
+                            let Goal::Go { direction, .. } = &episode.goal else {
+                                unreachable!("a walk")
+                            };
+                            // What's new is what's in sight; where to go on
+                            // is read from what's remembered too.
+                            let new = crate::adventure::sights(link.client().state())
+                                .into_iter()
+                                .find(|(id, ..)| !seen.contains(id));
+                            if let Some((_, what, whereabouts)) = new {
+                                reader.beats.push(Beat::Spotted { what, whereabouts });
+                            } else if legs < MAX_LEGS {
+                                let now = super::seen(link.client());
+                                if let Some((way, to)) =
+                                    crate::adventure::onward(&before, &now, *direction)
+                                {
+                                    episode.goal = Goal::Go {
+                                        direction: way,
+                                        destination: to.clone(),
+                                    };
+                                    next = Some(to);
                                 }
                             }
                         }
-                        episode.end = End::Stopped(phase);
+                        Settled::Journey(TravelPhase::Arrived) => {
+                            // Arrival never authorizes what comes next if someone
+                            // new came into view.
+                            let now = Scene::new(link.client().state(), link.palette());
+                            let newcomer = now.figure_ids().difference(&known).next().is_some();
+                            let target_is_figure = matches!(goal, Goal::Attack { .. })
+                                || matches!(goal, Goal::Approach { target } if now.get(target).is_some_and(|r| r.is(Kind::Figure)));
+                            if newcomer
+                                && !matches!(
+                                    goal,
+                                    Goal::Go { .. } | Goal::Approach { .. } | Goal::Visit { .. }
+                                )
+                                && !target_is_figure
+                            {
+                                episode.end = End::Wary;
+                            }
+                        }
+                        // Closing in on a figure that steps up to meet you: the
+                        // way is "blocked" because it's here, so attack it.
+                        Settled::Journey(TravelPhase::Blocked)
+                            if matches!(goal, Goal::Attack { target } if Scene::new(link.client().state(), link.palette())
+                            .get(Key::Actor(target))
+                            .is_some_and(|r| r.reachable)) => {}
+                        Settled::Journey(phase) => {
+                            if phase == TravelPhase::Blocked {
+                                // Name who's in the way, when someone is.
+                                let now = Scene::new(link.client().state(), link.palette());
+                                let blocker = now.of(Kind::Figure).find(|r| r.reachable);
+                                if let Some(r) = blocker {
+                                    if let Key::Actor(id) = r.key {
+                                        reader.beats.push(Beat::Barred(super::chronicle::Figure {
+                                            id,
+                                            name: r.name.clone(),
+                                        }));
+                                    }
+                                }
+                            }
+                            episode.end = End::Stopped(phase);
+                        }
+                        Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
+                        Settled::Rejected(code) => {
+                            episode.approached = false;
+                            episode.end = End::Refused(refusal(code, &goal));
+                        }
+                        Settled::Lost => episode.end = End::Lost,
                     }
-                    Settled::Done => episode.end = End::Stopped(TravelPhase::Active),
-                    Settled::Rejected(code) => {
-                        episode.approached = false;
-                        episode.end = End::Refused(refusal(code, &goal));
+                    match next {
+                        Some(to) => {
+                            destination = to;
+                            branch = link.client().branch().clone();
+                            revision = link.client().state().revision;
+                        }
+                        None => break,
                     }
-                    Settled::Lost => episode.end = End::Lost,
                 }
             }
         }
@@ -470,6 +599,9 @@ pub async fn run_goal(
     record.entries.push(Entry::Episode(episode));
     Ok(done && !resynced)
 }
+
+/// The most journeys one walk in a direction makes before stopping anyway.
+const MAX_LEGS: usize = 12;
 
 /// Send a session request and record what comes back.
 pub async fn run_request(
@@ -487,6 +619,7 @@ pub async fn run_request(
         beats: Vec::new(),
         pages: Vec::new(),
         resynced: false,
+        waiting: None,
     };
     let settled = settle(link, &mut reader, request, Until::Answered).await?;
     let beats = std::mem::take(&mut reader.beats);

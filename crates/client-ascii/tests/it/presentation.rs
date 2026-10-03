@@ -42,6 +42,7 @@ fn places_modal_displays_memory_and_renames_without_travel_or_time() {
     snapshot.state.observation.places.push(PlaceView {
         key: "forgotten-cell".into(),
         name: "Quiet Reverie".into(),
+        origin: PlaceNameOrigin::Authored,
     });
     let mut app = App::new();
     app.role = AccessRole::Player;
@@ -701,6 +702,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             }],
             events: vec![],
             objective: None,
+            exit: None,
             victory: false,
             dead: false,
             terminal: false,

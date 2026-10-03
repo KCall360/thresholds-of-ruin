@@ -29,6 +29,9 @@ struct Client {
     palette_region: Option<u64>,
     messages: mpsc::Sender<ServerMessage>,
     close: watch::Sender<bool>,
+    /// What this client was last told play waits for, since its last update
+    /// or snapshot; `None` once anything has changed.
+    waiting: Option<Waiting>,
 }
 
 pub(crate) struct Connection {
@@ -154,6 +157,7 @@ impl Service {
                 palette_region: None,
                 messages,
                 close,
+                waiting: None,
             },
         );
         self.send(
@@ -659,6 +663,7 @@ impl Service {
             return Step::Full(full);
         }
         let Some(next) = self.engine.next_actor() else {
+            self.announce_waiting();
             return Step::Blocked;
         };
         if self.travels.contains_key(&next) {
@@ -674,10 +679,45 @@ impl Service {
                 .keys()
                 .any(|&actor| self.engine.alive(actor))
         {
+            self.announce_waiting();
             return Step::Blocked;
         }
         self.advance_ai(next);
         Step::Progress
+    }
+
+    /// Tell each attached client what stopped play waits for, once per stop.
+    fn announce_waiting(&mut self) {
+        let next = self.engine.next_actor();
+        let anyone = self
+            .controllers
+            .keys()
+            .any(|&actor| self.engine.alive(actor));
+        let ids: Vec<u64> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.actor.is_some())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
+            let on = match next {
+                None => Waiting::Stopped,
+                // AI plays only while someone does.
+                Some(actor) if self.engine.is_ai(actor) && !anyone => Waiting::Stopped,
+                Some(actor) if self.engine.is_ai(actor) => Waiting::Paused,
+                Some(actor) => match self.controllers.get(&actor) {
+                    Some(&owner) if owner == id => Waiting::You,
+                    Some(_) => Waiting::Others,
+                    None => Waiting::Unclaimed,
+                },
+            };
+            if self.clients[&id].waiting != Some(on) {
+                self.send(id, ServerMessage::Waiting { on });
+                if let Some(client) = self.clients.get_mut(&id) {
+                    client.waiting = Some(on);
+                }
+            }
+        }
     }
 
     #[cfg(test)]
@@ -994,6 +1034,18 @@ impl Service {
     }
 
     fn send(&mut self, id: u64, message: ServerMessage) {
+        // Anything that changes what a client knows, and every answer to a
+        // request, needs a fresh word on whose move it is.
+        if matches!(
+            message,
+            ServerMessage::Update { .. }
+                | ServerMessage::Snapshot { .. }
+                | ServerMessage::Ack { .. }
+        ) {
+            if let Some(client) = self.clients.get_mut(&id) {
+                client.waiting = None;
+            }
+        }
         if self
             .clients
             .get(&id)

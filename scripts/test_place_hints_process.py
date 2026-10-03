@@ -15,11 +15,17 @@ class PlaceHintProcesses(ProcessTestCase):
         places = initial["state"]["observation"]["places"]
         self.assertEqual(len(places), 2)
         self.assertTrue(all(not p["name"].startswith("Place ") for p in places))
-        self.assertIn(places[0]["name"], self.say(player, "places"))
+        # These hints have no authored names: the game invents them, and the
+        # text client leaves them unsaid until the player names one.
+        self.assertTrue(all(p["origin"] == "invented" for p in places))
+        listed = self.say(player, "places")
+        self.assertIn("1. An unnamed place (in sight)", listed)
+        self.assertNotIn(places[0]["name"], listed)
         self.assertIn("Hearth of Echoes", self.say(player, "name 1 Hearth of Echoes"))
         renamed = self.request(observer, {"type": "snapshot"})
         self.assertEqual(renamed["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
         self.assertEqual(renamed["state"]["observation"]["places"][0]["name"], "Hearth of Echoes")
+        self.assertEqual(renamed["state"]["observation"]["places"][0]["origin"], "player")
         denied = self.request(observer, {"type": "command", "branch": renamed["branch"], "command": {
             "type": "rename_place", "expected_revision": renamed["state"]["revision"], "key": places[0]["key"], "name": "Forbidden"}})
         self.assertIsNotNone(denied["error"])

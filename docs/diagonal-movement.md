@@ -36,6 +36,14 @@ movement revalidates every executed step; stale obstacles interrupt travel.
 Equal-cost routes preserve stable discovery order: N/E/S/W/up/down, then
 NE/SE/SW/NW.
 
+Every walking body follows the same one-clear-side rule: a body of more than
+one cell, or one in a gravity field, takes a diagonal step when either
+ordering of its two component steps carries the whole body clear (see
+[physics](physics.md)), and where both do they must agree. So routes, which
+are planned with one clear side, are walkable by any body, and creatures
+chase through doorways. Before `dungeon-v18`, such a body needed both
+orderings clear, and journeys past a doorway's corner stopped "blocked".
+
 ASCII movement:
 
 ```text

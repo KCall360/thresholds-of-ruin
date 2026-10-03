@@ -2,7 +2,7 @@
 format = 2
 id = "material-volumes"
 version = "1.0"
-ruleset = "dungeon-v17"
+ruleset = "dungeon-v18"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

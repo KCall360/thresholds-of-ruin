@@ -51,6 +51,9 @@ A run continues while one of these holds:
 It stops when the next actor is one a client controls with no journey running,
 when an uncontrolled non-AI actor is next, when nothing can act (for example
 after the selected character dies), or when a client's queue is nearly full.
+When it stops for input, each attached client is told whose move it is with a
+`waiting` message (see [pushed updates](protocol.md#pushed-updates)), once per
+stop.
 A run that never reaches a controlled turn can't hang the server, because
 requests are still handled between actions; there's no action limit.
 

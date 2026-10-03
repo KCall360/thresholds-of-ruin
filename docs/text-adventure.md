@@ -50,19 +50,26 @@ actually visible; an undisclosed cell or region boundary is not called a wall.
 
 The character is always in a *place*: the open floor reachable without passing
 a door or a narrow gap in the walls, worked out from what is seen (see
-[places and ways](if-engine.md#places-and-ways)). A description says what kind
-of place it is, its floor and walls, and where it goes on out of sight:
+[places and ways](if-engine.md#places-and-ways)). A description, in prose,
+says what kind of place it is and what it's made of, its atmosphere, where it
+goes on out of sight and its ways out, then who and what is in it:
 
 ```text
-You are in a small chamber with a stone floor and walls of stone.
-You see a copper token on the floor nearby.
-You see an open wooden door to the east.
-You can head east.
+Hollow Promise
+You are in a small, dusty chamber of stone. Motes of dust hang in the still
+air, stirring as you move. An open wooden door leads east.
+A copper token lies on the floor nearby; a stone tablet lies to the east.
 ```
+
+Arriving somewhere already described gives its name, ways and contents only;
+`verbose` describes every arrival in full, `superbrief` names places only, and
+`brief` returns to the default. `look` always describes in full. See
+[descriptions](if-engine.md#descriptions).
 
 Things inside the place are "at your feet" or "on the floor nearby"; anything
 outside it keeps its direction. The ways onward are the place's doors and gaps,
-and stairs underfoot. Walkable floor inside a place is not an exit. A direction
+stairs underfoot, and the directions in which the place fades into darkness
+(out of sight), which lead as far as can be seen that way. Walkable floor inside a place is not an exit. A direction
 heads through the opening that way to the first open cells beyond it, asking
 which when there are several; a closed door answers "The wooden door to the
 east is closed." With no opening that way, an authored place hint seen in
@@ -71,8 +78,11 @@ blocked journey says so, naming a creature in the way.
 
 Bearings follow the observer frame, including rotated joins. Diagonal sectors
 cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
-adds persistent mnemonic names and renaming. Descriptions never invent walls,
-smells or region names the protocol doesn't disclose.
+adds persistent names (authored by the scenario, or your own) and renaming.
+Descriptions never invent walls or names the protocol doesn't disclose. Atmosphere (a mood word, the
+feel of the air, a smell or a sound) colours each place, has no effect on play,
+and is the same every time the place is described; see
+[atmosphere](if-engine.md#atmosphere).
 
 ## Commands
 
@@ -82,7 +92,9 @@ tablet` walks over first when it's out of reach. See the
 
 - `look` / `l`; `examine <thing>` / `x` / `look at`; `read <thing>`;
   `examine walls`, `floor` or `ceiling` for visible surface materials;
-  `examine me` and `diagnose` for the character's condition.
+  `examine me` and `diagnose` for the character's condition; `status` (or
+  `score`) adds the run's objective.
+- `brief`, `verbose` and `superbrief` choose how arrivals are described.
 - `inventory` / `i`.
 - `take` / `get` / `pick up` / `grab <thing>`; `drop` / `put down`; `put <thing>
   on floor`. Counts take from one stack: `take 3 arrows`.
@@ -90,13 +102,20 @@ tablet` walks over first when it's out of reach. See the
   the key`, `take tokens`.
 - `open` / `close` a door, walking over first when needed.
 - `attack` / `kill` / `hit <creature>`, closing in first when needed.
-- A direction (`east`, `ne`, `up`), or `go east`: head for a way onward.
-  `go to <thing>` walks over without acting on it. `step east` makes one step.
+- A direction (`east`, `ne`, `up`), or `go east`: head for a way onward, and
+  keep walking through darkness or along a corridor until something comes
+  into view or the way needs a choice.
+  `go to <thing>` walks over without acting on it, and `go to <place name>`
+  goes back to a place listed by `places`; `go to start` (or `go back to the
+  start`) returns to where the character stood when the client began, and
+  `go to exit` heads for the objective's exit.
+  `step east` makes one step.
 - `wait` / `z`.
 - `again` / `g` repeats the last command.
 - Chains: `take sword. go east. open door`, or `take key, then go north`.
-- `listen` and `smell` answer that nothing is out of the ordinary.
-- `places`, `name room <name>`, `name <number> <name>`.
+- `listen` and `smell` describe the place's atmosphere.
+- `places`, `name room <name>`, `name <number> <name>`. Places the scenario
+  hasn't named, and you haven't, are listed as unnamed.
 - Session tools are in `help session`: `control`, `release`, `sync`, `save`,
   `history`, `note`, `bookmark`, `pace` and `wizard`. `quit` disconnects.
 
