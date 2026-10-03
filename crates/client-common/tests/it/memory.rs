@@ -36,6 +36,7 @@ fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
     next.state.observation.places.push(PlaceView {
         key: "offscreen".into(),
         name: "Quiet Reverie".into(),
+        origin: PlaceNameOrigin::Authored,
     });
     let mut change = update(next.clone(), 1);
     if let UpdateBody::Observation { event, .. } = &mut change.body {

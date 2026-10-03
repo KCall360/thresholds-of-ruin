@@ -62,6 +62,8 @@ pub struct CombatView {
     /// What the action this view follows did, as far as the observer knows.
     pub events: Vec<DisclosedCombatEvent>,
     pub objective: Option<ObjectiveKind>,
+    /// Where the objective is met, when the objective is disclosed.
+    pub exit: Option<tor_world::Location>,
     pub victory: bool,
     pub dead: bool,
     pub terminal: bool,
@@ -312,6 +314,12 @@ impl Game {
                         ObjectiveKind::ReachExit
                     }
                 }),
+            exit: self
+                .combat
+                .objective
+                .as_ref()
+                .filter(|o| o.disclosed)
+                .map(|o| o.anchor),
             victory: self.combat.outcome.victor.is_some(),
             dead: c.hp == 0,
             terminal: self.combat.outcome.terminal,

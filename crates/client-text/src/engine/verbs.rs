@@ -523,6 +523,17 @@ fn transitive(
                 },
             )
         }
+        (Verb::Go, _) if exit(direct, scene).is_some() => {
+            let key = exit(direct, scene).expect("checked");
+            if crate::narrative::here_key(scene.state) == Some(key) {
+                say("You're already at the exit.")
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name: EXIT.into(),
+                })
+            }
+        }
         (Verb::Go, _) if start(direct, scene).is_some() => {
             let key = start(direct, scene).expect("checked");
             if crate::narrative::here_key(scene.state) == Some(key) {
@@ -615,17 +626,32 @@ fn door(r: &Referent, open: bool) -> Interpretation {
     }
 }
 
-/// Where the character began, when the phrase asks for it: `go to start`,
-/// `go back to the beginning`.
-fn start<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
+/// How the objective's exit is named.
+pub const EXIT: &str = "the exit";
+
+/// The phrase without "back to" and "the": "back to the start" is "start".
+fn bare(np: &NounPhrase) -> String {
     let raw = np.raw.trim().to_lowercase();
     let raw = ["back to ", "back "]
         .iter()
         .find_map(|p| raw.strip_prefix(p))
         .unwrap_or(&raw);
-    let raw = raw.strip_prefix("the ").unwrap_or(raw).trim();
+    raw.strip_prefix("the ").unwrap_or(raw).trim().to_owned()
+}
+
+/// The objective's exit, when the phrase asks for it and the objective is
+/// disclosed: `go to exit`, `go back to the way out`.
+fn exit<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
+    matches!(bare(np).as_str(), "exit" | "way out")
+        .then_some(())
+        .and(scene.state.observation.combat.as_ref()?.exit.as_deref())
+}
+
+/// Where the character began, when the phrase asks for it: `go to start`,
+/// `go back to the beginning`.
+fn start<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
     matches!(
-        raw,
+        bare(np).as_str(),
         "start" | "beginning" | "where i started" | "where i began"
     )
     .then_some(())
@@ -633,8 +659,8 @@ fn start<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
 }
 
 /// A place the character remembers, named in full: its key and name. Names
-/// are matched whole and without regard to case, so "go to hollow promise"
-/// finds Hollow Promise.
+/// are matched whole and without regard to case, so "go to the entry chamber"
+/// finds Entry chamber.
 fn remembered<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<(&'s str, String)> {
     let raw = np.raw.trim().to_lowercase();
     let raw = raw.strip_prefix("the ").unwrap_or(&raw).trim().to_owned();
@@ -644,6 +670,7 @@ fn remembered<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<(&'s str, String)
         .observation
         .places
         .iter()
+        .filter(|p| p.origin != PlaceNameOrigin::Invented)
         .find(|p| {
             let name = p.name.trim().to_lowercase();
             !name.is_empty() && (name == raw || name == words)

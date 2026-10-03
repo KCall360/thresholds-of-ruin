@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -116,8 +116,22 @@ pub struct ActorView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlaceView {
     pub key: String,
-    /// Character-owned mnemonic, not an authored region name.
+    /// The name the character knows the place by.
     pub name: String,
+    /// Where that name came from: clients may leave invented ones unsaid.
+    pub origin: PlaceNameOrigin,
+}
+
+/// Where a remembered place's name came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaceNameOrigin {
+    /// A mnemonic the game made up when the place was first seen.
+    Invented,
+    /// The scenario's name for the place, learned on seeing it.
+    Authored,
+    /// The player's own name for it.
+    Player,
 }
 
 /// Own-body sensations only; never includes hidden field geometry or other bodies.
@@ -158,6 +172,10 @@ pub struct CombatView {
     /// Clients write their own prose from these.
     pub events: Vec<CombatEventView>,
     pub objective: Option<ObjectiveKind>,
+    /// The key of the cell where the objective is met, sent with the
+    /// objective. The cell itself is disclosed only when it's seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<String>,
     pub victory: bool,
     pub dead: bool,
     pub terminal: bool,
@@ -564,6 +582,27 @@ pub enum ServerMessage {
         request_id: Option<String>,
         palette: PaletteUpdate,
     },
+    /// Play has stopped and needs input; says whose. Sent each time a run
+    /// stops, after the updates it sent, and again after a snapshot.
+    Waiting {
+        on: Waiting,
+    },
+}
+
+/// What stopped play is waiting for, as seen by one client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Waiting {
+    /// This client's actor is next, and this client controls it: its move.
+    You,
+    /// An actor another client controls is next.
+    Others,
+    /// A character no client controls is next, until someone takes control.
+    Unclaimed,
+    /// AI play is paused until a controller acts or sends `continue`.
+    Paused,
+    /// Nothing can act: no actor is next, or none a client controls is alive.
+    Stopped,
 }
 
 /// Asset identifiers the attached actor may soon see, forecast from the

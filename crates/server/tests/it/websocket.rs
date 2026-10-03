@@ -10,7 +10,17 @@ use tor_server::{serve, Account, Engine, Scenario, Service, Simulation, Simulati
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+/// The next message, past `waiting` signals, which only some tests watch for
+/// (see [`receive_any`]).
 async fn receive(client: &mut Client) -> ServerMessage {
+    loop {
+        match receive_any(client).await {
+            ServerMessage::Waiting { .. } => continue,
+            message => return message,
+        }
+    }
+}
+async fn receive_any(client: &mut Client) -> ServerMessage {
     let frame = timeout(Duration::from_secs(5), client.next())
         .await
         .unwrap()
@@ -589,6 +599,32 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     };
     assert_eq!(page.entries, vec![entries[1].clone()]);
     assert!(page.older_before.is_some());
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+/// The next `waiting` signal, past anything else.
+async fn waiting(client: &mut Client) -> Waiting {
+    loop {
+        if let ServerMessage::Waiting { on } = receive_any(client).await {
+            return on;
+        }
+    }
+}
+
+#[tokio::test]
+async fn each_client_is_told_whose_move_it_is_when_play_stops() {
+    let (address, _, stop, server) = launch().await;
+    let mut player = connect(&address, "alice-test-token", "text").await;
+    attach(&mut player).await;
+    // Nobody controls the character yet.
+    assert_eq!(waiting(&mut player).await, Waiting::Unclaimed);
+    let mut watcher = connect(&address, "bob-test-token", "text").await;
+    attach(&mut watcher).await;
+    assert_eq!(waiting(&mut watcher).await, Waiting::Unclaimed);
+    request(&mut player, "acquire", Request::AcquireControl).await;
+    assert_eq!(waiting(&mut player).await, Waiting::You);
+    assert_eq!(waiting(&mut watcher).await, Waiting::Others);
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
 }

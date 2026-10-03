@@ -114,7 +114,7 @@ samples; test packages are named for what they set up. See the
 [testing policy](docs/testing.md).
 
 **Interactive fiction engine (in progress, branch `feature/if-prose`).** The
-engine core, protocol 21 and places merged in PR #60. The text client's
+engine core, structured combat facts and places merged in PR #60. The text client's
 `engine` module replaces `Dialogue`: everything between two prompts is one
 passage, and the prompt returns only when it's the player's move. See the
 [IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
@@ -136,7 +136,7 @@ CI on both platforms and the maintainer's approval to merge.
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),
 preloading, per-region packages, generated regions and server palettes
-(PR #47, save format 14), its review fixes (PR #53) and palettes in the text
+(PR #47, which changed the save format), its review fixes (PR #53) and palettes in the text
 and headless clients (PR #54). Against the pre-4e `main`, command p95 rose by
 at most 13% and by under 8% in most cases; see
 [region streaming](docs/region-streaming.md#performance). No ledger line was
@@ -176,8 +176,9 @@ The server reads a package's index, which is proportional to its region
 count, and saves keep a copy of it; everything else a game holds or saves
 grows with the regions played.
 
-The desktop launchers run the 4e build (save format 14); playtest saves from
-before it won't resume with them.
+The desktop launchers run the 4e build. The IF prose branch changes the save
+format to 15 and the ruleset to `dungeon-v18`, so rebuild them after it merges;
+playtest saves from before it won't resume.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

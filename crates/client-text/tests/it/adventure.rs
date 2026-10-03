@@ -559,6 +559,7 @@ fn condition_and_inventory_are_told_without_numbers_beyond_hp() {
         actors: vec![],
         events: vec![],
         objective: None,
+        exit: None,
         victory: false,
         dead: false,
         terminal: false,
@@ -623,6 +624,7 @@ fn session_commands_and_naming_are_tools() {
     named.observation.places.push(PlaceView {
         key: "cell-1".into(),
         name: "Hallowed Crypt".into(),
+        origin: PlaceNameOrigin::Authored,
     });
     assert!(describe(&named).contains("Hallowed Crypt"));
     assert_eq!(
@@ -745,7 +747,7 @@ fn a_room_seen_in_part_goes_on_out_of_sight() {
         }]
     ));
     // It isn't called a dead end.
-    assert!(!prose.contains("no way out"), "{prose}");
+    assert!(!prose.contains("no way onward"), "{prose}");
 }
 
 #[test]
@@ -828,7 +830,7 @@ fn ways_are_named_by_kind_and_a_closed_room_has_none() {
         "{prose}"
     );
     let shut = walled(&["#####", "#.@.#", "#####"]);
-    assert!(describe(&shut).contains("You see no way out."));
+    assert!(describe(&shut).contains("You see no way onward."));
 }
 
 #[test]
@@ -953,10 +955,12 @@ fn going_to_a_remembered_place_travels_to_where_it_was_learned() {
         PlaceView {
             key: "cell-1".into(),
             name: "Hollow Promise".into(),
+            origin: PlaceNameOrigin::Authored,
         },
         PlaceView {
             key: "far-away".into(),
             name: "Vault of Whispers".into(),
+            origin: PlaceNameOrigin::Authored,
         },
     ];
     for line in ["go to vault of whispers", "go to the Vault of Whispers"] {
@@ -1056,4 +1060,65 @@ fn a_walk_follows_a_passage_and_stops_where_it_opens_out() {
     // Coming out into a room: stop to look at it.
     let room = walled(&["#######", "#.....#", "...@..#", "#.....#", "#######"]);
     assert_eq!(onward(&before, &room, Direction::East), None);
+}
+
+#[test]
+fn a_disclosed_exit_is_described_and_can_be_gone_to() {
+    let mut s = state();
+    assert_eq!(said("go to exit", &s), "You can't see any exit here.");
+    s.observation.combat = Some(
+        serde_json::from_value(serde_json::json!({
+            "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
+            "preparation_remaining": null, "preparation_active": false,
+            "recovery_remaining": 0, "events": [], "objective": "reach_exit",
+            "exit": "cell-3", "actors": []
+        }))
+        .unwrap(),
+    );
+    assert!(
+        describe(&s).contains("The exit is to the east."),
+        "{}",
+        describe(&s)
+    );
+    for line in ["go to exit", "go back to the exit", "go to the way out"] {
+        assert_eq!(
+            goals(line, &s),
+            [Goal::Visit {
+                destination: "cell-3".into(),
+                name: "the exit".into()
+            }],
+            "{line}"
+        );
+    }
+    s.observation.combat.as_mut().unwrap().exit = Some("cell-0".into());
+    assert_eq!(said("go to exit", &s), "You're already at the exit.");
+    assert!(describe(&s).contains("You are standing at the exit."));
+}
+
+#[test]
+fn names_the_game_made_up_are_left_unsaid() {
+    let mut s = state();
+    s.observation.places.push(PlaceView {
+        key: "cell-1".into(),
+        name: "Hollow Promise".into(),
+        origin: PlaceNameOrigin::Invented,
+    });
+    assert!(!describe(&s).contains("Hollow Promise"), "{}", describe(&s));
+    assert_eq!(
+        tor_client_text::places(&s),
+        "1. An unnamed place (in sight)\nName one with name <number> <name>."
+    );
+    assert_eq!(
+        said("go to hollow promise", &s),
+        "You can't see any hollow promise here."
+    );
+    // Once the player names it, it's theirs, and said.
+    s.observation.places[0].name = "Antechamber".into();
+    s.observation.places[0].origin = PlaceNameOrigin::Player;
+    assert!(
+        describe(&s).starts_with("Antechamber\n"),
+        "{}",
+        describe(&s)
+    );
+    assert_eq!(tor_client_text::places(&s), "1. Antechamber (in sight)");
 }

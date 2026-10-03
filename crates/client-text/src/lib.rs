@@ -444,13 +444,25 @@ pub fn places(state: &StateView) -> String {
                 .visible_cells
                 .iter()
                 .any(|c| c.key == place.key && !c.wall);
+            // Names the game made up are left unsaid.
+            let name = match place.origin {
+                PlaceNameOrigin::Invented => "An unnamed place".to_owned(),
+                _ => safe(&place.name),
+            };
             format!(
-                "{}. {} ({})",
+                "{}. {name} ({})",
                 i + 1,
-                safe(&place.name),
                 if visible { "in sight" } else { "remembered" }
             )
         })
+        .chain(
+            state
+                .observation
+                .places
+                .iter()
+                .any(|p| p.origin == PlaceNameOrigin::Invented)
+                .then(|| "Name one with name <number> <name>.".to_owned()),
+        )
         .collect::<Vec<_>>()
         .join("\n")
 }

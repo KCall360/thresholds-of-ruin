@@ -400,6 +400,10 @@ fn episode(teller: &mut Teller, e: &Episode) {
                             }
                             walk
                         }
+                        // The exit isn't somewhere the character has been.
+                        _ if object == super::verbs::EXIT => {
+                            format!("you make your way to {object}")
+                        }
                         _ => format!("you make your way back to {object}"),
                     });
                     // When a description of a new place follows, the engine

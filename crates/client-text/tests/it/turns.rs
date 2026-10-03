@@ -16,6 +16,8 @@ enum Frame {
     View(StateView, Option<Event>),
     /// The status of the journey this request started.
     Journey(TravelPhase),
+    /// Play stopped; whose move it is.
+    Waiting(Waiting),
 }
 
 type Responder = Box<dyn FnMut(&Request, &StateView) -> Vec<Frame>>;
@@ -156,6 +158,7 @@ impl Link for Scripted {
                     code,
                     message: String::new(),
                 },
+                Frame::Waiting(on) => ServerMessage::Waiting { on },
                 Frame::View(mut state, event) => {
                     let (tick, revision) = self.last();
                     state.revision = revision + 1;
@@ -849,6 +852,7 @@ async fn a_remembered_place_is_travelled_to_by_name() {
     s.observation.places = vec![PlaceView {
         key: "cell-6".into(),
         name: "Far Hall".into(),
+        origin: PlaceNameOrigin::Authored,
     }];
     let mut link = Scripted::new(s, obliging);
     let mut engine = Engine::default();
@@ -1091,4 +1095,33 @@ async fn a_walk_with_nothing_to_find_stops_in_the_end() {
     let mut engine = Engine::default();
     assert_eq!(play(&mut link, &mut engine, "east").await, "You walk east.");
     assert_eq!(link.sent.len(), 12);
+}
+
+#[tokio::test]
+async fn a_turn_ends_when_the_server_says_another_player_is_next() {
+    // The server's word ends the turn at once; what comes after it is
+    // another player's doing, told between turns.
+    let mut link = Scripted::new(state(), |request, now| match request {
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => {
+            let mut later = not_ready(now.clone());
+            later.observation.visible_actors.push(figure(2, "rat", 3));
+            vec![
+                Frame::View(not_ready(now.clone()), Some(Event::Waited)),
+                Frame::Ack,
+                Frame::Waiting(Waiting::Others),
+                Frame::View(later, None),
+            ]
+        }
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert_eq!(play(&mut link, &mut engine, "wait").await, "Time passes.");
+    assert_eq!(
+        link.queue.len(),
+        1,
+        "the rat's arrival waits for between turns"
+    );
 }

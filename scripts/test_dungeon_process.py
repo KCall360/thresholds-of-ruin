@@ -19,6 +19,19 @@ class DungeonProcesses(ProcessTestCase):
         if current and (current["state"]["observation"]["combat"]["terminal"] or (current["state"]["observation"]["tick"] > tick and current["state"]["observation"]["ready"])): return current
         return self.ascii_frame(player, lambda f:f['state'] is not None and (f['state']['observation']['combat']['terminal'] or (f['state']['observation']['tick'] > tick and f['state']['observation']['ready'])))
 
+    def test_text_wins_by_going_to_the_exit(self):
+        self.start()
+        player, welcome = self.adventure()
+        self.assertIn("You are standing at the exit.", welcome)
+        self.assertIn("falls dead", self.say(player, "attack ruin guard"))
+        taken = self.say(player, "take the dawn seal")
+        self.assertIn("pick it up", taken)
+        self.assertIn("The exit is to the west.", self.say(player, "look"))
+        self.assertEqual(
+            "You make your way to the exit. You have done it! This run has ended.\n> ",
+            self.say(player, "go to the exit"),
+        )
+
     def test_text_wins_by_going_back_to_the_start(self):
         # The exit isn't disclosed, but the character began there, and the
         # text client remembers where it began.

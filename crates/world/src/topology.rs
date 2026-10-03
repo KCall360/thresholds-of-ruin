@@ -197,7 +197,10 @@ pub struct World {
     terrain: Shared<BTreeMap<Location, Terrain>>,
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: Shared<BTreeMap<RegionId, Extent>>,
-    place_hints: Shared<BTreeSet<Location>>,
+    /// Authored place hints, each with its authored name ("" when it has
+    /// none).
+    #[serde(with = "crate::checkpoint_map::shared")]
+    place_hints: Shared<BTreeMap<Location, String>>,
     /// Metadata of detached regions, whose content is held elsewhere as a
     /// [`RegionSlice`]. Omitted from saves while empty.
     #[serde(default, skip_serializing_if = "no_absent_regions")]
@@ -288,7 +291,7 @@ impl World {
         }) && self.terrain.keys().all(|location| self.contains(*location))
             && self
                 .place_hints
-                .iter()
+                .keys()
                 .all(|location| self.contains(*location))
             && self.chambers.keys().all(|id| self.regions.contains_key(id))
             && self.passages.iter().all(|((from, direction), passage)| {
@@ -429,7 +432,7 @@ impl World {
             cell_gravity: Shared::default(),
             terrain: Shared::new(BTreeMap::new()),
             chambers: Shared::new(BTreeMap::new()),
-            place_hints: Shared::new(BTreeSet::new()),
+            place_hints: Shared::new(BTreeMap::new()),
             absent: Shared::default(),
             sight: Default::default(),
         };
@@ -680,15 +683,37 @@ impl World {
             return Err(WorldError::InvalidEndpoint);
         }
         if present {
-            self.place_hints.insert(location);
+            // An existing hint keeps its authored name.
+            self.place_hints.entry(location).or_default();
         } else {
             self.place_hints.remove(&location);
         }
         Ok(())
     }
 
+    /// A place hint with an authored name the character learns on seeing it.
+    pub fn set_named_place_hint(
+        &mut self,
+        location: Location,
+        name: &str,
+    ) -> Result<(), WorldError> {
+        if !self.contains(location) {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.place_hints.insert(location, name.to_owned());
+        Ok(())
+    }
+
     pub fn has_place_hint(&self, location: Location) -> bool {
-        self.place_hints.contains(&location) && self.walkable(location)
+        self.place_hints.contains_key(&location) && self.walkable(location)
+    }
+
+    /// The authored name of the place hint here, if it has one.
+    pub fn place_name(&self, location: Location) -> Option<&str> {
+        self.place_hints
+            .get(&location)
+            .map(String::as_str)
+            .filter(|name| !name.is_empty())
     }
 
     pub fn is_wall(&self, location: Location) -> bool {

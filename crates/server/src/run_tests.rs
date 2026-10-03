@@ -613,3 +613,38 @@ async fn the_runner_drops_a_stalled_spectator_and_finishes_the_journey() {
     stopped.await.unwrap();
     runner.await.unwrap();
 }
+
+#[test]
+fn a_stopped_run_tells_each_client_whose_move_it_is_once() {
+    let (mut service, mut client) = fixture();
+    let mut other = second_player(&mut service, &mut client, 7);
+    let waiting = |c: &mut Connection| -> Vec<Waiting> {
+        drain(c)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMessage::Waiting { on } => Some(on),
+                _ => None,
+            })
+            .collect()
+    };
+    for _ in 0..3 {
+        service.run_until_blocked();
+        let next = service.engine.next_actor().unwrap();
+        let (mine, theirs) = if next == ActorId(1) {
+            (Waiting::You, Waiting::Others)
+        } else {
+            (Waiting::Others, Waiting::You)
+        };
+        assert_eq!(waiting(&mut client), [mine]);
+        assert_eq!(waiting(&mut other), [theirs]);
+        // Still stopped: nothing new to say.
+        assert!(matches!(service.step(), Step::Blocked));
+        assert!(waiting(&mut client).is_empty());
+        let mover = if next == ActorId(1) {
+            &mut client
+        } else {
+            &mut other
+        };
+        act(&mut service, mover, next, Action::Wait);
+    }
+}

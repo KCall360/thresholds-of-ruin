@@ -17,10 +17,6 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// How long to wait for an answer before giving up on the server.
 const ANSWER: Duration = Duration::from_secs(10);
-/// How long play may stay quiet, with the character still not ready, before
-/// the turn ends anyway: another player's character, or one nothing
-/// controls, may be next.
-const QUIET: Duration = Duration::from_secs(2);
 
 /// The connection a turn runs over. Tests use scripted links.
 #[allow(async_fn_in_trait)]
@@ -161,15 +157,17 @@ async fn settle(
     let mut ended = None;
     loop {
         let before = link.client().state().clone();
-        let wait = if acked { QUIET } else { ANSWER };
-        let Some(message) = link.next(wait).await? else {
+        // Play stopped, and not for this player: the turn is over.
+        let others = |ended: Option<TravelPhase>| match ended {
+            Some(phase) => Settled::Journey(phase),
+            None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
+            None => Settled::Done,
+        };
+        let Some(message) = link.next(ANSWER).await? else {
             if acked {
-                // Play went quiet without this player being next.
-                return Ok(match ended {
-                    Some(phase) => Settled::Journey(phase),
-                    None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
-                    None => Settled::Done,
-                });
+                // The server always says when play stops; this is only a
+                // safety net if that word never comes.
+                return Ok(others(ended));
             }
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
         };
@@ -192,6 +190,17 @@ async fn settle(
                 return Ok(Settled::Done);
             }
             ServerMessage::Snapshot { .. } => return Ok(Settled::Lost),
+            ServerMessage::Waiting { on } if acked && *on != Waiting::You => {
+                if until == Until::Journey {
+                    ended = link
+                        .client()
+                        .travel()
+                        .filter(|t| Some(&t.id) == receipt.as_ref())
+                        .map(|t| t.phase)
+                        .filter(|phase| *phase != TravelPhase::Active);
+                }
+                return Ok(others(ended));
+            }
             ServerMessage::Update { update } => {
                 if let UpdateBody::Control { has_control: false } = update.body {
                     if until != Until::Answered {

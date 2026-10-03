@@ -16,7 +16,7 @@ use crate::journal::{
     Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 14;
+pub(crate) const ARCHIVE_VERSION: u32 = 15;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -1030,9 +1030,14 @@ impl Engine {
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
-            .map(|(location, name)| PlaceView {
+            .map(|(location, name, origin)| PlaceView {
                 key: adapt::cell_key(&self.archive.view_salt, actor.0, location),
                 name: name.into(),
+                origin: match origin {
+                    tor_simulation::NameOrigin::Invented => PlaceNameOrigin::Invented,
+                    tor_simulation::NameOrigin::Authored => PlaceNameOrigin::Authored,
+                    tor_simulation::NameOrigin::Player => PlaceNameOrigin::Player,
+                },
             })
             .collect();
         Ok(observation)
@@ -1093,31 +1098,6 @@ impl Engine {
             .ok_or_else(unavailable)?;
         self.game
             .travel_route(SimActor(actor.0), location)
-            .map_err(|_| unavailable())
-    }
-
-    /// The steps of a journey the actor's body can walk; see
-    /// `Game::walking_route`. Validating a travel command still uses
-    /// [`Engine::travel_route`], so the same commands are accepted, in replay
-    /// too; journeys are journaled as the moves they make.
-    pub fn walking_route(
-        &self,
-        actor: ActorId,
-        destination: &str,
-    ) -> Result<Vec<tor_simulation::TravelStep>, Failure> {
-        let unavailable = || {
-            Failure::new(
-                ErrorCode::InvalidAction,
-                "Travel destination or known route is unavailable",
-            )
-        };
-        let location = self
-            .game
-            .known_cells(SimActor(actor.0))
-            .find(|&cell| adapt::cell_key(&self.archive.view_salt, actor.0, cell) == destination)
-            .ok_or_else(unavailable)?;
-        self.game
-            .walking_route(SimActor(actor.0), location)
             .map_err(|_| unavailable())
     }
 
@@ -1545,10 +1525,10 @@ impl Engine {
                 let location = self
                     .game
                     .remembered_places(SimActor(receipt.actor.0))
-                    .find(|(location, _)| {
+                    .find(|(location, ..)| {
                         adapt::cell_key(&self.archive.view_salt, receipt.actor.0, *location) == *key
                     })
-                    .map(|(location, _)| location)
+                    .map(|(location, ..)| location)
                     .ok_or_else(|| {
                         Failure::new(ErrorCode::InvalidRequest, "Place or name is unavailable")
                     })?;

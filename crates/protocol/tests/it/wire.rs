@@ -119,3 +119,56 @@ fn combat_facts_are_data_not_prose() {
     )
     .is_err());
 }
+
+#[test]
+fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from() {
+    let waiting = ServerMessage::Waiting {
+        on: Waiting::Others,
+    };
+    let text = serde_json::to_string(&waiting).unwrap();
+    assert_eq!(text, r#"{"type":"waiting","on":"others"}"#);
+    assert_eq!(
+        serde_json::from_str::<ServerMessage>(&text).unwrap(),
+        waiting
+    );
+    for on in ["you", "others", "unclaimed", "paused", "stopped"] {
+        let text = format!(r#"{{"type":"waiting","on":"{on}"}}"#);
+        assert!(serde_json::from_str::<ServerMessage>(&text).is_ok(), "{on}");
+    }
+
+    let place = PlaceView {
+        key: "opaque-cell".into(),
+        name: "Threshold".into(),
+        origin: PlaceNameOrigin::Authored,
+    };
+    let text = serde_json::to_string(&place).unwrap();
+    assert_eq!(
+        text,
+        r#"{"key":"opaque-cell","name":"Threshold","origin":"authored"}"#
+    );
+    // Every place says where its name came from.
+    assert!(serde_json::from_str::<PlaceView>(r#"{"key":"k","name":"n"}"#).is_err());
+
+    let combat = |exit: Option<&str>| CombatView {
+        hp: 1,
+        max_hp: 1,
+        preparation_remaining: None,
+        preparation_active: false,
+        recovery_remaining: 0,
+        actors: vec![],
+        events: vec![],
+        objective: Some(ObjectiveKind::ReachExit),
+        exit: exit.map(str::to_owned),
+        victory: false,
+        dead: false,
+        terminal: false,
+    };
+    let with = serde_json::to_value(combat(Some("exit-cell"))).unwrap();
+    assert_eq!(with["exit"], "exit-cell");
+    let without = serde_json::to_value(combat(None)).unwrap();
+    assert!(without.get("exit").is_none());
+    assert_eq!(
+        serde_json::from_value::<CombatView>(without).unwrap(),
+        combat(None)
+    );
+}

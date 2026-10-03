@@ -279,7 +279,7 @@ mod navigation_regions {
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Regions {
-        places: Vec<RegionMap<Location, String>>,
+        places: Vec<RegionMap<Location, crate::PlaceName>>,
         cells: Vec<RegionMap<Location, bool>>,
         edges: Vec<EdgeRegion>,
         instances: Vec<Instance>,

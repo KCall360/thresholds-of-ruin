@@ -663,7 +663,7 @@ fn ways_sentences(state: &StateView, place: &Place) -> Vec<String> {
     }
     let walls = state.observation.visible_cells.iter().any(|c| c.wall);
     if sentences.is_empty() && walls && place.continues.is_empty() {
-        sentences.push("You see no way out.".into());
+        sentences.push("You see no way onward.".into());
     }
     sentences
 }
@@ -743,12 +743,28 @@ pub fn brief_place_with(
     }
     if ways {
         about.extend(ways_sentences(state, &place));
+        about.extend(exit_sentence(state));
     }
     if !about.is_empty() {
         lines.push(prose::paragraph(&about));
     }
     lines.extend(contents(state, palette, &place));
     lines.join("\n")
+}
+
+/// Where the objective's exit is, when it's in sight.
+fn exit_sentence(state: &StateView) -> Option<String> {
+    let key = state.observation.combat.as_ref()?.exit.as_ref()?;
+    let cell = state
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| &c.key == key && !c.wall)?;
+    Some(if cell.position == (Position { x: 0, y: 0, z: 0 }) {
+        "You are standing at the exit.".into()
+    } else {
+        format!("The exit is {}.", whereabouts(cell.position))
+    })
 }
 
 /// Who and what is in the place, as a paragraph.
@@ -773,6 +789,7 @@ pub fn describe_place_with(state: &StateView, palette: &Palette, places: &Places
         state, palette, &place, places,
     )];
     about.extend(ways_sentences(state, &place));
+    about.extend(exit_sentence(state));
     lines.push(prose::paragraph(&about));
     lines.extend(contents(state, palette, &place));
     lines.join("\n")

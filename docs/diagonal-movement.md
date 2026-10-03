@@ -36,14 +36,13 @@ movement revalidates every executed step; stale obstacles interrupt travel.
 Equal-cost routes preserve stable discovery order: N/E/S/W/up/down, then
 NE/SE/SW/NW.
 
-A body of more than one cell, or one in a gravity field, moves diagonally
-only when both orderings are clear (see [physics](physics.md)), so it can't
-cut a corner. A journey's steps are planned for the body that walks them: such
-a body's route goes round corners, decided from its own cells and where it
-stands. Validating a travel command still accepts any route with one clear
-side, and when only such a route is known the journey follows it, so the same
-commands are accepted as before, in replay too; journeys are journaled as the
-moves they make. AI pathing still plans with one clear side.
+Every walking body follows the same one-clear-side rule: a body of more than
+one cell, or one in a gravity field, takes a diagonal step when either
+ordering of its two component steps carries the whole body clear (see
+[physics](physics.md)), and where both do they must agree. So routes, which
+are planned with one clear side, are walkable by any body, and creatures
+chase through doorways. Before `dungeon-v18`, such a body needed both
+orderings clear, and journeys past a doorway's corner stopped "blocked".
 
 ASCII movement:
 

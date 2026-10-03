@@ -5,12 +5,21 @@ perception. Seeing an anchor discovers that point, never a room extent, region,
 connection, or surrounding contents. Repeated portal views identify one anchor.
 Characters do not share knowledge or player-assigned names.
 
-The backend assigns a deterministic mnemonic such as **Hollow Promise** or
-**Quiet Reverie**, using the game seed and that character's discovery order.
-These are personal, imagined names, not claims about physical properties or
-authored region names. The 256 combinations receive numeric suffixes after the
-first cycle. A player's rename may duplicate another name; selection uses a
-listed number and the exact opaque identity, not name matching.
+A scenario can name a place hint (`places = [{ at = [3,2,0], name =
+"Threshold" }]`), and the character learns that name on first seeing the hint.
+An unnamed hint gets a deterministic mnemonic such as **Hollow Promise** or
+**Quiet Reverie**, using the game seed and that character's discovery order;
+both words change from one discovery to the next. These are personal, imagined
+names, not claims about physical properties. The 256 combinations receive
+numeric suffixes after the first cycle. A player's rename may duplicate another
+name; selection uses a listed number and the exact opaque identity, not name
+matching.
+
+Each remembered name carries its origin, `invented`, `authored` or `player`,
+and clients may leave invented names unsaid: the text client titles a place
+only by an authored name or the player's, lists the others as "An unnamed
+place", and travels by name only to names it shows. The ASCII client shows
+every name.
 
 `places` lists names in the text client, with `in sight` or `remembered` beside
 each. `name <place number> <new name>` renames an entry. ASCII uses **F5** for the

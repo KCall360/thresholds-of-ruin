@@ -78,8 +78,8 @@ blocked journey says so, naming a creature in the way.
 
 Bearings follow the observer frame, including rotated joins. Diagonal sectors
 cover ratios from 1:2 to 2:1. [Durable place knowledge](place-knowledge.md)
-adds persistent mnemonic names and renaming. Descriptions never invent walls or
-region names the protocol doesn't disclose. Atmosphere (a mood word, the
+adds persistent names (authored by the scenario, or your own) and renaming.
+Descriptions never invent walls or names the protocol doesn't disclose. Atmosphere (a mood word, the
 feel of the air, a smell or a sound) colours each place, has no effect on play,
 and is the same every time the place is described; see
 [atmosphere](if-engine.md#atmosphere).
@@ -107,13 +107,15 @@ tablet` walks over first when it's out of reach. See the
   into view or the way needs a choice.
   `go to <thing>` walks over without acting on it, and `go to <place name>`
   goes back to a place listed by `places`; `go to start` (or `go back to the
-  start`) returns to where the character stood when the client began.
+  start`) returns to where the character stood when the client began, and
+  `go to exit` heads for the objective's exit.
   `step east` makes one step.
 - `wait` / `z`.
 - `again` / `g` repeats the last command.
 - Chains: `take sword. go east. open door`, or `take key, then go north`.
 - `listen` and `smell` describe the place's atmosphere.
-- `places`, `name room <name>`, `name <number> <name>`.
+- `places`, `name room <name>`, `name <number> <name>`. Places the scenario
+  hasn't named, and you haven't, are listed as unnamed.
 - Session tools are in `help session`: `control`, `release`, `sync`, `save`,
   `history`, `note`, `bookmark`, `pace` and `wizard`. `quit` disconnects.
 

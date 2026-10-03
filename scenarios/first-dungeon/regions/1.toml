@@ -4,5 +4,5 @@ size = [7,5,2]
 chamber = true
 gravity = [0,0,-1]
 anchors = { "west" = [0,2,0], "east" = [6,2,0], "exit" = [1,2,0] }
-places = [[3,2,0]]
+places = [{ at = [3,2,0], name = "Threshold" }]
 portals = [{ at = [6,2,0], direction = "east", to = "2/west", height = 2 }]

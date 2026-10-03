@@ -119,6 +119,7 @@ Examples:
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
 | | a remembered place, by name | `Travel` to the key it was learned at; "You're already in ..." when there |
 | | `start`, `the beginning` (also `go back to ...`) | `Travel` to the cell the character stood on when the client began |
+| | `exit`, `the way out` | `Travel` to the objective's exit cell, when the objective is disclosed |
 | a direction; go, walk, head | way onward | `Approach(exit)`, then on while there's nothing to see (see [walking on](#walking-on)); the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
 | examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |
@@ -150,10 +151,11 @@ picking it up").
 character is next, then reports it `ready`. So an action step completes at the
 first update after its acknowledgement whose revision is newer and in which the
 character is ready, and a journey step at the first update in which its travel
-has ended and the character is ready. If play goes quiet for two seconds with
-the character still not ready, the step ends anyway: another player's
-character, or one nothing controls, is next. A journey still keeps the way it
-ended. That removes today's race, where the prompt returned at
+has ended and the character is ready. When play stops and the server's
+`waiting` message says it isn't this player's move (another player's
+character, one nobody controls, paused AI, or nothing left to act), the step
+ends there, and what follows is told between turns. A journey still keeps the
+way it ended. Ten silent seconds end it too, as a safety net. That removes today's race, where the prompt returned at
 the acknowledgement and the rest of the turn arrived after it, and the
 corpse bug, where a pickup after a journey was dropped because the character
 was still recovering.
@@ -291,7 +293,7 @@ two stone tablets lie on the floor nearby.
   and later kinds are gapped: "A passage leads north, and open oak doors east
   and west." Directions with only a place seen beyond follow ("You can also
   head south."). A walled place with no way out and nothing out of sight says
-  "You see no way out."
+  "You see no way onward."
 - **Who and what is here.** Figures alike in one direction are counted
   together, with injuries as adjectives ("two badly wounded rats"); healthy
   figures get none. Things alike in one place are counted together, stacks
@@ -343,8 +345,9 @@ time takes its lowest open cell key. So a corridor seen in part keeps its key
 as the rest of it comes into sight. Cell keys are fixed for a game (they're
 salted per save), so a hinted place reads alike for the whole game, but a new
 game may colour it differently; an unhinted one reads alike until the client
-restarts. The hint's mnemonic name titles the place, and `name room` renames
-it; a place without a hint can't be named. Open ground has its own themes,
+restarts. A hint's authored name, or the player's, titles the place (invented names
+are left unsaid), and `name room` renames it; a place without a hint can't be
+named. Open ground has its own themes,
 with nothing about walls or corners.
 
 ## Testing
@@ -369,7 +372,7 @@ Following the [testing policy](testing.md):
 
 ## Implementation order
 
-1. **Structured combat events** (done, protocol 21): blows, interruptions and
+1. **Structured combat events** (done): blows, interruptions and
    deaths reach clients as data; injury is a level and the objective a kind.
    The server sends no prose.
 2. **The engine core** (done): scene, resolution, verb plans, turn execution,
@@ -379,40 +382,20 @@ Following the [testing policy](testing.md):
    [places and ways](#places-and-ways).
 4. **Prose descriptions, atmosphere and verbosity** (done): see
    [descriptions](#descriptions) and [atmosphere](#atmosphere).
+5. **Protocol 22** (done): the `waiting` signal ends turns, the objective's
+   exit is disclosed by key (`go to exit`; "The exit is to the west."), and
+   places carry authored names, with invented ones left unsaid.
 
 ## Next steps
 
 These are the open items, roughly in order of value. Each needs only the code
 named unless it says otherwise.
 
-1. **Authored region names.** Regions have authored names ("Threshold") the
-   protocol doesn't disclose, so titles are the character's mnemonic names.
-   Disclosing them is a protocol change: ask the maintainer.
-2. **Knowing when it's this player's move.** A turn ends when the character is
-   ready, or after two quiet seconds when someone else's character is next.
-   A server signal for "waiting on another client" would remove the timeout
-   (a protocol change).
-3. **Verbs waiting for game rules.** When the game gains equipment,
+1. **Verbs waiting for game rules.** When the game gains equipment,
    consumables, containers, locks or speech, add the action to
    `engine::verbs::Goal`, map the verbs to it, run it in `engine::turn::step`,
    and narrate its event in `engine::chronicle` and `engine::narrate`.
-4. **Where the exit is** (needs the maintainer). Victory needs the exact exit
-   cell, which isn't disclosed, so a text player can only win by going back
-   to where the character began (`go to start`), which is the exit in the
-   authored dungeons. Disclosing the objective's cell key with the objective
-   would let `go to exit` work anywhere: a protocol change.
-5. **Varied place names** (needs the maintainer). The server's mnemonic names
-   step the first word with each discovery and keep the second for sixteen
-   places, so a dungeon's rooms are all "... Promise". Stepping both words
-   changes the names new discoveries get, in replays of existing saves too,
-   so it's a compatibility decision.
-6. **AI routes round corners** (needs the maintainer). Player journeys now
-   plan for the walker's body (see
-   [diagonal movement](diagonal-movement.md#travel-and-clients)), but AI
-   pathing still cuts corners a two-cell body can't, so such creatures give
-   up a chase at doorways. Fixing it changes AI decisions, which replays
-   recompute: a ruleset-level change.
-7. **Fewer surveys.** A `look` surveys the place three times (description,
+2. **Fewer surveys.** A `look` surveys the place three times (description,
    anchor, ways); cache one survey per state revision if descriptions get
    slower.
 

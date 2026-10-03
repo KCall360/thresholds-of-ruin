@@ -173,6 +173,8 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
         // Palettes are drawn with once the window resolves assets.
         ServerMessage::Palette { .. } => Ok(()),
+        // The window shows readiness from the observation itself.
+        ServerMessage::Waiting { .. } => Ok(()),
     }
 }
 

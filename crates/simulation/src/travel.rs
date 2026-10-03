@@ -18,14 +18,14 @@ const DIRECTIONS: [Direction; 6] = [
 #[serde(deny_unknown_fields)]
 pub(crate) struct Navigation {
     pub(super) cells: RegionMap<Location, bool>,
-    pub(super) places: RegionMap<Location, String>,
+    pub(super) places: RegionMap<Location, crate::PlaceName>,
     pub(super) edges: RegionMap<(Location, Direction), (Location, u8)>,
 }
 
 impl Navigation {
     pub(crate) fn checkpoint_valid(&self, world: &tor_world::World) -> bool {
-        self.places.iter().all(|(location, name)| {
-            self.cells.contains_key(location) && crate::places::valid_name(name)
+        self.places.iter().all(|(location, place)| {
+            self.cells.contains_key(location) && crate::places::valid_name(&place.name)
         }) && self.cells.keys().all(|location| world.knows(*location))
             && self.edges.iter().all(|((from, _), (to, turns))| {
                 *turns < 24 && self.cells.contains_key(from) && self.cells.contains_key(to)
@@ -164,48 +164,13 @@ impl Game {
     }
 
     /// Stable minimum-tick search in remembered topology, including orientation.
-    /// A diagonal step needs one clear side, as a single free cell walks.
     pub fn travel_route(
         &self,
         actor: ActorId,
         destination: Location,
     ) -> Result<Vec<TravelStep>, GameError> {
-        self.route(actor, destination, false)
-    }
-
-    /// A route the actor's body can walk step by step. A body of several
-    /// cells, or one in a gravity field, moves diagonally only when both
-    /// sides are clear (see `translate_body`), so the route goes round
-    /// corners [`Game::travel_route`] would cut. When only a corner-cutting
-    /// route is known, that route is returned, so no journey is refused that
-    /// `travel_route` accepts.
-    pub fn walking_route(
-        &self,
-        actor: ActorId,
-        destination: Location,
-    ) -> Result<Vec<TravelStep>, GameError> {
-        self.route(actor, destination, true)
-            .or_else(|_| self.route(actor, destination, false))
-    }
-
-    fn route(
-        &self,
-        actor: ActorId,
-        destination: Location,
-        body_aware: bool,
-    ) -> Result<Vec<TravelStep>, GameError> {
         let actor_state = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
         let knowledge = self.navigation.get(&actor).ok_or(GameError::Blocked)?;
-        // As `actor_translation`: a single free cell may cut a corner; a
-        // larger body, or one held by a field, may not. Decided from the body
-        // and where it stands, never from geometry along the route.
-        let squeeze = !body_aware
-            || (actor_state.body.cells.len() == 1
-                && !self.body_has_field(
-                    actor_state.location,
-                    actor_state.orientation,
-                    &actor_state.body,
-                ));
         if knowledge.cells.get(&destination) != Some(&false) {
             return Err(GameError::Blocked);
         }
@@ -249,7 +214,7 @@ impl Game {
                     };
                     match (path(a, b), path(b, a)) {
                         (Some(a), Some(b)) if a == b => Some(a),
-                        (Some(a), None) | (None, Some(a)) if squeeze => Some(a),
+                        (Some(a), None) | (None, Some(a)) => Some(a),
                         _ => None,
                     }
                 } else {
@@ -400,13 +365,13 @@ mod refresh_tests {
     }
 
     #[test]
-    fn a_two_cell_body_can_walk_every_step_of_its_walking_route() {
-        // Regression: journeys past a doorway's corner were planned with a
-        // diagonal step a two-cell body may not take, so they stopped
-        // "blocked" beside the wall.
+    fn a_two_cell_body_walks_every_step_of_a_route_round_a_doorway() {
+        // Regression: a two-cell body needed both sides of a diagonal clear,
+        // so routes past a doorway's corner, planned with one clear side,
+        // stopped "blocked" beside the wall.
         use tor_world::{Extent, Passage, Region, World};
         // Two 7x5 chambers joined by a gap in the middle of a wall, as in
-        // the first dungeon, with the body beside the wall north of the gap.
+        // the first dungeon.
         let at = |region, x, y| Location {
             region: RegionId(region),
             position: Position { x, y, z: 0 },
@@ -439,6 +404,7 @@ mod refresh_tests {
                 .unwrap();
         }
         let mut game = Game::new(world, 42);
+        // Beside the wall, north of the gap.
         let actor = game
             .spawn_actor(at(1, 5, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -452,22 +418,25 @@ mod refresh_tests {
         )
         .unwrap();
         game.refresh_navigation();
-        let walks = |game: &Game, route: &[TravelStep]| {
-            let mut game = game.clone();
-            route
-                .iter()
-                .all(|step| game.act(actor, Action::Move(step.direction)).is_ok())
-        };
-        let mut cut = 0;
+        // Straight into the gap, past the wall's corner.
+        let mut corner = game.clone();
+        corner
+            .act(actor, Action::Move(Direction::SouthEast))
+            .unwrap();
         let destinations: Vec<Location> = game.known_cells(actor).collect();
+        let mut routes = 0;
         for destination in destinations {
-            let Ok(old) = game.travel_route(actor, destination) else {
+            let Ok(route) = game.travel_route(actor, destination) else {
                 continue;
             };
-            let new = game.walking_route(actor, destination).unwrap();
-            assert!(walks(&game, &new), "{destination:?}: {new:?}");
-            cut += usize::from(!walks(&game, &old));
+            let mut walker = game.clone();
+            for step in &route {
+                walker
+                    .act(actor, Action::Move(step.direction))
+                    .unwrap_or_else(|e| panic!("{destination:?} {step:?}: {e:?}"));
+            }
+            routes += 1;
         }
-        assert!(cut > 0, "no route here cuts a corner");
+        assert!(routes > 20, "{routes}");
     }
 }

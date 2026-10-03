@@ -172,7 +172,11 @@ pub fn place_title(state: &StateView) -> Option<String> {
         .observation
         .places
         .iter()
-        .find(|p| p.key == key && !p.name.is_empty())
+        .find(|p| {
+            p.key == key
+                && !p.name.is_empty()
+                && p.origin != tor_protocol::PlaceNameOrigin::Invented
+        })
         .map(|p| safe(&p.name))
 }
 

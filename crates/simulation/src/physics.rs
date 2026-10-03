@@ -138,7 +138,7 @@ impl Game {
         actor.motion.acceleration_remainder = [0; 3];
         Ok(())
     }
-    pub(crate) fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
+    fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {
             cells
                 .iter()
@@ -384,6 +384,23 @@ impl Game {
             return self
                 .body_fits(id, to, frame, &a.body)
                 .then_some((to, frame));
+        }
+        // A walking diagonal needs one clear side, as a single cell's does:
+        // the body passes by either ordering of the two steps, and where both
+        // are open they must arrive at the same place.
+        if x != 0 && y != 0 && z == 0 {
+            let entity = PhysicsEntity::Actor(id);
+            let (across, along) = ([i64::from(x), 0, 0], [0, i64::from(y), 0]);
+            let by = |first: [i64; 3], second: [i64; 3]| {
+                let (side, frame) =
+                    self.translate_body(entity, a.location, a.orientation, &a.body, first)?;
+                self.translate_body(entity, side, frame, &a.body, second)
+            };
+            return match (by(across, along), by(along, across)) {
+                (Some(one), Some(other)) if one == other => Some(one),
+                (Some(one), None) | (None, Some(one)) => Some(one),
+                _ => None,
+            };
         }
         self.translate_body(
             PhysicsEntity::Actor(id),
