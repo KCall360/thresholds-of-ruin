@@ -523,6 +523,17 @@ fn transitive(
                 },
             )
         }
+        (Verb::Go, _) if start(direct, scene).is_some() => {
+            let key = start(direct, scene).expect("checked");
+            if crate::narrative::here_key(scene.state) == Some(key) {
+                say("You're already where you started.")
+            } else {
+                goal(Goal::Visit {
+                    destination: key.to_owned(),
+                    name: "where you started".into(),
+                })
+            }
+        }
         (Verb::Go, _) if remembered(direct, scene).is_some() => {
             let (key, name) = remembered(direct, scene).expect("checked");
             if crate::narrative::current_place_key(scene.state) == Some(key) {
@@ -602,6 +613,23 @@ fn door(r: &Referent, open: bool) -> Interpretation {
             prose::capitalize(&r.the())
         )),
     }
+}
+
+/// Where the character began, when the phrase asks for it: `go to start`,
+/// `go back to the beginning`.
+fn start<'s>(np: &NounPhrase, scene: &'s Scene) -> Option<&'s str> {
+    let raw = np.raw.trim().to_lowercase();
+    let raw = ["back to ", "back "]
+        .iter()
+        .find_map(|p| raw.strip_prefix(p))
+        .unwrap_or(&raw);
+    let raw = raw.strip_prefix("the ").unwrap_or(raw).trim();
+    matches!(
+        raw,
+        "start" | "beginning" | "where i started" | "where i began"
+    )
+    .then_some(())
+    .and(scene.places.start.as_deref())
 }
 
 /// A place the character remembers, named in full: its key and name. Names

@@ -429,7 +429,19 @@ pub async fn run_goal(
                 };
                 match settle(link, &mut reader, request, Until::Acted { revision }).await? {
                     Settled::Done | Settled::Journey(_) => acted = true,
-                    Settled::Rejected(code) => episode.end = End::Refused(refusal(code, &goal)),
+                    Settled::Rejected(code) => {
+                        // A figure that moved off while you closed in is out
+                        // of reach, not unreachable.
+                        let now = Scene::new(link.client().state(), link.palette());
+                        let away = matches!(goal, Goal::Attack { target }
+                            if code == ErrorCode::InvalidAction
+                                && now.get(Key::Actor(target)).is_some_and(|r| !r.reachable));
+                        episode.end = End::Refused(if away {
+                            "It keeps out of reach.".into()
+                        } else {
+                            refusal(code, &goal)
+                        });
+                    }
                     Settled::Lost => episode.end = End::Lost,
                 }
             }

@@ -962,3 +962,66 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
     assert!(text.contains("falls dead"), "{text}");
     assert_eq!(link.sent.len(), 2);
 }
+
+#[tokio::test]
+async fn a_figure_that_backs_away_keeps_out_of_reach() {
+    // Regression: "You walk over to the ember wisp. You can't reach it from
+    // here." when it had moved off while the character closed in.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ember wisp", 4));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => {
+            let mut there = east(now.clone(), 2);
+            there.observation.visible_actors[0].position.x = 3;
+            vec![
+                Frame::Ack,
+                Frame::View(
+                    there,
+                    Some(Event::Moved {
+                        direction: Direction::East,
+                    }),
+                ),
+                Frame::Journey(TravelPhase::Arrived),
+            ]
+        }
+        Request::Command {
+            command: Command::Act { .. },
+            ..
+        } => vec![Frame::Reject(ErrorCode::InvalidAction)],
+        _ => vec![Frame::Ack],
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "attack wisp").await,
+        "You go after the ember wisp. It keeps out of reach."
+    );
+}
+
+#[tokio::test]
+async fn a_creature_in_the_way_is_named() {
+    // Regression: the creature barring a journey was found after the journey
+    // ended but looked for before, so it was never named.
+    let mut start = state();
+    start
+        .observation
+        .visible_actors
+        .push(figure(2, "ruin guard", 1));
+    let mut link = Scripted::new(start, |request, now| match request {
+        Request::Command {
+            command: Command::Travel { .. },
+            ..
+        } => vec![Frame::Ack, Frame::Journey(TravelPhase::Blocked)],
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "take tablet").await,
+        "You head toward the stone tablet, intent on picking it up, but the ruin guard bars the way."
+    );
+}

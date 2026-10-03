@@ -170,6 +170,7 @@ impl Engine {
 
     /// The scene as the game opens.
     pub fn welcome(&mut self, link: &impl Link) -> String {
+        self.places.begin(link.client().state());
         self.note_described(link);
         crate::adventure::describe_in(link.client().state(), link.palette(), &self.places)
     }

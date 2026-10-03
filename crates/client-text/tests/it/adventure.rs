@@ -985,3 +985,37 @@ fn a_place_keeps_the_key_it_was_first_seen_under() {
         tor_client_text::narrative::atmosphere(&part, &palette, &places)
     );
 }
+
+#[test]
+fn going_to_the_start_returns_to_where_the_character_began() {
+    let begun = state();
+    let mut places = tor_client_text::narrative::Places::default();
+    places.begin(&begun);
+    let palette = Palette::default();
+    let meaning = |line: &str, s: &StateView| {
+        let scene = Scene::remembering(s, &palette, &places);
+        let command = match_sentence_with_raw(&tokenize(line), Some(line)).unwrap();
+        understand(&command, &scene, &mut Referents::default())
+    };
+    assert_eq!(
+        meaning("go to start", &begun),
+        Interpretation::Say("You're already where you started.".into())
+    );
+    // Two steps east, the start is a journey back.
+    let mut moved = state();
+    for cell in &mut moved.observation.visible_cells {
+        cell.position.x -= 2;
+    }
+    for line in ["go to start", "go back to the start", "go to the beginning"] {
+        assert_eq!(
+            meaning(line, &moved),
+            Interpretation::Goals(vec![Goal::Visit {
+                destination: "cell-0".into(),
+                name: "where you started".into(),
+            }]),
+            "{line}"
+        );
+    }
+    // A client that never saw the start can't go back to it.
+    assert_eq!(said("go to start", &moved), "You can't see any start here.");
+}

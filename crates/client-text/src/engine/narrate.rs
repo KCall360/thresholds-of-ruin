@@ -252,16 +252,20 @@ fn alike(objects: &[Object]) -> Vec<String> {
         .collect()
 }
 
-/// Sightings that cancel out: a figure lost from sight and seen again (or
-/// glimpsed and lost) within one passage is neither news nor gone.
+/// Sightings told by their net effect: a figure lost from sight and seen
+/// again (or glimpsed and lost) within one passage is neither news nor gone,
+/// and one that flickers in and out is told once, as it ended.
 fn settled(beats: &[Beat]) -> Vec<Beat> {
-    let mut net: std::collections::BTreeMap<ActorId, (usize, usize)> = Default::default();
-    for beat in beats {
-        match beat {
-            Beat::Appeared { figure, .. } => net.entry(figure.id).or_default().0 += 1,
-            Beat::Vanished(figure) => net.entry(figure.id).or_default().1 += 1,
-            _ => {}
-        }
+    // Per figure: whether it was in sight before the first sighting beat,
+    // and the index of its last one.
+    let mut net: std::collections::BTreeMap<ActorId, (bool, usize)> = Default::default();
+    for (i, beat) in beats.iter().enumerate() {
+        let (id, appeared) = match beat {
+            Beat::Appeared { figure, .. } => (figure.id, true),
+            Beat::Vanished(figure) => (figure.id, false),
+            _ => continue,
+        };
+        net.entry(id).or_insert((!appeared, i)).1 = i;
     }
     let died: BTreeSet<ActorId> = beats
         .iter()
@@ -270,15 +274,18 @@ fn settled(beats: &[Beat]) -> Vec<Beat> {
             _ => None,
         })
         .collect();
-    let cancels =
-        |id: &ActorId| !died.contains(id) && net.get(id).is_some_and(|(seen, lost)| seen == lost);
     beats
         .iter()
-        .filter(|b| match b {
-            Beat::Appeared { figure, .. } | Beat::Vanished(figure) => !cancels(&figure.id),
+        .enumerate()
+        .filter(|(i, b)| match b {
+            Beat::Appeared { figure, .. } | Beat::Vanished(figure) => {
+                let (before, last) = net[&figure.id];
+                let after = matches!(beats[last], Beat::Appeared { .. });
+                died.contains(&figure.id) || (*i == last && before != after)
+            }
             _ => true,
         })
-        .cloned()
+        .map(|(_, b)| b.clone())
         .collect()
 }
 
@@ -490,7 +497,8 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     }
                 }
                 TravelPhase::Blocked => {
-                    let barred = travel.iter().find_map(|b| match b {
+                    // Who's in the way is found once the journey has ended.
+                    let barred = e.beats.iter().find_map(|b| match b {
                         Beat::Barred(figure) => Some(figure.clone()),
                         _ => None,
                     });
@@ -580,8 +588,10 @@ fn episode(teller: &mut Teller, e: &Episode) {
             tell(teller, &e.beats);
         }
         (End::Refused(text), approached) => {
-            if approached {
-                teller.say(format!("you walk over to {object}"));
+            match (&e.goal, approached) {
+                (Goal::Attack { .. }, true) => teller.say(format!("you go after {object}")),
+                (_, true) => teller.say(format!("you walk over to {object}")),
+                _ => {}
             }
             tell(teller, &e.beats);
             teller.say(text);
@@ -790,11 +800,12 @@ mod tests {
 
     #[test]
     fn whoever_bars_a_blocked_way_is_named() {
+        // As the turn records them: the journey ends, then who's in the way.
         let journey = vec![
-            Beat::Barred(scout()),
             Beat::Journey {
                 phase: TravelPhase::Blocked,
             },
+            Beat::Barred(scout()),
         ];
         assert_eq!(
             told(vec![episode(
@@ -968,5 +979,33 @@ mod tests {
             )]),
             "You set off east. The ruin scout strikes you. You stop short."
         );
+    }
+
+    #[test]
+    fn a_figure_flickering_in_and_out_of_sight_is_told_once() {
+        // Regression: "The ember wisp is no longer in sight. You notice it to
+        // the west. It is no longer in sight."
+        let gone = Beat::Vanished(scout());
+        let back = Beat::Appeared {
+            figure: scout(),
+            whereabouts: "to the west".into(),
+        };
+        assert_eq!(
+            told(vec![Entry::Beats(vec![
+                gone.clone(),
+                back.clone(),
+                gone.clone()
+            ])]),
+            "The ruin scout is no longer in sight."
+        );
+        assert_eq!(
+            told(vec![Entry::Beats(vec![
+                back.clone(),
+                gone.clone(),
+                back.clone()
+            ])]),
+            "You notice a ruin scout to the west."
+        );
+        assert_eq!(told(vec![Entry::Beats(vec![gone, back])]), "");
     }
 }

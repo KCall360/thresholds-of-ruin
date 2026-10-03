@@ -103,7 +103,9 @@ tablet` walks over first when it's out of reach. See the
 - `attack` / `kill` / `hit <creature>`, closing in first when needed.
 - A direction (`east`, `ne`, `up`), or `go east`: head for a way onward.
   `go to <thing>` walks over without acting on it, and `go to <place name>`
-  goes back to a place listed by `places`. `step east` makes one step.
+  goes back to a place listed by `places`; `go to start` (or `go back to the
+  start`) returns to where the character stood when the client began.
+  `step east` makes one step.
 - `wait` / `z`.
 - `again` / `g` repeats the last command.
 - Chains: `take sword. go east. open door`, or `take key, then go north`.

@@ -115,6 +115,7 @@ Examples:
 | attack, kill, hit, fight, strike | figure | `Approach(figure)` when not next to it, then `Act(Attack)` (which resumes interrupted preparation); an approach "blocked" by the figure stepping up next to the character goes on to the attack |
 | go to, approach, walk to | thing, door, figure, place | `Approach(target)` |
 | | a remembered place, by name | `Travel` to the key it was learned at; "You're already in ..." when there |
+| | `start`, `the beginning` (also `go back to ...`) | `Travel` to the cell the character stood on when the client began |
 | a direction; go, walk, head | way onward | `Approach(exit)`, then the new place is described |
 | wait, z | | `Act(Wait)`, or `Resume` when not ready |
 | examine, x, look at, read, listen, smell, touch | anything | no step; the answer is composed from the scene (`listen` and `smell` give the place's atmosphere) |
@@ -363,18 +364,23 @@ named unless it says otherwise.
    consumables, containers, locks or speech, add the action to
    `engine::verbs::Goal`, map the verbs to it, run it in `engine::turn::step`,
    and narrate its event in `engine::chronicle` and `engine::narrate`.
-4. **Varied place names** (needs the maintainer). The server's mnemonic names
+4. **Where the exit is** (needs the maintainer). Victory needs the exact exit
+   cell, which isn't disclosed, so a text player can only win by going back
+   to where the character began (`go to start`), which is the exit in the
+   authored dungeons. Disclosing the objective's cell key with the objective
+   would let `go to exit` work anywhere: a protocol change.
+5. **Varied place names** (needs the maintainer). The server's mnemonic names
    step the first word with each discovery and keep the second for sixteen
    places, so a dungeon's rooms are all "... Promise". Stepping both words
    changes the names new discoveries get, in replays of existing saves too,
    so it's a compatibility decision.
-5. **AI routes round corners** (needs the maintainer). Player journeys now
+6. **AI routes round corners** (needs the maintainer). Player journeys now
    plan for the walker's body (see
    [diagonal movement](diagonal-movement.md#travel-and-clients)), but AI
    pathing still cuts corners a two-cell body can't, so such creatures give
    up a chase at doorways. Fixing it changes AI decisions, which replays
    recompute: a ruleset-level change.
-6. **Fewer surveys.** A `look` surveys the place three times (description,
+7. **Fewer surveys.** A `look` surveys the place three times (description,
    anchor, ways); cache one survey per state revision if descriptions get
    slower.
 

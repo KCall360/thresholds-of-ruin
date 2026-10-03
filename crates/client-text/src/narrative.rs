@@ -57,14 +57,35 @@ fn current_place_anchor_in<'a>(state: &'a StateView, place: &Place) -> Option<(&
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Places {
     by_cell: BTreeMap<String, String>,
+    /// The cell the character stood on when this client began, which `go to
+    /// start` returns to.
+    pub start: Option<String>,
 }
 
 /// No places remembered.
 pub static NO_PLACES: Places = Places {
     by_cell: BTreeMap::new(),
+    start: None,
 };
 
+/// The key of the cell the character stands on.
+pub fn here_key(state: &StateView) -> Option<&str> {
+    state
+        .observation
+        .visible_cells
+        .iter()
+        .find(|c| c.position == Position { x: 0, y: 0, z: 0 } && !c.wall)
+        .map(|c| c.key.as_str())
+}
+
 impl Places {
+    /// Remember where the character begins, once.
+    pub fn begin(&mut self, state: &StateView) {
+        if self.start.is_none() {
+            self.start = here_key(state).map(str::to_owned);
+        }
+    }
+
     /// The key of the place the character is in.
     pub fn key(&self, state: &StateView) -> Option<String> {
         self.key_in(state, &place::survey(state))
