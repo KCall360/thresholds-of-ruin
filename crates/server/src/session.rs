@@ -402,7 +402,7 @@ impl Service {
                 }
                 match visible_entry.content {
                     HistoryContent::Travel { ref destination } => {
-                        let steps = self.engine.travel_route(actor, destination)?;
+                        let steps = self.engine.walking_route(actor, destination)?;
                         let observation = self.engine.observation(actor)?;
                         let phase = if steps.is_empty() {
                             TravelPhase::Arrived

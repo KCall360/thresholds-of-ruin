@@ -138,7 +138,7 @@ impl Game {
         actor.motion.acceleration_remainder = [0; 3];
         Ok(())
     }
-    fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
+    pub(crate) fn body_has_field(&self, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {
             cells
                 .iter()

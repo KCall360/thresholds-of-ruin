@@ -1096,6 +1096,31 @@ impl Engine {
             .map_err(|_| unavailable())
     }
 
+    /// The steps of a journey the actor's body can walk; see
+    /// `Game::walking_route`. Validating a travel command still uses
+    /// [`Engine::travel_route`], so the same commands are accepted, in replay
+    /// too; journeys are journaled as the moves they make.
+    pub fn walking_route(
+        &self,
+        actor: ActorId,
+        destination: &str,
+    ) -> Result<Vec<tor_simulation::TravelStep>, Failure> {
+        let unavailable = || {
+            Failure::new(
+                ErrorCode::InvalidAction,
+                "Travel destination or known route is unavailable",
+            )
+        };
+        let location = self
+            .game
+            .known_cells(SimActor(actor.0))
+            .find(|&cell| adapt::cell_key(&self.archive.view_salt, actor.0, cell) == destination)
+            .ok_or_else(unavailable)?;
+        self.game
+            .walking_route(SimActor(actor.0), location)
+            .map_err(|_| unavailable())
+    }
+
     pub fn state(&self, actor: ActorId) -> Result<StateView, Failure> {
         Ok(StateView {
             wizard_game: self.archive.wizard_game,
