@@ -134,7 +134,7 @@ fn plural_word(word: &str) -> String {
     }
 }
 
-/// Whether `word` is the plural of `singular`, as [`plural_word`] forms it.
+/// Whether `word` is the plural of `singular`, as [`plural`] forms it.
 pub fn is_plural_of(word: &str, singular: &str) -> bool {
     word != singular && plural_word(singular) == word
 }
