@@ -57,6 +57,9 @@ pub struct Engine {
     described: BTreeSet<String>,
     /// The keys places were first seen under.
     places: crate::narrative::Places,
+    /// The place the character was in when the last passage ended, so
+    /// moves told between turns (a spectator's) can arrive somewhere too.
+    last_place: Option<String>,
 }
 
 /// The sentences of a line, each with its own text as typed, so names and
@@ -172,6 +175,7 @@ impl Engine {
     pub fn welcome(&mut self, link: &impl Link) -> String {
         self.places.begin(link.client().state());
         self.note_described(link);
+        self.last_place = self.place_key(link);
         crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places)
     }
 
@@ -485,13 +489,15 @@ impl Engine {
         // walking over to something; a direction across open ground can
         // leave the character in the same place.
         let here = self.place_key(link);
+        self.last_place.clone_from(&here);
         let moved = start.is_some_and(|start| here.is_some_and(|here| here != start));
         if resynced {
             self.note_described(link);
             let text =
                 crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places);
             record.entries.push(Entry::Description(text));
-        } else if moved {
+        } else if moved && !matches!(record.entries.last(), Some(Entry::Description(_))) {
+            // A `look` after the move already described where it ended.
             // The description says who is there; sightings on the way in
             // would say it twice.
             let present: BTreeSet<ActorId> = link
@@ -549,7 +555,8 @@ impl Engine {
         let mut record = Record::default();
         record.entries.push(Entry::Beats(beats));
         self.after_beats(link, &record);
-        self.finish(link, &mut record, None);
+        let start = self.last_place.clone();
+        self.finish(link, &mut record, start.as_deref());
         narrate::compose(&record)
     }
 }
@@ -561,10 +568,11 @@ enum Flow {
 }
 
 /// The view places and ways are read from: what's in sight, and the cells
-/// remembered from earlier views, aligned to this one, where nothing is in
-/// sight. So a doorway seen a moment ago is still a way out when the angle
-/// hides its floor. Things and figures are only what's in sight; remembered
-/// doors are as last seen.
+/// remembered from earlier views, aligned to this one, that fill out a column
+/// partly in sight or lie within two cells. So a doorway seen a moment ago is
+/// still a way out when standing beside it hides it. Only those: memory
+/// charts across portals can misplace cells farther off. Things and figures
+/// are only what's in sight; remembered doors are as last seen.
 pub fn seen(client: &tor_client_common::ClientState) -> StateView {
     let mut state = client.state().clone();
     let shown: BTreeSet<Position> = state
@@ -573,8 +581,11 @@ pub fn seen(client: &tor_client_common::ClientState) -> StateView {
         .iter()
         .map(|c| c.position)
         .collect();
+    let columns: BTreeSet<(i32, i32)> = shown.iter().map(|p| (p.x, p.y)).collect();
     for cell in client.map_memory() {
-        if shown.contains(&cell.position) {
+        let (x, y) = (cell.position.x, cell.position.y);
+        let near = x.abs() <= 2 && y.abs() <= 2;
+        if shown.contains(&cell.position) || !(near || columns.contains(&(x, y))) {
             continue;
         }
         state.observation.visible_cells.push(CellView {

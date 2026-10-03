@@ -443,6 +443,12 @@ fn episode(teller: &mut Teller, e: &Episode) {
                     "you {} {object}",
                     if *open { "open" } else { "close" }
                 )),
+                Goal::Step {
+                    direction: Direction::Up,
+                } => teller.say("you go up"),
+                Goal::Step {
+                    direction: Direction::Down,
+                } => teller.say("you go down"),
                 Goal::Step { direction } => {
                     teller.say(format!("you step {}", direction_name(*direction)))
                 }

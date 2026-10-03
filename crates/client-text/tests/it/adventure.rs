@@ -1169,3 +1169,16 @@ fn a_place_dark_on_most_sides_names_the_sides_that_are_not() {
         "{prose}"
     );
 }
+
+#[test]
+fn stairs_underfoot_are_one_step_up() {
+    let mut s = state();
+    s.observation.visible_cells[0].stairs_up = true;
+    assert_eq!(
+        goals("up", &s),
+        [Goal::Step {
+            direction: Direction::Up
+        }]
+    );
+    assert!(describe(&s).contains("Stairs lead up."), "{}", describe(&s));
+}

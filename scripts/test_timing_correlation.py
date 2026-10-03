@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from timing_correlation import correlate_ack, correlate_native
+from timing_correlation import correlate_ack, correlate_native, events
 
 
 class TimingCorrelation(unittest.TestCase):
@@ -50,3 +50,19 @@ class TimingCorrelation(unittest.TestCase):
         with patch('timing_correlation.events', side_effect=[server,client[:-1]]):
             with self.assertRaises(KeyError):
                 correlate_ack('.', result)
+
+    def test_a_line_cut_off_when_a_process_is_killed_is_not_evidence(self):
+        # Regression: a client killed at the end of a run left half a line,
+        # and reading the log failed instead of ignoring it.
+        complete = json.dumps({"timing_version": 1, "event": "client_ack", "request_id": "r"})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "actor-1.stderr.log"
+            path.write_text(complete + "\n" + '{"timing_version":1,"event":"cli')
+            self.assertEqual([r["request_id"] for r in events(path)], ["r"])
+            # A complete last line is kept, and a broken line in the middle
+            # is still an error.
+            path.write_text(complete + "\n")
+            self.assertEqual(len(events(path)), 1)
+            path.write_text('{"broken\n' + complete + "\n")
+            with self.assertRaises(json.JSONDecodeError):
+                events(path)
