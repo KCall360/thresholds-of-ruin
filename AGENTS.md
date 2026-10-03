@@ -113,20 +113,25 @@ validators share `workload_report.py`; protocol messages have recorded wire
 samples; test packages are named for what they set up. See the
 [testing policy](docs/testing.md).
 
-**Interactive fiction engine (in progress, branch `feature/if-engine`).** The
-text client's `engine` module replaces `Dialogue`: everything between two
-prompts is one passage, and the prompt returns only when it's the player's
-move. Protocol 21 sends combat facts instead of prose. See the
+**Interactive fiction engine (in progress, branch `feature/if-prose`).** The
+engine core, protocol 21 and places merged in PR #60. The text client's
+`engine` module replaces `Dialogue`: everything between two prompts is one
+passage, and the prompt returns only when it's the player's move. See the
 [IF engine](docs/if-engine.md), [parser](docs/if-parser-architecture.md) and
 [adventure commands](docs/text-adventure.md). Decisions agreed with the
 maintainer: the server sends facts, never sentences; verbs the game can't carry
 out yet are recognized and refused plainly, never narrated as if they worked;
 descriptions state only disclosed facts, coloured by atmosphere (mood words,
 smells, sounds) that has no gameplay effect and is fixed per place.
-Places, ways and room descriptions come from `engine::place`. Pick up from the
-engine's [next steps](docs/if-engine.md#next-steps); items 1 and 2 there are
-protocol changes that need the maintainer's decision. The branch needs CI on
-both platforms and the maintainer's approval to merge.
+
+On `feature/if-prose`: prose descriptions with themed atmosphere
+(`engine::atmosphere`), place keys that stay put (`narrative::Places`),
+brief/verbose/superbrief, `go to <place name>` and `go to start`, directions
+across open ground, and playtest fixes, including player journeys planned
+for the walker's body (`Game::walking_route`). Pick up from the engine's
+[next steps](docs/if-engine.md#next-steps): items 1, 2 and 4–6 need the
+maintainer's decision (protocol or replay-affecting changes). The branch needs
+CI on both platforms and the maintainer's approval to merge.
 
 **Milestone 4e — region streaming, generation, and asset palettes (complete).**
 The region lifecycle (PR #44), streaming through disk regions (PR #45),
