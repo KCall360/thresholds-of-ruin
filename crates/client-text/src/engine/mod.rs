@@ -496,7 +496,8 @@ impl Engine {
             let text =
                 crate::adventure::describe_in(&seen(link.client()), link.palette(), &self.places);
             record.entries.push(Entry::Description(text));
-        } else if moved {
+        } else if moved && !matches!(record.entries.last(), Some(Entry::Description(_))) {
+            // A `look` after the move already described where it ended.
             // The description says who is there; sightings on the way in
             // would say it twice.
             let present: BTreeSet<ActorId> = link

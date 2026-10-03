@@ -1196,3 +1196,24 @@ async fn a_move_told_between_turns_describes_where_it_arrives() {
     let passage = engine.passage(&link, beats);
     assert!(passage.contains("You are in an open"), "{passage}");
 }
+
+#[tokio::test]
+async fn a_look_after_a_move_in_one_line_describes_the_place_once() {
+    // Regression: "go east. look" described the new place in full, then
+    // again as the arrival.
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    let text = play(&mut link, &mut engine, "go east. look").await;
+    assert_eq!(text.matches("You are in").count(), 1, "{text}");
+    assert!(!text.contains("You are back in"), "{text}");
+}
+
+#[tokio::test]
+async fn a_look_before_a_move_still_leaves_the_arrival_told() {
+    let mut link = Scripted::new(state(), obliging);
+    let mut engine = Engine::default();
+    engine.welcome(&link);
+    let text = play(&mut link, &mut engine, "look. go east").await;
+    assert_eq!(text.matches("You are in").count(), 2, "{text}");
+}
