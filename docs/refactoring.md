@@ -152,6 +152,26 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Autonomous execution now chooses an AI action once inside private candidate state
+and uses the same journal admission, revision, region-transition and publication
+pipeline as ordinary actions. The decision never escapes across a mutation or
+scheduler boundary. Recorded actions still revalidate through the ordinary
+simulation path during replay. This removes duplicated preparation; it does not
+implement the proposed general intention queue.
+
+The baseline regression performed two route searches for one autonomous turn;
+the new path performs one. Focused equivalence checks preserve simulation state,
+disclosures, events and checkpoint/tail restoration. Repeated storage rejection
+preserves published state and journal sequence. The actual headless-client check
+preserves AI state/history across restart and continues play. Complete simulation
+and backend tests passed, followed by quick Windows verification, including all
+112 process tests. Full Windows verification also passed, including 222 debug
+Python/process tests and 112 release process tests. Release comparisons and a
+controlled repeat validated; the deployed desktop build passed twelve real-client
+checks. Their timings and limits are recorded below. Combat timing now places AI preparation inside
+simulation execution; combined decision-and-command time is needed to compare
+the old and new paths without mistaking phase movement for improvement.
+
 Structural observation validation now lives in the protocol crate and runs at
 every shared-client state publication boundary, including after delta expansion.
 It checks duplicate projected occurrences, inventory/place identities, item
@@ -322,8 +342,8 @@ restarts, and continues at an authoritative decision boundary. Full Windows
 checks passed, including 216 debug Python/process tests and 106 release process
 tests. The updated desktop targets passed six real-client connection/frame checks.
 Release measurements and their limits are below. Route construction still
-allocates each returned path, and selecting versus executing an AI action still
-computes the decision twice; removing that duplication remains pending.
+allocates each returned path. The later autonomous-execution checkpoint removes
+the duplicated decision between selection and execution.
 
 Historical queries now use a derived entry-ID lookup and ordered buckets for
 each branch, actor, and private author. Pages merge actor-wide and own-private
@@ -610,3 +630,58 @@ result sets are retained; no broad command, restore or save-time improvement is
 claimed. Restart samples number three per ordinary case, and physics save/resume
 samples number nine. Bootstrap latency, isolated validation time, allocations
 and resident memory remain unmeasured. Raw samples remain local and unpublished.
+
+### Single-preparation AI release comparison
+
+Three interleaved rounds compared single-preparation execution with the preceding
+structural-validation checkpoint on the same Windows host. A controlled combat
+repeat used identical verified binaries. Both comparisons validated completely.
+The combat benchmark now invokes the production autonomous operation. Its AI
+preparation is included in simulation/command time, so the paired sum of decision
+and command samples is used below. Comparing the standalone decision phase would
+misrepresent that change. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 2 actors, no prior history / decision + command | 576 | 0.315 → 0.241 | 0.824 → 0.798 | 3.055 → 3.362 |
+| Same two-actor case, repeat / decision + command | 576 | 0.293 → 0.243 | 0.789 → 0.814 | 2.861 → 2.355 |
+| 2 actors, 1,000 prior actions / decision + command | 576 | 0.291 → 0.230 | 0.734 → 0.734 | 1.741 → 1.465 |
+| Same two-actor history case, repeat / decision + command | 576 | 0.287 → 0.230 | 0.747 → 0.725 | 1.407 → 1.148 |
+| 8 actors, no prior history / decision + command | 576 | 0.896 → 0.800 | 4.015 → 3.854 | 7.001 → 6.558 |
+| Same eight-actor case, repeat / decision + command | 576 | 0.953 → 0.800 | 3.983 → 3.946 | 7.422 → 6.372 |
+| 8 actors, 1,000 prior actions / decision + command | 576 | 0.622 → 0.552 | 3.519 → 3.362 | 5.188 → 5.288 |
+| Same eight-actor history case, repeat / decision + command | 576 | 0.609 → 0.551 | 3.462 → 3.341 | 6.478 → 5.298 |
+| 256-region streamed play, durable / command | 2,100 | 0.229 → 0.231 | 0.429 → 0.410 | 1.432 → 6.127 |
+| Same streamed play / restart | 3 | 167.341 → 169.753 | 181.184 → 175.541 | 181.184 → 175.541 |
+| 2 actors, no prior history / resume | 9 | 18.169 → 26.807 | 29.123 → 37.785 | 29.123 → 37.785 |
+| Same two-actor case, repeat / resume | 9 | 26.338 → 21.802 | 33.291 → 33.329 | 33.291 → 33.329 |
+| 8 actors, 1,000 prior actions / resume | 9 | 195.864 → 200.723 | 205.755 → 283.502 | 205.755 → 283.502 |
+| Same eight-actor history case, repeat / resume | 9 | 195.209 → 208.203 | 215.765 → 224.742 | 215.765 → 224.742 |
+| Same eight-actor history case / save | 9 | 413.086 → 437.248 | 905.609 → 506.162 | 905.609 → 506.162 |
+| Same eight-actor history case, repeat / save | 9 | 127.430 → 109.534 | 220.810 → 353.949 | 220.810 → 353.949 |
+
+In the long-history eight-actor case, paired median time fell 11.2% initially and
+9.6% in the repeat; paired p95 fell 4.5% and 3.5%. The small no-history case's
+paired p95 rose 3.2% in the repeat despite a lower median. Long-history client
+application p95 fell 6.6% initially but rose 6.0% in the repeat. These are complete
+turn/application measurements, not isolated AI timings. Streamed command p95 fell
+4.4%, while its maximum increased substantially.
+
+The eight-actor history workload performed 365,055 body-cell operations instead
+of 415,200 and built 59,748 scenes instead of 65,394, reductions of 12.1% and
+8.6%. Disclosed bytes and navigation-refresh counts were unchanged in every
+combat group; all streamed workload, memory, saved-byte and replay counts were
+unchanged. The benchmark's autonomous receipts now use production source labels
+and UUIDs. Its eight-actor history database grew from 7,925,760 to 8,196,096 bytes
+(3.4%); other combat database lengths were unchanged. This stored-metadata change
+is included in save/restore measurements, and their causes were not isolated.
+
+The initial small-case resume increase did not persist in the repeat. The
+eight-actor history resume p95 increase narrowed from 37.8% to 4.2%, with a 6.7%
+median increase in the repeat. Save timings varied substantially: the repeat's
+eight-actor history save p95 rose 60.3% despite a lower median. Both result sets
+are retained; no restore or save-time improvement is claimed. Save/resume samples
+number nine per group and streamed restarts number three. Resident memory and
+isolated AI-decision costs remain unmeasured. Raw samples remain local and
+unpublished. Earlier restore regressions remain a follow-up for save decoding
+and immutable content pooling.

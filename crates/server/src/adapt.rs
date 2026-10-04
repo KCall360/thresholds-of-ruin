@@ -60,6 +60,46 @@ pub fn action(action: &p::Action) -> s::Action {
     }
 }
 
+pub fn disclosed_action(action: s::Action) -> Option<p::Action> {
+    Some(match action {
+        s::Action::Move(d) => p::Action::Move {
+            direction: match d {
+                w::Direction::North => p::Direction::North,
+                w::Direction::East => p::Direction::East,
+                w::Direction::South => p::Direction::South,
+                w::Direction::West => p::Direction::West,
+                w::Direction::NorthEast => p::Direction::NorthEast,
+                w::Direction::SouthEast => p::Direction::SouthEast,
+                w::Direction::SouthWest => p::Direction::SouthWest,
+                w::Direction::NorthWest => p::Direction::NorthWest,
+                w::Direction::Up => p::Direction::Up,
+                w::Direction::Down => p::Direction::Down,
+                w::Direction::EastUp
+                | w::Direction::WestUp
+                | w::Direction::NorthUp
+                | w::Direction::SouthUp
+                | w::Direction::EastDown
+                | w::Direction::WestDown
+                | w::Direction::NorthDown
+                | w::Direction::SouthDown => return None,
+            },
+        },
+        s::Action::Attack { target } => p::Action::Attack {
+            target: p::ActorId(target.0),
+        },
+        s::Action::SetDoor { door, open } => p::Action::SetDoor { door, open },
+        s::Action::Take { item, quantity } => p::Action::Take {
+            item: item.0,
+            quantity,
+        },
+        s::Action::Drop { item, quantity } => p::Action::Drop {
+            item: item.0,
+            quantity,
+        },
+        s::Action::Wait => p::Action::Wait,
+    })
+}
+
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
         s::OutcomeKind::AttackStarted { target } => crate::journal::Event::AttackStarted {

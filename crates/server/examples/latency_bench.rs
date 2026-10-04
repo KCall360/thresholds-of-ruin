@@ -117,7 +117,7 @@ impl Runner {
             actor,
             &step.label,
             &step.expected,
-            action,
+            Some(action),
             Some(step),
             before,
             cycle,
@@ -125,14 +125,14 @@ impl Runner {
         );
     }
     /// Run one command and record its sample; `step`, when given, verifies
-    /// the outcome.
+    /// the outcome. A missing action executes the due AI decision internally.
     #[allow(clippy::too_many_arguments)]
     fn execute(
         &mut self,
         actor: ActorId,
         label: &str,
         expected: &str,
-        action: tor_protocol::Action,
+        mut action: Option<tor_protocol::Action>,
         step: Option<&Step>,
         before: tor_protocol::StateView,
         cycle: usize,
@@ -140,16 +140,23 @@ impl Runner {
     ) {
         let request = format!("sample-{}", self.attempt);
         self.attempt += 1;
-        let command = Command::Act {
-            expected_revision: before.revision,
-            action: action.clone(),
-        };
         let branch = self.engine.branch().clone();
         let history_start = self.engine.profile_counts().0;
         let start = Instant::now();
-        let result = self
-            .engine
-            .command_profiled("bench", "headless", actor, &request, &branch, command);
+        let result = match &action {
+            Some(action) => self.engine.command_profiled(
+                "bench",
+                "headless",
+                actor,
+                &request,
+                &branch,
+                Command::Act {
+                    expected_revision: before.revision,
+                    action: action.clone(),
+                },
+            ),
+            None => self.engine.advance_ai_profiled(actor),
+        };
         let command_call_ms = start.elapsed().as_secs_f64() * 1000.;
         let after = self.engine.state(actor).unwrap();
         if let Err(error) = &result {
@@ -172,6 +179,15 @@ impl Runner {
         let mut profile = None;
         let mut event = None;
         if let Ok((result, p)) = result {
+            if action.is_none() {
+                let tor_server::journal::HistoryContent::Action {
+                    action: selected, ..
+                } = &result.entry.content
+                else {
+                    panic!("AI execution did not record an action");
+                };
+                action = Some(selected.clone());
+            }
             timings = phases(&p);
             profile = Some(p);
             event = Some(result.entry);
@@ -335,11 +351,13 @@ fn streaming_case(
                 min_regions: 1,
             };
             for index in 0..STREAM_LEG {
-                while let Some((actor, action)) = runner.engine.next_ai_action() {
+                while let Some(actor) = runner
+                    .engine
+                    .next_actor()
+                    .filter(|id| runner.engine.is_ai(*id))
+                {
                     let before = runner.engine.state(actor).unwrap();
-                    runner.execute(
-                        actor, "ai_turn", "acted", action, None, before, cycle, index,
-                    );
+                    runner.execute(actor, "ai_turn", "acted", None, None, before, cycle, index);
                 }
                 runner.perform(ActorId(1), &step, cycle, leg * STREAM_LEG + index);
             }

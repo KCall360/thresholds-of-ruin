@@ -136,8 +136,12 @@ delta translation now rejects overflow and falls back to full observations when
 needed, verified by full Windows checks and ten deployed-client checks. Structural
 observation validation now rejects malformed full and reconstructed views before
 client publication, verified by full Windows checks and twelve deployed-client
-checks. Measured costs and limits are recorded in the plan. AI preparation,
-scenario compilation, save decoding and the admission/scheduler split remain.
+checks. Autonomous AI now chooses and executes once in private candidate state,
+then uses the shared journal/revision/region/publication path. Replay still
+validates recorded actions normally. Full Windows and twelve deployed-client
+checks passed; release comparisons and a controlled repeat validated. Measured
+gains, restore tails and limits are recorded in the plan. Scenario compilation,
+save decoding and the admission/scheduler split remain.
 The versioned queue
 and stream-recovery proposal awaits explicit format authorization.
 Gameplay must admit intentions to simulation-owned

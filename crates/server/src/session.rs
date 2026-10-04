@@ -850,37 +850,13 @@ impl Service {
     }
 
     fn advance_ai(&mut self, actor: ActorId) {
-        let action = self
-            .engine
-            .next_ai_action()
-            .filter(|(chosen, _)| *chosen == actor)
-            .map(|(_, action)| action);
         let revisions = self
             .engine
             .actors()
             .into_iter()
             .map(|id| (id, self.engine.revision(id).unwrap()))
             .collect();
-        let result = match action {
-            Some(action) => {
-                let command = crate::journal::Command::Act {
-                    expected_revision: self.engine.revision(actor).unwrap(),
-                    action,
-                };
-                self.engine.command(
-                    "scenario-ai",
-                    "server-ai",
-                    actor,
-                    &uuid::Uuid::new_v4().to_string(),
-                    &self.engine.branch().clone(),
-                    command,
-                )
-            }
-            None => Err(Failure::new(
-                ErrorCode::InvalidAction,
-                "Scenario AI has no action",
-            )),
-        };
+        let result = self.engine.advance_ai(actor);
         match result {
             Ok(result) => {
                 let _ = self.action_update(&revisions, &result.entry.disclosed());

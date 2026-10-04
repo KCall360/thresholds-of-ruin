@@ -72,8 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut sequence = 0;
                 for turn in 0..history + 64 {
                     let decision_start = Instant::now();
-                    let (actor, action) = if let Some(next) = engine.next_ai_action() {
-                        next
+                    let (actor, action) = if let Some(actor) =
+                        engine.next_actor().filter(|id| engine.is_ai(*id))
+                    {
+                        (actor, None)
                     } else {
                         let observation = engine.observation(player)?;
                         let target = observation.visible_actors.iter().find(|a| {
@@ -84,23 +86,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         (
                             player,
-                            target.map_or(Action::Wait, |a| Action::Attack { target: a.id }),
+                            Some(target.map_or(Action::Wait, |a| Action::Attack { target: a.id })),
                         )
                     };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;
                     let revision = engine.revision(actor)?;
                     let start = Instant::now();
-                    let (_, profile) = engine.command_profiled(
-                        "combat-benchmark",
-                        "combat-v1",
-                        actor,
-                        &turn.to_string(),
-                        &engine.branch().clone(),
-                        Command::Act {
-                            expected_revision: revision,
-                            action,
-                        },
-                    )?;
+                    let (_, profile) = if let Some(action) = action {
+                        engine.command_profiled(
+                            "combat-benchmark",
+                            "combat-v1",
+                            actor,
+                            &turn.to_string(),
+                            &engine.branch().clone(),
+                            Command::Act {
+                                expected_revision: revision,
+                                action,
+                            },
+                        )?
+                    } else {
+                        engine.advance_ai_profiled(actor)?
+                    };
                     let elapsed = start.elapsed().as_secs_f64() * 1000.;
                     if turn >= history {
                         for (name, duration) in [

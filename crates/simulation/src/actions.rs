@@ -9,7 +9,7 @@ use crate::{
     movement_cost, Action, ActionOutcome, ActorId, Game, GameError, ItemLocation, OutcomeKind,
 };
 
-/// Valid only inside the uninterrupted `Game::act` call that prepared it.
+/// Valid only inside the uninterrupted `Game::act` or `Game::act_ai` call.
 /// Kept private so callers cannot retain an action across world changes.
 struct PreparedAction {
     actor: ActorId,
@@ -25,10 +25,36 @@ impl Game {
     /// wind-up progress. Recovery is not partially completed work and cannot resume.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
         let prepared = self.prepare_action(id, action)?;
-        if let Some((expected, ai)) = self.choose_ai(id) {
+        let ai = if let Some((expected, ai)) = self.choose_ai(id) {
             if expected != action {
                 return Err(GameError::InvalidLocation);
             }
+            Some(ai)
+        } else {
+            None
+        };
+        Ok(self.commit_action(prepared, ai))
+    }
+
+    /// Choose and execute the due AI actor's action in one uninterrupted call.
+    /// The decision cannot escape or survive a mutation; replay still validates
+    /// recorded actions through `act`.
+    pub fn act_ai(&mut self, id: ActorId) -> Result<(Action, ActionOutcome), GameError> {
+        if self.next_actor() != Some(id) {
+            return Err(GameError::NotActorsTurn);
+        }
+        let (action, ai) = self.choose_ai(id).ok_or(GameError::InvalidLocation)?;
+        let prepared = self.prepare_action(id, action)?;
+        Ok((action, self.commit_action(prepared, Some(ai))))
+    }
+
+    fn commit_action(
+        &mut self,
+        prepared: PreparedAction,
+        ai: Option<crate::ai::Ai>,
+    ) -> ActionOutcome {
+        let id = prepared.actor;
+        if let Some(ai) = ai {
             self.combat.ai.insert(id, ai);
         }
         self.physics.impacts.clear();
@@ -37,7 +63,7 @@ impl Game {
         self.combat.events.clear();
         self.apply_action_effect(&prepared);
         self.sync_actor_lifecycle(id);
-        Ok(self.finish_action(prepared))
+        self.finish_action(prepared)
     }
 
     /// Action-specific validity and timing are settled before any mutation.

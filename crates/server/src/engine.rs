@@ -1296,31 +1296,65 @@ impl Engine {
 
     pub fn next_ai_action(&self) -> Option<(ActorId, Action)> {
         let (actor, action) = self.game.next_ai_action()?;
-        let action = match action {
-            tor_simulation::Action::Attack { target } => Action::Attack {
-                target: ActorId(target.0),
-            },
-            tor_simulation::Action::Wait => Action::Wait,
-            tor_simulation::Action::SetDoor { door, open } => Action::SetDoor { door, open },
-            tor_simulation::Action::Move(d) => {
-                let direction = match d {
-                    tor_world::Direction::North => Direction::North,
-                    tor_world::Direction::South => Direction::South,
-                    tor_world::Direction::East => Direction::East,
-                    tor_world::Direction::West => Direction::West,
-                    tor_world::Direction::NorthEast => Direction::NorthEast,
-                    tor_world::Direction::SouthEast => Direction::SouthEast,
-                    tor_world::Direction::SouthWest => Direction::SouthWest,
-                    tor_world::Direction::NorthWest => Direction::NorthWest,
-                    tor_world::Direction::Up => Direction::Up,
-                    tor_world::Direction::Down => Direction::Down,
-                    _ => return None,
-                };
-                Action::Move { direction }
-            }
-            _ => return None,
-        };
+        let action = adapt::disclosed_action(action)?;
         Some((ActorId(actor.0), action))
+    }
+
+    /// Execute one due AI turn without preparing the same decision twice.
+    /// Candidate effects remain private until journal admission succeeds.
+    pub fn advance_ai(&mut self, actor: ActorId) -> Result<CommandResult, Failure> {
+        self.advance_ai_inner(actor, None)
+    }
+
+    pub fn advance_ai_profiled(
+        &mut self,
+        actor: ActorId,
+    ) -> Result<(CommandResult, CommandProfile), Failure> {
+        let mut profile = CommandProfile::default();
+        let result = self.advance_ai_inner(actor, Some(&mut profile))?;
+        Ok((result, profile))
+    }
+
+    fn advance_ai_inner(
+        &mut self,
+        actor: ActorId,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        if !self.is_ai(actor) || self.next_actor() != Some(actor) {
+            return Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI is not ready",
+            ));
+        }
+        let revision = self.revision(actor)?;
+        let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
+        let started = Instant::now();
+        let (action, outcome) = candidate
+            .game
+            .act_ai(SimActor(actor.0))
+            .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Scenario AI has no action"))?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.simulation_transition += started.elapsed();
+            profile.simulation_transitions += 1;
+        }
+        let receipt = Receipt {
+            user: "scenario-ai".into(),
+            frontend: "server-ai".into(),
+            request_id: Uuid::new_v4().to_string(),
+            actor,
+            branch: self.branch().clone(),
+            command: Command::Act {
+                expected_revision: revision,
+                action: adapt::disclosed_action(action).ok_or_else(|| {
+                    Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Scenario AI action is unavailable",
+                    )
+                })?,
+            },
+        };
+        let checked = self.check_request(&receipt)?;
+        self.finish_checked_command(checked, None, profile, candidate, Some(outcome))
     }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
@@ -1759,18 +1793,36 @@ impl Engine {
         recorded_id: Option<EntryId>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
-        let (receipt, revision) = checked.into_parts();
+        let candidate = self.capture_command_candidate(profile.as_deref_mut());
+        self.finish_checked_command(checked, recorded_id, profile, candidate, None)
+    }
+
+    fn capture_command_candidate(&mut self, profile: Option<&mut CommandProfile>) -> Candidate {
         if let (Some(regions), Some(store)) = (&mut self.regions, &self.store) {
             if let Some((on_disk, watermark)) = store.take_written() {
                 regions.written(on_disk, watermark);
             }
         }
         let started = Instant::now();
-        let mut candidate = Candidate::capture(self);
-        if let Some(profile) = profile.as_deref_mut() {
+        let candidate = Candidate::capture(self);
+        if let Some(profile) = profile {
             profile.rollback_capture += started.elapsed();
             profile.candidate_captures += 1;
         }
+        candidate
+    }
+
+    // `executed_ai` comes only from the uninterrupted private-candidate path
+    // above. It is not an action token that callers can retain or replay.
+    fn finish_checked_command(
+        &mut self,
+        checked: command_request::CheckedRequest<'_>,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+        mut candidate: Candidate,
+        executed_ai: Option<tor_simulation::ActionOutcome>,
+    ) -> Result<CommandResult, Failure> {
+        let (receipt, revision) = checked.into_parts();
         // Exhaustive impact decisions: new commands/actions must explicitly
         // decide whether they can change remembered geometry.
         let navigation_changed = match &receipt.command {
@@ -1787,7 +1839,7 @@ impl Engine {
             }
         };
         let mut navigation_refreshed = false;
-        let mut tick = candidate.game.tick();
+        let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
             Command::PausePreparation => {
@@ -1922,11 +1974,17 @@ impl Engine {
                     profile.actors_observed += before.len();
                 }
                 let started = Instant::now();
-                let outcome = candidate
-                    .game
-                    .act(SimActor(receipt.actor.0), adapt::action(action))
-                    .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?;
-                if let Some(profile) = profile.as_deref_mut() {
+                let already_executed = executed_ai.is_some();
+                let outcome = match executed_ai {
+                    Some(outcome) => outcome,
+                    None => candidate
+                        .game
+                        .act(SimActor(receipt.actor.0), adapt::action(action))
+                        .map_err(|_| {
+                            Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
+                        })?,
+                };
+                if let Some(profile) = profile.as_deref_mut().filter(|_| !already_executed) {
                     profile.simulation_transition += started.elapsed();
                     profile.simulation_transitions += 1;
                 }

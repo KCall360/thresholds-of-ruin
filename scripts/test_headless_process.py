@@ -40,8 +40,10 @@ class HeadlessProcesses(ProcessTestCase):
             self.assertIsNone(result["error"])
             next_turn(player, result)
         observer, ai_state = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
-        self.assertTrue(any(entry["author"].get("user") == "scenario-ai"
-                            for entry in ai_state["history"]))
+        ai_entries = [entry for entry in ai_state["history"]
+                      if entry["author"].get("user") == "scenario-ai"]
+        self.assertTrue(ai_entries)
+        self.assertEqual(len({entry["id"] for entry in ai_entries}), len(ai_entries))
         observer.stop()
         boundary = self.request(player, {"type": "snapshot"})
         self.assertTrue(boundary["state"]["observation"]["ready"])
@@ -51,6 +53,9 @@ class HeadlessProcesses(ProcessTestCase):
         self.server(scenario="first-dungeon", seed=None)
         resumed, state = self.client()
         self.assertEqual(state["state"], boundary["state"])
+        restored_observer, restored_ai = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
+        self.assertEqual(restored_ai["state"], ai_state["state"])
+        self.assertEqual(restored_ai["history"], ai_state["history"])
         continued = self.act(resumed, {"type": "wait"})
         self.assertIsNone(continued["error"])
         continued = next_turn(resumed, continued)
