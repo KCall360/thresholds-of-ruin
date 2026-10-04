@@ -119,8 +119,11 @@ indexes passed full Windows checks, release comparisons, and deployed client
 checks, including indexed disclosure and region membership. Their maintenance
 costs are recorded in the plan. Decision-local shared route searches passed full
 Windows checks, release comparisons and deployed client checks. Small-case timing
-regressions are recorded alongside reduced search counts. AI preparation and the
-admission/scheduler split are next.
+regressions are recorded alongside reduced search counts. Backend request
+metadata extraction and the checked-request executor passed full Windows checks,
+release comparisons and deployed client checks. Stale requests reject before
+candidate capture; receipt and authorization precedence remain covered.
+Immutable snapshot sharing, AI preparation and the admission/scheduler split are next.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
 runtime selection/implementation for scripting are deferred. No format versions

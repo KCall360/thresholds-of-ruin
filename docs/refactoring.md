@@ -116,6 +116,22 @@ already-computed post-action views. Region transitions invalidate those views,
 and load, rewind, and diagnostic seeding start from fresh derived data. The action
 queue and remaining items above are pending.
 
+Backend request metadata now has a focused checking stage before candidate
+capture. Wizard authorization and identity labels precede receipt resolution;
+matching receipts still resolve before branch and revision checks. Fresh action,
+travel, rename, and wizard requests reject stale revisions before copying private
+state. The command variants explicitly state whether a revision is required.
+A private executor consumes the checked-request type in the uninterrupted command
+pipeline; this transient proof is not a queued intention.
+Operation-specific targets and timing remain validated against candidate state,
+and session attachment/controller authority stays in the session layer.
+Full Windows checks passed, including 217 debug Python/process tests and 107
+release process tests. The updated desktop targets passed seven real-client
+connection/frame checks. Release measurements and their limits are below.
+Regressions check zero candidate captures for
+stale requests, unchanged error precedence and retry results, and real-client
+state/history preservation across rejection and restart.
+
 Item mutations now pass through a private store that maintains ground-location
 and inventory-owner indexes. Observation, stack matching, corpse inventory
 release, and item occupancy checks use these indexes. Candidate and rewind clones
@@ -325,3 +341,30 @@ nine per combat case. Multi-target latency, isolated single-route latency, and
 resident frontier memory remain unmeasured. The regression tests establish one
 search per fifteen-target decision and exact route equivalence. These remain
 diagnostic local measurements, with raw samples unpublished.
+
+### Checked-request release comparison
+
+Three interleaved rounds compared early request checks and the private executor
+with the shared-route checkpoint on the same Windows host. These are valid
+workloads; stale-request latency and throughput were not measured. Timings are
+milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor / command | 915 | 0.573 → 0.556 | 0.829 → 0.799 | 1.460 → 1.871 |
+| 64 regions, 8 actors / command | 7,500 | 0.029 → 0.028 | 2.551 → 2.558 | 6.411 → 6.591 |
+| Combat, 8 actors / 1,000 history / command | 576 | 0.518 → 0.521 | 3.276 → 3.330 | 3.487 → 3.976 |
+| Same combat / decision | 576 | 0.081 → 0.085 | 0.546 → 0.547 | 0.604 → 1.251 |
+| Same combat / resume | 9 | 193.1 → 199.2 | 207.3 → 213.2 | 207.3 → 213.2 |
+| Same combat / save | 9 | 424.9 → 191.4 | 472.3 → 449.4 | 472.3 → 449.4 |
+
+All runs validated. Saved/disclosed bytes, body-cell work, scenes, navigation
+refreshes, and valid-command workload counts were unchanged. Eight-actor command
+p95 increased 0.3%, and combat command p95 increased 1.6%; small-case p95 fell
+by 30 microseconds but its maximum increased. Combat resume p95 increased 2.8%,
+and decision maximum increased. Save timings varied substantially between rounds;
+these runs do not establish a save-time improvement. Save/resume samples number
+only nine per combat case. The stale-request regression establishes zero
+candidate captures instead of one for action, travel, rename and wizard requests;
+it does not establish an invalid-request timing or throughput improvement.
+Raw samples remain local and unpublished.

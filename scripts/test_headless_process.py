@@ -6,6 +6,27 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_stale_request_keeps_committed_state_and_history_after_restart(self):
+        server = self.server()
+        player, initial = self.client()
+        accepted = self.act(player, {"type": "wait"})
+        self.assertIsNone(accepted["error"])
+        rejected = self.request(player, {
+            "type": "command", "branch": initial["branch"],
+            "command": {"type": "act", "expected_revision": initial["state"]["revision"],
+                        "action": {"type": "wait"}}})
+        self.assertTrue(rejected["error"].startswith("StaleRevision:"))
+        self.assertEqual(rejected["state"], accepted["state"])
+        self.assertEqual(rejected["history"], accepted["history"])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        resumed, state = self.client()
+        self.assertEqual(state["state"], accepted["state"])
+        self.assertEqual(state["history"], accepted["history"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
     def test_ai_navigation_continues_after_saved_decision_boundary(self):
         server = self.server(scenario="first-dungeon", seed=None)
         player, _ = self.client()

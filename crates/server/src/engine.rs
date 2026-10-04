@@ -19,9 +19,139 @@ use crate::journal::{
 pub(crate) const ARCHIVE_VERSION: u32 = 15;
 #[path = "checkpoint.rs"]
 mod checkpoint;
+#[path = "command_request.rs"]
+mod command_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = crate::scenario_package::RULESET;
+
+#[cfg(test)]
+mod request_validation_tests {
+    use super::*;
+
+    #[test]
+    fn receipts_and_authority_keep_their_precedence_over_stale_revisions() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let receipt = Receipt {
+            user: "test".into(),
+            frontend: "test".into(),
+            request_id: "accepted".into(),
+            actor,
+            branch: engine.branch().clone(),
+            command: Command::Act {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: Action::Wait,
+            },
+        };
+        let accepted = engine.apply_command(&receipt, None).unwrap();
+        let state = engine.state(actor).unwrap();
+        let mut profile = CommandProfile::default();
+        let repeated = engine
+            .apply_command_profiled(&receipt, None, Some(&mut profile))
+            .unwrap();
+        assert!(repeated.duplicate);
+        assert_eq!(repeated.entry, accepted.entry);
+        assert_eq!(profile.candidate_captures, 0);
+
+        let mut conflict = receipt.clone();
+        conflict.command = Command::Act {
+            expected_revision: 0,
+            action: Action::Move {
+                direction: Direction::East,
+            },
+        };
+        let mut unauthorized = receipt.clone();
+        unauthorized.request_id = "wizard".into();
+        unauthorized.branch = BranchId("unavailable".into());
+        unauthorized.command = Command::Wizard {
+            expected_revision: 0,
+            operation: WizardOperation::Teleport {
+                actor,
+                position: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
+            },
+        };
+        let mut malformed = receipt.clone();
+        malformed.user.clear();
+        let mut wrong_branch = receipt.clone();
+        wrong_branch.request_id = "wrong-branch".into();
+        wrong_branch.branch = BranchId("unavailable".into());
+        for (receipt, code) in [
+            (conflict, ErrorCode::RequestConflict),
+            (unauthorized, ErrorCode::Unauthorized),
+            (malformed, ErrorCode::InvalidRequest),
+            (wrong_branch, ErrorCode::WrongBranch),
+        ] {
+            let failure = engine
+                .apply_command_profiled(&receipt, None, Some(&mut profile))
+                .unwrap_err();
+            assert_eq!(failure.code, code);
+            assert_eq!(profile.candidate_captures, 0);
+            assert_eq!(engine.state(actor).unwrap(), state);
+        }
+    }
+
+    #[test]
+    fn stale_commands_are_rejected_before_candidate_capture() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        let actor = ActorId(1);
+        let before = engine.state(actor).unwrap();
+        let expected_revision = before.revision + 1;
+        let commands = [
+            Command::Act {
+                expected_revision,
+                action: Action::Wait,
+            },
+            Command::Travel {
+                expected_revision,
+                destination: "unavailable".into(),
+            },
+            Command::RenamePlace {
+                expected_revision,
+                key: "unavailable".into(),
+                name: "name".into(),
+            },
+            Command::Wizard {
+                expected_revision,
+                operation: WizardOperation::Teleport {
+                    actor,
+                    position: Position {
+                        region: 1,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                },
+            },
+        ];
+        for (n, command) in commands.into_iter().enumerate() {
+            let receipt = Receipt {
+                user: "test".into(),
+                frontend: "test".into(),
+                request_id: format!("stale-{n}"),
+                actor,
+                branch: engine.branch().clone(),
+                command,
+            };
+            let mut profile = CommandProfile::default();
+            let failure = engine
+                .apply_command_profiled(&receipt, None, Some(&mut profile))
+                .unwrap_err();
+            assert_eq!(failure.code, ErrorCode::StaleRevision);
+            assert_eq!(
+                profile.candidate_captures, 0,
+                "stale command {n} copied candidate state"
+            );
+            assert_eq!(engine.state(actor).unwrap(), before);
+        }
+    }
+}
 
 #[cfg(test)]
 mod observation_reuse_tests {
@@ -1611,39 +1741,25 @@ impl Engine {
         &mut self,
         receipt: &Receipt,
         recorded_id: Option<EntryId>,
-        mut profile: Option<&mut CommandProfile>,
+        profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
-        if matches!(receipt.command, Command::Wizard { .. }) && !self.wizard_enabled {
-            return Err(Failure::new(
-                ErrorCode::Unauthorized,
-                "Wizard operations are disabled",
-            ));
-        }
-        if !valid_label(&receipt.user)
-            || !valid_label(&receipt.frontend)
-            || !valid_label(&receipt.request_id)
-        {
-            return Err(Failure::new(
-                ErrorCode::InvalidRequest,
-                "Invalid identity or request ID",
-            ));
-        }
-        if let Some(result) = self.retry(
-            &receipt.user,
-            receipt.actor,
-            &receipt.request_id,
-            &receipt.branch,
-            &receipt.command,
-        )? {
+        if let Some(result) = self.resolve_receipt(receipt)? {
             return Ok(result);
         }
-        if &receipt.branch != self.branch() {
-            return Err(Failure::new(
-                ErrorCode::WrongBranch,
-                "Reconnect to the current branch",
-            ));
-        }
-        let revision = self.revision(receipt.actor)?;
+        let checked = self.check_request(receipt)?;
+        self.execute_checked_command(checked, recorded_id, profile)
+    }
+
+    /// Consumes metadata checked at this boundary without a callback or yield.
+    /// Target/timing validation, candidate execution, persistence admission and
+    /// publication remain ordered inside this private operation.
+    fn execute_checked_command(
+        &mut self,
+        checked: command_request::CheckedRequest<'_>,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        let (receipt, revision) = checked.into_parts();
         if let (Some(regions), Some(store)) = (&mut self.regions, &self.store) {
             if let Some((on_disk, watermark)) = store.take_written() {
                 regions.written(on_disk, watermark);
@@ -1700,16 +1816,10 @@ impl Engine {
                 )
             }
             Command::RenamePlace {
-                expected_revision,
+                expected_revision: _,
                 key,
                 name,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before naming a place",
-                    ));
-                }
                 let location = self
                     .game
                     .remembered_places(SimActor(receipt.actor.0))
@@ -1745,15 +1855,9 @@ impl Engine {
             }
 
             Command::Travel {
-                expected_revision,
+                expected_revision: _,
                 destination,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before travelling",
-                    ));
-                }
                 self.travel_route(receipt.actor, destination)?;
                 if self.game.next_actor() != Some(SimActor(receipt.actor.0)) {
                     return Err(Failure::new(ErrorCode::InvalidAction, "Actor is not ready"));
@@ -1770,15 +1874,9 @@ impl Engine {
             }
 
             Command::Wizard {
-                expected_revision,
+                expected_revision: _,
                 operation,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before a wizard operation",
-                    ));
-                }
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
                 let result =
                     candidate.apply_wizard(receipt, operation, &entry_id, &self.archive.records)?;
@@ -1801,15 +1899,9 @@ impl Engine {
                 )
             }
             Command::Act {
-                expected_revision,
+                expected_revision: _,
                 action,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh the observation before acting",
-                    ));
-                }
                 let started = Instant::now();
                 let perception_changed = match action {
                     Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
