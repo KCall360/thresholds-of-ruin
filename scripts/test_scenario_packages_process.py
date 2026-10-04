@@ -9,6 +9,32 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_validator_identifies_invalid_declarations_without_rewriting_package(self):
+        cases = [
+            ('faction', 'scenario.toml', '\nfactions = { guard = ["missing"] }\n',
+             'scenario.toml: faction "guard": Invalid faction relationship'),
+            ('profile', 'scenario.toml', '\nai_profiles = { guard = { flee_percent = 101 } }\n',
+             'scenario.toml: AI profile "guard": Invalid AI profile'),
+            ('actor', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], controller = "bad" }]\n',
+             'regions/1.toml: region 1, actor 9: Invalid actor controller'),
+            ('combat', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], combat = { max_hp = 0 } }]\n',
+             'regions/1.toml: region 1, actor 9: Invalid combat attributes or faction'),
+        ]
+        for name, source, edit, message in cases:
+            with self.subTest(declaration=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios/two-room', package)
+                path = package / source
+                path.write_text(path.read_text() + edit)
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                        capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                error = json.loads(result.stderr)['error']
+                self.assertEqual(error, {'code': 'scenario_invalid', 'message': message})
+                after = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                self.assertEqual(after, before)
+
     def test_compiled_inheritance_and_overrides_survive_save_restart(self):
         package = self.directory / 'compiled-package'
         shutil.copytree(ROOT / 'scenarios/two-room', package)

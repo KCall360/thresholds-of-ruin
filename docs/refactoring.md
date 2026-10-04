@@ -152,6 +152,19 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Declaration validation now identifies the manifest file and failing faction, AI
+profile, character or archetype. Region actor controller and combat failures name
+the indexed source file, region and actor. Context is constructed only on failure;
+the original error codes, predicates and first-failure order remain unchanged.
+This reads no additional region files. A failing-first regression covers combined
+errors and their precedence; actual validator processes check four rejected
+packages, their JSON error messages and unchanged package bytes. Quick Windows
+verification passed, including all 115 process tests. Full Windows verification
+passed with 225 debug Python/process tests, debug/release Rust checks and all 115
+release process tests. All fifteen deployed-client/validator checks passed.
+Construction and remaining reference diagnostics still need work; this change
+does not claim a performance improvement.
+
 Scenario declarations now own combat, attack, body, AI and damage schemas instead
 of embedding simulation types. Explicit conversions preserve field values,
 canonical serialization, defaults, required nested fields and unknown-field

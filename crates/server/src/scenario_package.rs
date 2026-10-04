@@ -43,6 +43,11 @@ fn require(ok: bool, message: impl AsRef<str>) -> Result<(), Failure> {
         Err(fail(message))
     }
 }
+/// Add author-facing context only on failure, preserving the original code.
+fn in_declaration(mut failure: Failure, declaration: impl AsRef<str>) -> Failure {
+    failure.message = format!("{}: {}", declaration.as_ref(), failure.message);
+    failure
+}
 /// Asset identifiers are dotted lowercase names, like `creature.rat`.
 fn asset_id(s: &str) -> bool {
     !s.is_empty()
@@ -1188,27 +1193,36 @@ impl Package {
                         .iter()
                         .all(|e| self.manifest.factions.contains_key(e)),
                 "Invalid faction relationship",
-            )?;
+            )
+            .map_err(|failure| {
+                in_declaration(failure, format!("scenario.toml: faction {faction:?}"))
+            })?;
         }
         for (name, profile) in &self.manifest.ai_profiles {
             require(
                 label(name) && tor_simulation::ai::AiProfile::from(profile.clone()).valid(),
                 "Invalid AI profile",
-            )?;
-        }
-        for spec in self
-            .manifest
-            .characters
-            .iter()
-            .filter_map(|c| c.combat.as_ref())
-            .chain(
-                self.manifest
-                    .archetypes
-                    .values()
-                    .filter_map(|a| a.combat.as_ref()),
             )
-        {
-            self.check_combat(spec)?;
+            .map_err(|failure| {
+                in_declaration(failure, format!("scenario.toml: AI profile {name:?}"))
+            })?;
+        }
+        for character in &self.manifest.characters {
+            if let Some(spec) = &character.combat {
+                self.check_combat(spec).map_err(|failure| {
+                    in_declaration(
+                        failure,
+                        format!("scenario.toml: character {}", character.id),
+                    )
+                })?;
+            }
+        }
+        for (name, archetype) in &self.manifest.archetypes {
+            if let Some(spec) = &archetype.combat {
+                self.check_combat(spec).map_err(|failure| {
+                    in_declaration(failure, format!("scenario.toml: archetype {name:?}"))
+                })?;
+            }
         }
         Ok(())
     }
@@ -1438,14 +1452,27 @@ impl Package {
             }
         }
         for a in &r.actors {
+            let contextualize = |failure| {
+                let file = self.index.region(r.id).map(|entry| entry.file.as_str());
+                in_declaration(
+                    failure,
+                    format!(
+                        "{}: region {}, actor {}",
+                        file.unwrap_or("generated region"),
+                        r.id,
+                        a.id
+                    ),
+                )
+            };
             require(
                 matches!(a.controller.as_str(), "external" | "ai")
                     && (a.controller == "ai") == a.ai.is_some()
                     && a.ai.as_ref().is_none_or(|s| label(s)),
                 "Invalid actor controller",
-            )?;
+            )
+            .map_err(contextualize)?;
             if let Some(spec) = &a.combat {
-                self.check_combat(spec)?;
+                self.check_combat(spec).map_err(contextualize)?;
             }
         }
         Ok(())
@@ -2336,6 +2363,67 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn declaration_diagnostics_identify_source_and_preserve_precedence() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = read_package(&root).unwrap();
+        package
+            .manifest
+            .factions
+            .insert("guard".into(), BTreeSet::from(["missing".into()]));
+        package.manifest.ai_profiles.insert(
+            "guard".into(),
+            AiProfile {
+                flee_percent: 101,
+                ..Default::default()
+            },
+        );
+        package.manifest.characters[0].combat = Some(CombatSpec {
+            max_hp: 0,
+            ..Default::default()
+        });
+        package.manifest.archetypes.get_mut("token").unwrap().combat = Some(CombatSpec {
+            max_hp: 0,
+            ..Default::default()
+        });
+        for expected in [
+            "scenario.toml: faction \"guard\": Invalid faction relationship",
+            "scenario.toml: AI profile \"guard\": Invalid AI profile",
+            "scenario.toml: character 1: Invalid combat attributes or faction",
+            "scenario.toml: archetype \"token\": Invalid combat attributes or faction",
+        ] {
+            let failure = package.supported().unwrap_err();
+            assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
+            assert_eq!(failure.message, expected);
+            match expected {
+                s if s.contains("faction relationship") => package.manifest.factions.clear(),
+                s if s.contains("AI profile") => package.manifest.ai_profiles.clear(),
+                s if s.contains("character 1") => package.manifest.characters[0].combat = None,
+                _ => package.manifest.archetypes.get_mut("token").unwrap().combat = None,
+            }
+        }
+        package.supported().unwrap();
+        let mut region = package.region_defs().unwrap().remove(0);
+        let mut actor: Actor = serde_json::from_value(serde_json::json!({
+            "id": 9, "at": [1, 1, 0], "controller": "invalid",
+            "combat": {"max_hp": 0}
+        }))
+        .unwrap();
+        region.actors.push(actor.clone());
+        let failure = package.check_region(&region).unwrap_err();
+        assert_eq!(
+            failure.message,
+            "regions/1.toml: region 1, actor 9: Invalid actor controller"
+        );
+        actor.controller = "external".into();
+        *region.actors.last_mut().unwrap() = actor;
+        let failure = package.check_region(&region).unwrap_err();
+        assert_eq!(
+            failure.message,
+            "regions/1.toml: region 1, actor 9: Invalid combat attributes or faction"
+        );
+        assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
+    }
     #[test]
     fn compiled_instances_preserve_inheritance_and_explicit_overrides() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
