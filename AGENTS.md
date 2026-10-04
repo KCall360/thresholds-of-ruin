@@ -127,8 +127,10 @@ Immutable body sharing across in-memory snapshots passed full Windows checks and
 deployed client checks. Readiness changes copy zero definitions in scaling tests;
 encoded saves retain their existing values. Repeat measurements retained a
 restore regression, recorded in the plan; decode/content pooling remains pending.
-Storage queue accounting, AI preparation and the
-admission/scheduler split are next.
+Storage queue accounting now releases copied-source capacity after committed
+writes; full Windows and deployed-client checks passed. Admission lock scope,
+AI preparation and the admission/scheduler split are next. The versioned queue
+and stream-recovery proposal awaits explicit format authorization.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
 runtime selection/implementation for scripting are deferred. No format versions

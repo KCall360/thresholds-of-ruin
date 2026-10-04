@@ -68,6 +68,30 @@ class StreamingProcesses(ProcessTestCase):
                 self.fail("blocked for good: " + str(moved.get("error")))
         return moved
 
+    def test_drained_source_copies_do_not_exhaust_small_save_queue(self):
+        def start():
+            return self.server("--checkpoint-interval", 4, "--save-queue-bytes", 1024,
+                scenario=SCENARIO, seed=5)
+
+        server = start()
+        player, _ = self.client()
+        for _ in range(TO_HALL_4):
+            self.assertIsNone(self.request(player, {"type": "save"})["error"])
+            moved = self.act(player, {"type": "move", "direction": "east"})
+            self.assertIsNone(moved.get("error"), moved.get("error"))
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        expected = self.request(player, {"type": "snapshot"})["state"]
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertGreater(db.execute("SELECT COUNT(*) FROM region_sources").fetchone()[0], 3)
+        player.stop()
+        server.stop()
+        start()
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], expected)
+        continued = self.act(player, {"type": "move", "direction": "west"})
+        self.assertIsNone(continued.get("error"), continued)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+
     def rows(self):
         with closing(sqlite3.connect(self.save)) as db:
             return db.execute("SELECT count(*) FROM regions").fetchone()[0]

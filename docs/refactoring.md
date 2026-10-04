@@ -104,6 +104,52 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
+## Proposed compatibility decision: queued gameplay and stream recovery
+
+This proposal is awaiting maintainer authorization; current formats remain
+unchanged. Implementing the admission/execution contract requires the next
+protocol and save versions rather than silently changing protocol 22 and save
+format 15. Their version constants advance only after authorization.
+The package format is unchanged by this proposal. No old-format reader is added.
+
+- Gameplay admission returns a stable intention identity and admission receipt.
+  The acknowledgement means accepted into the simulation queue, not executed.
+  Simulation updates carry execution effects and the corresponding intention
+  identity. Immediate queries, annotations and session commands retain immediate
+  completion. Travel submits its individual simulated steps through the same
+  execution path as player and AI actions.
+- The simulation owns deterministic queue ordering and due-time selection.
+  Admission validates authority, request identity, branch, revision, disclosed
+  targets and timing. Execution revalidates actor availability, target identity,
+  topology and timing against the then-current state. It never silently changes
+  a target. Submit-time revisions are not treated as perpetual execution guards.
+  Queue capacity is bounded; rejection publishes neither queue state nor effects.
+- Saved state includes queued intentions, their identities/order and lifecycle.
+  Admission, execution and cancellation have separate journal records and
+  persistence/publication boundaries. Retries resolve the original admission;
+  restart cannot duplicate execution. Restored human-controlled intentions remain
+  suspended until fresh authorized input. Region suspension preserves applicable
+  queued work; rewind restores the selected queue and discards abandoned-future
+  work without reusing identities.
+- Each attachment has an opaque stream identity; each reset has a distinct epoch.
+  Snapshots establish that context, and deltas name their exact base within it.
+  Readiness and acceptance are explicit and versioned. Clients reject late old-
+  attachment/reset messages, wrong-base deltas and invalid reconstructed state,
+  then resynchronize. Collection identities remain separate from disclosed
+  occurrences. Numeric identities and counters use a defined lossless wire
+  representation suitable for future JavaScript clients.
+- Existing clients are updated together at the shared protocol boundary, with
+  real-process acceptance/recovery coverage. This authorizes required transport
+  adaptations in the text client, not its deferred parser/prose refactor.
+  No scripting language, VM, package handlers or scripting API are introduced.
+- Existing saves and previous executables are preserved. Unsupported versions
+  fail explicitly. Updated desktop targets use separate new-format save
+  locations, so adopting the new build cannot overwrite an existing game.
+
+The schema and execution changes receive focused regressions, full Windows
+verification, actual-client save/retry/reconnect/rewind tests, and both-platform
+CI before merge. Publication still requires its separate authorization.
+
 ## Current checkpoint
 
 The ordinary wire/backend command mapping is explicit. Developer command text
@@ -131,6 +177,22 @@ connection/frame checks. Release measurements and their limits are below.
 Regressions check zero candidate captures for
 stale requests, unchanged error precedence and retry results, and real-client
 state/history preservation across rejection and restart.
+
+Successful background-save transactions now release the pending-byte capacity
+of both journal frames and copied region sources. Previously, source copies
+remained charged after the queue drained, eventually rejecting later gameplay
+with a false full-queue error. Journal-byte statistics continue to count frames
+alone. Failed transactions retain their pending capacity for retry; sources and
+records still commit together.
+
+A regression failed with 993 pending bytes after a completed corridor save and
+now verifies zero pending bytes, restored state, and continued play. A real-client
+regression reproduced the rejection with a small queue despite explicit saves
+between moves; it now crosses regions, saves, restarts and continues. Quick and
+full Windows verification passed, including 218 debug Python/process tests and
+108 release process tests. Updated desktop targets passed eight real-client
+checks. This fixes incorrect capacity accounting; no latency improvement is
+claimed.
 
 Item mutations now pass through a private store that maintains ground-location
 and inventory-owner indexes. Observation, stack matching, corpse inventory

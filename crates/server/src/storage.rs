@@ -1147,9 +1147,17 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                     s.status.checkpoint_bytes = checkpoint_bytes;
                     s.status.last_checkpoint_ms = checkpoint_ms;
                 }
-                let bytes = batch.iter().map(|p| p.bytes.len()).sum::<usize>();
-                s.status.pending_bytes -= bytes;
-                s.status.journal_bytes += bytes as u64;
+                let journal_bytes = batch.iter().map(|p| p.bytes.len()).sum::<usize>();
+                let source_bytes = batch
+                    .iter()
+                    .flat_map(|p| &p.sources)
+                    .map(|(_, text)| text.len())
+                    .sum::<usize>();
+                // Both frames and copied sources consume admission capacity.
+                // Release it only after their shared transaction commits;
+                // journal_bytes continues to describe journal frames alone.
+                s.status.pending_bytes -= journal_bytes + source_bytes;
+                s.status.journal_bytes += journal_bytes as u64;
                 s.status.durable_sequence = batch.last().unwrap().sequence;
                 s.status.batches += 1;
                 s.status.last_batch_ms =
@@ -1467,6 +1475,34 @@ mod tests {
                 )
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn flushed_region_sources_release_the_pending_byte_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source-budget.db");
+        let policy = SavePolicy {
+            checkpoint_interval: 4,
+            ..SavePolicy::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
+        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        let expected = engine.state(ActorId(1)).unwrap();
+        engine.flush().unwrap();
+        let status = engine.save_status();
+        assert_eq!(status.accepted_sequence, status.durable_sequence);
+        let source_count: i64 = connection(&path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM region_sources", [], |row| row.get(0))
+            .unwrap();
+        assert!(source_count > 1);
+        assert_eq!(status.pending_bytes, 0);
+        drop(engine);
+        let mut restored = Engine::open_with_policy(&path, corridor(), policy).unwrap();
+        assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
+        walk(&mut restored, tor_protocol::Direction::West, 1);
+        restored.flush().unwrap();
+        assert_eq!(restored.save_status().pending_bytes, 0);
     }
 
     /// A saved corridor game with halls 1 and 2 detached and no checkpoint
