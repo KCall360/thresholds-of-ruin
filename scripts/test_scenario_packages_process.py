@@ -9,6 +9,37 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_validator_reports_construction_references_without_rewriting_package(self):
+        cases = [
+            ('actor-ai', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], controller = "ai", ai = "missing", combat = { max_hp = 41 }, body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
+             'regions/1.toml: region 1, actor 9: Unknown actor AI profile "missing"'),
+            ('actor-body', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
+             'regions/1.toml: region 1, actor 9: Actor body eye must be one of its cells'),
+            ('actor-archetype', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], archetype = "missing" }]\n',
+             'regions/1.toml: region 1, actor 9: Unknown archetype missing'),
+            ('item-archetype', 'regions/2.toml',
+             '\nitems = [{ id = 9, at = [1,1,0], archetype = "missing" }]\n',
+             'regions/2.toml: region 2, item 9: Unknown archetype missing'),
+        ]
+        for name, source, edit, message in cases:
+            with self.subTest(reference=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios/two-room', package)
+                path = package / source
+                text = path.read_text()
+                if name == 'item-archetype':
+                    text = '\n'.join(line for line in text.splitlines() if not line.startswith('items =')) + '\n'
+                path.write_text(text + edit)
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                        capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(json.loads(result.stderr)['error'], {'code': 'scenario_invalid', 'message': message})
+                self.assertEqual({p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}, before)
+
     def test_validator_identifies_invalid_declarations_without_rewriting_package(self):
         cases = [
             ('faction', 'scenario.toml', '\nfactions = { guard = ["missing"] }\n',

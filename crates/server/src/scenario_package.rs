@@ -11,8 +11,11 @@ use crate::{Failure, Scenario};
 mod authoring;
 #[path = "scenario_compiler.rs"]
 mod compiler;
+#[path = "scenario_instantiation.rs"]
+mod instantiation;
 pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
 use compiler::PreparedDefinitions;
+use instantiation::Origin;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tor_simulation::Game;
@@ -1138,21 +1141,49 @@ impl Package {
         }
         // Each asset exactly as building the region assigns it: an actor
         // its archetype's, an item its item asset.
-        let generated = r.generate.iter();
-        let actors = r.actors.iter().filter_map(|a| a.archetype.as_ref()).chain(
-            generated
-                .clone()
-                .flat_map(|g| g.actors.iter().flat_map(|p| &p.archetypes)),
-        );
-        let items = r
-            .items
+        let file = self
+            .index
+            .region(r.id)
+            .map(|entry| entry.file.as_str())
+            .unwrap_or("generated region");
+        for actor in &r.actors {
+            if let Some(key) = &actor.archetype {
+                let archetype = self.author_archetype(key).map_err(|failure| {
+                    Origin::Actor {
+                        file,
+                        region: r.id,
+                        id: actor.id,
+                    }
+                    .context(failure)
+                })?;
+                assets.extend(archetype.asset.iter().cloned());
+            }
+        }
+        for key in r
+            .generate
             .iter()
-            .filter_map(|i| i.archetype.as_ref())
-            .chain(generated.flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes)));
-        for key in actors {
+            .flat_map(|g| g.actors.iter().flat_map(|p| &p.archetypes))
+        {
             assets.extend(self.author_archetype(key)?.asset.iter().cloned());
         }
-        for key in items {
+        for item in &r.items {
+            if let Some(key) = &item.archetype {
+                let archetype = self.author_archetype(key).map_err(|failure| {
+                    Origin::Item {
+                        file,
+                        region: r.id,
+                        id: item.id,
+                    }
+                    .context(failure)
+                })?;
+                assets.extend(self.item_asset(archetype));
+            }
+        }
+        for key in r
+            .generate
+            .iter()
+            .flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes))
+        {
             assets.extend(self.item_asset(self.author_archetype(key)?));
         }
         Ok(assets)
@@ -1575,7 +1606,7 @@ impl Package {
             )?;
         }
         self.add_entities(&mut game, seed, &index, &all)?;
-        self.configure_run(&mut game, &index.anchors)?;
+        self.configure_run(&mut game, &index)?;
         Ok(game)
     }
 
@@ -1592,11 +1623,12 @@ impl Package {
                 .push((name.clone(), *at));
         }
         let mut spawns = BTreeMap::new();
-        for c in &self.manifest.characters {
-            if c.id == self.selected || c.unselected == "ai" {
-                let at = *anchors
-                    .get(&c.anchor)
-                    .ok_or_else(|| fail("Missing character anchor"))?;
+        for c in &definitions.characters {
+            if c.creature.control.spawned() {
+                let at = *anchors.get(&c.anchor).ok_or_else(|| {
+                    Origin::Character(c.id)
+                        .context(fail(format!("Missing character anchor {:?}", c.anchor)))
+                })?;
                 spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
@@ -1604,7 +1636,17 @@ impl Package {
             for a in &r.actors {
                 let ticks = a
                     .turn_ticks
-                    .or(definitions.archetype(&a.archetype)?.turn_ticks)
+                    .or(definitions
+                        .archetype(&a.archetype)
+                        .map_err(|failure| {
+                            Origin::Actor {
+                                file: &r.file,
+                                region: r.id,
+                                id: a.id,
+                            }
+                            .context(failure)
+                        })?
+                        .turn_ticks)
                     .unwrap_or(100);
                 require(
                     spawns.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
@@ -1635,7 +1677,7 @@ impl Package {
                 &mut regions
                     .iter()
                     .flat_map(|r| r.items.iter())
-                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .filter(|i| !definitions.omitted_carrier(i.carried_by))
                     .map(|i| i.id),
             )?,
             ceiling(&mut regions.iter().flat_map(|r| r.doors.iter().copied()))?,
@@ -1733,7 +1775,7 @@ impl Package {
             game.add_unbuilt_region(unbuilt.region, unbuilt.chamber, unbuilt.identities)
                 .map_err(|e| fail(format!("Region {region}: {e:?}")))?;
         }
-        self.configure_run(&mut game, &index.anchors)?;
+        self.configure_run(&mut game, &index)?;
         Ok(game)
     }
 
@@ -1782,7 +1824,7 @@ impl Package {
                 items: r
                     .items
                     .iter()
-                    .filter(|i| !self.omitted_carrier(i.carried_by))
+                    .filter(|i| !index.definitions.omitted_carrier(i.carried_by))
                     .map(|i| tor_simulation::ItemId(i.id))
                     .collect(),
                 doors: r.doors.iter().copied().collect(),
@@ -1942,18 +1984,6 @@ impl Package {
         Ok(())
     }
 
-    /// Items carried by an omitted character are omitted with it.
-    fn omitted_carrier(&self, carried_by: Option<u64>) -> bool {
-        carried_by.is_some_and(|id| {
-            id != self.selected
-                && self
-                    .manifest
-                    .characters
-                    .iter()
-                    .any(|c| c.id == id && c.unselected == "omit")
-        })
-    }
-
     /// Actors, items, identity knowledge and doors in these regions (given in
     /// package order), in the same order whichever regions they are.
     fn add_entities(
@@ -1992,79 +2022,31 @@ impl Package {
             .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
         }
         for c in &definitions.characters {
-            if (c.selected || c.unselected == "ai")
-                && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
-            {
-                if let Some(spec) = c.combat.clone() {
-                    game.configure_combat(tor_simulation::ActorId(c.id), spec)
-                        .map_err(|_| fail("Invalid character combat specification"))?;
-                }
-                if !c.selected && c.unselected == "ai" {
-                    let profile =
-                        c.ai.as_ref()
-                            .and_then(|name| definitions.ai_profiles.get(name))
-                            .ok_or_else(|| fail("Unknown character AI profile"))?;
-                    game.configure_ai(tor_simulation::ActorId(c.id), profile.clone())
-                        .map_err(|_| fail("AI requires combat attributes"))?;
-                }
-                if let Some(body) = &c.body {
-                    if !body.cells.contains(&body.eye) {
-                        return Err(fail("Character body eye must be one of its cells"));
-                    }
-                    game.set_body(tor_simulation::ActorId(c.id), body.clone())
-                        .map_err(|_| fail("Character body does not fit"))?;
-                }
-                if let Some(v) = c.velocity {
-                    game.set_actor_velocity(tor_simulation::ActorId(c.id), v)
-                        .map_err(|_| fail("Invalid character velocity"))?;
-                }
-                if c.asset.is_some() {
-                    game.set_actor_asset(tor_simulation::ActorId(c.id), c.asset.clone())
-                        .map_err(|_| fail("Unknown character"))?;
-                }
+            if c.creature.control.spawned() && homes.get(&c.id).is_some_and(|h| keep(h.region.0)) {
+                instantiation::configure(
+                    game,
+                    c.id,
+                    c.creature.borrowed(),
+                    Origin::Character(c.id),
+                )?;
             }
         }
         for r in regions {
+            let file = self
+                .index
+                .region(r.id)
+                .map(|entry| entry.file.as_str())
+                .unwrap_or("generated region");
             for a in &r.actors {
-                let archetype = definitions.archetype(&a.archetype)?;
-                if let Some(spec) = a
-                    .combat
-                    .clone()
-                    .map(Into::into)
-                    .or_else(|| archetype.combat.clone())
-                {
-                    game.configure_combat(tor_simulation::ActorId(a.id), spec)
-                        .map_err(|_| fail("Invalid actor combat specification"))?;
-                }
-                if a.controller == "ai" {
-                    let profile =
-                        a.ai.as_ref()
-                            .and_then(|name| definitions.ai_profiles.get(name))
-                            .ok_or_else(|| fail("Unknown actor AI profile"))?;
-                    game.configure_ai(tor_simulation::ActorId(a.id), profile.clone())
-                        .map_err(|_| fail("AI requires combat attributes"))?;
-                }
-                if let Some(body) = a
-                    .body
-                    .clone()
-                    .map(Into::into)
-                    .or_else(|| archetype.body.clone())
-                {
-                    if !body.cells.contains(&body.eye) {
-                        return Err(fail("Actor body eye must be one of its cells"));
-                    }
-                    game.set_body(tor_simulation::ActorId(a.id), body)
-                        .map_err(|_| fail("Actor body does not fit"))?;
-                }
-                if let Some(v) = a.velocity {
-                    game.set_actor_velocity(tor_simulation::ActorId(a.id), v)
-                        .map_err(|_| fail("Invalid actor velocity"))?;
-                }
-                let asset = archetype.actor_asset.clone();
-                if asset.is_some() {
-                    game.set_actor_asset(tor_simulation::ActorId(a.id), asset)
-                        .map_err(|_| fail("Unknown actor"))?;
-                }
+                let origin = Origin::Actor {
+                    file,
+                    region: r.id,
+                    id: a.id,
+                };
+                let prepared = definitions
+                    .actor(a)
+                    .map_err(|failure| origin.context(failure))?;
+                instantiation::configure(game, a.id, prepared, origin)?;
             }
         }
         let appearances = &index.appearances;
@@ -2075,62 +2057,21 @@ impl Package {
             .collect();
         items.sort_by_key(|(_, i)| i.id);
         for (region, i) in items {
-            let archetype = definitions.archetype(&i.archetype)?;
-            let name = if i.seed_names.is_empty() {
-                i.name
-                    .clone()
-                    .or(archetype.name.clone())
-                    .ok_or_else(|| fail("Item needs a name or archetype"))?
-            } else {
-                require(
-                    i.name.is_none(),
-                    "Item cannot have both name and seed_names",
-                )?;
-                i.seed_names[(seed % i.seed_names.len() as u64) as usize].clone()
+            let contextualize = |failure| {
+                Origin::Item {
+                    file: self
+                        .index
+                        .region(region)
+                        .map(|entry| entry.file.as_str())
+                        .unwrap_or("generated region"),
+                    region,
+                    id: i.id,
+                }
+                .context(failure)
             };
-            require(
-                label(&name) && i.seed_names.iter().all(|s| label(s)),
-                "Invalid item name",
-            )?;
-            let key = i.archetype.clone().unwrap_or_else(|| name.clone());
-            let identity = archetype.identity.clone().unwrap_or_else(|| key.clone());
-            let concealed = archetype.concealed;
-            require(
-                !concealed || (i.name.is_none() && i.seed_names.is_empty()),
-                "Concealed items cannot override their identity name",
-            )?;
-            let appearance = appearances
-                .get(&identity)
-                .cloned()
-                .unwrap_or_else(|| name.clone());
-            let stackable = i.stackable.unwrap_or(archetype.stackable);
-            require(
-                definitions.objective_item != Some(i.id) || !stackable,
-                "Objective item instances must be non-stackable",
-            )?;
-            let mut properties = archetype.properties.clone();
-            properties.extend(i.properties.clone());
-            let spec = tor_simulation::ItemSpec {
-                archetype: key,
-                identity,
-                name,
-                appearance,
-                concealed,
-                stackable,
-                properties,
-                asset: archetype.item_asset.clone(),
-            };
-            require(
-                i.quantity > 0 && (stackable || i.quantity == 1),
-                "Invalid item quantity or non-stackable count",
-            )?;
-            require(
-                spec.properties.len() <= 32
-                    && spec.properties.iter().all(|(k, v)| {
-                        label(k) && v.len() <= 80 && !v.chars().any(char::is_control)
-                    }),
-                "Invalid item properties",
-            )?;
+            let spec = definitions
+                .item(i, seed, appearances)
+                .map_err(contextualize)?;
             // Inventory of omitted characters is omitted with its owner.
             if definitions.omitted_carrier(i.carried_by) {
                 continue;
@@ -2148,12 +2089,10 @@ impl Package {
                 i.quantity,
                 spec,
             )
-            .map_err(|e| fail(format!("Item {}: {e:?}", i.id)))?;
+            .map_err(|e| contextualize(fail(format!("Item {}: {e:?}", i.id))))?;
         }
         for c in &definitions.characters {
-            if (c.selected || c.unselected != "omit")
-                && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
-            {
+            if c.creature.control.spawned() && homes.get(&c.id).is_some_and(|h| keep(h.region.0)) {
                 for identity in &c.known_identities {
                     game.learn_identity(tor_simulation::ActorId(c.id), identity)
                         .map_err(|_| fail("Unknown initial item identity"))?;
@@ -2187,11 +2126,7 @@ impl Package {
         Ok(())
     }
 
-    fn configure_run(
-        &self,
-        game: &mut Game,
-        anchors: &BTreeMap<String, Location>,
-    ) -> Result<(), Failure> {
+    fn configure_run(&self, game: &mut Game, index: &PackageIndex) -> Result<(), Failure> {
         if self.manifest.characters.iter().any(|c| c.combat.is_some())
             || self.manifest.objective.is_some()
         {
@@ -2200,16 +2135,16 @@ impl Package {
                     .objective
                     .as_ref()
                     .map(|o| tor_simulation::combat::Objective {
-                        anchor: anchors[&o.anchor],
+                        anchor: index.anchors[&o.anchor],
                         item: o.item.map(tor_simulation::ItemId),
                         disclosed: o.disclosed,
                         continue_play: o.continue_play,
                     });
-            let characters = self
-                .manifest
+            let characters = index
+                .definitions
                 .characters
                 .iter()
-                .filter(|c| c.id == self.selected || c.unselected == "ai")
+                .filter(|c| c.creature.control.spawned())
                 .map(|c| tor_simulation::ActorId(c.id))
                 .collect();
             game.configure_run(
@@ -2363,6 +2298,40 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn construction_reference_errors_identify_source_without_reordering_failures() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let mut manifest = template.manifest.clone();
+        let mut regions = template.region_defs().unwrap();
+        let mut actor: Actor = serde_json::from_value(serde_json::json!({
+            "id": 2, "at": [3, 1, 0], "controller": "ai", "ai": "missing",
+            "combat": {"max_hp": 41},
+            "body": {"cells": [[0, 0, 0]], "eye": [1, 0, 0], "mass": 91}
+        }))
+        .unwrap();
+        regions[0].actors.push(actor.clone());
+        let package = Package::from_parts(manifest.clone(), regions.clone()).unwrap();
+        let failure = package.build(42, true).unwrap_err();
+        assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
+        assert_eq!(
+            failure.message,
+            "regions/1.toml: region 1, actor 2: Unknown actor AI profile \"missing\""
+        );
+        manifest
+            .ai_profiles
+            .insert("careful".into(), AiProfile::default());
+        actor.ai = Some("careful".into());
+        *regions[0].actors.last_mut().unwrap() = actor;
+        let package = Package::from_parts(manifest, regions).unwrap();
+        let failure = package.build(42, true).unwrap_err();
+        assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
+        assert_eq!(
+            failure.message,
+            "regions/1.toml: region 1, actor 2: Actor body eye must be one of its cells"
+        );
+    }
+
     #[test]
     fn declaration_diagnostics_identify_source_and_preserve_precedence() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");

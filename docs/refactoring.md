@@ -104,6 +104,58 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
+## Current checkpoint: scenario compilation
+
+Prepared definitions now represent external, omitted and AI control explicitly.
+AI references share immutable compiled profiles; missing references are reported
+at the existing configuration boundary, preserving earlier-error precedence and
+the treatment of unused profiles on selected characters. Characters and regional
+actors use one creature installation path. Item inheritance, seeded names,
+appearance, properties and instance constraints are normalized by the compiler.
+An omitted-character index replaces repeated manifest scans during identity and
+inventory preparation. Inherited creature definitions remain borrowed until
+installation; inline definitions are converted once and moved into the game.
+
+Construction errors identify the character or indexed region file and actor/item.
+Palette validation retains its original reference-check order and adds context
+for authored archetype references. The actual validator regression verifies
+these diagnostics and unchanged package bytes; the existing compiled-inheritance
+save/restart acceptance test passes. Quick verification passed, including 120
+actual-process tests. Full Windows verification also passed, including 232 debug
+Python/process tests, Rust workspace tests in debug and release, and 120 release
+process tests. All twenty deployed-client/validator checks passed. No format,
+generation seed or scripting contract changes are
+part of this increment. Broader generator/reference diagnostics remain open.
+
+Three interleaved release rounds compared this increment with the previous
+checkpoint. All eighteen runs validated, with matching work, saved-byte and
+disclosure counts. Timings below are milliseconds, baseline to refactor:
+
+| Workload / metric | n per side | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 16-region streaming / command | 2,100 | .2263 → .2308 | .4040 → .4136 | 1.1881 → .8454 |
+| 256-region streaming / command | 2,100 | .2284 → .2261 | .4196 → .3914 | 1.2668 → .8130 |
+| Falling bodies / command | 576 | .0977 → .0972 | 12.1394 → 12.0582 | 20.4284 → 21.2233 |
+| Falling bodies / client apply | 144 | .7166 → .7200 | .8849 → .9148 | 1.1201 → 1.1859 |
+| Falling bodies / client draw | 144 | 1.0932 → 1.0953 | 1.2712 → 1.3391 | 1.4016 → 1.6299 |
+| Falling bodies / resume | 9 | 229.590 → 235.054 | 241.012 → 256.117 | 241.012 → 256.117 |
+| Falling bodies / save | 9 | 253.462 → 87.095 | 328.401 → 314.131 | 328.401 → 314.131 |
+| 16-region streaming / save | 3 | 114.376 → 109.846 | 114.377 → 126.161 | 114.377 → 126.161 |
+| 16-region streaming / replay | 3 | 162.644 → 164.832 | 164.070 → 175.729 | 164.070 → 175.729 |
+| 256-region streaming / save | 3 | 84.811 → 74.395 | 121.632 → 291.211 | 121.632 → 291.211 |
+| 256-region streaming / replay | 3 | 164.313 → 167.040 | 169.797 → 170.319 | 169.797 → 170.319 |
+
+The 256-region save p95 increase of 139.4% prompted one controlled repeat with
+the same binaries and machine/storage fingerprint. All six repeated runs
+validated with matching counts. Command p50/p95/max were .2337/.4363/.8863
+versus .2300/.3963/.7677 (2,100 samples per side). Save median/p95/max were
+40.222/46.079/46.079 versus 38.123/41.730/41.730; replay was
+163.946/166.553/166.553 versus 168.300/174.617/174.617 (three samples each).
+The save spike did not repeat, while replay p95 rose 4.8% in the repeat. Both
+sets and adverse values are retained. These workloads do not isolate compiler
+construction costs or resident memory. No broad latency, construction-speed or
+memory improvement is claimed; earlier unresolved timing tails remain open.
+
 ## Proposed compatibility decision: queued gameplay and stream recovery
 
 This proposal is awaiting maintainer authorization; current formats remain
@@ -150,7 +202,7 @@ The schema and execution changes receive focused regressions, full Windows
 verification, actual-client save/retry/reconnect/rewind tests, and both-platform
 CI before merge. Publication still requires its separate authorization.
 
-## Current checkpoint
+## Outbound output budgets
 
 Outgoing queues now retain one bounded encoded frame rather than a message DTO
 plus later serialization. Per-client and shared byte leases cover queued and
