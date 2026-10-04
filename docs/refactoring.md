@@ -152,6 +152,21 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Observation deltas now use checked coordinate arithmetic for translation and
+translation voting. Overflow rejects an incoming delta before client state is
+published; an unrepresentable outgoing delta falls back to the full observation.
+Repeated portal projections keep their existing correspondence rules. Regression
+checks cover every axis and both integer limits, removed cells, representable
+edge translations, preservation of the entire client model, and real ASCII/text
+clients rejecting a corrupted delta and reconnecting to a fresh snapshot.
+Focused Rust and real-client checks passed. Quick formatting, lint, architecture,
+tooling and Rust checks passed; 109 of 110 process checks passed initially, with
+one unable to write logs because the host disk was full. That check passed after
+generated incremental compiler caches were cleared. Full Windows verification
+passed, including 220 debug Python/process tests and 110 release process tests.
+The deployed desktop build passed ten real-client checks. No format version
+changes are needed for this correction; no latency improvement is claimed.
+
 The ordinary wire/backend command mapping is explicit. Developer command text
 still uses its existing parser and opaque wire representation. No wire, package,
 save, or ruleset format has changed. Action broadcasts resolve disclosed state

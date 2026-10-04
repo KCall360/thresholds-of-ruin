@@ -1,4 +1,4 @@
-"""Real playable clients: delayed delivery, gap rejection, snapshot on relaunch."""
+"""Real clients: delayed delivery, gap/invalid-state rejection, and relaunch."""
 import unittest
 from stream_relay import StreamRelay
 
@@ -80,6 +80,42 @@ class StreamRecoveryProcesses(ProcessTestCase):
 
     def test_text_delayed_delivery_gap_and_relaunch(self):
         self.exercise('text')
+
+    def exercise_overflow(self, kind):
+        self.server()
+        player, _ = self.client()
+        relay = StreamRelay(self.address)
+        self.addCleanup(relay.close)
+        spectator, initial = self.playable(kind, relay.address)
+        relay.overflow_delta.set()
+        final = self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
+        self.assertIsNone(final['error'])
+        self.assertTrue(relay.corrupted.wait(5), 'No actual delta was corrupted')
+        if kind == 'ascii':
+            failed = self.ascii_frame(spectator, lambda f: not f['connected'])
+            self.assertIn('InconsistentState', failed['status'])
+            self.assertEqual(failed['state'], initial['state'])
+            self.assertEqual(failed['history'], initial['history'])
+        else:
+            spectator.until(lambda line: 'InconsistentState' in line)
+        self.assertNotEqual(spectator.child.wait(timeout=15), 0)
+        replacement, recovered = self.playable(kind, self.address)
+        if kind == 'ascii':
+            self.assertEqual(recovered['state'], final['state'])
+            self.assertEqual(recovered['history'], final['history'])
+        else:
+            replacement.child.stdin.write('history\n')
+            replacement.child.stdin.flush()
+            history = replacement.until(lambda line: line == '> ')
+            for entry in final['history']:
+                self.assertIn(entry['id'], history)
+        self.assertIsNone(self.command(player, {'type': 'act', 'action': {'type': 'wait'}})['error'])
+
+    def test_ascii_overflowing_delta_and_relaunch(self):
+        self.exercise_overflow('ascii')
+
+    def test_text_overflowing_delta_and_relaunch(self):
+        self.exercise_overflow('text')
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
         self.server(scenario='semantic-narration', seed=None)

@@ -131,8 +131,10 @@ Storage queue accounting now releases copied-source capacity after committed
 writes; full Windows and deployed-client checks passed. A separate producer gate
 now releases the worker/status lock during encoding and checkpoint capture,
 verified by concurrency regressions, full Windows checks, release comparisons
-and deployed-client checks. Timing limits are recorded in the plan. Protocol
-validation, AI preparation and the admission/scheduler split are next. The versioned queue
+and deployed-client checks. Timing limits are recorded in the plan. Observation
+delta translation now rejects overflow and falls back to full observations when
+needed, verified by full Windows checks and ten deployed-client checks. Central
+observation validation, AI preparation and the admission/scheduler split are next. The versioned queue
 and stream-recovery proposal awaits explicit format authorization.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
