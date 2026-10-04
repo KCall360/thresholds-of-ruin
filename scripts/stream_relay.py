@@ -33,6 +33,7 @@ class StreamRelay:
         self.drop_observation = threading.Event()
         self.dropped = threading.Event()
         self.overflow_delta = threading.Event()
+        self.invalid_inventory = threading.Event()
         self.corrupted = threading.Event()
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
@@ -86,12 +87,16 @@ class StreamRelay:
                         self.drop_observation.clear()
                         self.dropped.set()
                         continue
-                if prefix[0] == 0x81 and self.overflow_delta.is_set():
+                if prefix[0] == 0x81 and (self.overflow_delta.is_set() or self.invalid_inventory.is_set()):
                     message = json.loads(payload)
                     if message.get('type') == 'update' and message['update']['body']['type'] == 'observation_delta':
-                        # Shift the ordinary room past i32::MAX. Keep the
-                        # envelope and sequence valid to isolate state rejection.
-                        message['update']['body']['state']['cells']['shift']['x'] = 2147483647
+                        # Keep the envelope and sequence valid to isolate
+                        # rejection of arithmetic or reconstructed state.
+                        state = message['update']['body']['state']
+                        if self.overflow_delta.is_set():
+                            state['cells']['shift']['x'] = 2147483647
+                        else:
+                            state['inventory'].append({'id':123, 'quantity':0, 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
                         payload = json.dumps(message, separators=(',', ':')).encode()
                         length = len(payload)
                         if length < 126:
@@ -101,6 +106,7 @@ class StreamRelay:
                         else:
                             prefix, extra = bytes((0x81, 127)), struct.pack('!Q', length)
                         self.overflow_delta.clear()
+                        self.invalid_inventory.clear()
                         self.corrupted.set()
                 downstream.sendall(prefix + extra + payload)
         except (EOFError, OSError):

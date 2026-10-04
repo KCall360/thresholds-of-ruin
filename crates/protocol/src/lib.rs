@@ -1,9 +1,11 @@
 //! Public observation types. Never expose internal world state through this crate.
 
 mod delta;
+mod validation;
 mod wire;
 pub use delta::*;
 use serde::{Deserialize, Serialize};
+pub use validation::*;
 pub use wire::*;
 
 /// Actor identity is explicit even in single-player sessions.

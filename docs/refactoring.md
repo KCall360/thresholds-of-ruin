@@ -152,6 +152,29 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Structural observation validation now lives in the protocol crate and runs at
+every shared-client state publication boundary, including after delta expansion.
+It checks duplicate projected occurrences, inventory/place identities, item
+quantities and conflicting ground/carried identities, combat consistency, and
+motion scale. Repeated cell keys and entity identities at distinct projected
+offsets remain valid, as do unordered full views. Canonically ordered occurrence
+checks need no temporary set. This is structural validation, not a reconstruction
+of hidden topology or a new collection-size policy.
+
+The baseline regression accepted duplicate cell offsets into client memory.
+Focused tests now reject twelve malformed-state cases at initial snapshots,
+replacement snapshots, full updates and representable reconstructed deltas,
+preserving the entire existing client model. Recorded complete wire views and
+repeated portal projections still validate. Actual ASCII/text clients reject a
+zero-quantity inventory delta, retain their prior state/history and reconnect to
+the correct server boundary. Two existing ASCII fixtures were corrected to use
+distinct ground/carried item identities and avoid repeated map offsets. Focused
+Rust and real-client checks passed, followed by quick Windows verification,
+including all 112 process tests. Full Windows verification also passed, including
+222 debug Python/process tests and 112 release process tests. The deployed desktop
+build passed twelve real-client checks. Release comparisons and their controlled
+repeat are recorded below under structural-validation release comparison.
+
 Observation deltas now use checked coordinate arithmetic for translation and
 translation voting. Overflow rejects an incoming delta before client state is
 published; an unrepresentable outgoing delta falls back to the full observation.
@@ -543,3 +566,47 @@ These results do not establish a broad command or save-time improvement. The
 concurrency regression establishes status progress while capture is blocked;
 resident memory and lock-wait distributions remain unmeasured. Raw samples remain
 local and unpublished.
+
+### Structural-validation release comparison
+
+Three interleaved rounds compared structural validation with the preceding
+checked-delta implementation on the same Windows host. A controlled repeat used
+the same verified binaries for client and falling-physics cases. All runs
+validated; workload, memory/chart, saved/disclosed byte and physics counts were
+unchanged. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor, durable / command | 915 | 0.543 → 0.562 | 0.787 → 0.795 | 1.150 → 2.541 |
+| 64 regions, 8 actors, durable / command | 7,500 | 0.043 → 0.043 | 2.535 → 2.583 | 9.147 → 6.642 |
+| Same small case / client apply | 915 | 0.228 → 0.231 | 0.304 → 0.311 | 0.485 → 0.507 |
+| Same eight-actor case / client apply | 2,373 | 0.230 → 0.232 | 0.324 → 0.354 | 1.005 → 0.732 |
+| Client, 64 remembered cells, 64 updates / apply | 60 | 3.425 → 3.588 | 3.468 → 4.309 | 3.489 → 5.442 |
+| Same client, repeat / apply | 60 | 3.422 → 3.577 | 3.817 → 3.654 | 5.191 → 3.849 |
+| Client, 20,956 remembered cells, single update / apply | 60 | 0.567 → 0.568 | 0.702 → 1.035 | 3.722 → 3.758 |
+| Same client, repeat / apply | 60 | 0.567 → 0.564 | 0.687 → 0.829 | 3.672 → 3.930 |
+| Client, 20,956 remembered cells, 64 updates / apply | 60 | 35.073 → 34.965 | 38.452 → 37.988 | 39.270 → 41.599 |
+| Same client, repeat / apply | 60 | 35.202 → 35.035 | 38.084 → 38.433 | 38.716 → 39.646 |
+| Falling, 8 actors / 128 items / 8 cells / command | 576 | 0.095 → 0.096 | 12.280 → 13.633 | 25.339 → 24.561 |
+| Same falling, repeat / command | 576 | 0.094 → 0.094 | 12.040 → 12.804 | 21.059 → 22.269 |
+| Same falling / resume | 9 | 254.219 → 260.827 | 279.985 → 314.069 | 279.985 → 314.069 |
+| Same falling, repeat / resume | 9 | 263.497 → 252.967 | 271.709 → 265.503 | 271.709 → 265.503 |
+| Same falling / save | 9 | 258.758 → 207.164 | 413.211 → 343.410 | 413.211 → 343.410 |
+| Same falling, repeat / save | 9 | 251.523 → 67.218 | 309.405 → 395.980 | 309.405 → 395.980 |
+
+Client-matrix samples are batches, with 64 visible cells per update; the large
+history bootstrap is outside timing. The small 64-update median rose about
+4.5–4.8%, or 2.4–2.6 microseconds per update. Its initial 24.2% p95 increase did
+not persist in the repeat. Large-memory single-update p95 rose in both runs
+(47.4% and 20.6%), despite nearly unchanged medians. Actual server-generated
+updates showed client-apply p95 increases of about seven and thirty microseconds
+in the small and eight-actor cases. These measurements include complete client
+application, not isolated validator execution.
+
+Falling command p95 rose 11.0% initially and 6.4% in the repeat; its cause was
+not isolated. The initial resume-tail increase did not persist. Save timings
+varied substantially, with repeat p95 28.0% higher despite a lower median. Both
+result sets are retained; no broad command, restore or save-time improvement is
+claimed. Restart samples number three per ordinary case, and physics save/resume
+samples number nine. Bootstrap latency, isolated validation time, allocations
+and resident memory remain unmeasured. Raw samples remain local and unpublished.

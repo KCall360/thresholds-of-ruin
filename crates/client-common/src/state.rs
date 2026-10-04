@@ -35,6 +35,10 @@ pub struct ClientState {
 
 impl ClientState {
     pub fn from_snapshot(snapshot: Snapshot) -> Result<Self, StreamError> {
+        snapshot
+            .state
+            .validate()
+            .map_err(|_| StreamError::InconsistentState)?;
         if snapshot.actor != snapshot.state.observation.actor
             || snapshot.cursor.tick != snapshot.state.observation.tick
         {
@@ -203,6 +207,9 @@ impl ClientState {
                 self.snapshot.travel = Some(status);
             }
             UpdateBody::Observation { state, event } => {
+                state
+                    .validate()
+                    .map_err(|_| StreamError::InconsistentState)?;
                 if state.observation.actor != update.actor
                     || state.observation.tick != update.cursor.tick
                     || state.revision <= self.snapshot.state.revision

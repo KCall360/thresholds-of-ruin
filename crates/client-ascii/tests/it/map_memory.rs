@@ -61,13 +61,20 @@ fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_visible_cel
 fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
     let mut first = snapshot(false);
     let template = first.state.observation.visible_cells[0].clone();
+    let existing: std::collections::BTreeSet<_> = first
+        .state
+        .observation
+        .visible_cells
+        .iter()
+        .map(|cell| cell.position)
+        .collect();
     for z in -8..=8 {
         for x in -24..=24 {
             for y in -12..=12 {
                 let mut cell = template.clone();
                 cell.key = format!("{x}:{y}:{z}");
                 cell.position = Position { x, y, z };
-                if cell.position != (Position { x: 0, y: 0, z: 0 }) {
+                if !existing.contains(&cell.position) {
                     first.state.observation.visible_cells.push(cell);
                 }
             }

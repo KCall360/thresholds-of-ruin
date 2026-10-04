@@ -144,3 +144,37 @@ fn every_server_message_kind_round_trips() {
         expected.difference(&kinds).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn recorded_complete_views_validate_and_keep_projection_identity_separate() {
+    let mut checked = 0;
+    for sample in samples()["server"].as_array().unwrap() {
+        let message: ServerMessage = serde_json::from_value(sample.clone()).unwrap();
+        let mut state = match message {
+            ServerMessage::Snapshot { snapshot, .. } => snapshot.state,
+            ServerMessage::Update { update } => match update.body {
+                UpdateBody::Observation { state, .. } => *state,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        state.validate().unwrap();
+        checked += 1;
+        // Full views do not require canonical ordering.
+        state.observation.visible_cells.reverse();
+        state.validate().unwrap();
+        if let Some(cell) = state.observation.visible_cells.first().cloned() {
+            let mut image = cell.clone();
+            image.position = Position {
+                x: i32::MAX,
+                y: i32::MAX,
+                z: i32::MAX,
+            };
+            state.observation.visible_cells.push(image);
+            state.validate().unwrap();
+            state.observation.visible_cells.push(cell);
+            assert_eq!(state.validate(), Err(InvalidState::DuplicateCell));
+        }
+    }
+    assert!(checked > 0, "No recorded full views were validated");
+}

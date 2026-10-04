@@ -81,13 +81,13 @@ class StreamRecoveryProcesses(ProcessTestCase):
     def test_text_delayed_delivery_gap_and_relaunch(self):
         self.exercise('text')
 
-    def exercise_overflow(self, kind):
+    def exercise_invalid_state(self, kind, corruption):
         self.server()
         player, _ = self.client()
         relay = StreamRelay(self.address)
         self.addCleanup(relay.close)
         spectator, initial = self.playable(kind, relay.address)
-        relay.overflow_delta.set()
+        getattr(relay, corruption).set()
         final = self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
         self.assertIsNone(final['error'])
         self.assertTrue(relay.corrupted.wait(5), 'No actual delta was corrupted')
@@ -112,10 +112,16 @@ class StreamRecoveryProcesses(ProcessTestCase):
         self.assertIsNone(self.command(player, {'type': 'act', 'action': {'type': 'wait'}})['error'])
 
     def test_ascii_overflowing_delta_and_relaunch(self):
-        self.exercise_overflow('ascii')
+        self.exercise_invalid_state('ascii', 'overflow_delta')
 
     def test_text_overflowing_delta_and_relaunch(self):
-        self.exercise_overflow('text')
+        self.exercise_invalid_state('text', 'overflow_delta')
+
+    def test_ascii_invalid_reconstructed_inventory_and_relaunch(self):
+        self.exercise_invalid_state('ascii', 'invalid_inventory')
+
+    def test_text_invalid_reconstructed_inventory_and_relaunch(self):
+        self.exercise_invalid_state('text', 'invalid_inventory')
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
         self.server(scenario='semantic-narration', seed=None)

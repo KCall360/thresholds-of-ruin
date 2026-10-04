@@ -6,3 +6,4 @@ mod memory;
 mod palette;
 mod streamed_notes;
 mod travel;
+mod validation;

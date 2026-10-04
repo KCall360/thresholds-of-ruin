@@ -1,0 +1,122 @@
+use tor_client_common::{ClientState, StreamError};
+use tor_protocol::*;
+
+fn snapshot(revision: u64) -> Snapshot {
+    serde_json::from_value(serde_json::json!({
+        "actor":1,"branch":"validation","cursor":{"sequence":0,"tick":revision},
+        "has_control":false,"history":{"entries":[],"older_before":null},
+        "state":{"wizard_game":false,"revision":revision,"observation":{
+            "actor":1,"tick":revision,"position":{"x":0,"y":0,"z":0},
+            "places":[{"key":"here","name":"Here","origin":"authored"}],
+            "visible_cells":[
+                {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},
+                {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}
+            ],
+            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":8,"quantity":1,"name":"stone","appearance":"stone","identified":true}}],
+            "inventory":[{"id":7,"quantity":1,"name":"stone","appearance":"stone","identified":true}],
+            "visible_actors":[{"id":2,"position":{"x":1,"y":0,"z":0}}],
+            "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":0,"actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
+            "motion":{"velocity":[0,0,0],"units_per_cell":65536,"displaced":false,"impacted":false},
+            "ready":true
+        }}
+    }))
+    .unwrap()
+}
+
+type Corrupt = fn(&mut Observation);
+
+fn corruptions() -> [(&'static str, Corrupt); 12] {
+    [
+        ("cell occurrence", |o| {
+            o.visible_cells.push(o.visible_cells[0].clone())
+        }),
+        ("inventory identity", |o| {
+            o.inventory.push(o.inventory[0].clone())
+        }),
+        ("ground occurrence", |o| {
+            o.ground_items.push(o.ground_items[0].clone())
+        }),
+        ("actor occurrence", |o| {
+            o.visible_actors.push(o.visible_actors[0].clone())
+        }),
+        ("place identity", |o| o.places.push(o.places[0].clone())),
+        ("inventory quantity", |o| o.inventory[0].quantity = 0),
+        ("ground quantity", |o| o.ground_items[0].item.quantity = 0),
+        ("health", |o| o.combat.as_mut().unwrap().hp = 11),
+        ("preparation", |o| {
+            o.combat.as_mut().unwrap().preparation_active = true
+        }),
+        ("death", |o| o.combat.as_mut().unwrap().dead = true),
+        ("motion scale", |o| {
+            o.motion.as_mut().unwrap().units_per_cell = 0
+        }),
+        ("item location", |o| {
+            o.ground_items[0].item.id = o.inventory[0].id
+        }),
+    ]
+}
+
+#[test]
+fn malformed_observations_reject_at_every_boundary_without_partial_effects() {
+    for (label, corrupt) in corruptions() {
+        let initial = snapshot(0);
+        let mut next = snapshot(1);
+        corrupt(&mut next.state.observation);
+        assert_eq!(
+            ClientState::from_snapshot(next.clone()),
+            Err(StreamError::InconsistentState),
+            "snapshot: {label}"
+        );
+        let mut client = ClientState::from_snapshot(initial).unwrap();
+        let before = client.clone();
+        assert_eq!(
+            client.replace_snapshot(next.clone()),
+            Err(StreamError::InconsistentState),
+            "replacement: {label}"
+        );
+        assert_eq!(client, before);
+        let delta = StateDelta::between(client.state(), &next.state);
+        let full = UpdateBody::Observation {
+            state: Box::new(next.state),
+            event: None,
+        };
+        let mut bodies = vec![full];
+        if let Some(delta) = delta {
+            bodies.push(UpdateBody::ObservationDelta {
+                state: Box::new(delta),
+                event: None,
+            });
+        }
+        for body in bodies {
+            let update = StreamUpdate {
+                actor: ActorId(1),
+                branch: next.branch.clone(),
+                cursor: StreamCursor {
+                    sequence: 1,
+                    tick: 1,
+                },
+                body,
+            };
+            assert_eq!(
+                client.apply(update),
+                Err(StreamError::InconsistentState),
+                "update: {label}"
+            );
+            assert_eq!(client, before);
+        }
+    }
+}
+
+#[test]
+fn repeated_portal_entities_at_distinct_offsets_remain_valid() {
+    let mut next = snapshot(0);
+    let o = &mut next.state.observation;
+    o.visible_cells[1].key = o.visible_cells[0].key.clone();
+    let mut item = o.ground_items[0].clone();
+    item.position = o.visible_cells[0].position;
+    o.ground_items.push(item);
+    let mut actor = o.visible_actors[0].clone();
+    actor.position = o.visible_cells[0].position;
+    o.visible_actors.push(actor);
+    assert!(ClientState::from_snapshot(next).is_ok());
+}
