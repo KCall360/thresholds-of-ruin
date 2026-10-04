@@ -66,7 +66,8 @@ pub(crate) fn resolve_body(
     .then_some(cells)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct BodySpec {
     pub cells: Vec<[i32; 3]>,
@@ -74,6 +75,24 @@ pub struct BodySpec {
     /// every declaration; see `docs/sight-3d.md`.
     pub eye: [i32; 3],
     pub mass: u32,
+}
+
+#[cfg(test)]
+thread_local! {
+    // Count actual definition copies without changing production diagnostics.
+    static BODY_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl Clone for BodySpec {
+    fn clone(&self) -> Self {
+        BODY_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
+        Self {
+            cells: self.cells.clone(),
+            eye: self.eye,
+            mass: self.mass,
+        }
+    }
 }
 impl Default for BodySpec {
     /// The implicit single-cell body of an actor that declares none.
@@ -191,7 +210,7 @@ impl Game {
             return Err(GameError::Blocked);
         }
         let mut actor = self.actors.get_mut(&id).expect("validated actor");
-        actor.body = body;
+        actor.body = tor_world::Shared::new(body);
         actor.motion.acceleration_remainder = [0; 3];
         Ok(())
     }
@@ -710,6 +729,88 @@ fn cap_velocity(v: &mut [i64; 3]) {
         let ceiling = root + u128::from(root * root != squared);
         for n in v {
             *n = (i128::from(*n) * i128::from(TERMINAL) / ceiling as i128) as i64;
+        }
+    }
+}
+
+#[cfg(test)]
+mod definition_sharing_tests {
+    use super::*;
+    use crate::Action;
+    use std::num::NonZeroU64;
+    use tor_world::{Extent, Position, Region, World};
+
+    #[test]
+    fn body_edits_detach_snapshots_and_keep_checkpoint_encoding() {
+        let mut game = Game::two_room(42);
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        game.observe(actor).unwrap();
+        let old = game.clone();
+        let body = BodySpec {
+            cells: vec![[0, 0, 0], [0, 1, 0]],
+            eye: [0, 1, 0],
+            mass: 97,
+        };
+        game.set_body(actor, body.clone()).unwrap();
+        let extra = Location {
+            position: Position { x: 1, y: 2, z: 0 },
+            ..at
+        };
+        assert!(old.actors.at(&old.world, extra).is_empty());
+        assert!(game.actors.at(&game.world, extra).contains_key(&actor));
+        assert_eq!(&*old.actors[&actor].body, &BodySpec::default());
+        assert_eq!(&*game.actors[&actor].body, &body);
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let encoded = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(
+            encoded["actors"][actor.0.to_string()]["body"],
+            serde_json::to_value(&body).unwrap()
+        );
+        let decoded = serde_json::from_value(encoded).unwrap();
+        let restored = Game::restore_checkpoint(decoded, &shared).unwrap();
+        assert_eq!(restored, game);
+        assert_eq!(
+            restored.actors.at(&restored.world, extra),
+            game.actors.at(&game.world, extra)
+        );
+    }
+
+    #[test]
+    fn readiness_changes_do_not_copy_unrelated_body_definitions() {
+        for unrelated in [16, 256, 4096] {
+            let mut world = World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(Region {
+                    id: RegionId(1),
+                    name: "actors".into(),
+                    bounds: Extent::new(unrelated + 2, 3, 1).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            for x in 0..=unrelated {
+                game.spawn_actor(
+                    Location {
+                        region: RegionId(1),
+                        position: Position { x, y: 1, z: 0 },
+                    },
+                    NonZeroU64::new(100).unwrap(),
+                )
+                .unwrap();
+            }
+            game.observe(ActorId(1)).unwrap();
+            let old = game.clone();
+            let before = BODY_DEFINITION_COPIES.with(|copies| copies.get());
+            game.act(ActorId(1), Action::Wait).unwrap();
+            let copied = BODY_DEFINITION_COPIES.with(|copies| copies.get()) - before;
+            assert_eq!(copied, 0, "unrelated actors: {unrelated}");
+            assert_eq!(old.next_actor(), Some(ActorId(1)));
+            assert_eq!(game.next_actor(), Some(ActorId(2)));
+            assert_eq!(old.actors[&ActorId(1)].body, game.actors[&ActorId(1)].body);
         }
     }
 }

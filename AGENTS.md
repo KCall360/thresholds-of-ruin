@@ -123,7 +123,12 @@ regressions are recorded alongside reduced search counts. Backend request
 metadata extraction and the checked-request executor passed full Windows checks,
 release comparisons and deployed client checks. Stale requests reject before
 candidate capture; receipt and authorization precedence remain covered.
-Immutable snapshot sharing, AI preparation and the admission/scheduler split are next.
+Immutable body sharing across in-memory snapshots passed full Windows checks and
+deployed client checks. Readiness changes copy zero definitions in scaling tests;
+encoded saves retain their existing values. Repeat measurements retained a
+restore regression, recorded in the plan; decode/content pooling remains pending.
+Storage queue accounting, AI preparation and the
+admission/scheduler split are next.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
 runtime selection/implementation for scripting are deferred. No format versions

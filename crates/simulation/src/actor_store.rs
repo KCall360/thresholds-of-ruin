@@ -29,7 +29,7 @@ fn remove_member(regions: &mut Members, region: RegionId, id: ActorId) {
 struct BodyEntry {
     location: Location,
     orientation: u8,
-    body: BodySpec,
+    body: Shared<BodySpec>,
     cells: Option<BodyCells>,
 }
 

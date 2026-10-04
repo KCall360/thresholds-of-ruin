@@ -70,7 +70,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.flush_save()
         player.stop()
         server.stop()
-        self.server(scenario="physics-portal", seed=None)
+        server = self.server(scenario="physics-portal", seed=None)
         resumed, state = self.client()
         self.assertEqual(state["state"], crossed["state"])
         continued = self.act(resumed, {"type": "wait"})
@@ -78,6 +78,14 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
                             for actor in continued["state"]["observation"]["visible_actors"]))
         self.assertNotIn('"region"', json.dumps(continued["state"]["observation"]))
+        # Definitions and derived portal bodies remain stable across another
+        # private candidate and a second cold restore.
+        self.flush_save()
+        resumed.stop()
+        server.stop()
+        self.server(scenario="physics-portal", seed=None)
+        _, restored = self.client()
+        self.assertEqual(restored["state"], continued["state"])
 
     def test_private_history_pagination_and_anchors_survive_restart(self):
         server = self.server()

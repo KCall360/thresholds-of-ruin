@@ -173,6 +173,23 @@ body cells; resident memory is not yet measured. Shared root maps can still copy
 their entries on first mutation, and geometry edits can incur a complete body
 rebuild. These changes do not establish constant-time whole commands.
 
+Actor bodies and derived body entries now share immutable body definitions across
+in-memory snapshots. Readiness and pose changes retain that storage; body edits
+detach it through copy-on-write. The public body API and transparent checkpoint
+encoding retain their existing values. This does not pool definitions in encoded
+saves or intern independently authored actors' definitions.
+
+At 16, 256, and 4,096 unrelated actors, a readiness-changing action copies zero
+body definitions instead of copying every actor's cell vector. A regression
+checks body-edit isolation, occupancy invalidation, the encoded body value and
+checkpoint restoration. The portal physics process test now saves and restarts
+twice, checking continued motion at both restored boundaries. Quick and full
+Windows verification passed, including 217 debug Python/process tests and 107
+release process tests. Updated desktop targets passed seven real-client checks.
+Release measurements and their limits are below.
+Root-map entries can still copy on first mutation; resident memory has not been
+measured.
+
 AI target ranking, pursuit, and retreat-distance lookup now share one incremental
 minimum-tick route search within a decision. The frontier borrows authoritative
 actor state and remembered navigation, so it cannot outlive a game mutation. It
@@ -368,3 +385,35 @@ only nine per combat case. The stale-request regression establishes zero
 candidate captures instead of one for action, travel, rename and wizard requests;
 it does not establish an invalid-request timing or throughput improvement.
 Raw samples remain local and unpublished.
+
+### Immutable-body release comparison
+
+Three interleaved rounds compared immutable body sharing with the checked-request
+checkpoint on the same Windows host. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor / command | 915 | 0.557 → 0.553 | 0.827 → 0.786 | 3.388 → 1.357 |
+| 64 regions, 8 actors / command | 7,500 | 0.028 → 0.027 | 2.568 → 2.541 | 8.523 → 6.503 |
+| Falling, 8 actors / 128 items / 8 cells / command | 576 | 0.086 → 0.086 | 11.711 → 11.702 | 20.085 → 19.837 |
+| Same falling / resume | 9 | 243.0 → 255.6 | 251.4 → 292.4 | 251.4 → 292.4 |
+| Same falling / save | 9 | 72.639 → 137.4 | 260.5 → 290.3 | 260.5 → 290.3 |
+| Same falling, repeat / command | 576 | 0.087 → 0.087 | 11.923 → 12.666 | 20.280 → 21.910 |
+| Same falling, repeat / resume | 9 | 238.9 → 253.9 | 250.2 → 285.4 | 250.2 → 285.4 |
+| Same falling, repeat / save | 9 | 65.562 → 141.8 | 110.0 → 324.8 | 110.0 → 324.8 |
+
+All runs validated. Saved/disclosed bytes, body-cell work, scenes, physics steps,
+and ordinary-command workload counts were unchanged. Small-case command p95 fell
+5.0%, eight-actor command p95 fell 1.1%, and dense-falling command p95 was almost
+unchanged. Dense-falling resume p95 increased 16.3% and save p95 increased 11.4%;
+save timings varied substantially between rounds. These results do not establish
+a broad latency or save-time improvement. A controlled repeat using the same
+verified binaries retained a 14.1% resume p95 increase, a 6.2% command p95 increase
+and highly variable save timings. Both comparisons are retained. Sharing adds an
+allocation when decoding each inline body definition; its contribution to these
+timings has not been isolated. Encoded definitions are still repeated across
+boundaries, and restore currently validates through multiple decoded trees.
+Reducing decode work and pooling immutable definitions remain follow-up work;
+the measured restore regression is unresolved. Save/resume samples number only
+nine per comparison; resident memory remains unmeasured. The scaling regression
+establishes avoided definition copies. Raw samples remain local and unpublished.

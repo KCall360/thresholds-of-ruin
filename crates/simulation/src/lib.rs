@@ -116,7 +116,7 @@ pub struct ActionOutcome {
 #[serde(deny_unknown_fields)]
 struct Actor {
     combat: Option<combat::CombatState>,
-    body: BodySpec,
+    body: Shared<BodySpec>,
     motion: MotionState,
     location: Location,
     orientation: u8,
@@ -302,7 +302,7 @@ impl Game {
             id,
             Actor {
                 combat: None,
-                body: BodySpec::default(),
+                body: Shared::default(),
                 motion: MotionState::default(),
                 location,
                 orientation: 0,
