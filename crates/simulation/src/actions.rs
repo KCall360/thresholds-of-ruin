@@ -97,12 +97,10 @@ impl Game {
                     if self
                         .reach(actor.location, direction.rotated(actor.orientation))
                         .is_some_and(|(at, _)| {
-                            self.actors.iter().any(|(other, a)| {
-                                *other != id
-                                    && self
-                                        .body_cells(a.location, a.orientation, &a.body)
-                                        .is_some_and(|cells| cells.iter().any(|(p, _)| *p == at))
-                            })
+                            self.actors
+                                .at(&self.world, at)
+                                .keys()
+                                .any(|other| *other != id)
                         })
                     {
                         GameError::Occupied
@@ -157,7 +155,7 @@ impl Game {
             new_orientation,
             ..
         } = *prepared;
-        let actor = self.actors.get_mut(&id).expect("actor validated above");
+        let mut actor = self.actors.get_mut(&id).expect("actor validated above");
         actor.orientation = new_orientation;
         if !matches!(
             kind,
@@ -167,16 +165,18 @@ impl Game {
                 c.pending = None;
             }
         }
+        if let OutcomeKind::Moved { to, .. } = kind {
+            actor.location = to;
+            actor.visited.insert(to.region);
+        }
+        drop(actor);
         match kind {
             OutcomeKind::AttackStarted { target } => self.start_attack(id, target),
             OutcomeKind::DoorChanged { door, open } => {
                 let location = self.world.door_location(door).expect("validated door");
                 self.world.set_door(location, open);
             }
-            OutcomeKind::Moved { to, .. } => {
-                actor.location = to;
-                actor.visited.insert(to.region);
-            }
+            OutcomeKind::Moved { .. } => {}
             OutcomeKind::Taken {
                 item,
                 result,

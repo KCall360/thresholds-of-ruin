@@ -110,7 +110,32 @@ unchanged. Reference-scan, interrupted-edit, clone-isolation, portal-transfer,
 checkpoint, and actual-client save/resume/drop tests cover the new store.
 Scaling regressions at 16, 256, and 4,096 unrelated items and regions examine one
 disclosed candidate, zero candidates for an empty destination inventory, and one
-matching ground stack. Actor-body occupancy remains pending.
+matching ground stack.
+
+Actor mutations now pass through a private store with anchor-region membership
+and derived body-cell occupancy. Body cells retain their portal-resolved frames
+and authored order, using the same resolver as uncached physics rules. Edits mark
+an actor dirty; unchanged pose/body definitions reuse their mapping. Geometry
+witnesses reuse the world's existing process-local cache versions and never
+enter saved state or decide game behavior. Geometry changes conservatively
+rebuild mappings for loaded actors. Clone, restore, and region transitions retain
+the authoritative actor table and rebuild or update derived data.
+
+Occupancy, body fitting, collision identity, and region freeze/thaw queries use
+the indexes. Actor disclosure selects only visible region buckets, using the
+smaller occupied-cell or visible-cell set within each region, then preserves
+identity and authored cell order. Combat shares those selected body mappings.
+Each caller retains its existing life/freeze rules; cached mappings include dead actors.
+At 16, 256, and 4,096 unrelated actors, repeated warm occupancy queries resolve
+no bodies, and an isolated observer examines only its own body candidate.
+Reference comparisons cover cell/frame mappings, partial disclosure, geometry
+edits, interrupted edits, and clone isolation. A real-client sideways-portal
+save/restart test checks body projections, continued motion, and topology privacy.
+
+This stage passed full Windows verification. The index uses memory proportional to loaded
+body cells; resident memory is not yet measured. Shared root maps can still copy
+their entries on first mutation, and geometry edits can incur a complete body
+rebuild. These changes do not establish constant-time whole commands.
 
 Historical queries now use a derived entry-ID lookup and ordered buckets for
 each branch, actor, and private author. Pages merge actor-wide and own-private
@@ -130,9 +155,12 @@ tests cover pagination and rejection of inaccessible anchors. The index itself
 uses memory proportional to retained entries; storage-backed history and direct
 resident-memory measurement remain pending.
 
-The full Windows verification tier passed in debug and release. Tests of the
-deployed text, ASCII spectator, and headless executables also passed. Linux CI is
-still required before merge. No merge or raw-measurement publication has occurred.
+The command, item, history, and actor/body checkpoints passed full Windows
+verification in debug and release, including 215 debug Python/process tests and
+105 release process tests for the actor/body stage. The updated desktop targets
+passed five real-client connection/frame tests, including portal-body restart.
+Linux CI is still required before merge. No merge or raw-measurement publication
+has occurred.
 
 ### Initial release measurements
 
@@ -205,3 +233,27 @@ an improvement in every timing statistic. Restart samples are too few to establi
 stable tail behavior. Page-request latency and resident index memory were not
 measured; bounded page work is established by the scaling regressions above.
 These remain diagnostic local measurements, with raw samples unpublished.
+
+### Actor/body-index release comparison
+
+Three interleaved rounds compared actor/body indexing with the history checkpoint
+on the same Windows host. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor / command | 915 | 0.557 → 0.562 | 0.801 → 0.788 | 1.728 → 1.457 |
+| 64 regions, 8 actors / command | 7,500 | 0.027 → 0.029 | 2.535 → 2.582 | 6.137 → 17.851 |
+| Falling, 8 actors / 128 items / 8 cells / command | 576 | 0.087 → 0.087 | 11.774 → 11.757 | 21.391 → 20.272 |
+| Falling / resume | 9 | 249.6 → 258.5 | 264.2 → 283.7 | 264.2 → 283.7 |
+| Falling / save | 9 | 74.649 → 102.2 | 276.7 → 317.2 | 276.7 → 317.2 |
+| 64 regions, 8 actors / restart | 3 | 1544.2 → 1551.1 | 1554.4 → 1625.6 | 1554.4 → 1625.6 |
+
+All runs validated. Dense falling resolved 233,064 body cells instead of 380,328,
+a 38.7% reduction; physics steps, scenes, disclosed bytes, and saved bytes were
+unchanged. Ordinary-case perception and revision work were unchanged. Eight-actor
+command p95 rose 1.9% and its maximum increased. Dense falling resume p95 rose
+7.4%; save timings varied substantially between rounds and increased overall.
+Restart samples number only three per latency case, and save/resume samples number
+nine per physics case. These measurements do not establish a broad latency or
+save-time improvement. The scaling regressions establish bounded local query work;
+resident cache memory remains unmeasured. Raw samples remain local and unpublished.

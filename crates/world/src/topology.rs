@@ -238,6 +238,11 @@ fn raised(location: Location, cells: i32) -> Option<Location> {
 }
 
 impl World {
+    /// Invalidates derived geometry mappings when any topology or region changes.
+    /// Tokens only select cache reuse; they never affect world behavior.
+    pub fn geometry_snapshot(&self) -> crate::GeometrySnapshot {
+        self.sight.geometry_snapshot()
+    }
     /// Authored portal endpoints must remain clear of solid terrain. Closed
     /// doors are ordinary gameplay state and do not invalidate a package.
     pub fn authored_links_clear(&self) -> bool {

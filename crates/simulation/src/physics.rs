@@ -9,6 +9,63 @@ pub const CELL: i64 = 65_536;
 pub const ACCELERATION: i64 = 16;
 pub const TERMINAL: i64 = 8_192;
 
+/// Resolve all paths through portal topology and retain each cell's body frame.
+/// Both uncached rules and the derived occupancy index use this same resolver.
+pub(crate) fn resolve_body(
+    world: &tor_world::World,
+    at: Location,
+    frame: u8,
+    body: &BodySpec,
+) -> Option<Vec<(Location, u8)>> {
+    crate::diagnostics::body_cells(body.cells.len());
+    if body.cells.as_slice() == [[0; 3]] {
+        return Some(vec![(at, frame)]);
+    }
+    let mut cache = BTreeMap::from([([0; 3], Some((at, frame)))]);
+    fn resolve(
+        world: &tor_world::World,
+        offset: [i32; 3],
+        cache: &mut BTreeMap<[i32; 3], Option<(Location, u8)>>,
+    ) -> Option<(Location, u8)> {
+        if let Some(v) = cache.get(&offset) {
+            return *v;
+        }
+        let mut result = None;
+        for axis in 0..3 {
+            if offset[axis] == 0 {
+                continue;
+            }
+            let mut prev = offset;
+            prev[axis] -= offset[axis].signum();
+            let (from, frame) = resolve(world, prev, cache)?;
+            let mut delta = [0; 3];
+            delta[axis] = i64::from(offset[axis].signum());
+            let dir = Direction::from_delta(rotate_vector(frame, delta))?;
+            let (to, turn) = world.physics_neighbor(from, dir)?;
+            let candidate = (to, compose_rotation(frame, turn));
+            if result.is_some_and(|old| old != candidate) {
+                cache.insert(offset, None);
+                return None;
+            }
+            result = Some(candidate);
+        }
+        cache.insert(offset, result);
+        result
+    }
+    let cells = body
+        .cells
+        .iter()
+        .map(|offset| resolve(world, *offset, &mut cache))
+        .collect::<Option<Vec<_>>>()?;
+    (cells
+        .iter()
+        .map(|(at, _)| at)
+        .collect::<BTreeSet<_>>()
+        .len()
+        == cells.len())
+    .then_some(cells)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BodySpec {
@@ -133,7 +190,7 @@ impl Game {
         if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, &body) {
             return Err(GameError::Blocked);
         }
-        let actor = self.actors.get_mut(&id).expect("validated actor");
+        let mut actor = self.actors.get_mut(&id).expect("validated actor");
         actor.body = body;
         actor.motion.acceleration_remainder = [0; 3];
         Ok(())
@@ -207,7 +264,7 @@ impl Game {
         if velocity.iter().any(|v| v.unsigned_abs() > TERMINAL as u64) {
             return Err(GameError::InvalidLocation);
         }
-        let actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.motion.velocity = velocity;
         cap_velocity(&mut actor.motion.velocity);
         Ok(())
@@ -232,65 +289,17 @@ impl Game {
         frame: u8,
         body: &BodySpec,
     ) -> Option<Vec<(Location, u8)>> {
-        crate::diagnostics::body_cells(body.cells.len());
-        if body.cells.as_slice() == [[0; 3]] {
-            return Some(vec![(at, frame)]);
-        }
-        let mut cache = BTreeMap::from([([0; 3], Some((at, frame)))]);
-        fn resolve(
-            game: &Game,
-            offset: [i32; 3],
-            cache: &mut BTreeMap<[i32; 3], Option<(Location, u8)>>,
-        ) -> Option<(Location, u8)> {
-            if let Some(v) = cache.get(&offset) {
-                return *v;
-            }
-            let mut result = None;
-            for axis in 0..3 {
-                if offset[axis] == 0 {
-                    continue;
-                }
-                let mut prev = offset;
-                prev[axis] -= offset[axis].signum();
-                let (from, frame) = resolve(game, prev, cache)?;
-                let mut delta = [0; 3];
-                delta[axis] = i64::from(offset[axis].signum());
-                let dir = Direction::from_delta(rotate_vector(frame, delta))?;
-                let (to, turn) = game.world.physics_neighbor(from, dir)?;
-                let candidate = (to, compose_rotation(frame, turn));
-                if result.is_some_and(|old| old != candidate) {
-                    cache.insert(offset, None);
-                    return None;
-                }
-                result = Some(candidate);
-            }
-            cache.insert(offset, result);
-            result
-        }
-        let cells = body
-            .cells
-            .iter()
-            .map(|offset| resolve(self, *offset, &mut cache))
-            .collect::<Option<Vec<_>>>()?;
-        (cells
-            .iter()
-            .map(|(at, _)| at)
-            .collect::<BTreeSet<_>>()
-            .len()
-            == cells.len())
-        .then_some(cells)
+        resolve_body(&self.world, at, frame, body)
     }
     pub(crate) fn body_fits(&self, id: ActorId, at: Location, frame: u8, body: &BodySpec) -> bool {
         self.body_cells(at, frame, body).is_some_and(|cells| {
             cells.iter().all(|(at, _)| {
                 self.world.walkable(*at)
-                    && !self.actors.iter().any(|(other, a)| {
-                        *other != id
-                            && a.alive()
-                            && self
-                                .body_cells(a.location, a.orientation, &a.body)
-                                .is_some_and(|other_cells| other_cells.iter().any(|(p, _)| p == at))
-                    })
+                    && !self
+                        .actors
+                        .at(&self.world, *at)
+                        .keys()
+                        .any(|other| *other != id && self.actors[other].alive())
             })
         })
     }
@@ -482,11 +491,12 @@ impl Game {
                 if at != a.location || frame != a.orientation {
                     self.physics.displaced.insert(id);
                 }
-                let a = self.actors.get_mut(&id).expect("scheduled actor");
+                let mut a = self.actors.get_mut(&id).expect("scheduled actor");
                 a.location = at;
                 a.orientation = frame;
                 a.motion = motion;
                 a.visited.insert(at.region);
+                drop(a);
                 // Falling into a frozen region freezes the actor there.
                 self.sync_actor_lifecycle(id);
                 if self.combat.outcome.terminal {
@@ -640,16 +650,14 @@ impl Game {
                                 let dir =
                                     Direction::from_delta(rotate_vector(rotation, component))?;
                                 let (target, _) = self.world.physics_neighbor(cell, dir)?;
-                                self.actors.iter().find_map(|(id, a)| {
-                                    if entity == PhysicsEntity::Actor(*id) || !a.alive() {
-                                        return None;
-                                    }
-                                    self.body_cells(a.location, a.orientation, &a.body)
-                                        .is_some_and(|cells| {
-                                            cells.iter().any(|(p, _)| *p == target)
-                                        })
-                                        .then_some(*id)
-                                })
+                                self.actors
+                                    .at(&self.world, target)
+                                    .keys()
+                                    .copied()
+                                    .find(|id| {
+                                        entity != PhysicsEntity::Actor(*id)
+                                            && self.actors[id].alive()
+                                    })
                             })
                         });
                         self.physics.impacts.push(Impact {
@@ -671,10 +679,11 @@ impl Game {
                         motion.acceleration_remainder[axis] = 0;
                         if let PhysicsEntity::Actor(id) = entity {
                             if damage > 0 {
-                                let actor = self.actors.get_mut(&id).expect("integrated actor");
+                                let mut actor = self.actors.get_mut(&id).expect("integrated actor");
                                 actor.location = at;
                                 actor.orientation = frame;
                                 actor.motion = motion.clone();
+                                drop(actor);
                                 self.apply_damage(
                                     id,
                                     &std::collections::BTreeMap::from([(

@@ -6,6 +6,28 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_body_indexes_rebuild_after_portal_physics_save_and_restart(self):
+        server = self.server(scenario="physics-portal", seed=None)
+        player, _ = self.client()
+        crossed = self.act(player, {"type": "wait"})
+        self.assertIsNone(crossed["error"])
+        observation = crossed["state"]["observation"]
+        self.assertTrue(observation["motion"]["displaced"])
+        self.assertGreater(observation["motion"]["velocity"][0], 4096)
+        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+                            for actor in observation["visible_actors"]))
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server(scenario="physics-portal", seed=None)
+        resumed, state = self.client()
+        self.assertEqual(state["state"], crossed["state"])
+        continued = self.act(resumed, {"type": "wait"})
+        self.assertIsNone(continued["error"])
+        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+                            for actor in continued["state"]["observation"]["visible_actors"]))
+        self.assertNotIn('"region"', json.dumps(continued["state"]["observation"]))
+
     def test_private_history_pagination_and_anchors_survive_restart(self):
         server = self.server()
         player, initial = self.client()

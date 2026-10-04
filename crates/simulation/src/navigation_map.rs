@@ -1,4 +1,4 @@
-//! Ordered maps shared by source region, used for navigation and item indexes.
+//! Ordered maps shared by source region, used for navigation and spatial indexes.
 //! Mutating a local bucket must not copy the contents of other regions.
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
@@ -31,6 +31,9 @@ impl<K, V> Default for RegionMap<K, V> {
     }
 }
 impl<K: RegionKey, V> RegionMap<K, V> {
+    pub fn region(&self, region: RegionId) -> Option<&BTreeMap<K, V>> {
+        self.regions.get(&region).map(|map| &**map)
+    }
     pub fn get(&self, key: &K) -> Option<&V> {
         self.regions.get(&key.region())?.get(key)
     }

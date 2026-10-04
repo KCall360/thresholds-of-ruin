@@ -218,20 +218,17 @@ impl Game {
         &self,
         id: ActorId,
         visible: &impl Fn(tor_world::Location) -> bool,
+        perceived: &[(ActorId, crate::actor_store::BodyCells)],
     ) -> Option<CombatView> {
         let a = self.actors.get(&id)?;
         let c = a.combat.as_ref()?;
-        let actors = self
-            .actors
+        let actors = perceived
             .iter()
-            .filter(|(other, a)| {
-                **other != id
-                    && a.alive()
-                    && self
-                        .body_cells(a.location, a.orientation, &a.body)
-                        .is_some_and(|cells| cells.iter().any(|(p, _)| visible(*p)))
+            .filter(|(other, body)| {
+                *other != id && self.actors[other].alive() && body.iter().any(|(p, _)| visible(*p))
             })
-            .filter_map(|(other, a)| {
+            .filter_map(|(other, _)| {
+                let a = &self.actors[other];
                 let c = a.combat.as_ref()?;
                 let injury = if c.hp == c.spec.max_hp {
                     Injury::Healthy
@@ -394,7 +391,7 @@ impl Game {
         if !spec.valid() {
             return Err(GameError::InvalidLocation);
         }
-        let actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
+        let mut actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
         actor.combat = Some(CombatState {
             hp: spec.max_hp,
             spec,
@@ -413,26 +410,33 @@ impl Game {
         actor: ActorId,
         damage: &BTreeMap<DamageType, u32>,
     ) -> u32 {
-        let Some(state) = self.actors.get_mut(&actor).and_then(|a| a.combat.as_mut()) else {
+        let Some(mut edited) = self.actors.get_mut(&actor) else {
+            return 0;
+        };
+        let Some(state) = edited.combat.as_mut() else {
             return 0;
         };
         let loss = state.spec.damage_taken(damage).min(state.hp);
         state.hp -= loss;
         let died = loss > 0 && state.hp == 0;
+        let mut interrupted = false;
         if loss > 0 {
             if let Some(pending) = state.pending.as_mut().filter(|p| p.active) {
                 pending.remaining = pending
                     .remaining
                     .saturating_sub(self.tick.saturating_sub(pending.started));
                 pending.active = false;
-                self.combat.events.push(CombatEvent::Interrupted { actor });
-                if !self.is_ai(actor) {
-                    self.combat.input_boundaries.insert(actor);
-                }
-                self.actors
-                    .get_mut(&actor)
-                    .expect("existing actor")
-                    .ready_at = self.tick;
+                interrupted = true;
+            }
+        }
+        if interrupted {
+            edited.ready_at = self.tick;
+        }
+        drop(edited);
+        if interrupted {
+            self.combat.events.push(CombatEvent::Interrupted { actor });
+            if !self.is_ai(actor) {
+                self.combat.input_boundaries.insert(actor);
             }
         }
         if died {
@@ -443,7 +447,7 @@ impl Game {
 
     fn finish_death(&mut self, id: ActorId) {
         self.combat.input_boundaries.remove(&id);
-        let actor = self.actors.get_mut(&id).unwrap();
+        let mut actor = self.actors.get_mut(&id).unwrap();
         actor.combat.as_mut().unwrap().pending = None;
         let location = actor.location;
         let motion = actor.motion.clone();
@@ -501,7 +505,7 @@ impl Game {
     }
 
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<ActorId> {
-        let a = self.actors.get_mut(&actor)?;
+        let mut a = self.actors.get_mut(&actor)?;
         let p = a.combat.as_mut()?.pending.as_mut()?;
         if !p.active {
             return None;
@@ -510,9 +514,10 @@ impl Game {
             .remaining
             .saturating_sub(self.tick.saturating_sub(p.started));
         p.active = false;
+        let target = p.target;
         a.ready_at = self.tick;
         self.combat.input_boundaries.insert(actor);
-        Some(p.target)
+        Some(target)
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
@@ -598,13 +603,8 @@ impl Game {
     }
 
     pub(crate) fn start_attack(&mut self, actor: ActorId, target: ActorId) {
-        let c = self
-            .actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap();
+        let mut edited = self.actors.get_mut(&actor).unwrap();
+        let c = edited.combat.as_mut().unwrap();
         let remaining = c
             .pending
             .as_ref()

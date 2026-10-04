@@ -2,6 +2,7 @@
 //! links one test executable instead of one per file.
 
 mod action_boundaries;
+mod actor_index;
 mod combat;
 mod diagonal;
 mod doors;

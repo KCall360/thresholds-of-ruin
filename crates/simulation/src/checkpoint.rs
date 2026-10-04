@@ -78,7 +78,7 @@ impl Game {
                 .collect(),
             seed: self.seed,
             tick: self.tick,
-            actors: self.actors.clone(),
+            actors: self.actors.raw_entries().clone(),
             items: shared
                 .items
                 .iter()
@@ -117,7 +117,7 @@ impl Game {
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
-            actors: snapshot.actors,
+            actors: crate::actor_store::ActorStore::from_entries(snapshot.actors),
             items: crate::item_store::ItemStore::from_entries(
                 shared.items.get(snapshot.items)?.clone(),
             ),

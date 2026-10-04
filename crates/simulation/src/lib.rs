@@ -4,6 +4,7 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 mod actions;
+mod actor_store;
 pub mod ai;
 pub mod combat;
 mod physics;
@@ -154,7 +155,7 @@ pub struct Game {
     world: Shared<World>,
     seed: u64,
     tick: u64,
-    actors: BTreeMap<ActorId, Actor>,
+    actors: actor_store::ActorStore,
     items: item_store::ItemStore,
     next_actor_id: u64,
     next_item_id: u64,
@@ -270,7 +271,7 @@ impl Game {
             world: Shared::new(world),
             seed,
             tick: 0,
-            actors: BTreeMap::new(),
+            actors: actor_store::ActorStore::default(),
             items: item_store::ItemStore::default(),
             next_actor_id: 1,
             next_item_id: 1,
@@ -411,7 +412,7 @@ impl Game {
         }
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
-        let actor = self.actors.get_mut(&id).expect("validated actor");
+        let mut actor = self.actors.get_mut(&id).expect("validated actor");
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
@@ -421,13 +422,14 @@ impl Game {
             }
         }
         actor.visited.insert(location.region);
+        drop(actor);
         self.sync_actor_lifecycle(id);
         Ok(())
     }
 
     /// Set the asset clients draw an actor with.
     pub fn set_actor_asset(&mut self, id: ActorId, asset: Option<String>) -> Result<(), GameError> {
-        let actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.asset = asset;
         Ok(())
     }
@@ -530,12 +532,10 @@ impl Game {
     }
 
     fn occupied(&self, location: Location) -> bool {
-        self.actors.values().any(|actor| {
-            actor.alive()
-                && self
-                    .body_cells(actor.location, actor.orientation, &actor.body)
-                    .is_some_and(|cells| cells.iter().any(|(at, _)| *at == location))
-        })
+        self.actors
+            .at(&self.world, location)
+            .keys()
+            .any(|id| self.actors[id].alive())
     }
 }
 

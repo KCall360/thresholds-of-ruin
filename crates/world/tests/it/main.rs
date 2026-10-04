@@ -2,6 +2,7 @@
 //! links one test executable instead of one per file.
 
 mod diagonal;
+mod geometry_snapshot;
 mod materials;
 mod passages;
 mod place_hints;

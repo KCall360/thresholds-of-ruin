@@ -9,10 +9,18 @@ pub struct WorkCounts {
     pub body_cells: usize,
     pub scenes: usize,
     pub item_candidates: usize,
+    pub actor_candidates: usize,
     pub stack_candidates: usize,
     pub knowledge_checks: usize,
 }
-thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {physics_steps:0,body_cells:0,observations:0,scenes:0,item_candidates:0,stack_candidates:0,knowledge_checks:0}) }; }
+thread_local! { static COUNTS: Cell<WorkCounts> = const { Cell::new(WorkCounts {physics_steps:0,body_cells:0,observations:0,scenes:0,item_candidates:0,actor_candidates:0,stack_candidates:0,knowledge_checks:0}) }; }
+pub(crate) fn actor_candidates(count: usize) {
+    COUNTS.with(|c| {
+        let mut n = c.get();
+        n.actor_candidates += count;
+        c.set(n);
+    });
+}
 pub(crate) fn item_view(concealed: bool) {
     COUNTS.with(|c| {
         let mut n = c.get();
