@@ -1453,6 +1453,71 @@ mod tests {
         assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
     }
 
+    #[tokio::test]
+    async fn replenished_mailbox_cannot_starve_a_due_simulation_action() {
+        use crate::runner::Mail;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::oneshot;
+
+        fn next_mail(
+            sender: mpsc::Sender<Mail>,
+            remaining: usize,
+            observed: Arc<Mutex<Vec<Option<ActorId>>>>,
+            stopped: oneshot::Sender<Option<crate::storage::Store>>,
+        ) -> Mail {
+            Mail::Call(Box::new(move |service| {
+                observed.lock().unwrap().push(service.engine.next_actor());
+                let next = if remaining == 0 {
+                    Mail::Shutdown(stopped)
+                } else {
+                    next_mail(sender.clone(), remaining - 1, observed, stopped)
+                };
+                // One replacement always fits, so this reproduces a mailbox
+                // that never empties without relying on threads or wall time.
+                assert!(sender.try_send(next).is_ok());
+            }))
+        }
+
+        for capacity in [4, 16, 256] {
+            let (service, _client) = character_waiting_on_a_guard();
+            let (mail, mailbox) = mpsc::channel(capacity);
+            let observed = Arc::new(Mutex::new(Vec::new()));
+            let (reply, stopped) = oneshot::channel();
+            assert!(mail
+                .try_send(next_mail(
+                    mail.clone(),
+                    capacity * 3,
+                    observed.clone(),
+                    reply
+                ))
+                .is_ok());
+            crate::runner::run(service, mailbox, crate::runner::STALL).await;
+            stopped.await.unwrap();
+            let observed = observed.lock().unwrap();
+            assert_ne!(observed[0], Some(ActorId(1)));
+            assert_eq!(
+                observed[capacity],
+                Some(ActorId(1)),
+                "due AI was starved by replenished mail at capacity {capacity}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_full_mailbox_stops_before_the_next_simulation_action() {
+        let (service, _client) = character_waiting_on_a_guard();
+        let before = service.engine.next_actor();
+        let (mail, mailbox) = mpsc::channel(4);
+        for _ in 0..4 {
+            assert!(mail
+                .try_send(crate::runner::Mail::Call(Box::new(|_| {})))
+                .is_ok());
+        }
+        drop(mail);
+        let service = crate::runner::run(service, mailbox, crate::runner::STALL).await;
+        assert_eq!(service.engine.next_actor(), before);
+    }
+
     /// Mail that is already waiting, here a rewind against the current
     /// revision, is handled before the next action can change that revision.
     #[tokio::test]

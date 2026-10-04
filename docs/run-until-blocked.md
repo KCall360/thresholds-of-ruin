@@ -29,11 +29,18 @@ tests and tools.
 
 The thread's loop:
 
-1. Handle every message already waiting.
+1. Handle a bounded pass of queued messages in FIFO order.
 2. Take one action (an AI action or a journey step) if anything can act, then
    go back to 1.
 3. Otherwise wait for a message, for a client's queue to drain, or for the next
    save check.
+
+Each drain pass handles at most the mailbox's capacity (256 messages in the
+server). That covers every message already waiting when the pass starts; newly
+arriving replacements cannot extend it indefinitely. The request that wakes a
+blocked loop is handled before the next pass. Saves and due simulation actions
+therefore get a turn even while more mail arrives. A closed, empty mailbox ends
+the run before another action, including when its last message fills the pass.
 
 A request waits for at most one action, never a whole run. Interruptions land
 only between actions, so no action is ever split. What happens in the game

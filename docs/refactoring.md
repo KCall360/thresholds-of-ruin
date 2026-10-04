@@ -152,6 +152,20 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Mailbox draining is now bounded by channel capacity, preserving FIFO ordering
+and handling every request already queued at the start of a pass before a due
+action. Newly arriving mail cannot indefinitely postpone save polling or
+simulation work. Closing the last sender and draining its final message still
+stops before another action. A failing-first, self-replenishing-mail regression
+now passes at capacities 4, 16 and 256; queued rewind ordering and closed-full
+mailbox tests pass. Actual concurrent spectator reads preserve AI progress,
+matching client states and save/restart behavior. Quick/full Windows verification
+passed, including 226 debug Python/process tests and all 116 release process
+tests; all sixteen deployed-client/validator checks passed. This establishes
+bounded mailbox work, not lower normal command latency. Existing engine benchmark
+examples do not exercise the runner. This does not implement the saved intention
+queue or change any formats.
+
 Declaration validation now identifies the manifest file and failing faction, AI
 profile, character or archetype. Region actor controller and combat failures name
 the indexed source file, region and actor. Context is constructed only on failure;

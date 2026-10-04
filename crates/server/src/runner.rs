@@ -138,7 +138,9 @@ pub(crate) async fn run(
     // When each nearly-full client was first seen nearly full.
     let mut stalled: BTreeMap<u64, Instant> = BTreeMap::new();
     loop {
-        loop {
+        // Handle every message that could already be queued, but do not let
+        // continuously arriving replacements starve saves or the simulation.
+        for _ in 0..mailbox.max_capacity() {
             match mailbox.try_recv() {
                 Ok(mail) => {
                     if !receive(&mut service, mail) {
@@ -151,6 +153,12 @@ pub(crate) async fn run(
                     return service;
                 }
             }
+        }
+        // Reaching the batch limit must not add an action after the final
+        // sender disappeared and its last queued message was handled.
+        if mailbox.is_closed() && mailbox.is_empty() {
+            service.shutdown();
+            return service;
         }
         if saves_polled.elapsed() >= SAVE_POLL {
             service.poll_saves();
