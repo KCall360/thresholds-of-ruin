@@ -107,7 +107,7 @@ duplicating them. Earlier handoff notes are in the
 
 **Architecture refactor (active).** The maintainer authorized the
 [refactor plan](docs/refactoring.md). Work remains isolated from the original
-dirty interactions checkout. Twenty local implementation checkpoints cover
+dirty interactions checkout. Twenty-one local implementation checkpoints cover
 explicit command mappings, shared boundary observations, portal-local item/body
 and privacy-scoped history indexes, shared route searches, checked requests,
 immutable body sharing, storage accounting and concurrency, atomic observation
@@ -118,9 +118,10 @@ FIFO mailbox draining without starving due actions or save polling, nonblocking
 runtime diagnostics with loss accounting, and encoded-output byte leases through
 queueing, write failures/timeouts and task cancellation, prepared control and AI
 references, shared creature installation, item normalization and contextual
-construction-reference diagnostics.
-Current quick/full Windows verification passed, including 232 debug Python/process
-tests and 120 release process tests; all twenty deployed-client/validator checks passed.
+construction-reference diagnostics, and a restore-scoped context sharing decoded
+worlds, navigation, items and equal body definitions across retained boundaries.
+Current quick/full Windows verification passed, including 233 debug Python/process
+tests and 121 release process tests; all twenty-one deployed-client/validator checks passed.
 
 Release comparisons and their limits are recorded in the plan. Reduced query and
 copy counts do not establish broad latency or resident-memory improvements.

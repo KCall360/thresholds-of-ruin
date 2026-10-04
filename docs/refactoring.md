@@ -104,7 +104,132 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
-## Current checkpoint: scenario compilation
+## Current checkpoint: shared checkpoint restoration
+
+A restore-scoped context now shares decoded worlds, navigation and item stores
+by their existing pool indexes across the current game and retained rewind
+states. Item location indexes are reconstructed from each decoded item pool once
+and remain copy-on-write. Equal body definitions share ownership through a
+value-ordered pool; the entire authored cell sequence, eye and mass participate
+in equality. Pooling never sorts body cells or uses pointer identity for game
+decisions. Temporary context references are released after restoration, and
+restored games retain only the values they use. The serialized schema and normal
+game validation are unchanged.
+
+The failing-first decoded-body regression now passes at 16, 256 and 4,096 actors.
+Focused checks cover complete game equality, byte-identical recapture, sharing
+across decoded states, mutation isolation, distinct cell order/eye/mass and
+corrupt-body rejection. The server checkpoint test restores every retained
+exploration boundary through the production context and recaptures the same
+bytes. A real-process test checkpoints portal physics, restarts, rewinds,
+reproduces the crossing and restarts again with matching state and history.
+Quick verification passed, including 121 actual-process tests. Full Windows
+verification passed too, including 233 debug Python/process tests, Rust
+workspace debug/release checks and 121 release process tests. All twenty-one
+deployed-client/validator checks passed. The initial quick attempt failed on two
+Clippy warnings in test assertions; the corrected quick and full runs passed.
+No lower latency, decoder-allocation or resident-memory claim is made.
+
+This shares loaded checkpoint content. Detached-region records have their own
+decoding and ownership path; broader immutable-content pooling remains open.
+Restoration does not eagerly load those records or alter lazy region activation.
+
+### Shared restoration release comparison
+
+Three interleaved rounds compared shared restoration with the preceding scenario
+compiler checkpoint on the same Windows host. All twenty-four runs validated,
+with unchanged work, saved-byte and disclosure counts. A controlled repeat of
+256-region streaming and combat used identical binaries and the same machine;
+all twelve repeat runs validated with matching counts. Timings below are
+milliseconds, baseline to refactor. Combat decision and command are separate
+phases; their quantiles must not be added.
+
+| Workload / metric | n per side | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| stream-r16-durable / command | 2,100 | 0.2313 → 0.2281 | 0.4090 → 0.4203 | 1.2750 → 1.3015 |
+| stream-r16-durable / save | 3 | 66.7226 → 79.0118 | 127.5680 → 112.2398 | 127.5680 → 112.2398 |
+| stream-r16-durable / restart/replay | 3 | 177.4863 → 177.2945 | 180.4089 → 177.6369 | 180.4089 → 177.6369 |
+| stream-r256-durable / command | 2,100 | 0.2257 → 0.2303 | 0.4299 → 0.4098 | 0.8385 → 1.0987 |
+| stream-r256-durable / save | 3 | 79.3078 → 68.2169 | 116.9602 → 289.4145 | 116.9602 → 289.4145 |
+| stream-r256-durable / restart/replay | 3 | 165.0301 → 166.1065 | 183.3521 → 177.3497 | 183.3521 → 177.3497 |
+| a2-h0 / client apply | 576 | 0.2731 → 0.2720 | 0.4587 → 0.3770 | 1.5868 → 0.8572 |
+| a2-h0 / client draw | 576 | 0.6557 → 0.6615 | 1.1042 → 0.9659 | 2.4978 → 2.1910 |
+| a2-h0 / command | 576 | 0.2075 → 0.2089 | 0.3327 → 0.3119 | 0.8806 → 0.7299 |
+| a2-h0 / decision | 576 | 0.0004 → 0.0004 | 0.6391 → 0.6114 | 2.1168 → 1.8309 |
+| a2-h0 / resume | 9 | 21.7924 → 25.6572 | 38.1904 → 39.5009 | 38.1904 → 39.5009 |
+| a2-h0 / save | 9 | 36.1467 → 23.4552 | 264.6201 → 35.4481 | 264.6201 → 35.4481 |
+| a2-h1000 / client apply | 576 | 0.2753 → 0.2761 | 0.4271 → 0.3863 | 0.8873 → 0.5836 |
+| a2-h1000 / client draw | 576 | 0.6433 → 0.6455 | 1.0282 → 0.8532 | 6.4363 → 1.3523 |
+| a2-h1000 / command | 576 | 0.2026 → 0.2004 | 0.3628 → 0.2627 | 0.7564 → 0.5603 |
+| a2-h1000 / decision | 576 | 0.0004 → 0.0003 | 0.5510 → 0.5641 | 1.2852 → 0.8108 |
+| a2-h1000 / resume | 9 | 65.5766 → 64.4968 | 75.9848 → 76.1618 | 75.9848 → 76.1618 |
+| a2-h1000 / save | 9 | 70.6924 → 103.1569 | 314.3081 → 251.3498 | 314.3081 → 251.3498 |
+| a8-h0 / client apply | 459 | 0.2819 → 0.2842 | 0.3544 → 0.3471 | 0.6995 → 0.7699 |
+| a8-h0 / client draw | 459 | 0.6922 → 0.7068 | 0.9688 → 0.9779 | 1.7292 → 2.0895 |
+| a8-h0 / command | 576 | 0.6412 → 0.6469 | 3.7285 → 3.6400 | 6.2673 → 7.0739 |
+| a8-h0 / decision | 576 | 0.0004 → 0.0004 | 0.5448 → 0.5595 | 2.0680 → 2.2094 |
+| a8-h0 / resume | 9 | 106.6356 → 107.5638 | 118.2698 → 120.7544 | 118.2698 → 120.7544 |
+| a8-h0 / save | 9 | 23.0300 → 21.8864 | 43.4433 → 46.8050 | 43.4433 → 46.8050 |
+| a8-h1000 / client apply | 495 | 0.2881 → 0.2891 | 0.3441 → 0.3424 | 0.4737 → 0.4761 |
+| a8-h1000 / client draw | 495 | 0.6773 → 0.6853 | 0.8953 → 0.9266 | 1.1273 → 1.0433 |
+| a8-h1000 / command | 576 | 0.5264 → 0.5296 | 3.3072 → 3.2596 | 3.4772 → 3.4309 |
+| a8-h1000 / decision | 576 | 0.0004 → 0.0004 | 0.5409 → 0.5466 | 0.7444 → 0.6166 |
+| a8-h1000 / resume | 9 | 210.9147 → 201.1872 | 219.6432 → 219.8359 | 219.6432 → 219.8359 |
+| a8-h1000 / save | 9 | 109.1385 → 395.7784 | 220.5126 → 431.1857 | 220.5126 → 431.1857 |
+| a8-i128-c8-falling / client apply | 144 | 0.7374 → 0.7291 | 0.8821 → 0.8795 | 1.2058 → 1.1131 |
+| a8-i128-c8-falling / client draw | 144 | 1.1886 → 1.1638 | 1.4280 → 1.3611 | 1.6262 → 1.5443 |
+| a8-i128-c8-falling / command | 576 | 0.0846 → 0.0832 | 11.7443 → 11.9579 | 20.3153 → 19.8607 |
+| a8-i128-c8-falling / resume | 9 | 239.4075 → 232.1165 | 257.4475 → 256.1336 | 257.4475 → 256.1336 |
+| a8-i128-c8-falling / save | 9 | 231.5130 → 71.8067 | 302.4876 → 304.0111 | 302.4876 → 304.0111 |
+
+The controlled repeat retained the following results:
+
+| Workload / metric | n per side | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| stream-r256-durable / command | 2,100 | 0.2303 → 0.2365 | 0.4101 → 0.4401 | 0.8019 → 0.9431 |
+| stream-r256-durable / save | 3 | 99.9884 → 102.4694 | 119.6959 → 222.7252 | 119.6959 → 222.7252 |
+| stream-r256-durable / restart/replay | 3 | 164.8181 → 163.0968 | 181.2101 → 177.8812 | 181.2101 → 177.8812 |
+| a2-h0 / client apply | 576 | 0.2702 → 0.2695 | 0.3596 → 0.3837 | 0.7240 → 0.7621 |
+| a2-h0 / client draw | 576 | 0.6511 → 0.6470 | 0.9421 → 0.9399 | 1.8953 → 1.8036 |
+| a2-h0 / command | 576 | 0.2043 → 0.2073 | 0.3034 → 0.2889 | 0.6967 → 0.6936 |
+| a2-h0 / decision | 576 | 0.0004 → 0.0004 | 0.5954 → 0.6160 | 2.1142 → 1.9027 |
+| a2-h0 / resume | 9 | 23.7854 → 19.2432 | 32.8376 → 36.5165 | 32.8376 → 36.5165 |
+| a2-h0 / save | 9 | 25.6813 → 35.7903 | 41.1061 → 121.1002 | 41.1061 → 121.1002 |
+| a2-h1000 / client apply | 576 | 0.2707 → 0.2760 | 0.3087 → 0.3151 | 0.4961 → 0.5363 |
+| a2-h1000 / client draw | 576 | 0.6458 → 0.6462 | 0.8300 → 0.8342 | 3.2831 → 1.0445 |
+| a2-h1000 / command | 576 | 0.1999 → 0.2018 | 0.2638 → 0.2702 | 0.4780 → 0.4703 |
+| a2-h1000 / decision | 576 | 0.0003 → 0.0004 | 0.5496 → 0.5494 | 0.8010 → 0.9403 |
+| a2-h1000 / resume | 9 | 62.6262 → 59.8232 | 77.2919 → 78.2093 | 77.2919 → 78.2093 |
+| a2-h1000 / save | 9 | 162.9250 → 245.9855 | 236.8769 → 280.9693 | 236.8769 → 280.9693 |
+| a8-h0 / client apply | 459 | 0.2817 → 0.2859 | 0.3333 → 0.3574 | 0.6012 → 0.7963 |
+| a8-h0 / client draw | 459 | 0.7048 → 0.7165 | 0.9832 → 0.9959 | 1.4560 → 1.6758 |
+| a8-h0 / command | 576 | 0.6357 → 0.6536 | 3.6883 → 3.6898 | 5.5992 → 6.2546 |
+| a8-h0 / decision | 576 | 0.0004 → 0.0004 | 0.5581 → 0.5535 | 1.4198 → 2.2142 |
+| a8-h0 / resume | 9 | 108.1658 → 107.2482 | 120.2836 → 128.0854 | 120.2836 → 128.0854 |
+| a8-h0 / save | 9 | 25.3829 → 36.9062 | 51.0235 → 74.9945 | 51.0235 → 74.9945 |
+| a8-h1000 / client apply | 495 | 0.2889 → 0.2907 | 0.3380 → 0.3466 | 0.5112 → 0.5151 |
+| a8-h1000 / client draw | 495 | 0.6775 → 0.6795 | 0.9041 → 0.9207 | 1.0724 → 1.4587 |
+| a8-h1000 / command | 576 | 0.5267 → 0.5340 | 3.2998 → 3.2969 | 3.5117 → 3.7694 |
+| a8-h1000 / decision | 576 | 0.0004 → 0.0004 | 0.5417 → 0.5457 | 0.5666 → 0.7755 |
+| a8-h1000 / resume | 9 | 202.5139 → 196.6607 | 219.0961 → 214.7730 | 219.0961 → 214.7730 |
+| a8-h1000 / save | 9 | 401.8290 → 353.0054 | 457.4747 → 439.9117 | 457.4747 → 439.9117 |
+
+The repeat's 256-region command p95 rose 7.3%; its save p95 rose 86.1%, following
+an initial 147.4% save-tail increase. The initial eight-actor history save p95
+increase of 95.5% reversed in the repeat, while other combat save groups still
+had higher tails. Small-combat resume p95 rose 11.2% in the repeat; eight-actor
+no-history resume p95 rose 6.5%. Falling command p95 rose 1.8% in the initial
+comparison. Both result sets are retained, including adverse samples.
+
+The harness flushes each fresh save before reopening it, so save samples do not
+directly time the new restore context. These measurements do not isolate the
+cause of save variation or establish a general restore improvement. Stream
+restart samples number three and combat/physics save and resume samples number
+nine per group. Decoder allocations and resident memory remain unmeasured.
+Earlier body-sharing restore and compiler falling-command regressions remain
+unresolved. Raw samples remain local and unpublished.
+
+## Scenario compilation follow-up
 
 Prepared definitions now represent external, omitted and AI control explicitly.
 AI references share immutable compiled profiles; missing references are reported

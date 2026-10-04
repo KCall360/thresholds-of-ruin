@@ -47,6 +47,71 @@ impl SharedState {
     }
 }
 
+/// Ownership shared while restoring one decoded checkpoint and its rewind states.
+/// This context is never serialized. Dropping it releases its temporary pool
+/// references; restored games retain only the definitions they actually use.
+pub struct RestoreContext<'a> {
+    shared: &'a SharedState,
+    worlds: BTreeMap<usize, Shared<World>>,
+    navigation: BTreeMap<usize, Shared<Navigation>>,
+    items: BTreeMap<usize, crate::item_store::ItemStore>,
+    bodies: BTreeSet<Shared<crate::BodySpec>>,
+}
+
+impl<'a> RestoreContext<'a> {
+    pub fn new(shared: &'a SharedState) -> Self {
+        Self {
+            shared,
+            worlds: BTreeMap::new(),
+            navigation: BTreeMap::new(),
+            items: BTreeMap::new(),
+            bodies: BTreeSet::new(),
+        }
+    }
+
+    pub fn restore(&mut self, snapshot: Snapshot) -> Option<Game> {
+        Game::restore_with_context(snapshot, self)
+    }
+
+    fn world(&mut self, index: usize) -> Option<Shared<World>> {
+        if let Some(world) = self.worlds.get(&index) {
+            return Some(world.clone());
+        }
+        let world = Shared::new(self.shared.worlds.get(index)?.clone());
+        self.worlds.insert(index, world.clone());
+        Some(world)
+    }
+
+    fn navigation(&mut self, index: usize) -> Option<Shared<Navigation>> {
+        if let Some(navigation) = self.navigation.get(&index) {
+            return Some(navigation.clone());
+        }
+        let navigation = Shared::new(self.shared.navigation.get(index)?.clone());
+        self.navigation.insert(index, navigation.clone());
+        Some(navigation)
+    }
+
+    fn items(&mut self, index: usize) -> Option<crate::item_store::ItemStore> {
+        if let Some(items) = self.items.get(&index) {
+            return Some(items.clone());
+        }
+        let items =
+            crate::item_store::ItemStore::from_entries(self.shared.items.get(index)?.clone());
+        self.items.insert(index, items.clone());
+        Some(items)
+    }
+
+    fn share_bodies(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
+        for actor in actors.values_mut() {
+            if let Some(body) = self.bodies.get(&*actor.body) {
+                actor.body = body.clone();
+            } else {
+                self.bodies.insert(actor.body.clone());
+            }
+        }
+    }
+}
+
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
         let worlds = &mut shared.worlds;
@@ -104,23 +169,27 @@ impl Game {
     }
 
     pub fn restore_checkpoint(snapshot: Snapshot, shared: &SharedState) -> Option<Self> {
+        RestoreContext::new(shared).restore(snapshot)
+    }
+
+    fn restore_with_context(
+        mut snapshot: Snapshot,
+        context: &mut RestoreContext<'_>,
+    ) -> Option<Self> {
+        context.share_bodies(&mut snapshot.actors);
         let game = Self {
             combat: snapshot.combat,
             physics: snapshot.physics,
-            world: Shared::new(shared.worlds.get(snapshot.world)?.clone()),
+            world: context.world(snapshot.world)?,
             navigation: snapshot
                 .navigation
                 .into_iter()
-                .map(|(actor, index)| {
-                    Some((actor, Shared::new(shared.navigation.get(index)?.clone())))
-                })
+                .map(|(actor, index)| Some((actor, context.navigation(index)?)))
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
             actors: crate::actor_store::ActorStore::from_entries(snapshot.actors),
-            items: crate::item_store::ItemStore::from_entries(
-                shared.items.get(snapshot.items)?.clone(),
-            ),
+            items: context.items(snapshot.items)?,
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
@@ -128,7 +197,7 @@ impl Game {
                 None => Lifecycle::default(),
                 // An empty state is always omitted, so encodings stay unique.
                 Some(index) => {
-                    Some(shared.lifecycles.get(index)?.clone()).filter(|l| !l.is_empty())?
+                    Some(context.shared.lifecycles.get(index)?.clone()).filter(|l| !l.is_empty())?
                 }
             },
         };
@@ -230,6 +299,183 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Location, Position, RegionId};
+
+    #[test]
+    fn decoded_restore_shares_equal_bodies_without_changing_values() {
+        for count in [16, 256, 4096] {
+            let mut world = World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(tor_world::Region {
+                    id: RegionId(1),
+                    name: "restore".into(),
+                    bounds: tor_world::Extent::new(count * 3 + 3, 3, 1).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            for x in 0..count {
+                let id = game
+                    .spawn_actor(
+                        Location {
+                            region: RegionId(1),
+                            position: Position {
+                                x: x * 3,
+                                y: 1,
+                                z: 0,
+                            },
+                        },
+                        NonZeroU64::new(100).unwrap(),
+                    )
+                    .unwrap();
+                if x % 2 == 1 {
+                    game.set_body(
+                        id,
+                        crate::BodySpec {
+                            cells: vec![[0, 0, 0], [1, 0, 0]],
+                            eye: [1, 0, 0],
+                            mass: 91,
+                        },
+                    )
+                    .unwrap();
+                }
+            }
+            let mut shared = SharedState::default();
+            let snapshot = game.checkpoint(&mut shared);
+            let bytes = serde_json::to_vec(&(snapshot, shared)).unwrap();
+            let (snapshot, shared): (Snapshot, SharedState) =
+                serde_json::from_slice(&bytes).unwrap();
+            let restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+            assert_eq!(restored, game);
+            let first = &restored.actors[&ActorId(1)].body;
+            let second = &restored.actors[&ActorId(2)].body;
+            assert!(!first.shares_storage(second));
+            for (id, actor) in restored.actors.iter() {
+                let expected = if id.0 % 2 == 1 { first } else { second };
+                assert!(
+                    actor.body.shares_storage(expected),
+                    "actor {id:?}, count {count}"
+                );
+            }
+            let mut encoded_shared = SharedState::default();
+            let encoded_snapshot = restored.checkpoint(&mut encoded_shared);
+            assert_eq!(
+                serde_json::to_vec(&(encoded_snapshot, encoded_shared)).unwrap(),
+                bytes
+            );
+        }
+    }
+
+    #[test]
+    fn common_restore_context_shares_decoded_pools_and_preserves_copy_on_write() {
+        let mut game = Game::two_room_in_stone(42);
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        let item = game.place_item(at, "token".into()).unwrap();
+        game.refresh_navigation();
+        let mut shared = SharedState::default();
+        let before = game.checkpoint(&mut shared);
+        let original = game.clone();
+        game.act(actor, crate::Action::Wait).unwrap();
+        let after = game.checkpoint(&mut shared);
+        let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
+        let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+            serde_json::from_slice(&bytes).unwrap();
+        let mut context = RestoreContext::new(&shared);
+        let mut restored: Vec<_> = snapshots
+            .into_iter()
+            .map(|s| context.restore(s).unwrap())
+            .collect();
+        assert_eq!(restored[0], original);
+        assert_eq!(restored[1], game);
+        assert!(restored[0].world.shares_storage(&restored[1].world));
+        assert!(restored[0].navigation[&actor].shares_storage(&restored[1].navigation[&actor]));
+        assert!(restored[0].items.shares_storage(&restored[1].items));
+        assert!(restored[0].actors[&actor]
+            .body
+            .shares_storage(&restored[1].actors[&actor].body));
+        drop(context);
+        let mut encoded_shared = SharedState::default();
+        let encoded: Vec<_> = restored
+            .iter()
+            .map(|g| g.checkpoint(&mut encoded_shared))
+            .collect();
+        assert_eq!(
+            serde_json::to_vec(&(encoded, encoded_shared)).unwrap(),
+            bytes
+        );
+        restored[0]
+            .set_body(
+                actor,
+                crate::BodySpec {
+                    mass: 99,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        restored[0]
+            .items
+            .edit(item, |item| item.spec.name = "edited".into())
+            .unwrap();
+        restored[0]
+            .navigation
+            .get_mut(&actor)
+            .unwrap()
+            .cells
+            .remove(&at);
+        restored[0]
+            .world
+            .add_region(tor_world::Region {
+                id: RegionId(9),
+                name: "new".into(),
+                bounds: tor_world::Extent::new(3, 3, 1).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(restored[1], game);
+        assert_eq!(restored[1].items[&item].spec.name, "token");
+        assert_eq!(restored[1].actors[&actor].body.mass, 80);
+    }
+
+    #[test]
+    fn body_pool_preserves_cell_order_eye_and_mass_and_rejects_invalid_snapshots() {
+        let base = crate::BodySpec {
+            cells: vec![[0, 0, 0], [1, 0, 0]],
+            eye: [0, 0, 0],
+            mass: 80,
+        };
+        let mut reordered = base.clone();
+        reordered.cells.reverse();
+        let mut eye = base.clone();
+        eye.eye = [1, 0, 0];
+        let mut mass = base.clone();
+        mass.mass = 81;
+        let pool = BTreeSet::from([
+            Shared::new(base),
+            Shared::new(reordered),
+            Shared::new(eye),
+            Shared::new(mass),
+        ]);
+        assert_eq!(pool.len(), 4);
+        let mut game = Game::two_room_in_stone(42);
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 1, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let mut shared = SharedState::default();
+        let mut broken = game.checkpoint(&mut shared);
+        broken.actors.get_mut(&actor).unwrap().body.eye = [1, 0, 0];
+        let mut context = RestoreContext::new(&shared);
+        assert!(context.restore(broken).is_none());
+        let mut valid_shared = SharedState::default();
+        let valid = game.checkpoint(&mut valid_shared);
+        assert_eq!(context.restore(valid), Some(game));
+    }
 
     #[test]
     fn snapshots_preserve_complete_game_and_reject_invalid_shared_references() {

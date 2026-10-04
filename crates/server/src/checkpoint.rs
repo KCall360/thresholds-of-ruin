@@ -2,7 +2,7 @@
 //! Encoding and world/navigation deduplication run outside the engine/session lock.
 use super::*;
 use std::collections::BTreeSet;
-use tor_simulation::checkpoint::{SharedState, Snapshot};
+use tor_simulation::checkpoint::{RestoreContext, SharedState, Snapshot};
 use tor_simulation::RecordId;
 
 #[derive(Debug)]
@@ -168,7 +168,8 @@ impl DiskCheckpoint {
                 return Err(invalid_archive());
             }
         }
-        let game = Game::restore_checkpoint(self.game, &self.shared).ok_or_else(invalid_archive)?;
+        let mut restore = RestoreContext::new(&self.shared);
+        let game = restore.restore(self.game).ok_or_else(invalid_archive)?;
         let valid_game = |game: &Game, revisions: &Revisions| revisions.valid_for(game);
         if !valid_game(&game, &self.revisions) {
             return Err(invalid_archive());
@@ -198,8 +199,7 @@ impl DiskCheckpoint {
             if boundary.id.as_ref().is_some_and(|id| !ids.contains(id)) {
                 return Err(invalid_archive());
             }
-            let game = Game::restore_checkpoint(boundary.game, &self.shared)
-                .ok_or_else(invalid_archive)?;
+            let game = restore.restore(boundary.game).ok_or_else(invalid_archive)?;
             if !valid_game(&game, &boundary.revisions) {
                 return Err(invalid_archive());
             }
@@ -209,6 +209,7 @@ impl DiskCheckpoint {
                 revisions: boundary.revisions,
             }));
         }
+        drop(restore);
         if boundaries
             .back()
             .is_none_or(|b| b.game != game || b.revisions != self.revisions)
@@ -277,6 +278,19 @@ mod tests {
             }
         }
         let bytes = serde_json::to_vec(&Checkpoint::capture(&engine).encode("test", 165)).unwrap();
+        let restored_disk: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
+        let restored = restored_disk.restore(engine.archive.clone()).unwrap();
+        assert_eq!(restored.game, engine.game);
+        assert_eq!(restored.boundaries.len(), engine.boundaries.len());
+        for (actual, expected) in restored.boundaries.iter().zip(&engine.boundaries) {
+            assert_eq!(actual.game, expected.game);
+            assert_eq!(actual.revisions, expected.revisions);
+            assert_eq!(actual.id, expected.id);
+        }
+        assert_eq!(
+            serde_json::to_vec(&Checkpoint::capture(&restored).encode("test", 165)).unwrap(),
+            bytes
+        );
         let disk: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
             Game::restore_checkpoint(disk.game, &disk.shared),

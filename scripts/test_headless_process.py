@@ -1,11 +1,45 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
 import json
+import sqlite3
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_checkpointed_portal_bodies_survive_cold_restore_rewind_and_replay(self):
+        server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        player, initial = self.client()
+        crossed = self.act(player, {'type': 'wait'})
+        self.assertIsNone(crossed['error'])
+        later = self.act(player, {'type': 'wait'})
+        self.assertIsNone(later['error'])
+        self.flush_save()
+        with sqlite3.connect(self.save) as db:
+            self.assertGreaterEqual(db.execute('SELECT sequence FROM checkpoint').fetchone()[0], 2)
+        player.stop()
+        server.stop()
+        server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        player, restored = self.client()
+        self.assertEqual(restored['state'], later['state'])
+        self.assertEqual(restored['history'], later['history'])
+        wizard = self.wizard()
+        self.wizard_command(wizard, 'rewind initial')
+        rewound = self.request(player, {'type': 'snapshot'})
+        self.assertNotEqual(rewound['branch'], initial['branch'])
+        self.assertEqual(rewound['state']['observation'], initial['state']['observation'])
+        repeated = self.act(player, {'type': 'wait'})
+        self.assertIsNone(repeated['error'])
+        self.assertEqual(repeated['state']['observation'], crossed['state']['observation'])
+        self.flush_save()
+        wizard.stop()
+        player.stop()
+        server.stop()
+        self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        _, restored_again = self.client()
+        self.assertEqual(restored_again['state'], repeated['state'])
+        self.assertEqual(restored_again['history'], repeated['history'])
+
     def test_stale_request_keeps_committed_state_and_history_after_restart(self):
         server = self.server()
         player, initial = self.client()
