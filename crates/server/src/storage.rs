@@ -23,6 +23,93 @@ const APP_ID: i64 = 0x544f524a;
 /// SQLite `user_version`: the save format, as `ARCHIVE_VERSION`.
 const SAVE_FORMAT: i64 = crate::engine::ARCHIVE_VERSION as i64;
 
+#[cfg(test)]
+thread_local! {
+    static SAVED_BYTES_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn copy_saved_blob(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+    limit: usize,
+) -> rusqlite::Result<Vec<u8>> {
+    let bytes = saved_blob(row, column, limit)?.to_vec();
+    #[cfg(test)]
+    SAVED_BYTES_COPIED.with(|count| count.set(count.get() + bytes.len()));
+    Ok(bytes)
+}
+
+fn saved_blob<'row>(
+    row: &'row rusqlite::Row<'_>,
+    column: usize,
+    limit: usize,
+) -> rusqlite::Result<&'row [u8]> {
+    saved_bytes(row, column, limit, rusqlite::types::Type::Blob)
+}
+
+fn saved_bytes<'row>(
+    row: &'row rusqlite::Row<'_>,
+    column: usize,
+    limit: usize,
+    kind: rusqlite::types::Type,
+) -> rusqlite::Result<&'row [u8]> {
+    let value = row.get_ref(column)?;
+    let bytes = match (value, kind) {
+        (rusqlite::types::ValueRef::Blob(bytes), rusqlite::types::Type::Blob)
+        | (rusqlite::types::ValueRef::Text(bytes), rusqlite::types::Type::Text) => bytes,
+        _ => {
+            return Err(rusqlite::Error::InvalidColumnType(
+                column,
+                "saved bytes".into(),
+                value.data_type(),
+            ))
+        }
+    };
+    if bytes.len() > limit {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            column,
+            kind,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "saved value exceeds its byte limit",
+            )),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn saved_text<'row>(row: &'row rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'row str> {
+    let bytes = saved_bytes(
+        row,
+        column,
+        crate::scenario_package::MAX_REGION_BYTES as usize,
+        rusqlite::types::Type::Text,
+    )?;
+    std::str::from_utf8(bytes).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+fn copy_saved_text(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<String> {
+    let text = saved_text(row, column)?.to_owned();
+    #[cfg(test)]
+    SAVED_BYTES_COPIED.with(|count| count.set(count.get() + text.len()));
+    Ok(text)
+}
+
+fn saved_row_failure(error: rusqlite::Error) -> Failure {
+    match error {
+        rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::InvalidColumnType(..) => {
+            invalid_archive()
+        }
+        _ => storage_failure(),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SavePolicy {
     /// Accepted journal entries between snapshots; zero disables checkpointing.
@@ -131,12 +218,12 @@ fn read_region_row(
 ) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
     let bytes: Option<Vec<u8>> = conn
         .query_row(
-            "SELECT frame FROM regions WHERE record=?1",
-            [id.0 as i64],
-            |r| r.get(0),
+            "SELECT CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?2 THEN frame END FROM regions WHERE record=?1",
+            params![id.0 as i64, (codec::MAX_REGION + 24) as i64],
+            |r| copy_saved_blob(r, 0, codec::MAX_REGION + 24),
         )
         .optional()
-        .map_err(|_| storage_failure())?;
+        .map_err(saved_row_failure)?;
     bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
 }
 /// Reads the save's copies of region files, on a connection of its own
@@ -156,12 +243,12 @@ impl SourceReader {
             .as_ref()
             .unwrap()
             .query_row(
-                "SELECT source FROM region_sources WHERE region=?1",
-                [region as i64],
-                |r| r.get(0),
+                "SELECT CASE WHEN typeof(source)='text' AND octet_length(source)<=?2 THEN source END FROM region_sources WHERE region=?1",
+                params![region as i64, crate::scenario_package::MAX_REGION_BYTES as i64],
+                |r| copy_saved_text(r, 0),
             )
             .optional()
-            .map_err(|_| storage_failure())
+            .map_err(saved_row_failure)
     }
 }
 /// Reads region rows on a connection of its own, opened on first use.
@@ -195,16 +282,16 @@ fn connection(path: &Path) -> Result<Connection, Failure> {
 /// match it exactly.
 fn write_sources(tx: &Connection, sources: &[(u64, Arc<str>)]) -> Result<(), Failure> {
     for (region, text) in sources {
-        let existing: Option<String> = tx
+        let existing: Option<bool> = tx
             .query_row(
-                "SELECT source FROM region_sources WHERE region=?1",
-                [*region as i64],
-                |r| r.get(0),
+                "SELECT CASE WHEN typeof(source)='text' AND octet_length(source)<=?2 THEN source END FROM region_sources WHERE region=?1",
+                params![*region as i64, crate::scenario_package::MAX_REGION_BYTES as i64],
+                |r| Ok(saved_text(r, 0)? == text.as_ref()),
             )
             .optional()
-            .map_err(|_| storage_failure())?;
+            .map_err(saved_row_failure)?;
         match existing {
-            Some(old) if *old == **text => {}
+            Some(true) => {}
             Some(_) => return Err(invalid_archive()),
             None => {
                 tx.execute(
@@ -245,16 +332,17 @@ fn commit_batch(
     for entry in entries {
         // Retrying an uncertain commit reconciles exact stored bytes. A conflicting
         // sequence is never overwritten and no request can execute twice.
-        let existing: Option<Vec<u8>> = tx
+        let existing: Option<bool> = tx
             .query_row(
-                "SELECT frame FROM journal WHERE sequence=?1 UNION ALL SELECT frame FROM history WHERE sequence=?1",
-                [entry.sequence as i64],
-                |r| r.get(0),
+                "SELECT CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?2 THEN frame END FROM journal WHERE sequence=?1
+                 UNION ALL SELECT CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?2 THEN frame END FROM history WHERE sequence=?1",
+                params![entry.sequence as i64, (MAX_PAYLOAD + 24) as i64],
+                |r| Ok(saved_blob(r, 0, MAX_PAYLOAD + 24)? == entry.bytes.as_slice()),
             )
             .optional()
-            .map_err(|_| storage_failure())?;
+            .map_err(saved_row_failure)?;
         match existing {
-            Some(bytes) if bytes == entry.bytes => {}
+            Some(true) => {}
             Some(_) => return Err(invalid_archive()),
             None => {
                 tx.execute(
@@ -270,16 +358,16 @@ fn commit_batch(
         // Rows are written before the checkpoint naming them, in the same
         // transaction. A row is never rewritten: a retry must match it exactly.
         for (id, frame) in regions.map(|r| r.rows.as_slice()).unwrap_or_default() {
-            let existing: Option<Vec<u8>> = tx
+            let existing: Option<bool> = tx
                 .query_row(
-                    "SELECT frame FROM regions WHERE record=?1",
-                    [*id as i64],
-                    |r| r.get(0),
+                    "SELECT CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?2 THEN frame END FROM regions WHERE record=?1",
+                    params![*id as i64, (codec::MAX_REGION + 24) as i64],
+                    |r| Ok(saved_blob(r, 0, codec::MAX_REGION + 24)? == frame.as_slice()),
                 )
                 .optional()
-                .map_err(|_| storage_failure())?;
+                .map_err(saved_row_failure)?;
             match existing {
-                Some(old) if old == *frame => {}
+                Some(true) => {}
                 Some(_) => return Err(invalid_archive()),
                 None => {
                     tx.execute(
@@ -291,17 +379,18 @@ fn commit_batch(
             }
         }
         fault(&tx, "after_regions")?;
-        let current: Option<(i64, Vec<u8>)> = tx
+        let current: Option<(i64, bool)> = tx
             .query_row(
-                "SELECT sequence,payload FROM checkpoint WHERE slot=1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                "SELECT sequence,CASE WHEN typeof(payload)='blob' AND octet_length(payload)<=?1 THEN payload END FROM checkpoint WHERE slot=1",
+                [MAX_CHECKPOINT as i64],
+                |r| Ok((r.get(0)?, saved_blob(r, 1, MAX_CHECKPOINT)? == bytes)),
             )
             .optional()
-            .map_err(|_| storage_failure())?;
-        if current.as_ref().is_some_and(|(seq, old)| {
-            *seq > sequence as i64 || (*seq == sequence as i64 && old != bytes)
-        }) {
+            .map_err(saved_row_failure)?;
+        if current
+            .as_ref()
+            .is_some_and(|(seq, same)| *seq > sequence as i64 || (*seq == sequence as i64 && !same))
+        {
             return Err(invalid_archive());
         }
         tx.execute(
@@ -380,23 +469,16 @@ fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure>
     if count != 1 {
         return Err(invalid_archive());
     }
-    let (sequence, length): (i64, i64) = conn
+    let (sequence, bytes, checksum): (i64, Vec<u8>, u32) = conn
         .query_row(
-            "SELECT sequence,length(payload) FROM checkpoint WHERE slot=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            "SELECT sequence,CASE WHEN typeof(payload)='blob' AND octet_length(payload)<=?1 THEN payload END,checksum FROM checkpoint WHERE slot=1",
+            [MAX_CHECKPOINT as i64],
+            |r| Ok((r.get(0)?, copy_saved_blob(r, 1, MAX_CHECKPOINT)?, r.get(2)?)),
         )
         .map_err(|_| invalid_archive())?;
-    if sequence <= 0 || length <= 0 || length > MAX_CHECKPOINT as i64 {
+    if sequence <= 0 || bytes.is_empty() {
         return Err(invalid_archive());
     }
-    let (bytes, checksum): (Vec<u8>, u32) = conn
-        .query_row(
-            "SELECT payload,checksum FROM checkpoint WHERE slot=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .map_err(|_| invalid_archive())?;
     if crc32c(bytes.iter().copied()) != checksum {
         return Err(invalid_archive());
     }
@@ -472,9 +554,12 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
     let checkpoint_sequence = checkpoint.as_ref().map(|c| c.sequence).unwrap_or(0);
     let mut checkpoint_records = 0;
     let mut statement = conn
-        .prepare("SELECT sequence,length(frame),frame,0 FROM journal UNION ALL SELECT sequence,length(frame),frame,1 FROM history ORDER BY sequence")
+        .prepare("SELECT sequence,octet_length(frame),CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?1 THEN frame END,0 FROM journal
+                  UNION ALL SELECT sequence,octet_length(frame),CASE WHEN typeof(frame)='blob' AND octet_length(frame)<=?1 THEN frame END,1 FROM history ORDER BY sequence")
         .map_err(|_| invalid_archive())?;
-    let mut rows = statement.query([]).map_err(|_| invalid_archive())?;
+    let mut rows = statement
+        .query([(MAX_PAYLOAD + 24) as i64])
+        .map_err(|_| invalid_archive())?;
     let mut archive = None;
     let mut save_id = String::new();
     let mut next = 0u64;
@@ -490,7 +575,7 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
         if retained != (sequence > 0 && sequence <= checkpoint_sequence) {
             return Err(invalid_archive());
         }
-        let bytes: Vec<u8> = row.get(2).map_err(|_| invalid_archive())?;
+        let bytes = copy_saved_blob(row, 2, MAX_PAYLOAD + 24).map_err(|_| invalid_archive())?;
         let (kind, payload) = decode(&bytes, sequence)?;
         match kind {
             0 => {
@@ -550,48 +635,76 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
 
 /// Give a loaded archive's package its index, from the `package` table, and
 /// the region files copied into the save. Returns the copied regions.
+fn read_package_chunks(conn: &Connection) -> Result<(usize, Vec<u8>), Failure> {
+    let limit = crate::scenario_package::MAX_INDEX_BYTES as usize;
+    let mut statement = conn
+        .prepare("SELECT chunk,CASE WHEN typeof(bytes)='blob' AND octet_length(bytes)<=?1 THEN bytes END FROM package ORDER BY chunk LIMIT ?2")
+        .map_err(|_| invalid_archive())?;
+    let mut rows = statement
+        .query(params![
+            PACKAGE_CHUNK as i64,
+            (limit.div_ceil(PACKAGE_CHUNK) + 1) as i64
+        ])
+        .map_err(|_| invalid_archive())?;
+    let mut count = 0usize;
+    let mut bytes = Vec::new();
+    while let Some(row) = rows.next().map_err(|_| invalid_archive())? {
+        let chunk: i64 = row.get(0).map_err(|_| invalid_archive())?;
+        if chunk != count as i64 || count >= limit.div_ceil(PACKAGE_CHUNK) {
+            return Err(invalid_archive());
+        }
+        let payload = saved_blob(row, 1, PACKAGE_CHUNK.min(limit - bytes.len()))
+            .map_err(|_| invalid_archive())?;
+        if payload.is_empty() {
+            return Err(invalid_archive());
+        }
+        bytes.extend_from_slice(payload);
+        #[cfg(test)]
+        SAVED_BYTES_COPIED.with(|copied| copied.set(copied.get() + payload.len()));
+        count += 1;
+    }
+    Ok((count, bytes))
+}
+
 fn attach_package(conn: &Connection, archive: &mut Archive) -> Result<BTreeSet<u64>, Failure> {
-    let chunks: Vec<(i64, Vec<u8>)> = conn
-        .prepare("SELECT chunk, bytes FROM package ORDER BY chunk")
-        .and_then(|mut statement| {
-            statement
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()
-        })
-        .map_err(|_| invalid_archive())?;
-    // Only which regions have copies: each copy is read when first needed.
-    let sources: Vec<i64> = conn
-        .prepare("SELECT region FROM region_sources ORDER BY region")
-        .and_then(|mut statement| {
-            statement
-                .query_map([], |r| r.get(0))?
-                .collect::<Result<_, _>>()
-        })
-        .map_err(|_| invalid_archive())?;
+    let (chunks, bytes) = read_package_chunks(conn)?;
     let Some(package) = &mut archive.scenario.package else {
-        return if chunks.is_empty() && sources.is_empty() {
+        let has_sources: bool = conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM region_sources)", [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| invalid_archive())?;
+        return if chunks == 0 && !has_sources {
             Ok(BTreeSet::new())
         } else {
             Err(invalid_archive())
         };
     };
-    if chunks
-        .iter()
-        .enumerate()
-        .any(|(n, (chunk, _))| *chunk != n as i64)
-    {
-        return Err(invalid_archive());
-    }
-    let bytes: Vec<u8> = chunks.into_iter().flat_map(|(_, b)| b).collect();
     let index =
         crate::scenario_package::RegionIndex::from_bytes(&bytes).map_err(|_| invalid_archive())?;
+    // Only identities are read here; source text stays lazy. Validate each
+    // identity before inserting rather than collecting an unbounded list.
+    let mut sources = BTreeSet::new();
+    let mut statement = conn
+        .prepare("SELECT region FROM region_sources ORDER BY region LIMIT ?1")
+        .map_err(|_| invalid_archive())?;
+    let mut rows = statement
+        .query([(crate::scenario_package::MAX_REGIONS + 1) as i64])
+        .map_err(|_| invalid_archive())?;
+    while let Some(row) = rows.next().map_err(|_| invalid_archive())? {
+        let region = u64::try_from(row.get::<_, i64>(0).map_err(|_| invalid_archive())?)
+            .map_err(|_| invalid_archive())?;
+        if sources.len() >= crate::scenario_package::MAX_REGIONS
+            || index.region(region).is_none()
+            || !sources.insert(region)
+        {
+            return Err(invalid_archive());
+        }
+    }
     let package = Arc::make_mut(package);
     package.index = Arc::new(index);
     package.sources = Default::default();
-    sources
-        .into_iter()
-        .map(|region| u64::try_from(region).map_err(|_| invalid_archive()))
-        .collect()
+    Ok(sources)
 }
 
 #[derive(Debug)]
@@ -1074,6 +1187,197 @@ mod tests {
     use super::*;
     use crate::{Engine, Scenario};
     use tor_protocol::{Action, ActorId};
+
+    #[test]
+    fn acquisition_package_chunks_preserve_bounds_order_and_types() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE package(chunk INTEGER PRIMARY KEY, bytes BLOB NOT NULL)")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO package VALUES (0, zeroblob(?1))",
+            [PACKAGE_CHUNK as i64],
+        )
+        .unwrap();
+        let (count, bytes) = read_package_chunks(&conn).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(bytes.len(), PACKAGE_CHUNK);
+        for statement in [
+            "UPDATE package SET bytes='wrong type'",
+            "UPDATE package SET bytes=zeroblob(0)",
+            "UPDATE package SET bytes=zeroblob(1),chunk=1",
+        ] {
+            conn.execute(statement, []).unwrap();
+            let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+            assert!(read_package_chunks(&conn).is_err(), "{statement}");
+            assert_eq!(SAVED_BYTES_COPIED.with(std::cell::Cell::get), before);
+        }
+        conn.execute("DELETE FROM package", []).unwrap();
+        let maximum = (crate::scenario_package::MAX_INDEX_BYTES as usize).div_ceil(PACKAGE_CHUNK);
+        for chunk in 0..maximum {
+            conn.execute("INSERT INTO package VALUES (?1, x'20')", [chunk as i64])
+                .unwrap();
+        }
+        assert_eq!(
+            read_package_chunks(&conn).unwrap(),
+            (maximum, vec![b' '; maximum])
+        );
+        conn.execute("INSERT INTO package VALUES (?1, x'20')", [maximum as i64])
+            .unwrap();
+        let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+        assert!(read_package_chunks(&conn).is_err());
+        assert_eq!(
+            SAVED_BYTES_COPIED.with(std::cell::Cell::get) - before,
+            maximum
+        );
+    }
+
+    #[test]
+    fn acquisition_unknown_copied_region_rejects_without_changing_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("unknown-source.db");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let engine = Engine::open(
+            &path,
+            crate::scenario_package::load(&root, 42, None, false).unwrap(),
+        )
+        .unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        let conn = connection(&path).unwrap();
+        conn.execute("INSERT INTO region_sources VALUES (999999, 'unused')", [])
+            .unwrap();
+        drop(conn);
+        let before = std::fs::read(&path).unwrap();
+        assert!(
+            load(&path).is_err(),
+            "copied regions must belong to the pinned index"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn acquisition_retries_reject_oversized_stored_values_before_copying() {
+        let mut copied = Vec::new();
+        for kind in ["journal", "region", "checkpoint"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE journal(sequence INTEGER PRIMARY KEY, frame BLOB);
+                 CREATE TABLE history(sequence INTEGER PRIMARY KEY, frame BLOB);
+                 CREATE TABLE regions(record INTEGER PRIMARY KEY, frame BLOB);
+                 CREATE TABLE checkpoint(slot INTEGER PRIMARY KEY, sequence INTEGER, payload BLOB, checksum INTEGER);",
+            ).unwrap();
+            let pending = Pending {
+                sequence: 1,
+                bytes: vec![0],
+                sources: vec![],
+                queued: Instant::now(),
+            };
+            let regions = RegionWrite {
+                rows: vec![(1, vec![0])],
+                keep: BTreeSet::from([1]),
+            };
+            let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+            let result = match kind {
+                "journal" => {
+                    conn.execute(
+                        "INSERT INTO journal VALUES (1, zeroblob(?1))",
+                        [(MAX_PAYLOAD + 25) as i64],
+                    )
+                    .unwrap();
+                    commit_batch(&mut conn, &[pending], None, None, |_, _| Ok(()))
+                }
+                "region" => {
+                    conn.execute(
+                        "INSERT INTO regions VALUES (1, zeroblob(?1))",
+                        [(codec::MAX_REGION + 25) as i64],
+                    )
+                    .unwrap();
+                    commit_batch(&mut conn, &[], Some((1, &[0])), Some(&regions), |_, _| {
+                        Ok(())
+                    })
+                }
+                _ => {
+                    conn.execute(
+                        "INSERT INTO checkpoint VALUES (1, 1, zeroblob(?1), 0)",
+                        [(MAX_CHECKPOINT + 1) as i64],
+                    )
+                    .unwrap();
+                    commit_batch(&mut conn, &[], Some((1, &[0])), None, |_, _| Ok(()))
+                }
+            };
+            assert!(result.is_err(), "{kind}");
+            copied.push((kind, SAVED_BYTES_COPIED.with(std::cell::Cell::get) - before));
+        }
+        assert_eq!(
+            copied,
+            vec![("journal", 0), ("region", 0), ("checkpoint", 0)]
+        );
+    }
+
+    #[test]
+    fn acquisition_sources_use_utf8_byte_limits_before_copying() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE region_sources(region INTEGER PRIMARY KEY, source TEXT NOT NULL)",
+        )
+        .unwrap();
+        let mut text = "é".repeat(crate::scenario_package::MAX_REGION_BYTES as usize / 2);
+        conn.execute("INSERT INTO region_sources VALUES (1, ?1)", [&text])
+            .unwrap();
+        let mut reader = SourceReader {
+            path: PathBuf::new(),
+            conn: Some(conn),
+        };
+        assert!(reader.read(2).unwrap().is_none());
+        assert_eq!(reader.read(1).unwrap().as_deref(), Some(text.as_str()));
+        text.push('!');
+        reader
+            .conn
+            .as_ref()
+            .unwrap()
+            .execute("UPDATE region_sources SET source=?1", [&text])
+            .unwrap();
+        let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+        assert!(
+            reader.read(1).is_err(),
+            "source bytes, rather than codepoints, must be bounded"
+        );
+        assert_eq!(SAVED_BYTES_COPIED.with(std::cell::Cell::get), before);
+    }
+
+    #[test]
+    fn acquisition_oversized_package_chunk_rejects_before_copying() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE package(chunk INTEGER PRIMARY KEY, bytes BLOB NOT NULL)")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO package VALUES (0, zeroblob(?1))",
+            [(PACKAGE_CHUNK + 1) as i64],
+        )
+        .unwrap();
+        let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+        assert!(read_package_chunks(&conn).is_err());
+        assert_eq!(SAVED_BYTES_COPIED.with(std::cell::Cell::get), before);
+    }
+
+    #[test]
+    fn oversized_region_rows_reject_before_copying_owned_bytes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE regions(record INTEGER PRIMARY KEY, frame BLOB NOT NULL)")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO regions VALUES (1, zeroblob(?1))",
+            [(codec::MAX_REGION + 25) as i64],
+        )
+        .unwrap();
+        let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
+        assert!(read_region_row(&conn, tor_simulation::RecordId(1)).is_err());
+        assert_eq!(
+            SAVED_BYTES_COPIED.with(std::cell::Cell::get) - before,
+            0,
+            "an invalid oversized row must not allocate a Rust-owned frame"
+        );
+    }
 
     fn checkpoint_fixture(path: &Path) -> (Vec<u8>, tor_protocol::StateView) {
         let mut engine = Engine::open_with_policy(

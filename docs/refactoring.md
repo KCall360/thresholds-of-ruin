@@ -152,6 +152,54 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Saved-data acquisition now checks SQL value types and byte lengths before
+selecting payloads, then checks borrowed bytes before Rust-owned copies. Source
+limits count UTF-8 bytes. Retry reconciliation compares bounded borrowed values;
+checkpoint metadata and payload are read together. Package chunks stream into a
+bounded buffer, and copied-source identifiers are validated against the pinned
+index while reading. Package-file reads use the opened handle and stop at the
+existing limit plus one byte, including if a file grows after its metadata check.
+
+Regressions reproduced oversized index acceptance, copied region/retry bytes,
+oversized Unicode sources and chunks, file growth, and unknown copied-region
+identifiers. Focused tests pass. An actual server previously advertised a listener
+after accepting an oversized saved-index chunk; the updated server rejects startup
+and leaves the save unchanged. Quick and full Windows verification passed,
+including debug/release workspace tests, 223 debug Python/process tests and all
+113 release process tests. Two three-round release comparisons validated with
+identical workload, disclosure and saved-byte counts; the second reused the same
+binaries. All thirteen deployed-client checks passed. Existing saves and builds
+are preserved. No format versions or scripting support change.
+
+Paired combat decision-and-command timings have 576 samples per side and case.
+Values below are p50 / p95 / maximum in milliseconds, baseline → updated:
+
+| Case | Initial comparison | Same-binary repeat |
+| --- | --- | --- |
+| Two actors, no history | .2392 / .7970 / 3.3456 → .2484 / .8202 / 2.9661 | .2420 / .8220 / 2.5885 → .2476 / .8013 / 3.0169 |
+| Two actors, 1,000 history | .2313 / .7171 / 1.1098 → .2327 / .7309 / 1.2991 | .2330 / .7682 / 1.7140 → .2347 / .7473 / 1.9759 |
+| Eight actors, no history | .8172 / 3.9379 / 5.8918 → .7979 / 3.9144 / 6.7353 | .9846 / 5.7038 / 6.5776 → .8227 / 3.8484 / 6.1316 |
+| Eight actors, 1,000 history | .5521 / 3.3530 / 3.7932 → .5575 / 3.3891 / 4.0832 | .5652 / 3.3828 / 4.4254 → .5588 / 3.3892 / 4.7431 |
+
+Standalone small-combat command p95 rose 15.5% initially and fell 8.6% in the
+repeat. Falling-physics command timings (576 samples per side) changed from
+.093 / 11.995 / 20.194 to .095 / 11.762 / 21.393 initially, and from
+.095 / 12.347 / 21.646 to .097 / 15.262 / 37.654 in the repeat. Falling client
+apply p95 rose 1.8% initially and 38.4% in the repeat (144 samples per side).
+
+Restore and save measurements have only nine samples per side and case. The
+large-history eight-actor save median changed 207.6 → 418.4 initially but
+109.9 → 112.2 in the repeat; its save p95 changed 459.0 → 503.0 and
+232.4 → 462.2 respectively. Repeat restore p95 rose 31.9% in that case.
+Other repeat save p95 increases include 29.6% for two actors with history and
+49.0% for eight actors without history. Falling restore median rose 0.9%
+initially and 5.3% in the repeat. Timing variation and these higher tails remain
+recorded; no latency improvement is claimed. Raw measurements stay local.
+
+The regressions establish avoided Rust-owned copies of rejected payloads and
+bounded file reads. SQLite allocations, vector capacity, typed JSON trees and
+whole-server resident memory are not measured; retained history remains resident.
+
 Save framing, checksums and strict JSON validation now have a focused codec
 module. SQLite admission, checkpoint row planning and worker transactions remain
 in storage. The existing typed parse, duplicate-free JSON parse and canonical-value
@@ -167,8 +215,8 @@ continued play between them. Quick and full Windows verification of the retained
 implementation passed, including debug/release workspace tests, 222 debug
 Python/process tests and all 112 release process tests. Release comparisons and
 a controlled repeat validated; all twelve deployed-client checks passed. Timing
-limits are recorded below. Reducing temporary JSON trees and enforcing byte limits
-before source/index/region copies remain open.
+limits are recorded below. Reducing temporary JSON trees and pooling immutable
+content remain open; acquisition guards are described above.
 
 Autonomous execution now chooses an AI action once inside private candidate state
 and uses the same journal admission, revision, region-transition and publication

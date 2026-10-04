@@ -144,9 +144,13 @@ gains, restore tails and limits are recorded in the plan. Save framing and stric
 validation now have a focused codec boundary, verified by full Windows checks,
 release comparisons and twelve deployed-client checks. The original decode
 algorithm is retained after measurements rejected a proposed reader change;
-timing tails and limits are recorded in the plan. Scenario compilation, bounded
-save/source acquisition, decode/content pooling and the admission/scheduler split
-remain.
+timing tails and limits are recorded in the plan. Saved-data acquisition now gates
+SQL payload types and lengths before owned copies, compares borrowed retry values,
+streams bounded package chunks and validates copied-source identities. Package
+file reads stop at their byte limit plus one. Quick/full Windows checks, two
+validated release comparisons and thirteen deployed-client checks passed; higher
+timing tails and unmeasured memory limits are recorded in the plan. Scenario
+compilation, decode/content pooling and the admission/scheduler split remain.
 The versioned queue
 and stream-recovery proposal awaits explicit format authorization.
 Gameplay must admit intentions to simulation-owned

@@ -1,6 +1,7 @@
 //! Ordinary authored inputs. Filesystem access stays in the server; construction
 //! uses the same deterministic world operations as other simulation callers.
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::num::NonZeroU64;
 use std::path::{Component, Path};
 use std::sync::Arc;
@@ -22,9 +23,9 @@ const REGION_DIR: &str = "regions";
 /// Regions a package may have.
 pub const MAX_REGIONS: usize = 65_536;
 /// Each region file is bounded to this.
-const MAX_REGION_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_REGION_BYTES: u64 = 1024 * 1024;
 /// The index is bounded to this, which holds the largest package.
-const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 
 fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
@@ -383,6 +384,10 @@ impl RegionIndex {
         Ok(bytes)
     }
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Failure> {
+        require(
+            bytes.len() as u64 <= MAX_INDEX_BYTES,
+            format!("index.json exceeds {} KiB", MAX_INDEX_BYTES / 1024),
+        )?;
         let index: Self =
             serde_json::from_slice(bytes).map_err(|e| fail(format!("index.json: {e}")))?;
         require(
@@ -587,11 +592,25 @@ fn read_limited(root: &Path, relative: &str, limit: u64) -> Result<String, Failu
         path.starts_with(&base),
         "Package file resolves outside package directory",
     )?;
+    let file = std::fs::File::open(path).map_err(|e| fail(format!("{relative}: {e}")))?;
     require(
-        path.metadata().map_err(|e| fail(e.to_string()))?.len() <= limit,
+        file.metadata().map_err(|e| fail(e.to_string()))?.len() <= limit,
         format!("{relative} exceeds {} KiB", limit / 1024),
     )?;
-    std::fs::read_to_string(path).map_err(|e| fail(format!("{relative}: {e}")))
+    read_text_limited(file, relative, limit)
+}
+
+fn read_text_limited(reader: impl Read, relative: &str, limit: u64) -> Result<String, Failure> {
+    let mut text = String::new();
+    reader
+        .take(limit.saturating_add(1))
+        .read_to_string(&mut text)
+        .map_err(|e| fail(format!("{relative}: {e}")))?;
+    require(
+        text.len() as u64 <= limit,
+        format!("{relative} exceeds {} KiB", limit / 1024),
+    )?;
+    Ok(text)
 }
 fn read(root: &Path, relative: &str) -> Result<String, Failure> {
     read_limited(root, relative, MAX_BYTES)
@@ -2289,6 +2308,54 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn acquisition_file_growth_cannot_bypass_the_read_limit() {
+        struct Counted<'a> {
+            input: &'a [u8],
+            consumed: &'a std::cell::Cell<usize>,
+        }
+        impl Read for Counted<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let size = self.input.read(buffer)?;
+                self.consumed.set(self.consumed.get() + size);
+                Ok(size)
+            }
+        }
+        // The opened stream can grow after its metadata was checked.
+        let consumed = std::cell::Cell::new(0);
+        let result = read_text_limited(
+            Counted {
+                input: b"12345678901234567890",
+                consumed: &consumed,
+            },
+            "growing.toml",
+            8,
+        );
+        assert_eq!((result.is_err(), consumed.get()), (true, 9));
+        assert_eq!(
+            read_text_limited(&b"12345678"[..], "exact.toml", 8).unwrap(),
+            "12345678"
+        );
+        assert_eq!(
+            read_text_limited("éé".as_bytes(), "utf8.toml", 4).unwrap(),
+            "éé"
+        );
+        assert!(read_text_limited(&[0xff][..], "invalid.toml", 4).is_err());
+    }
+
+    #[test]
+    fn saved_index_obeys_the_same_byte_limit_as_package_files() {
+        let expected = RegionIndex::default();
+        let mut bytes = expected.to_bytes().unwrap();
+        bytes.resize(MAX_INDEX_BYTES as usize, b' ');
+        assert_eq!(RegionIndex::from_bytes(&bytes).unwrap(), expected);
+        bytes.push(b' ');
+        assert!(
+            RegionIndex::from_bytes(&bytes).is_err(),
+            "saved indexes must reject bytes beyond the package-file limit"
+        );
+    }
+
     #[test]
     fn authored_default_matches_existing_fixture_at_every_seed_variant() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
