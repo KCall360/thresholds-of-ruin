@@ -107,23 +107,24 @@ duplicating them. Earlier handoff notes are in the
 
 **Architecture refactor (active).** The maintainer authorized the
 [refactor plan](docs/refactoring.md). Work remains isolated from the original
-dirty interactions checkout. Eighteen local implementation checkpoints cover
+dirty interactions checkout. Nineteen local implementation checkpoints cover
 explicit command mappings, shared boundary observations, portal-local item/body
 and privacy-scoped history indexes, shared route searches, checked requests,
 immutable body sharing, storage accounting and concurrency, atomic observation
 validation, single-decision AI execution, strict save-codec boundaries, bounded
 saved/authored input acquisition, separate authoring/prepared scenario types,
-contextual declaration diagnostics preserving validation precedence, and bounded
-FIFO mailbox draining without starving due actions or save polling, and bounded
-nonblocking runtime diagnostics with explicit loss accounting.
-Current quick/full Windows verification passed, including 229 debug Python/process
-tests and 117 release process tests; all seventeen deployed-client/validator checks passed.
+contextual declaration diagnostics preserving validation precedence, bounded
+FIFO mailbox draining without starving due actions or save polling, nonblocking
+runtime diagnostics with loss accounting, and encoded-output byte leases through
+queueing, write failures/timeouts and task cancellation.
+Current quick/full Windows verification passed, including 231 debug Python/process
+tests and 119 release process tests; all nineteen deployed-client/validator checks passed.
 
 Release comparisons and their limits are recorded in the plan. Reduced query and
 copy counts do not establish broad latency or resident-memory improvements.
 The body-sharing restore regression and higher falling-physics command tails
 remain unresolved. Compiler source diagnostics and reference normalization,
-content pooling, transport fairness/byte accounting, further persistence work,
+content pooling, fair allocation under aggregate output pressure, further persistence work,
 and the admission/scheduler split remain open. Windows/Linux CI is still required
 before merging; publishing awaits explicit authorization.
 

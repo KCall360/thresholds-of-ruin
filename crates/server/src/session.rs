@@ -1,7 +1,7 @@
 use crate::engine::valid_label;
 use crate::{Engine, Failure};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tor_protocol::*;
 
 /// Trusted startup configuration. Tokens are never put into game history.
@@ -27,7 +27,7 @@ struct Client {
     palette: Option<(u64, BTreeSet<String>)>,
     /// The region that palette was forecast from.
     palette_region: Option<u64>,
-    messages: mpsc::Sender<ServerMessage>,
+    messages: crate::outbound::Sender,
     close: watch::Sender<bool>,
     /// What this client was last told play waits for, since its last update
     /// or snapshot; `None` once anything has changed.
@@ -36,7 +36,7 @@ struct Client {
 
 pub(crate) struct Connection {
     pub id: u64,
-    pub messages: mpsc::Receiver<ServerMessage>,
+    pub messages: crate::outbound::Receiver,
     pub close: watch::Receiver<bool>,
 }
 
@@ -56,7 +56,7 @@ pub(crate) enum Step {
     /// It needs input from a client, or nobody is playing.
     Blocked,
     /// These clients' queues are nearly full; wait for them to read.
-    Full(Vec<(u64, mpsc::Sender<ServerMessage>)>),
+    Full(Vec<(u64, crate::outbound::Sender)>),
 }
 
 /// Until hostility and environmental danger are modeled, another perceived
@@ -80,6 +80,7 @@ struct TravelJob {
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    outbound: crate::outbound::Pool,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     pending_pauses: BTreeSet<ActorId>,
     autonomous_enabled: bool,
@@ -96,14 +97,31 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(mut engine: Engine) -> Self {
+    pub fn new(engine: Engine) -> Self {
+        Self::with_outbound_limits(engine, crate::OutboundLimits::default())
+            .expect("valid default outbound limits")
+    }
+
+    /// Configure host output bounds before any client connects. Limits are not
+    /// persisted and are validated before startup.
+    pub fn with_outbound_limits(
+        mut engine: Engine,
+        limits: crate::OutboundLimits,
+    ) -> Result<Self, Failure> {
+        if !limits.is_valid() {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Invalid outbound byte limits",
+            ));
+        }
         let mut save_warning = None;
         for actor in engine.actors() {
             if let Err(error) = engine.pause_preparation(actor) {
                 save_warning = Some(error.to_string());
             }
         }
-        Self {
+        Ok(Self {
+            outbound: crate::outbound::Pool::new(limits),
             diagnostics: None,
             pending_pauses: BTreeSet::new(),
             autonomous_enabled: false,
@@ -117,7 +135,7 @@ impl Service {
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
-        }
+        })
     }
 
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::diagnostics::Diagnostics>) {
@@ -140,7 +158,7 @@ impl Service {
         })?;
         let id = self.next_client;
         self.next_client = next;
-        let (messages, receiver) = mpsc::channel(QUEUE);
+        let (messages, receiver) = self.outbound.channel(QUEUE);
         let (close, closing) = watch::channel(false);
         let actors: Vec<_> = self
             .engine
@@ -672,7 +690,7 @@ impl Service {
         let full: Vec<_> = self
             .clients
             .iter()
-            .filter(|(_, client)| client.actor.is_some() && client.messages.capacity() < HEADROOM)
+            .filter(|(_, client)| client.actor.is_some() && !client.messages.has_headroom(HEADROOM))
             .map(|(&id, client)| (id, client.messages.clone()))
             .collect();
         if !full.is_empty() {
@@ -1148,6 +1166,52 @@ impl Service {
 mod tests {
     use super::*;
     use crate::Scenario;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn byte_backlog_disconnects_before_message_slots_fill_and_other_clients_continue() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "watcher".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut slow = service.connect(&account, "ascii".into()).unwrap();
+        slow.messages.try_recv().unwrap();
+        let mut healthy = service.connect(&account, "headless".into()).unwrap();
+        healthy.messages.try_recv().unwrap();
+        let branch = service.engine.branch().clone();
+        let revision = service.engine.revision(ActorId(1)).unwrap();
+        // These frames fit the existing native client's frame ceiling. Their
+        // backlog exceeds 64 MiB while still far below the 256 message slots.
+        for _ in 0..65 {
+            service.send(
+                slow.id,
+                ServerMessage::Error {
+                    request_id: None,
+                    code: ErrorCode::InvalidRequest,
+                    message: "x".repeat(1024 * 1024),
+                },
+            );
+        }
+        assert!(
+            *slow.close.borrow(),
+            "byte pressure must disconnect a slow stream"
+        );
+        assert!(!*healthy.close.borrow());
+        service.handle(
+            healthy.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        assert!(matches!(
+            healthy.messages.try_recv().unwrap(),
+            ServerMessage::Snapshot { .. }
+        ));
+        assert_eq!(service.engine.branch(), &branch);
+        assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+    }
 
     #[test]
     fn action_broadcast_observes_once_per_actor_with_independent_client_streams() {

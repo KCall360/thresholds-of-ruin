@@ -152,6 +152,64 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Outgoing queues now retain one bounded encoded frame rather than a message DTO
+plus later serialization. Per-client and shared byte leases cover queued and
+in-flight payloads, including timeout, write failure, close drain and task abort;
+socket destruction precedes release of a canceled write's charge. The host can
+configure lower limits; defaults are 16 MiB/frame (matching the existing native
+receiver), 64 MiB/client and 256 MiB total. Existing message-count limits remain.
+The simulation waits on each attached client's own byte/slot headroom and keeps
+handling mail; global exhaustion rejects admission rather than delaying an
+unrelated actor. Streams that cannot admit output disconnect and recover through
+the existing fresh-snapshot path. Host limits and budgets are not saved state.
+
+A failing-first service regression retained over 64 MiB below the old slot limit;
+it now disconnects only the overloaded client and preserves another client's
+snapshot and authoritative branch/revision. Queue tests cover 16/256/4,096 slots,
+UTF-8/escaping, encoding failures, shared exhaustion and ownership release;
+transport tests prove lease lifetime through failed/canceled writes and task
+abort. Real clients passed slow-reader recovery and durable restart with small
+byte budgets; invalid host limits neither create a save nor change an existing
+save. Quick/full Windows verification passed, including 231 debug Python/process
+and 119 release process tests; all nineteen deployed-client/validator checks
+passed. These are encoded-payload bounds, not
+resident-memory measurements; fair allocation under aggregate exhaustion remains
+open.
+
+Three alternating pairs of real-client release captures exercised the changed
+service/socket path at 16 regions with eight actors. Every capture correlated all
+495 accepted actions, with identical action sequences, 368,640 saved bytes, and
+client remembered-cell counts of 105 initially and 266 finally. Binary hashes
+stayed fixed throughout; headless and ASCII client binaries matched between
+sides. Both sides used the same machine/storage fingerprint. The following
+end-to-end timings pool all three runs; presentation samples cover the primary
+actor. Raw captures remain local and all adverse values are retained.
+
+| Actual-client boundary | n per side | Baseline p50/p95/max ms | Candidate p50/p95/max ms |
+| --- | ---: | ---: | ---: |
+| Request to acknowledgement | 1,485 | 9.294 / 26.799 / 38.053 | 9.440 / 26.728 / 36.940 |
+| Request to ready frame | 1,485 | 10.402 / 29.051 / 40.441 | 10.528 / 29.078 / 39.351 |
+| Request to presentation | 183 | 70.097 / 92.240 / 102.634 | 68.787 / 86.194 / 92.992 |
+
+Median acknowledgement/readiness increased about 0.15/0.13 ms. Their p95 values
+were essentially unchanged; presentation p95 fell 6.6% in this workload. This
+does not establish a general latency gain, large-frame throughput, or fairness
+under aggregate exhaustion. Encoding now belongs to `server_handled`, while
+`server_ack_sent` measures send/flush of an already prepared frame; individual
+phase durations are not directly comparable to the earlier encoding placement.
+
+The standard engine comparison also validated all 12 runs at 16/256 regions,
+with identical work, save and disclosure counts. These examples call the engine
+directly and do not exercise the changed transport path. Their 2,100 commands
+per side had p50/p95/max ms of 0.225/0.418/1.036 versus 0.228/0.403/1.255 at 16
+regions, and 0.224/0.415/2.474 versus 0.228/0.390/0.859 at 256. Saved bytes stayed
+610,304/679,936. Three-run save medians/p95 were 120.7/153.3 versus 113.8/171.4 ms
+at 16 regions (p95 +11.8%), and 147.7/313.0 versus 131.3/191.5 ms at 256. Replay
+medians/p95 were 162.0/178.2 versus 177.7/177.8 ms at 16 regions (median +9.7%),
+and 176.5/181.5 versus 182.8/182.8 ms at 256. These small save/replay samples and
+their variation are retained without attributing them to transport or claiming
+a persistence improvement.
+
 Runtime timing records and save warnings now use a server-owned, bounded host
 worker. Producers use nonblocking admission, preserve original timing fields and
 timestamps, and never perform console writes. Record ownership accounts for loss

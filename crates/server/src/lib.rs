@@ -6,6 +6,8 @@ mod diagnostics;
 mod engine;
 pub mod generator;
 mod history_index;
+mod outbound;
+pub use outbound::OutboundLimits;
 pub mod journal;
 pub mod performance_fixture;
 mod preload;

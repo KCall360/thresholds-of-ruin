@@ -447,8 +447,15 @@ python scripts/timing_correlation.py target/correlated --output target/correlate
 ```
 
 The report joins accepted actions by request identity and retains the original
-acknowledgement and line-receipt metrics. Native exploration additionally retains
-all intervening frame profiles and reader work/queue delay. Cross-process timestamps
+acknowledgement and line-receipt metrics.
+
+Outbound frames are encoded once by the service before queue admission.
+`server_handled` therefore includes encoding, while `server_ack_sent` measures
+the socket send/flush of the prepared frame. Preserve that distinction when
+comparing captures from earlier builds that encoded in the socket task.
+
+Native exploration additionally retains all intervening frame profiles and
+reader work/queue delay. Cross-process timestamps
 use the same host wall clock; the Python reader calibrates its monotonic clock
 once and timestamps the exact recorded boundaries through that offset. Phase
 durations use monotonic clocks. Clock adjustments can limit cross-process attribution. A receiver can

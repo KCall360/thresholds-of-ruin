@@ -203,7 +203,7 @@ pub(crate) async fn run(
         let stall_deadline = stalled.values().min().map(|since| *since + stall);
         let space = async {
             match full.first() {
-                Some((_, sender)) => drop(sender.reserve_many(HEADROOM).await),
+                Some((_, sender)) => sender.wait_for_headroom(HEADROOM).await,
                 None => std::future::pending().await,
             }
         };
