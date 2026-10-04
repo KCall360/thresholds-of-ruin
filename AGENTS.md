@@ -117,8 +117,10 @@ now centralize entry lookup and privacy-scoped pagination, verified by full
 Windows debug/release checks. The private actor store and portal-local body
 indexes passed full Windows checks, release comparisons, and deployed client
 checks, including indexed disclosure and region membership. Their maintenance
-costs are recorded in the plan. AI preparation and the admission/scheduler split
-are next.
+costs are recorded in the plan. Decision-local shared route searches passed full
+Windows checks, release comparisons and deployed client checks. Small-case timing
+regressions are recorded alongside reduced search counts. AI preparation and the
+admission/scheduler split are next.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and
 runtime selection/implementation for scripting are deferred. No format versions

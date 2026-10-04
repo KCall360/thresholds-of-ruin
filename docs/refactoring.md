@@ -20,6 +20,26 @@ and ordered effects are published. Retries resolve existing receipts; reconnect
 must not duplicate an uncertain action. Queue, cancellation, restart, rewind,
 and region-freezing semantics belong in deterministic saved state.
 
+The target gameplay flow has two persistence/publication boundaries. This is the
+planned architecture; the general intent-admission queue is not implemented yet.
+
+```mermaid
+flowchart TD
+    Request[Gameplay request] --> Admission[Validate authority, receipt and admission conditions]
+    Admission --> Intent[Prepare intention in private candidate state]
+    Intent --> Admit[Admit admission record and required inputs]
+    Admit --> Accepted[Publish acceptance and simulation queue state]
+    Accepted --> Scheduler[Simulation selects due intention]
+    Scheduler --> Execute[Revalidate and execute against private candidate state]
+    Execute --> Resolve[Resolve scheduling, regions and observations]
+    Resolve --> Record[Admit execution record and required inputs]
+    Record --> Effects[Publish authoritative state and ordered effects]
+```
+
+Immediate queries and metadata operations use their own request paths. An
+acceptance acknowledges the queued intention. Clients use simulation effects and
+authoritative readiness to determine when subsequent gameplay intentions are available.
+
 Spatial indexes are backend-only derived data. Keys use region-local locations;
 no global Euclidean distance is assumed. Occupancy includes every portal-resolved
 body cell and its frame. Queries crossing regions follow portal topology. Clients
@@ -136,6 +156,25 @@ This stage passed full Windows verification. The index uses memory proportional 
 body cells; resident memory is not yet measured. Shared root maps can still copy
 their entries on first mutation, and geometry edits can incur a complete body
 rebuild. These changes do not establish constant-time whole commands.
+
+AI target ranking, pursuit, and retreat-distance lookup now share one incremental
+minimum-tick route search within a decision. The frontier borrows authoritative
+actor state and remembered navigation, so it cannot outlive a game mutation. It
+uses the existing direction order, orientation composition, diagonal rules,
+movement costs, and discovery-order tie breaks; it reads no hidden terrain.
+Completed destinations reuse the first settled frame and predecessor chain.
+Search memory lasts only for that decision and is not saved.
+
+Reference comparisons cover target-order changes, repeated lookups, directed
+cycles, portal frames, blocked cells, and unreachable destinations. A public
+simulation regression with fifteen visible targets starts one search instead of
+one per target. A real headless client verifies AI-scoped history and saves,
+restarts, and continues at an authoritative decision boundary. Full Windows
+checks passed, including 216 debug Python/process tests and 106 release process
+tests. The updated desktop targets passed six real-client connection/frame checks.
+Release measurements and their limits are below. Route construction still
+allocates each returned path, and selecting versus executing an AI action still
+computes the decision twice; removing that duplication remains pending.
 
 Historical queries now use a derived entry-ID lookup and ordered buckets for
 each branch, actor, and private author. Pages merge actor-wide and own-private
@@ -257,3 +296,32 @@ Restart samples number only three per latency case, and save/resume samples numb
 nine per physics case. These measurements do not establish a broad latency or
 save-time improvement. The scaling regressions establish bounded local query work;
 resident cache memory remains unmeasured. Raw samples remain local and unpublished.
+
+### Shared-route release comparison
+
+Three interleaved rounds compared decision-local shared searches with the
+actor/body checkpoint on the same Windows host. A further three rounds repeated
+the unexpectedly slower small case using the same verified binaries. Timings
+are milliseconds, baseline to refactor; both result sets are retained.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor / command | 915 | 0.559 → 0.582 | 0.804 → 0.852 | 1.946 → 3.903 |
+| Same small case, repeat / command | 915 | 0.544 → 0.564 | 0.786 → 0.815 | 1.307 → 2.242 |
+| 64 regions, 8 actors / command | 7,500 | 0.029 → 0.028 | 2.583 → 2.537 | 7.264 → 7.205 |
+| Combat, 8 actors / 1,000 history / command | 576 | 0.507 → 0.522 | 3.356 → 3.288 | 4.125 → 3.906 |
+| Same combat / decision | 576 | 0.076 → 0.084 | 0.549 → 0.546 | 0.771 → 0.694 |
+| Same combat / resume | 9 | 192.5 → 194.6 | 201.9 → 206.0 | 201.9 → 206.0 |
+| Same combat / save | 9 | 403.4 → 202.3 | 446.7 → 371.6 | 446.7 → 371.6 |
+
+All runs validated. Combat body-cell work, scenes, navigation refreshes, saved
+bytes, and disclosed bytes were unchanged; ordinary-case workload counts were
+also unchanged. Small-case p95 increased 5.9% initially and 3.8% on repeat, or
+48 and 29 microseconds. Eight-actor play and combat command p95 decreased by
+about 2%, but combat decision p95 was almost unchanged and decision median rose
+by eight microseconds. Save timings varied substantially between rounds; these
+runs do not establish a save-time improvement. Save/resume samples number only
+nine per combat case. Multi-target latency, isolated single-route latency, and
+resident frontier memory remain unmeasured. The regression tests establish one
+search per fifteen-target decision and exact route equivalence. These remain
+diagnostic local measurements, with raw samples unpublished.

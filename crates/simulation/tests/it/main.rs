@@ -3,6 +3,7 @@
 
 mod action_boundaries;
 mod actor_index;
+mod ai_search;
 mod combat;
 mod diagonal;
 mod doors;
