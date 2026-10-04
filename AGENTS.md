@@ -106,57 +106,29 @@ duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
 **Architecture refactor (active).** The maintainer authorized the
-[refactor plan](docs/refactoring.md). Work is isolated from the original dirty
-interactions checkout. Explicit command mappings and derived boundary observation
-reuse are the first checkpoint, verified by the full Windows debug/release suite
-and release comparisons. A private item store now centralizes mutations and
-maintains derived ground-location and inventory-owner indexes, verified by full
-Windows debug/release checks and release comparisons. Transfer overhead and
-candidate-count improvements are recorded in the plan. Derived history indexes
-now centralize entry lookup and privacy-scoped pagination, verified by full
-Windows debug/release checks. The private actor store and portal-local body
-indexes passed full Windows checks, release comparisons, and deployed client
-checks, including indexed disclosure and region membership. Their maintenance
-costs are recorded in the plan. Decision-local shared route searches passed full
-Windows checks, release comparisons and deployed client checks. Small-case timing
-regressions are recorded alongside reduced search counts. Backend request
-metadata extraction and the checked-request executor passed full Windows checks,
-release comparisons and deployed client checks. Stale requests reject before
-candidate capture; receipt and authorization precedence remain covered.
-Immutable body sharing across in-memory snapshots passed full Windows checks and
-deployed client checks. Readiness changes copy zero definitions in scaling tests;
-encoded saves retain their existing values. Repeat measurements retained a
-restore regression, recorded in the plan; decode/content pooling remains pending.
-Storage queue accounting now releases copied-source capacity after committed
-writes; full Windows and deployed-client checks passed. A separate producer gate
-now releases the worker/status lock during encoding and checkpoint capture,
-verified by concurrency regressions, full Windows checks, release comparisons
-and deployed-client checks. Timing limits are recorded in the plan. Observation
-delta translation now rejects overflow and falls back to full observations when
-needed, verified by full Windows checks and ten deployed-client checks. Structural
-observation validation now rejects malformed full and reconstructed views before
-client publication, verified by full Windows checks and twelve deployed-client
-checks. Autonomous AI now chooses and executes once in private candidate state,
-then uses the shared journal/revision/region/publication path. Replay still
-validates recorded actions normally. Full Windows and twelve deployed-client
-checks passed; release comparisons and a controlled repeat validated. Measured
-gains, restore tails and limits are recorded in the plan. Save framing and strict
-validation now have a focused codec boundary, verified by full Windows checks,
-release comparisons and twelve deployed-client checks. The original decode
-algorithm is retained after measurements rejected a proposed reader change;
-timing tails and limits are recorded in the plan. Saved-data acquisition now gates
-SQL payload types and lengths before owned copies, compares borrowed retry values,
-streams bounded package chunks and validates copied-source identities. Package
-file reads stop at their byte limit plus one. Quick/full Windows checks, two
-validated release comparisons and thirteen deployed-client checks passed; higher
-timing tails and unmeasured memory limits are recorded in the plan. Scenario
-compilation, decode/content pooling and the admission/scheduler split remain.
-The versioned queue
-and stream-recovery proposal awaits explicit format authorization.
-Gameplay must admit intentions to simulation-owned
-scheduling. Derived topology indexes stay backend-only. Text-client fixes and
-runtime selection/implementation for scripting are deferred. No format versions
-have changed at this checkpoint.
+[refactor plan](docs/refactoring.md). Work remains isolated from the original
+dirty interactions checkout. Fifteen local implementation checkpoints cover
+explicit command mappings, shared boundary observations, portal-local item/body
+and privacy-scoped history indexes, shared route searches, checked requests,
+immutable body sharing, storage accounting and concurrency, atomic observation
+validation, single-decision AI execution, strict save-codec boundaries, bounded
+saved/authored input acquisition, and separate authoring/prepared scenario types.
+Current quick/full Windows verification passed, including 224 debug Python/process
+tests and 114 release process tests; all fourteen deployed-client checks passed.
+
+Release comparisons and their limits are recorded in the plan. Reduced query and
+copy counts do not establish broad latency or resident-memory improvements.
+The body-sharing restore regression and higher falling-physics command tails
+remain unresolved. Compiler source diagnostics and reference normalization,
+content pooling, transport fairness/byte accounting, further persistence work,
+and the admission/scheduler split remain open. Windows/Linux CI is still required
+before merging; publishing awaits explicit authorization.
+
+The versioned queue and stream-recovery proposal awaits explicit format
+authorization. Gameplay must admit intentions to simulation-owned scheduling.
+Derived topology indexes stay backend-only. Text-client fixes and scripting
+runtime selection/implementation are deferred. Existing format versions remain
+unchanged; future scripting informs boundaries without adding a runtime.
 
 **Test suite rationalization (complete, PR #59).** Process tests share
 `scripts/process_harness.py` and use the headless client for wizard setup;

@@ -152,6 +152,73 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Scenario declarations now own combat, attack, body, AI and damage schemas instead
+of embedding simulation types. Explicit conversions preserve field values,
+canonical serialization, defaults, required nested fields and unknown-field
+rejection. The manifest's prepared character, AI and archetype definitions are
+immutable and shared through the package index; region construction resolves
+instance overrides against those definitions. Author edits require fresh
+preparation. Prepared definitions are reconstructed and never enter saved state.
+Region instances and their geometry remain lazy, with existing portal frames,
+identity reservation, generator seeds and validation ordering.
+
+The failing-first regression reproduced one whole-archetype copy per prepared
+region build at 16, 256 and 4,096 unrelated definitions; the updated path copies
+zero whole declarations. This does not eliminate the simulation values copied
+into a newly built actor or measure resident memory. Focused tests passed for
+snapshot isolation, compiled attributes, serialization and every package's
+whole-versus-lazy construction across seeds and activation orders. An actual
+client validated an edited package, exercised inherited and overridden items,
+saved, restarted with matching state/history and continued play. Runtime tests
+also verify all inherited and overridden combat/body fields, timing, AI profiles,
+assets and hidden item-property merging against authoritative checkpoint values.
+Quick and full Windows verification passed, including debug/release Rust tests,
+224 debug Python/process tests and all 114 release process tests. Release
+comparisons validated with unchanged work, disclosure and saved-byte counts.
+All fourteen deployed-client checks passed after including the scenario validator
+in the local deployment. Source diagnostics and further compiler responsibility extraction remain
+open; this is not a claim that the entire scenario compiler refactor is complete.
+
+The compiler comparison used three interleaved rounds of 16- and 256-region
+streaming, combat and falling physics. A controlled combat/physics repeat reused
+the same binaries to investigate higher physics tails and long-history save
+medians. All 24 initial runs and 12 repeat runs validated. Raw samples stay local;
+no latency, initial-construction or resident-memory improvement is claimed.
+
+Streaming command timings (2,100 samples per side and case) changed from
+.219 / .407 / 1.017 to .221 / .422 / 1.082 milliseconds at 16 regions, and from
+.221 / .398 / 1.440 to .220 / .384 / .924 at 256 regions (p50 / p95 / maximum).
+Replay has only three samples per side: median/p95 changed 160.3 / 162.8 →
+160.4 / 165.0 and 162.6 / 180.4 → 165.6 / 182.6 respectively. Both retained
+700 history entries, 128 rewind boundaries and identical region work. Save sizes
+stayed 610,304 and 679,936 bytes respectively.
+
+Paired combat decision-and-command timings have 576 samples per side and case.
+Values are p50 / p95 / maximum in milliseconds, baseline → updated:
+
+| Case | Initial comparison | Same-binary repeat |
+| --- | --- | --- |
+| Two actors, no history | .2544 / .8217 / 2.4275 → .2379 / .7960 / 2.6461 | .2407 / .7916 / 3.0327 → .2338 / .7950 / 2.8993 |
+| Two actors, 1,000 history | .2318 / .7404 / 1.1968 → .2313 / .7307 / 1.4506 | .2329 / .7330 / 1.2132 → .2316 / .7393 / 1.1670 |
+| Eight actors, no history | .7928 / 3.9377 / 7.5889 → .7955 / 3.9751 / 7.1784 | .7918 / 3.8655 / 5.9716 → .7969 / 3.9992 / 6.6346 |
+| Eight actors, 1,000 history | .5605 / 3.3878 / 3.9653 → .5457 / 3.4075 / 4.8898 | .5604 / 3.4209 / 3.9400 → .5501 / 3.4124 / 4.3294 |
+
+Falling-physics command timings (576 samples per side) changed from
+.095 / 11.789 / 23.552 to .092 / 12.671 / 21.225 initially, and from
+.094 / 11.866 / 19.697 to .094 / 13.040 / 21.403 in the repeat. The 7.5% and
+9.9% p95 increases remain unresolved. Physics work stayed 97,512 steps,
+233,064 body cells and 381 scenes; saved/disclosed bytes were unchanged.
+
+Restore and save have only nine samples per side and case. Falling restore
+median rose 1.8% initially and 7.2% in the repeat, while p95 fell 10.6% and 8.3%.
+Falling repeat save p95 rose 12.8%. Long-history combat save median initially
+rose 93.3% for two actors and 72.8% for eight, then fell 22.6% and 15.6% in the
+repeat. Other repeat tails increased: no-history two-actor save p95 +62.6%,
+restore p95 +14.9%, standalone command p95 +8.8% and client-apply p95 +16.0%.
+Eight-actor no-history client-apply p95 rose 13.0%. These variations and the
+retained physics regression remain open performance work. The copying regression
+proves avoided whole-declaration copies rather than faster complete commands.
+
 Saved-data acquisition now checks SQL value types and byte lengths before
 selecting payloads, then checks borrowed bytes before Rust-owned copies. Source
 limits count UTF-8 bytes. Retry reconciliation compares bounded borrowed values;

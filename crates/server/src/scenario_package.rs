@@ -7,6 +7,12 @@ use std::path::{Component, Path};
 use std::sync::Arc;
 
 use crate::{Failure, Scenario};
+#[path = "scenario_authoring.rs"]
+mod authoring;
+#[path = "scenario_compiler.rs"]
+mod compiler;
+pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
+use compiler::PreparedDefinitions;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tor_simulation::Game;
@@ -58,7 +64,7 @@ pub struct Manifest {
     #[serde(default)]
     pub factions: BTreeMap<String, std::collections::BTreeSet<String>>,
     #[serde(default)]
-    pub ai_profiles: BTreeMap<String, tor_simulation::ai::AiProfile>,
+    pub ai_profiles: BTreeMap<String, AiProfile>,
     pub format: u32,
     pub id: String,
     pub version: String,
@@ -106,11 +112,12 @@ pub struct AppearancePool {
     /// it never discloses which identity an item is.
     pub asset: Option<String>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
-    pub combat: Option<tor_simulation::combat::CombatSpec>,
-    pub body: Option<tor_simulation::BodySpec>,
+    pub combat: Option<CombatSpec>,
+    pub body: Option<BodySpec>,
     pub identity: Option<String>,
     pub appearance_pool: Option<String>,
     #[serde(default)]
@@ -122,11 +129,32 @@ pub struct Archetype {
     /// The asset clients draw actors and items of this archetype with.
     pub asset: Option<String>,
 }
+#[cfg(test)]
+thread_local! {
+    static ARCHETYPE_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+impl Clone for Archetype {
+    fn clone(&self) -> Self {
+        ARCHETYPE_DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
+        Self {
+            combat: self.combat.clone(),
+            body: self.body.clone(),
+            identity: self.identity.clone(),
+            appearance_pool: self.appearance_pool.clone(),
+            stackable: self.stackable,
+            properties: self.properties.clone(),
+            name: self.name.clone(),
+            turn_ticks: self.turn_ticks,
+            asset: self.asset.clone(),
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
-    pub combat: Option<tor_simulation::combat::CombatSpec>,
-    pub body: Option<tor_simulation::BodySpec>,
+    pub combat: Option<CombatSpec>,
+    pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
     #[serde(default)]
     pub known_identities: Vec<String>,
@@ -261,8 +289,8 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
-    pub combat: Option<tor_simulation::combat::CombatSpec>,
-    pub body: Option<tor_simulation::BodySpec>,
+    pub combat: Option<CombatSpec>,
+    pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
     pub id: u64,
     pub at: [i32; 3],
@@ -1117,10 +1145,10 @@ impl Package {
             .filter_map(|i| i.archetype.as_ref())
             .chain(generated.flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes)));
         for key in actors {
-            assets.extend(self.archetype(&Some(key.clone()))?.asset);
+            assets.extend(self.author_archetype(key)?.asset.iter().cloned());
         }
         for key in items {
-            assets.extend(self.item_asset(&self.archetype(&Some(key.clone()))?));
+            assets.extend(self.item_asset(self.author_archetype(key)?));
         }
         Ok(assets)
     }
@@ -1163,7 +1191,10 @@ impl Package {
             )?;
         }
         for (name, profile) in &self.manifest.ai_profiles {
-            require(label(name) && profile.valid(), "Invalid AI profile")?;
+            require(
+                label(name) && tor_simulation::ai::AiProfile::from(profile.clone()).valid(),
+                "Invalid AI profile",
+            )?;
         }
         for spec in self
             .manifest
@@ -1181,9 +1212,9 @@ impl Package {
         }
         Ok(())
     }
-    fn check_combat(&self, spec: &tor_simulation::combat::CombatSpec) -> Result<(), Failure> {
+    fn check_combat(&self, spec: &CombatSpec) -> Result<(), Failure> {
         require(
-            spec.valid()
+            tor_simulation::combat::CombatSpec::from(spec.clone()).valid()
                 && (self.manifest.factions.is_empty()
                     || self.manifest.factions.contains_key(&spec.faction)),
             "Invalid combat attributes or faction",
@@ -1480,16 +1511,11 @@ impl Package {
         }
         Ok(result)
     }
-    fn archetype(&self, key: &Option<String>) -> Result<Archetype, Failure> {
-        key.as_ref()
-            .map(|key| {
-                self.manifest
-                    .archetypes
-                    .get(key)
-                    .cloned()
-                    .ok_or_else(|| fail(format!("Unknown archetype {key}")))
-            })
-            .unwrap_or(Ok(Archetype::default()))
+    fn author_archetype(&self, key: &str) -> Result<&Archetype, Failure> {
+        self.manifest
+            .archetypes
+            .get(key)
+            .ok_or_else(|| fail(format!("Unknown archetype {key}")))
     }
     pub(crate) fn build(&self, seed: u64, _runtime: bool) -> Result<Game, Failure> {
         self.check()?;
@@ -1529,6 +1555,7 @@ impl Package {
     /// Whole-package facts that building regions needs, computed once so
     /// building one region reads only that region and its neighbours.
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
+        let definitions = Arc::new(PreparedDefinitions::new(&self.manifest, self.selected));
         let anchors = self.anchors()?;
         let mut anchors_by_region: BTreeMap<u64, Vec<(String, Location)>> = BTreeMap::new();
         for (name, at) in &anchors {
@@ -1550,7 +1577,7 @@ impl Package {
             for a in &r.actors {
                 let ticks = a
                     .turn_ticks
-                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .or(definitions.archetype(&a.archetype)?.turn_ticks)
                     .unwrap_or(100);
                 require(
                     spawns.insert(a.id, (loc(r.id, a.at), ticks)).is_none(),
@@ -1618,6 +1645,7 @@ impl Package {
             ceilings.1 = ceilings.1.max(end(generated_base.1)?);
         }
         Ok(PackageIndex {
+            definitions,
             anchors,
             anchors_by_region,
             homes,
@@ -1911,6 +1939,7 @@ impl Package {
         let chosen: BTreeSet<u64> = regions.iter().map(|r| r.id).collect();
         let keep = |id: u64| chosen.contains(&id);
         let homes = &index.homes;
+        let definitions = &index.definitions;
         let mut spawns: Vec<_> = chosen
             .iter()
             .flat_map(|r| index.spawns.get(r).into_iter().flatten())
@@ -1921,7 +1950,7 @@ impl Package {
             for a in &r.actors {
                 let ticks = a
                     .turn_ticks
-                    .or(self.archetype(&a.archetype)?.turn_ticks)
+                    .or(definitions.archetype(&a.archetype)?.turn_ticks)
                     .unwrap_or(100);
                 spawns.push((a.id, loc(r.id, a.at), ticks));
             }
@@ -1935,23 +1964,18 @@ impl Package {
             )
             .map_err(|e| fail(format!("Actor {id}: {e:?}")))?;
         }
-        for c in &self.manifest.characters {
-            if (c.id == self.selected || c.unselected == "ai")
+        for c in &definitions.characters {
+            if (c.selected || c.unselected == "ai")
                 && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
             {
-                if let Some(spec) = c.combat.clone().or_else(|| {
-                    self.manifest
-                        .objective
-                        .as_ref()
-                        .map(|_| tor_simulation::combat::CombatSpec::default())
-                }) {
+                if let Some(spec) = c.combat.clone() {
                     game.configure_combat(tor_simulation::ActorId(c.id), spec)
                         .map_err(|_| fail("Invalid character combat specification"))?;
                 }
-                if c.id != self.selected && c.unselected == "ai" {
+                if !c.selected && c.unselected == "ai" {
                     let profile =
                         c.ai.as_ref()
-                            .and_then(|name| self.manifest.ai_profiles.get(name))
+                            .and_then(|name| definitions.ai_profiles.get(name))
                             .ok_or_else(|| fail("Unknown character AI profile"))?;
                     game.configure_ai(tor_simulation::ActorId(c.id), profile.clone())
                         .map_err(|_| fail("AI requires combat attributes"))?;
@@ -1975,38 +1999,41 @@ impl Package {
         }
         for r in regions {
             for a in &r.actors {
+                let archetype = definitions.archetype(&a.archetype)?;
                 if let Some(spec) = a
                     .combat
-                    .as_ref()
-                    .or(self.archetype(&a.archetype)?.combat.as_ref())
+                    .clone()
+                    .map(Into::into)
+                    .or_else(|| archetype.combat.clone())
                 {
-                    game.configure_combat(tor_simulation::ActorId(a.id), spec.clone())
+                    game.configure_combat(tor_simulation::ActorId(a.id), spec)
                         .map_err(|_| fail("Invalid actor combat specification"))?;
                 }
                 if a.controller == "ai" {
                     let profile =
                         a.ai.as_ref()
-                            .and_then(|name| self.manifest.ai_profiles.get(name))
+                            .and_then(|name| definitions.ai_profiles.get(name))
                             .ok_or_else(|| fail("Unknown actor AI profile"))?;
                     game.configure_ai(tor_simulation::ActorId(a.id), profile.clone())
                         .map_err(|_| fail("AI requires combat attributes"))?;
                 }
                 if let Some(body) = a
                     .body
-                    .as_ref()
-                    .or(self.archetype(&a.archetype)?.body.as_ref())
+                    .clone()
+                    .map(Into::into)
+                    .or_else(|| archetype.body.clone())
                 {
                     if !body.cells.contains(&body.eye) {
                         return Err(fail("Actor body eye must be one of its cells"));
                     }
-                    game.set_body(tor_simulation::ActorId(a.id), body.clone())
+                    game.set_body(tor_simulation::ActorId(a.id), body)
                         .map_err(|_| fail("Actor body does not fit"))?;
                 }
                 if let Some(v) = a.velocity {
                     game.set_actor_velocity(tor_simulation::ActorId(a.id), v)
                         .map_err(|_| fail("Invalid actor velocity"))?;
                 }
-                let asset = self.archetype(&a.archetype)?.asset;
+                let asset = archetype.actor_asset.clone();
                 if asset.is_some() {
                     game.set_actor_asset(tor_simulation::ActorId(a.id), asset)
                         .map_err(|_| fail("Unknown actor"))?;
@@ -2021,7 +2048,7 @@ impl Package {
             .collect();
         items.sort_by_key(|(_, i)| i.id);
         for (region, i) in items {
-            let archetype = self.archetype(&i.archetype)?;
+            let archetype = definitions.archetype(&i.archetype)?;
             let name = if i.seed_names.is_empty() {
                 i.name
                     .clone()
@@ -2040,7 +2067,7 @@ impl Package {
             )?;
             let key = i.archetype.clone().unwrap_or_else(|| name.clone());
             let identity = archetype.identity.clone().unwrap_or_else(|| key.clone());
-            let concealed = archetype.appearance_pool.is_some();
+            let concealed = archetype.concealed;
             require(
                 !concealed || (i.name.is_none() && i.seed_names.is_empty()),
                 "Concealed items cannot override their identity name",
@@ -2051,7 +2078,7 @@ impl Package {
                 .unwrap_or_else(|| name.clone());
             let stackable = i.stackable.unwrap_or(archetype.stackable);
             require(
-                self.manifest.objective.as_ref().and_then(|o| o.item) != Some(i.id) || !stackable,
+                definitions.objective_item != Some(i.id) || !stackable,
                 "Objective item instances must be non-stackable",
             )?;
             let mut properties = archetype.properties.clone();
@@ -2064,7 +2091,7 @@ impl Package {
                 concealed,
                 stackable,
                 properties,
-                asset: self.item_asset(&archetype),
+                asset: archetype.item_asset.clone(),
             };
             require(
                 i.quantity > 0 && (stackable || i.quantity == 1),
@@ -2078,7 +2105,7 @@ impl Package {
                 "Invalid item properties",
             )?;
             // Inventory of omitted characters is omitted with its owner.
-            if self.omitted_carrier(i.carried_by) {
+            if definitions.omitted_carrier(i.carried_by) {
                 continue;
             }
             // A carried item starts with its carrier, which may be authored
@@ -2096,8 +2123,8 @@ impl Package {
             )
             .map_err(|e| fail(format!("Item {}: {e:?}", i.id)))?;
         }
-        for c in &self.manifest.characters {
-            if (c.id == self.selected || c.unselected != "omit")
+        for c in &definitions.characters {
+            if (c.selected || c.unselected != "omit")
                 && homes.get(&c.id).is_some_and(|h| keep(h.region.0))
             {
                 for identity in &c.known_identities {
@@ -2192,6 +2219,7 @@ impl Package {
 /// Whole-package facts for building regions (see [`Package::index`]).
 #[derive(Clone, Debug)]
 pub(crate) struct PackageIndex {
+    definitions: Arc<PreparedDefinitions>,
     anchors: BTreeMap<String, Location>,
     anchors_by_region: BTreeMap<u64, Vec<(String, Location)>>,
     /// Where each spawned actor starts.
@@ -2308,6 +2336,304 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compiled_instances_preserve_inheritance_and_explicit_overrides() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let mut manifest = template.manifest.clone();
+        let mut regions = template.region_defs().unwrap();
+        let inherited_combat: CombatSpec = serde_json::from_value(serde_json::json!({
+            "name": "guard", "max_hp": 41, "defense": -3, "faction": "neutral",
+            "attack": {"bonus": -7, "wind_up": 19, "recovery": 23,
+                "damage": {"energy": 1, "impact": 2, "keen": 3, "spirit": 4, "vital": 5}},
+            "immunities": ["energy", "vital"],
+            "reductions": {"impact": 6, "keen": 7, "spirit": 8}
+        }))
+        .unwrap();
+        let override_combat = CombatSpec {
+            name: "override".into(),
+            max_hp: 57,
+            ..Default::default()
+        };
+        let inherited_body = BodySpec {
+            cells: vec![[0, 0, 0]],
+            eye: [0, 0, 0],
+            mass: 91,
+        };
+        let override_body = BodySpec {
+            mass: 137,
+            ..inherited_body.clone()
+        };
+        manifest.archetypes.insert(
+            "guard".into(),
+            Archetype {
+                combat: Some(inherited_combat.clone()),
+                body: Some(inherited_body.clone()),
+                identity: Some("guard-item".into()),
+                name: Some("guard token".into()),
+                stackable: true,
+                properties: BTreeMap::from([
+                    ("quality".into(), "fine".into()),
+                    ("origin".into(), "authored".into()),
+                ]),
+                turn_ticks: Some(73),
+                asset: Some("creature.guard".into()),
+                ..Default::default()
+            },
+        );
+        manifest
+            .assets
+            .insert("stone".into(), vec!["creature.guard".into()]);
+        manifest.ai_profiles.insert(
+            "careful".into(),
+            AiProfile {
+                memory_ticks: 73,
+                flee_percent: 19,
+            },
+        );
+        regions[0].actors.extend([
+            Actor {
+                id: 2,
+                at: [3, 1, 0],
+                archetype: Some("guard".into()),
+                combat: None,
+                body: None,
+                turn_ticks: None,
+                controller: "ai".into(),
+                ai: Some("careful".into()),
+                velocity: None,
+            },
+            Actor {
+                id: 3,
+                at: [4, 1, 0],
+                archetype: Some("guard".into()),
+                combat: Some(override_combat.clone()),
+                body: Some(override_body.clone()),
+                turn_ticks: Some(89),
+                controller: "external".into(),
+                ai: None,
+                velocity: Some([1, 0, 0]),
+            },
+        ]);
+        regions[0].items.extend([
+            Item {
+                id: 3,
+                at: [1, 1, 0],
+                archetype: Some("guard".into()),
+                name: None,
+                quantity: 3,
+                stackable: None,
+                properties: BTreeMap::new(),
+                carried_by: None,
+                seed_names: vec![],
+            },
+            Item {
+                id: 4,
+                at: [1, 1, 0],
+                archetype: Some("guard".into()),
+                name: Some("named gift".into()),
+                quantity: 1,
+                stackable: Some(false),
+                properties: BTreeMap::from([("quality".into(), "ordinary".into())]),
+                carried_by: Some(1),
+                seed_names: vec![],
+            },
+        ]);
+        let package = Package::from_parts(manifest, regions).unwrap();
+        let game = package.build(42, true).unwrap();
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let snapshot = serde_json::to_value(game.checkpoint(&mut shared)).unwrap();
+        let shared = serde_json::to_value(shared).unwrap();
+        for (id, combat, body, ticks) in [
+            ("2", inherited_combat, inherited_body, 73),
+            ("3", override_combat, override_body, 89),
+        ] {
+            let actor = &snapshot["actors"][id];
+            assert_eq!(
+                actor["combat"]["spec"],
+                serde_json::to_value(combat).unwrap()
+            );
+            assert_eq!(actor["body"], serde_json::to_value(body).unwrap());
+            assert_eq!(actor["turn_ticks"], ticks);
+            assert_eq!(actor["asset"], "creature.guard");
+        }
+        assert_eq!(
+            snapshot["combat"]["ai"]["2"]["profile"],
+            serde_json::json!({"memory_ticks": 73, "flee_percent": 19})
+        );
+        assert_eq!(
+            snapshot["actors"]["3"]["motion"]["velocity"],
+            serde_json::json!([1, 0, 0])
+        );
+        let items = &shared["items"][snapshot["items"].as_u64().unwrap() as usize];
+        assert_eq!(items["3"]["quantity"], 3);
+        assert_eq!(items["3"]["spec"]["name"], "guard token");
+        assert_eq!(items["3"]["spec"]["stackable"], true);
+        assert_eq!(items["4"]["spec"]["name"], "named gift");
+        assert_eq!(items["4"]["spec"]["stackable"], false);
+        assert_eq!(
+            items["4"]["spec"]["properties"],
+            serde_json::json!({"quality": "ordinary", "origin": "authored"})
+        );
+        for id in ["3", "4"] {
+            assert_eq!(items[id]["spec"]["identity"], "guard-item");
+            assert_eq!(items[id]["spec"]["asset"], "creature.guard");
+        }
+    }
+
+    #[test]
+    fn prepared_definitions_are_shared_and_isolated_from_author_edits() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut package = read_package(&root).unwrap();
+        let prepared = package.index(42).unwrap();
+        let copy = prepared.clone();
+        assert!(Arc::ptr_eq(&prepared.definitions, &copy.definitions));
+        let before: Vec<_> = [1, 2]
+            .into_iter()
+            .map(|id| package.build_region(42, &prepared, id).unwrap())
+            .collect();
+        package.manifest.characters[0].body.as_mut().unwrap().mass = 91;
+        for archetype in package.manifest.archetypes.values_mut() {
+            archetype.name = Some("renamed author definition".into());
+        }
+        for (offset, id) in [1, 2].into_iter().enumerate() {
+            assert_eq!(package.build_region(42, &copy, id).unwrap(), before[offset]);
+        }
+        let updated = package.index(42).unwrap();
+        assert!(!Arc::ptr_eq(&prepared.definitions, &updated.definitions));
+        for (offset, id) in [1, 2].into_iter().enumerate() {
+            assert_ne!(
+                package.build_region(42, &updated, id).unwrap(),
+                before[offset]
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_region_avoids_recopying_archetypes_at_every_scale() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let mut results = Vec::new();
+        for count in [16, 256, 4096] {
+            let mut package = read_package(&root).unwrap();
+            for id in 0..count {
+                package.manifest.archetypes.insert(
+                    format!("unrelated-{id}"),
+                    Archetype {
+                        name: Some(format!("unrelated-{id}")),
+                        body: Some(BodySpec {
+                            cells: vec![[0, 0, 0]],
+                            eye: [0, 0, 0],
+                            mass: 80,
+                        }),
+                        ..Default::default()
+                    },
+                );
+            }
+            let index = package.index(42).unwrap();
+            let expected = package.build_region(42, &index, 2).unwrap();
+            ARCHETYPE_DEFINITION_COPIES.with(|copies| copies.set(0));
+            let actual = package.build_region(42, &index, 2).unwrap();
+            assert_eq!(actual, expected);
+            results.push((
+                count,
+                ARCHETYPE_DEFINITION_COPIES.with(|copies| copies.get()),
+            ));
+        }
+        assert_eq!(results, vec![(16, 0), (256, 0), (4096, 0)]);
+    }
+
+    #[test]
+    fn authoring_combat_defaults_and_nested_requirements_are_stable() {
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "id": 7, "anchor": "1/start", "combat": {}
+        }))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(character.combat.unwrap()).unwrap(),
+            serde_json::json!({
+                "name": "figure", "max_hp": 30, "defense": 10,
+                "attack": {"bonus": 2, "wind_up": 60, "recovery": 40,
+                           "damage": {"impact": 4}},
+                "immunities": [], "reductions": {}, "faction": "neutral"
+            })
+        );
+        for combat in [
+            serde_json::json!({"attack": {"bonus": 2}}),
+            serde_json::json!({"unknown": 1}),
+            serde_json::json!({"attack": {"bonus": 2, "wind_up": 60,
+                "recovery": 40, "damage": {"other": 4}}}),
+        ] {
+            assert!(serde_json::from_value::<Character>(serde_json::json!({
+                "id": 7, "anchor": "1/start", "combat": combat
+            }))
+            .is_err());
+        }
+        for body in [
+            serde_json::json!({"cells": [[0, 0, 0]], "mass": 80}),
+            serde_json::json!({"cells": [[0, 0, 0]], "eye": [0, 0, 0]}),
+            serde_json::json!({"eye": [0, 0, 0], "mass": 80}),
+        ] {
+            assert!(serde_json::from_value::<Character>(serde_json::json!({
+                "id": 7, "anchor": "1/start", "body": body
+            }))
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn authoring_explicit_actor_values_preserve_canonical_shape() {
+        let value = serde_json::json!({
+            "id": 9, "at": [1, 2, 3], "archetype": "guard", "turn_ticks": 73,
+            "controller": "ai", "ai": "cautious", "velocity": [-1, 0, 2],
+            "body": {"cells": [[0, 0, 0], [0, 0, 1]], "eye": [0, 0, 1], "mass": 91},
+            "combat": {
+                "name": "guard", "max_hp": 41, "defense": -3, "faction": "guards",
+                "attack": {"bonus": -7, "wind_up": 19, "recovery": 23,
+                    "damage": {"energy": 1, "impact": 2, "keen": 3, "spirit": 4, "vital": 5}},
+                "immunities": ["energy", "vital"],
+                "reductions": {"impact": 6, "keen": 7, "spirit": 8}
+            }
+        });
+        let actor: Actor = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&actor).unwrap(), value);
+        let combat = actor.combat.unwrap();
+        let author_bytes = serde_json::to_vec(&combat).unwrap();
+        let compiled = tor_simulation::combat::CombatSpec::from(combat);
+        assert_eq!(serde_json::to_value(&compiled).unwrap(), value["combat"]);
+        assert_eq!(serde_json::to_vec(&compiled).unwrap(), author_bytes);
+        let body = actor.body.unwrap();
+        let author_bytes = serde_json::to_vec(&body).unwrap();
+        let compiled = tor_simulation::BodySpec::from(body);
+        assert_eq!(serde_json::to_value(&compiled).unwrap(), value["body"]);
+        assert_eq!(serde_json::to_vec(&compiled).unwrap(), author_bytes);
+    }
+
+    #[test]
+    fn authoring_ai_defaults_and_conversion_preserve_values() {
+        for (declaration, expected) in [
+            (
+                serde_json::json!({}),
+                serde_json::json!({"memory_ticks": 1000, "flee_percent": 25}),
+            ),
+            (
+                serde_json::json!({"flee_percent": 0}),
+                serde_json::json!({"memory_ticks": 1000, "flee_percent": 0}),
+            ),
+            (
+                serde_json::json!({"memory_ticks": 0, "flee_percent": 100}),
+                serde_json::json!({"memory_ticks": 0, "flee_percent": 100}),
+            ),
+        ] {
+            let author: AiProfile = serde_json::from_value(declaration).unwrap();
+            assert_eq!(serde_json::to_value(&author).unwrap(), expected);
+            let author_bytes = serde_json::to_vec(&author).unwrap();
+            let compiled = tor_simulation::ai::AiProfile::from(author);
+            assert_eq!(serde_json::to_value(&compiled).unwrap(), expected);
+            assert_eq!(serde_json::to_vec(&compiled).unwrap(), author_bytes);
+        }
+        assert!(serde_json::from_value::<AiProfile>(serde_json::json!({"unknown": 1})).is_err());
+    }
+
     #[test]
     fn acquisition_file_growth_cannot_bypass_the_read_limit() {
         struct Counted<'a> {

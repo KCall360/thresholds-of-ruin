@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let directory = tempfile::tempdir()?;
                 let mut package = (**template.package.as_ref().unwrap()).clone();
                 let z = if falling { 6 } else { 0 };
-                let body = tor_simulation::BodySpec {
+                let body = scenario_package::BodySpec {
                     cells: if cells == 2 {
                         vec![[0, 0, 0], [0, 0, 1]]
                     } else {

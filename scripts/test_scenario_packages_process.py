@@ -9,6 +9,50 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_compiled_inheritance_and_overrides_survive_save_restart(self):
+        package = self.directory / 'compiled-package'
+        shutil.copytree(ROOT / 'scenarios/two-room', package)
+        manifest = package / 'scenario.toml'
+        text = manifest.read_text()
+        text = text.replace('"token" = { "name" = "copper token" }',
+                            '"token" = { name = "compiled coin", stackable = true, '
+                            'properties = { quality = "fine" } }')
+        text = text.replace('"turn_ticks" = 100, body =',
+                            '"turn_ticks" = 100, combat = { name = "compiler hero", max_hp = 41 }, body =')
+        manifest.write_text(text.replace('mass = 80', 'mass = 91'))
+        region = package / 'regions/1.toml'
+        text = region.read_text()
+        start = text.index('items = ')
+        region.write_text(text[:start] + '''items = [
+            { id = 1, at = [1, 1, 0], archetype = "token", quantity = 3, properties = { quality = "ordinary" } },
+            { id = 3, at = [1, 1, 0], archetype = "token", name = "named gift", stackable = false }
+        ]
+        ''')
+        validated = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                   capture_output=True, text=True, timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        observation = initial['state']['observation']
+        self.assertEqual(observation['combat']['max_hp'], 41)
+        items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
+        self.assertEqual(items['compiled coin']['quantity'], 3)
+        self.assertEqual(items['named gift']['quantity'], 1)
+        taken = self.act(player, {'type': 'take', 'item': items['compiled coin']['id'], 'quantity': 2})
+        self.assertIsNone(taken['error'])
+        inventory = taken['state']['observation']['inventory']
+        self.assertEqual([(item['name'], item['quantity']) for item in inventory], [('compiled coin', 2)])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server(scenario=package)
+        resumed, restored = self.client()
+        self.assertEqual(restored['state'], taken['state'])
+        self.assertEqual(restored['history'], taken['history'])
+        dropped = self.act(resumed, {'type': 'drop', 'item': inventory[0]['id'], 'quantity': 1})
+        self.assertIsNone(dropped['error'])
+        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], 1)
+
     def test_validator_stale_rejection_and_ordinary_startup(self):
         package = self.directory / 'package'
         shutil.copytree(ROOT / 'scenarios/two-room', package)
