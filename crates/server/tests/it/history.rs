@@ -15,6 +15,122 @@ fn note(anchor: Anchor, text: &str, audience: Audience) -> Command {
 }
 
 #[test]
+fn history_pages_and_entry_anchors_survive_checkpoint_and_tail_replay() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("history.db");
+    let mut engine = Engine::open_with_policy(
+        &path,
+        Scenario::two_room(42),
+        tor_server::SavePolicy {
+            checkpoint_interval: 4,
+            ..tor_server::SavePolicy::default()
+        },
+    )
+    .unwrap();
+    let branch = engine.branch().clone();
+    let mut private = None;
+    for n in 0..11 {
+        let result = engine
+            .command(
+                "alice",
+                "text",
+                ActorId(1),
+                &format!("note-{n}"),
+                &branch,
+                note(
+                    Anchor::State { revision: 0 },
+                    &format!("Note {n}"),
+                    if n % 3 == 0 {
+                        Audience::Actor
+                    } else {
+                        Audience::Private
+                    },
+                ),
+            )
+            .unwrap();
+        if n == 1 {
+            private = Some(result.entry.id);
+        }
+    }
+    engine.flush().unwrap();
+    assert!(engine.save_status().checkpoint_sequence >= 4);
+    let pages: Vec<_> = ["alice", "observer"]
+        .into_iter()
+        .map(|user| {
+            let mut pages = Vec::new();
+            let mut before = None;
+            loop {
+                let page = engine
+                    .history(ActorId(1), user, before.as_ref(), 2)
+                    .unwrap();
+                before = page.older_before.clone();
+                pages.push(page);
+                if before.is_none() {
+                    break;
+                }
+            }
+            pages
+        })
+        .collect();
+    drop(engine);
+    let mut resumed = Engine::open(&path, Scenario::two_room(99)).unwrap();
+    for (user, expected) in ["alice", "observer"].into_iter().zip(pages) {
+        let mut before = None;
+        for page in expected {
+            assert_eq!(
+                resumed
+                    .history(ActorId(1), user, before.as_ref(), 2)
+                    .unwrap(),
+                page
+            );
+            before = page.older_before;
+        }
+    }
+    let private = private.unwrap();
+    assert_eq!(
+        resumed
+            .history(ActorId(1), "observer", Some(&private), 2)
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidAnchor
+    );
+    assert_eq!(
+        resumed
+            .command(
+                "observer",
+                "text",
+                ActorId(1),
+                "hidden-anchor",
+                &branch,
+                note(
+                    Anchor::Entry {
+                        id: private.clone()
+                    },
+                    "No access",
+                    Audience::Private
+                )
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidAnchor
+    );
+    resumed
+        .command(
+            "alice",
+            "text",
+            ActorId(1),
+            "own-anchor",
+            &branch,
+            note(
+                Anchor::Entry { id: private },
+                "Still accessible",
+                Audience::Private,
+            ),
+        )
+        .unwrap();
+}
+
+#[test]
 fn notes_preserve_state_and_pending_action_revision_and_survive_restart() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("game.json");

@@ -2,6 +2,101 @@ use tempfile::tempdir;
 use tor_protocol::{Action, ActorId};
 use tor_server::{journal::Command, ActorSetup, Engine, Scenario};
 
+#[test]
+fn autonomous_execution_prepares_one_ai_decision() {
+    let mut engine = Engine::memory(crate::support::load("dungeon-loop", 42)).unwrap();
+    crate::support::act_as(&mut engine, ActorId(1), Action::Wait).unwrap();
+    let before = tor_simulation::diagnostics::work_counts().route_searches;
+    let actor = engine.next_actor().expect("AI turn is due");
+    assert!(engine.is_ai(actor));
+    let (_, profile) = engine.advance_ai_profiled(actor).unwrap();
+    assert_eq!(profile.candidate_captures, 1);
+    assert_eq!(profile.simulation_transitions, 1);
+    assert_eq!(
+        tor_simulation::diagnostics::work_counts().route_searches - before,
+        1
+    );
+}
+
+#[test]
+fn autonomous_execution_preserves_disclosures_and_both_restore_paths() {
+    for interval in [1, 4096] {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ai.db");
+        let reference_path = dir.path().join("reference.db");
+        let scenario = crate::support::load("dungeon-loop", 42);
+        let policy = tor_server::SavePolicy {
+            checkpoint_interval: interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+        crate::support::act_as(&mut engine, ActorId(1), Action::Wait).unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        std::fs::copy(&path, &reference_path).unwrap();
+        let mut engine = Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+        let mut reference =
+            Engine::open_with_policy(&reference_path, scenario.clone(), policy.clone()).unwrap();
+        let (actor, action) = reference.next_ai_action().unwrap();
+        let old = crate::support::act_as(&mut reference, actor, action).unwrap();
+        let new = engine.advance_ai(actor).unwrap();
+        assert_eq!(new.entry.content, old.entry.content);
+        assert_eq!(new.entry.tick, old.entry.tick);
+        let expected: Vec<_> = engine
+            .actors()
+            .into_iter()
+            .map(|id| {
+                let state = engine.state(id).unwrap();
+                assert_eq!(state, reference.state(id).unwrap());
+                (id, state)
+            })
+            .collect();
+        engine.flush().unwrap();
+        drop(engine);
+        let restored = Engine::open_with_policy(&path, scenario, policy).unwrap();
+        for (id, state) in expected {
+            assert_eq!(restored.state(id).unwrap(), state);
+        }
+    }
+}
+
+#[test]
+fn failed_ai_journal_admission_does_not_publish_candidate_effects() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ai.db");
+    let scenario = crate::support::load("dungeon-loop", 42);
+    let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+    crate::support::act_as(&mut engine, ActorId(1), Action::Wait).unwrap();
+    engine.flush().unwrap();
+    drop(engine);
+    let mut engine = Engine::open_with_policy(
+        &path,
+        scenario,
+        tor_server::SavePolicy {
+            max_pending_bytes: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let actor = engine.next_actor().unwrap();
+    assert!(engine.is_ai(actor));
+    let before: Vec<_> = engine
+        .actors()
+        .into_iter()
+        .map(|id| (id, engine.state(id).unwrap()))
+        .collect();
+    let counts = engine.profile_counts();
+    let sequence = engine.save_status().accepted_sequence;
+    for _ in 0..2 {
+        assert!(engine.advance_ai(actor).is_err());
+        assert_eq!(engine.profile_counts(), counts);
+        assert_eq!(engine.save_status().accepted_sequence, sequence);
+        for (id, state) in &before {
+            assert_eq!(&engine.state(*id).unwrap(), state);
+        }
+    }
+}
+
 fn scenario(actors: usize) -> Scenario {
     let positions = [
         (1, 1),

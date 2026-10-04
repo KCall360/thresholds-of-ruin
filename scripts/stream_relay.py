@@ -1,4 +1,4 @@
-"""Test-only loopback relay: pause delivery or omit one server observation.
+"""Test-only loopback relay: pause, omit an observation, or corrupt a delta.
 
 The real server and clients keep their normal protocol, queue sizes and clocks.
 Only one server frame is held; no unbounded test queue hides backpressure.
@@ -32,6 +32,9 @@ class StreamRelay:
         self.held = threading.Event()
         self.drop_observation = threading.Event()
         self.dropped = threading.Event()
+        self.overflow_delta = threading.Event()
+        self.invalid_inventory = threading.Event()
+        self.corrupted = threading.Event()
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
         self.listener.listen(1)
@@ -84,6 +87,27 @@ class StreamRelay:
                         self.drop_observation.clear()
                         self.dropped.set()
                         continue
+                if prefix[0] == 0x81 and (self.overflow_delta.is_set() or self.invalid_inventory.is_set()):
+                    message = json.loads(payload)
+                    if message.get('type') == 'update' and message['update']['body']['type'] == 'observation_delta':
+                        # Keep the envelope and sequence valid to isolate
+                        # rejection of arithmetic or reconstructed state.
+                        state = message['update']['body']['state']
+                        if self.overflow_delta.is_set():
+                            state['cells']['shift']['x'] = 2147483647
+                        else:
+                            state['inventory'].append({'id':123, 'quantity':0, 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
+                        payload = json.dumps(message, separators=(',', ':')).encode()
+                        length = len(payload)
+                        if length < 126:
+                            prefix, extra = bytes((0x81, length)), b''
+                        elif length <= 65535:
+                            prefix, extra = bytes((0x81, 126)), struct.pack('!H', length)
+                        else:
+                            prefix, extra = bytes((0x81, 127)), struct.pack('!Q', length)
+                        self.overflow_delta.clear()
+                        self.invalid_inventory.clear()
+                        self.corrupted.set()
                 downstream.sendall(prefix + extra + payload)
         except (EOFError, OSError):
             pass

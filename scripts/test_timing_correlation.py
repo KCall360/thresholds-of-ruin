@@ -4,10 +4,26 @@ import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from timing_correlation import correlate_ack, correlate_native, events
+from timing_correlation import correlate_ack, correlate_native, events, server_events
 
 
 class TimingCorrelation(unittest.TestCase):
+    def test_loss_reports_require_a_positive_integer_count(self):
+        for count in (None, 0, -1, True, 1.5, '3'):
+            with self.subTest(count=count):
+                with patch('timing_correlation.events', return_value=[dict(
+                        event='server_diagnostics_dropped', request_id='', dropped=count)]):
+                    with self.assertRaisesRegex(ValueError, 'Invalid server diagnostic loss record'):
+                        server_events('unused')
+
+    def test_dropped_server_records_reject_ack_and_native_correlation(self):
+        lost = dict(timing_version=1, event='server_diagnostics_dropped', request_id='', dropped=3)
+        for correlate in (correlate_ack, correlate_native):
+            with self.subTest(correlator=correlate.__name__):
+                with patch('timing_correlation.events', return_value=[lost]):
+                    with self.assertRaisesRegex(ValueError, 'dropped 3 records'):
+                        correlate('.', dict(actors=0, samples=[]))
+
     def test_native_report_cost_belongs_to_preceding_frame_and_log_event(self):
         server = [dict(event='server_handled', request_id='r', unix_ns=3000000, lock_ms=0, duration_ms=1),
                   dict(event='server_ack_sent', request_id='r', unix_ns=4000000)]

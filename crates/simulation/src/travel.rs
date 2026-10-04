@@ -39,6 +39,113 @@ pub struct TravelStep {
     pub destination: Location,
 }
 
+type Node = (Location, u8);
+
+/// One ordered search shared by targets in a single read-only decision.
+pub(crate) struct RouteSearch<'a> {
+    actor: &'a crate::Actor,
+    knowledge: &'a Navigation,
+    start: Node,
+    queue: BTreeSet<(u128, u64, Node)>,
+    distances: BTreeMap<Node, u128>,
+    previous: BTreeMap<Node, (Node, Direction)>,
+    settled: BTreeMap<Location, Node>,
+    order: u64,
+    started: bool,
+}
+
+impl<'a> RouteSearch<'a> {
+    fn new(actor: &'a crate::Actor, knowledge: &'a Navigation) -> Self {
+        let start = (actor.location, actor.orientation);
+        Self {
+            actor,
+            knowledge,
+            start,
+            queue: BTreeSet::from([(0, 0, start)]),
+            distances: BTreeMap::from([(start, 0)]),
+            previous: BTreeMap::new(),
+            settled: BTreeMap::new(),
+            order: 0,
+            started: false,
+        }
+    }
+
+    pub(crate) fn route(&mut self, destination: Location) -> Result<Vec<TravelStep>, GameError> {
+        if self.knowledge.cells.get(&destination) != Some(&false) {
+            return Err(GameError::Blocked);
+        }
+        if !self.started {
+            crate::diagnostics::route_search();
+            self.started = true;
+        }
+        while !self.settled.contains_key(&destination) {
+            let Some((cost, _, node)) = self.queue.pop_first() else {
+                return Err(GameError::Blocked);
+            };
+            if self.distances[&node] != cost {
+                continue;
+            }
+            self.settled.entry(node.0).or_insert(node);
+            self.expand(cost, node);
+        }
+        let mut route = Vec::new();
+        let mut cursor = self.settled[&destination];
+        while cursor != self.start {
+            let (parent, direction) = self.previous[&cursor];
+            route.push(TravelStep {
+                direction,
+                destination: cursor.0,
+            });
+            cursor = parent;
+        }
+        route.reverse();
+        Ok(route)
+    }
+
+    fn expand(&mut self, cost: u128, node: Node) {
+        for direction in DIRECTIONS.into_iter().chain(
+            Direction::HORIZONTAL
+                .into_iter()
+                .filter(|d| d.components().is_some()),
+        ) {
+            let local = direction.rotated(node.1);
+            let edge = if let Some((a, b)) = local.components() {
+                let path = |first, second: Direction| {
+                    let &(side, r1) = self.knowledge.edges.get(&(node.0, first))?;
+                    if self.knowledge.cells.get(&side) != Some(&false) {
+                        return None;
+                    }
+                    let &(to, r2) = self.knowledge.edges.get(&(side, second.rotated(r1)))?;
+                    Some((to, tor_world::compose_rotation(r1, r2)))
+                };
+                match (path(a, b), path(b, a)) {
+                    (Some(a), Some(b)) if a == b => Some(a),
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    _ => None,
+                }
+            } else {
+                self.knowledge.edges.get(&(node.0, local)).copied()
+            };
+            if let Some((to, rotation)) = edge {
+                if self.knowledge.cells.get(&to) != Some(&false) {
+                    continue;
+                }
+                let next = (to, tor_world::compose_rotation(node.1, rotation));
+                let Ok(duration) = movement_cost(self.actor.turn_ticks.get(), direction) else {
+                    continue;
+                };
+                let next_cost = cost + u128::from(duration);
+                if self.distances.get(&next).is_none_or(|old| next_cost < *old) {
+                    self.distances.insert(next, next_cost);
+                    self.previous.insert(next, (node, direction));
+                    self.order += 1;
+                    self.queue.insert((next_cost, self.order, next));
+                }
+            }
+        }
+    }
+}
+
 /// Where the far end of a link from `cell` must appear in the actor's scene for
 /// the link to count as seen: the adjacent offset, or, for the abstract stair
 /// the actor stands on, the landing occurrence beyond physical sight.
@@ -165,6 +272,25 @@ impl Game {
 
     /// Stable minimum-tick search in remembered topology, including orientation.
     pub fn travel_route(
+        &self,
+        actor: ActorId,
+        destination: Location,
+    ) -> Result<Vec<TravelStep>, GameError> {
+        self.route_search(actor)?.route(destination)
+    }
+
+    /// Borrowed decision-local frontier: it cannot outlive a mutation of this game.
+    pub(crate) fn route_search(&self, actor: ActorId) -> Result<RouteSearch<'_>, GameError> {
+        let actor_state = self.actors.get(&actor).ok_or(GameError::UnknownActor)?;
+        let knowledge = self.navigation.get(&actor).ok_or(GameError::Blocked)?;
+        Ok(RouteSearch::new(actor_state, knowledge))
+    }
+}
+
+#[cfg(test)]
+impl Game {
+    /// Stable minimum-tick search in remembered topology, including orientation.
+    fn reference_travel_route(
         &self,
         actor: ActorId,
         destination: Location,
@@ -302,6 +428,68 @@ mod refresh_tests {
     use crate::Action;
     use std::num::NonZeroU64;
     use tor_world::RegionId;
+
+    #[test]
+    fn shared_search_matches_fresh_routes_across_target_orders_and_frames() {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        for id in 1..=2 {
+            world
+                .add_region(tor_world::Region {
+                    id: RegionId(id),
+                    name: format!("remembered-{id}"),
+                    bounds: tor_world::Extent::new(12, 3, 1).unwrap(),
+                })
+                .unwrap();
+        }
+        let mut game = Game::new(world, 42);
+        let cells: Vec<_> = (0..24)
+            .map(|n| Location {
+                region: RegionId(1 + n / 12),
+                position: Position {
+                    x: (n % 12) as i32,
+                    y: 1,
+                    z: 0,
+                },
+            })
+            .collect();
+        let actor = game
+            .spawn_actor(cells[0], NonZeroU64::new(100).unwrap())
+            .unwrap();
+        // Remembered edges may remain after hidden topology edits. Exercise
+        // directed cycles, portal frames, equal-cost choices and unreachable cells.
+        let mut knowledge = Navigation::default();
+        knowledge.cells.extend(cells.iter().map(|&at| (at, false)));
+        for n in 0..20 {
+            for (offset, direction) in DIRECTIONS.into_iter().enumerate() {
+                knowledge.edges.insert(
+                    (cells[n], direction),
+                    (cells[(n + offset + 1) % 20], ((n + offset) % 24) as u8),
+                );
+            }
+        }
+        knowledge.cells.insert(cells[23], true);
+        game.navigation
+            .insert(actor, tor_world::Shared::new(knowledge));
+        for frame in [0, 1, 5, 12, 23] {
+            game.actors.get_mut(&actor).unwrap().orientation = frame;
+            for order in 0..3 {
+                let mut targets = cells.clone();
+                match order {
+                    1 => targets.reverse(),
+                    2 => targets.rotate_left(11),
+                    _ => {}
+                }
+                let mut search = game.route_search(actor).unwrap();
+                for destination in targets.into_iter().chain(cells.iter().copied()) {
+                    assert_eq!(
+                        search.route(destination),
+                        game.reference_travel_route(actor, destination),
+                        "frame {frame}, order {order}, destination {destination:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn local_refresh_matches_original_full_scan_with_stale_edges_and_door_changes() {

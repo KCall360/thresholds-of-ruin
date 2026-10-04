@@ -136,6 +136,7 @@ impl Game {
             .map(|cell| cell.location)
             .collect::<BTreeSet<_>>();
         let visible = |location: Location| cells.contains(&location);
+        let perceived = self.actors.perceived(&self.world, &cells);
         let door_base = |location: Location| {
             self.world
                 .door(location)
@@ -147,7 +148,7 @@ impl Game {
         let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
-        for (&item_id, item) in self.items.iter() {
+        for (item_id, item) in self.items.perceived(id, &cells) {
             crate::diagnostics::item_view(item.spec.concealed);
             let identified = !item.spec.concealed || actor.knowledge.contains(&item.spec.identity);
             let name = if identified {
@@ -184,7 +185,7 @@ impl Game {
             }
         }
         Ok(Observation {
-            combat: self.combat_view(id, &visible),
+            combat: self.combat_view(id, &visible, &perceived),
             motion: self.motion_view_active(id).then_some(MotionView {
                 velocity: actor.motion.velocity,
                 displaced: self.physics.displaced.contains(&id),
@@ -229,14 +230,14 @@ impl Game {
                 })
                 .collect(),
             inventory,
-            visible_actors: self
-                .actors
+            visible_actors: perceived
                 .iter()
-                .filter(|(_, a)| a.alive())
-                .flat_map(|(&other_id, other)| {
-                    self.body_cells(other.location, other.orientation, &other.body)
-                        .unwrap_or_default()
-                        .into_iter()
+                .filter(|(other_id, _)| self.actors[other_id].alive())
+                .flat_map(|(other_id, body)| {
+                    let other_id = *other_id;
+                    let other = &self.actors[&other_id];
+                    body.iter()
+                        .copied()
                         .filter(move |(at, _)| {
                             visible(*at) && (other_id != id || *at != actor.location)
                         })

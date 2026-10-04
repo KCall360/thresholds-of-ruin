@@ -105,6 +105,43 @@ blockers, and next steps. Keep it short and link to guides rather than
 duplicating them. Earlier handoff notes are in the
 [`docs-history-2026-09` archive](https://github.com/KCall360/thresholds-of-ruin/blob/docs-history-2026-09/docs/session-handoff.md).
 
+**Architecture refactor (active).** The maintainer authorized the
+[refactor plan](docs/refactoring.md). Work remains isolated from the original
+dirty interactions checkout. Twenty-three local implementation checkpoints cover
+explicit command mappings, shared boundary observations, portal-local item/body
+and privacy-scoped history indexes, shared route searches, checked requests,
+immutable body sharing, storage accounting and concurrency, atomic observation
+validation, single-decision AI execution, strict save-codec boundaries, bounded
+saved/authored input acquisition, separate authoring/prepared scenario types,
+contextual declaration diagnostics preserving validation precedence, bounded
+FIFO mailbox draining without starving due actions or save polling, nonblocking
+runtime diagnostics with loss accounting, and encoded-output byte leases through
+queueing, write failures/timeouts and task cancellation, prepared control and AI
+references, shared creature installation, item normalization and contextual
+construction-reference diagnostics, and a restore-scoped context sharing decoded
+worlds, navigation, items and equal body definitions across retained boundaries,
+profiled region-acquisition attribution with validated nested timings, and shared
+item/combat definitions with full-value pooling across decoded rewind boundaries.
+Future scenario extension contracts are documented without adding a runtime.
+Current quick/full Windows verification passed, including 237 debug Python/process
+tests and 123 release process tests; all twenty-two deployed-client/validator checks passed.
+
+Release comparisons and their limits are recorded in the plan. Reduced query and
+copy counts do not establish broad latency or resident-memory improvements.
+The body-sharing restore regression and higher falling-physics command tails
+remain unresolved. Compiler source diagnostics and reference normalization,
+content pooling, fair allocation under aggregate output pressure, further persistence work,
+and the admission/scheduler split remain open. Windows/Linux CI is still required
+before merging. The maintainer explicitly authorized pushes and PR merges on
+2026-10-04; the required verification and both-platform CI gates still apply.
+
+The maintainer explicitly authorized protocol, save, gameplay and scenario
+version changes on 2026-10-04, including the queue and stream-recovery proposal.
+Gameplay must admit intentions to simulation-owned scheduling.
+Derived topology indexes stay backend-only. Text-client fixes and scripting
+runtime selection/implementation are deferred. Advance format versions with the
+corresponding implementation; future scripting informs boundaries without adding a runtime.
+
 **Test suite rationalization (complete, PR #59).** Process tests share
 `scripts/process_harness.py` and use the headless client for wizard setup;
 every scenario package is checked by the
@@ -175,9 +212,11 @@ The server reads a package's index, which is proportional to its region
 count, and saves keep a copy of it; everything else a game holds or saves
 grows with the regions played.
 
-The desktop launchers run the 4e build. The IF prose branch changes the save
-format to 15 and the ruleset to `dungeon-v18`, so rebuild them after it merges;
-playtest saves from before it won't resume.
+The three desktop launchers use a separate verified refactor build and copied
+scenario package, selected through their local helper configuration. Existing
+binaries and saves are retained, and helper backups are available. Real text,
+ASCII spectator, and headless client connections and frames were checked after
+deployment. Launchers remain outside Git.
 
 Don't treat the planner's `deactivate` candidates as permission to unload
 state; only `Game::apply_region_transition` detaches. Keep the 4d dungeon,

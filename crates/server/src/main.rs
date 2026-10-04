@@ -3,7 +3,9 @@ use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::net::TcpListener;
-use tor_server::{serve, Account, Engine, SavePolicy, Scenario, Service, Simulation};
+use tor_server::{
+    serve, Account, Engine, OutboundLimits, SavePolicy, Scenario, Service, Simulation,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,10 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut allow_unvalidated = false;
     let mut actors = 1usize;
     let mut save_policy = SavePolicy::default();
+    let mut outbound = OutboundLimits::default();
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
+                println!("Outgoing buffers: --outbound-frame-bytes 16777216 --outbound-client-bytes 67108864 --outbound-total-bytes 268435456. Byte limits include queued and in-flight payloads. Frame <= client <= total; frame is at most 16 MiB. Exhausted streams disconnect and must reconnect for a snapshot.");
                 println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
                 println!("Checkpoints: --checkpoint-interval 1024 journal entries (0 disables). Retains all history; bounds simulation replay after the latest committed checkpoint.");
                 println!("Authored packages: --scenario <directory> [--character <id>] [--allow-unvalidated]. Validate with tor-scenario validate <directory>. Saves pin their original package.");
@@ -51,6 +55,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 save_policy.max_pending_bytes =
                     args.next().ok_or("Missing save queue size")?.parse()?
             }
+            "--outbound-frame-bytes" => {
+                outbound.frame_bytes = args.next().ok_or("Missing outbound frame limit")?.parse()?
+            }
+            "--outbound-client-bytes" => {
+                outbound.client_bytes = args
+                    .next()
+                    .ok_or("Missing outbound client limit")?
+                    .parse()?
+            }
+            "--outbound-total-bytes" => {
+                outbound.total_bytes = args.next().ok_or("Missing outbound total limit")?.parse()?
+            }
             "--scenario" => {
                 package_path = Some(args.next().ok_or("Missing scenario directory")?.into())
             }
@@ -64,6 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--save" => save = args.next().ok_or("Missing --save value")?.into(),
             _ => return Err(format!("Unknown argument: {argument}").into()),
         }
+    }
+    if !outbound.is_valid() {
+        return Err("Invalid outbound byte limits".into());
     }
     if !listen.ip().is_loopback() {
         return Err("Only loopback listeners are supported".into());
@@ -176,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             actors: accounts[0].actors.clone(),
         });
     }
-    let simulation = Simulation::start(Service::new(engine));
+    let simulation = Simulation::start(Service::with_outbound_limits(engine, outbound)?);
     let listener = TcpListener::bind(listen).await?;
     println!(
         "{}",

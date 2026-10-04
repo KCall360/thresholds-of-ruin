@@ -9,7 +9,7 @@ use crate::{
     movement_cost, Action, ActionOutcome, ActorId, Game, GameError, ItemLocation, OutcomeKind,
 };
 
-/// Valid only inside the uninterrupted `Game::act` call that prepared it.
+/// Valid only inside the uninterrupted `Game::act` or `Game::act_ai` call.
 /// Kept private so callers cannot retain an action across world changes.
 struct PreparedAction {
     actor: ActorId,
@@ -25,10 +25,36 @@ impl Game {
     /// wind-up progress. Recovery is not partially completed work and cannot resume.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
         let prepared = self.prepare_action(id, action)?;
-        if let Some((expected, ai)) = self.choose_ai(id) {
+        let ai = if let Some((expected, ai)) = self.choose_ai(id) {
             if expected != action {
                 return Err(GameError::InvalidLocation);
             }
+            Some(ai)
+        } else {
+            None
+        };
+        Ok(self.commit_action(prepared, ai))
+    }
+
+    /// Choose and execute the due AI actor's action in one uninterrupted call.
+    /// The decision cannot escape or survive a mutation; replay still validates
+    /// recorded actions through `act`.
+    pub fn act_ai(&mut self, id: ActorId) -> Result<(Action, ActionOutcome), GameError> {
+        if self.next_actor() != Some(id) {
+            return Err(GameError::NotActorsTurn);
+        }
+        let (action, ai) = self.choose_ai(id).ok_or(GameError::InvalidLocation)?;
+        let prepared = self.prepare_action(id, action)?;
+        Ok((action, self.commit_action(prepared, Some(ai))))
+    }
+
+    fn commit_action(
+        &mut self,
+        prepared: PreparedAction,
+        ai: Option<crate::ai::Ai>,
+    ) -> ActionOutcome {
+        let id = prepared.actor;
+        if let Some(ai) = ai {
             self.combat.ai.insert(id, ai);
         }
         self.physics.impacts.clear();
@@ -37,7 +63,7 @@ impl Game {
         self.combat.events.clear();
         self.apply_action_effect(&prepared);
         self.sync_actor_lifecycle(id);
-        Ok(self.finish_action(prepared))
+        self.finish_action(prepared)
     }
 
     /// Action-specific validity and timing are settled before any mutation.
@@ -97,12 +123,10 @@ impl Game {
                     if self
                         .reach(actor.location, direction.rotated(actor.orientation))
                         .is_some_and(|(at, _)| {
-                            self.actors.iter().any(|(other, a)| {
-                                *other != id
-                                    && self
-                                        .body_cells(a.location, a.orientation, &a.body)
-                                        .is_some_and(|cells| cells.iter().any(|(p, _)| *p == at))
-                            })
+                            self.actors
+                                .at(&self.world, at)
+                                .keys()
+                                .any(|other| *other != id)
                         })
                     {
                         GameError::Occupied
@@ -157,7 +181,7 @@ impl Game {
             new_orientation,
             ..
         } = *prepared;
-        let actor = self.actors.get_mut(&id).expect("actor validated above");
+        let mut actor = self.actors.get_mut(&id).expect("actor validated above");
         actor.orientation = new_orientation;
         if !matches!(
             kind,
@@ -167,16 +191,18 @@ impl Game {
                 c.pending = None;
             }
         }
+        if let OutcomeKind::Moved { to, .. } = kind {
+            actor.location = to;
+            actor.visited.insert(to.region);
+        }
+        drop(actor);
         match kind {
             OutcomeKind::AttackStarted { target } => self.start_attack(id, target),
             OutcomeKind::DoorChanged { door, open } => {
                 let location = self.world.door_location(door).expect("validated door");
                 self.world.set_door(location, open);
             }
-            OutcomeKind::Moved { to, .. } => {
-                actor.location = to;
-                actor.visited.insert(to.region);
-            }
+            OutcomeKind::Moved { .. } => {}
             OutcomeKind::Taken {
                 item,
                 result,

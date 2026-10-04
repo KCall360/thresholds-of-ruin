@@ -1,11 +1,218 @@
 """Actual headless client disclosure, memory, authorization and rewind acceptance."""
 import json
+import sqlite3
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_checkpointed_portal_bodies_survive_cold_restore_rewind_and_replay(self):
+        server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        player, initial = self.client()
+        crossed = self.act(player, {'type': 'wait'})
+        self.assertIsNone(crossed['error'])
+        later = self.act(player, {'type': 'wait'})
+        self.assertIsNone(later['error'])
+        self.flush_save()
+        with sqlite3.connect(self.save) as db:
+            self.assertGreaterEqual(db.execute('SELECT sequence FROM checkpoint').fetchone()[0], 2)
+        player.stop()
+        server.stop()
+        server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        player, restored = self.client()
+        self.assertEqual(restored['state'], later['state'])
+        self.assertEqual(restored['history'], later['history'])
+        wizard = self.wizard()
+        self.wizard_command(wizard, 'rewind initial')
+        rewound = self.request(player, {'type': 'snapshot'})
+        self.assertNotEqual(rewound['branch'], initial['branch'])
+        self.assertEqual(rewound['state']['observation'], initial['state']['observation'])
+        repeated = self.act(player, {'type': 'wait'})
+        self.assertIsNone(repeated['error'])
+        self.assertEqual(repeated['state']['observation'], crossed['state']['observation'])
+        self.flush_save()
+        wizard.stop()
+        player.stop()
+        server.stop()
+        self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
+        _, restored_again = self.client()
+        self.assertEqual(restored_again['state'], repeated['state'])
+        self.assertEqual(restored_again['history'], repeated['history'])
+
+    def test_stale_request_keeps_committed_state_and_history_after_restart(self):
+        server = self.server()
+        player, initial = self.client()
+        accepted = self.act(player, {"type": "wait"})
+        self.assertIsNone(accepted["error"])
+        rejected = self.request(player, {
+            "type": "command", "branch": initial["branch"],
+            "command": {"type": "act", "expected_revision": initial["state"]["revision"],
+                        "action": {"type": "wait"}}})
+        self.assertTrue(rejected["error"].startswith("StaleRevision:"))
+        self.assertEqual(rejected["state"], accepted["state"])
+        self.assertEqual(rejected["history"], accepted["history"])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        resumed, state = self.client()
+        self.assertEqual(state["state"], accepted["state"])
+        self.assertEqual(state["history"], accepted["history"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
+    def test_ai_navigation_continues_after_saved_decision_boundary(self):
+        server = self.server(scenario="first-dungeon", seed=None)
+        player, _ = self.client()
+        def next_turn(client, frame):
+            if frame["state"]["observation"]["ready"]:
+                return frame
+            return self.frame(client, lambda update: update.get("state") is not None
+                              and update["state"]["observation"]["ready"])
+        for _ in range(3):
+            result = self.act(player, {"type": "wait"})
+            self.assertIsNone(result["error"])
+            next_turn(player, result)
+        observer, ai_state = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
+        ai_entries = [entry for entry in ai_state["history"]
+                      if entry["author"].get("user") == "scenario-ai"]
+        self.assertTrue(ai_entries)
+        self.assertEqual(len({entry["id"] for entry in ai_entries}), len(ai_entries))
+        observer.stop()
+        boundary = self.request(player, {"type": "snapshot"})
+        self.assertTrue(boundary["state"]["observation"]["ready"])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        server = self.server(scenario="first-dungeon", seed=None)
+        resumed, state = self.client()
+        self.assertEqual(state["state"], boundary["state"])
+        restored_observer, restored_ai = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
+        self.assertEqual(restored_ai["state"], ai_state["state"])
+        self.assertEqual(restored_ai["history"], ai_state["history"])
+        continued = self.act(resumed, {"type": "wait"})
+        self.assertIsNone(continued["error"])
+        continued = next_turn(resumed, continued)
+        self.assertGreater(continued["state"]["observation"]["tick"],
+                           boundary["state"]["observation"]["tick"])
+        # A second cold decode must preserve the new boundary and its history.
+        boundary = self.request(resumed, {"type": "snapshot"})
+        self.flush_save()
+        restored_observer.stop()
+        resumed.stop()
+        server.stop()
+        self.server(scenario="first-dungeon", seed=None)
+        _, second_restore = self.client()
+        self.assertEqual(second_restore["state"], boundary["state"])
+        self.assertEqual(second_restore["history"], boundary["history"])
+
+    def test_body_indexes_rebuild_after_portal_physics_save_and_restart(self):
+        server = self.server(scenario="physics-portal", seed=None)
+        player, _ = self.client()
+        crossed = self.act(player, {"type": "wait"})
+        self.assertIsNone(crossed["error"])
+        observation = crossed["state"]["observation"]
+        self.assertTrue(observation["motion"]["displaced"])
+        self.assertGreater(observation["motion"]["velocity"][0], 4096)
+        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+                            for actor in observation["visible_actors"]))
+        self.flush_save()
+        player.stop()
+        server.stop()
+        server = self.server(scenario="physics-portal", seed=None)
+        resumed, state = self.client()
+        self.assertEqual(state["state"], crossed["state"])
+        continued = self.act(resumed, {"type": "wait"})
+        self.assertIsNone(continued["error"])
+        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+                            for actor in continued["state"]["observation"]["visible_actors"]))
+        self.assertNotIn('"region"', json.dumps(continued["state"]["observation"]))
+        # Definitions and derived portal bodies remain stable across another
+        # private candidate and a second cold restore.
+        self.flush_save()
+        resumed.stop()
+        server.stop()
+        self.server(scenario="physics-portal", seed=None)
+        _, restored = self.client()
+        self.assertEqual(restored["state"], continued["state"])
+
+    def test_private_history_pagination_and_anchors_survive_restart(self):
+        server = self.server()
+        player, initial = self.client()
+        # The initial snapshot holds at most 100 entries; leave an older page.
+        for n in range(104):
+            result = self.request(player, {
+                "type": "command", "branch": initial["branch"],
+                "command": {"type": "annotate", "anchor": {"type": "state", "revision": 0},
+                            "text": f"Note {n}", "source": "user", "category": "note",
+                            "audience": "actor" if n % 9 == 0 else "private"}})
+            self.assertIsNone(result["error"])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        player, resumed = self.client()
+        self.assertEqual(len(resumed["history"]), 100)
+        player.write(json.dumps({"type": "request", "request": {
+            "type": "history", "limit": 10, "before": resumed["history"][0]["id"]}}))
+        response = self.frame(player, lambda frame: frame["type"] == "response"
+                              and frame["message"]["type"] == "history")
+        older = self.frame(player, lambda frame: frame["type"] == "ready")
+        self.assertIsNone(older["error"])
+        self.assertEqual([entry["content"]["text"] for entry in response["message"]["page"]["entries"]],
+                         [f"Note {n}" for n in range(4)])
+        self.assertIsNone(response["message"]["page"]["older_before"])
+        observer, public = self.client(SPECTATOR_TOKEN)
+        self.assertEqual([entry["content"]["text"] for entry in public["history"]],
+                         [f"Note {n}" for n in range(0, 104, 9)])
+        denied = self.request(observer, {"type": "history", "limit": 1,
+                                        "before": resumed["history"][0]["id"]})
+        self.assertIn("InvalidAnchor", denied["error"])
+        self.assertEqual(denied["history"], public["history"])
+
+    def test_item_location_indexes_survive_inventory_save_and_drop(self):
+        server = self.server()
+        player, initial = self.client()
+        tablet = initial["state"]["observation"]["ground_items"][0]["item"]
+        taken = self.act(player, {"type": "take", "item": tablet["id"]})
+        self.assertIsNone(taken["error"])
+        self.assertIn(tablet, taken["state"]["observation"]["inventory"])
+        self.assertFalse(any(item["item"]["id"] == tablet["id"]
+                             for item in taken["state"]["observation"]["ground_items"]))
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server()
+        resumed, state = self.client()
+        self.assertEqual(state["state"], taken["state"])
+        dropped = self.act(resumed, {"type": "drop", "item": tablet["id"]})
+        self.assertIsNone(dropped["error"])
+        self.assertNotIn(tablet, dropped["state"]["observation"]["inventory"])
+        self.assertTrue(any(item["item"] == tablet
+                            for item in dropped["state"]["observation"]["ground_items"]))
+
+    def test_many_watchers_keep_independent_bases_when_a_late_watcher_joins(self):
+        self.server()
+        player, initial = self.client()
+        watchers = [self.client(SPECTATOR_TOKEN)[0] for _ in range(3)]
+        first = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(first["error"])
+        for watcher in watchers:
+            seen = self.frame(watcher, lambda f: f["state"]["revision"] == first["state"]["revision"])
+            self.assertEqual(seen["state"], first["state"])
+        late, attached = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(attached["state"], first["state"])
+        second = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(second["error"])
+        sequences = []
+        for watcher in [*watchers, late]:
+            seen = self.frame(watcher, lambda f: f["state"]["revision"] == second["state"]["revision"])
+            self.assertEqual(seen["state"], second["state"])
+            sequences.append(seen["message"]["update"]["cursor"]["sequence"])
+        self.assertEqual(sequences[:3], [sequences[0]] * 3)
+        self.assertGreater(sequences[0], sequences[-1])
+        self.assertGreater(second["state"]["revision"], initial["state"]["revision"])
+
     def test_normal_play_spectator_stream_denials_and_resume(self):
         server = self.server()
         player, initial = self.client()

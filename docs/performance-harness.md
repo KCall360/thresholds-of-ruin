@@ -191,13 +191,31 @@ Case metadata records seed, trace version, commit, dirty working-tree flag,
 platform, architecture, build profile, storage mode, cycles and warmup (currently
 zero). Small per-label sample counts remain visible and limit tail conclusions.
 
-Measured command phases are exclusive: candidate capture, checkpoint capture, simulation,
+Top-level measured command phases are exclusive: candidate capture, checkpoint capture, simulation,
 navigation refresh, revision-view perception, revision comparison, rewind
 snapshot, serialization, underlying write/flush, file sync, replacement, and
-publication. Simulation's internal door perception belongs to simulation;
+publication and region transition. Simulation's internal door perception belongs to simulation;
 navigation's scene work belongs to navigation. These nested calls are counted
 at their actual simulation call sites, without adding their time twice.
 `unattributed` accounts for the rest of total authoritative command latency.
+
+Profiled commands also report a nested `region_acquisition` object. Its
+`fallback_reads` and `fallback_builds` count successful synchronous acquisitions;
+`prepared_reads` and `prepared_builds` count acquisitions already completed by
+the preloader. Resident record-cache hits are excluded. The two read counts sum
+to `region_records_read`, the two build counts sum to `regions_built`, and the
+prepared counts sum to `regions_prepared`. Prepared counts depend on thread
+timing; the complete read/build counts retain their deterministic work contracts.
+
+`fallback_read` and `fallback_build` durations measure synchronous acquisition,
+including decoding or package construction, within region-transition time. The
+benchmark emits corresponding `region_fallback_read` and `region_fallback_build`
+timing summaries. These are nested diagnostics, so adding them to the top-level
+phase sum would count time twice. Zero-work commands have zero fallback time;
+failed commands do not return a successful command profile. Ordinary unprofiled
+commands do not enable the additional acquisition clocks. Streaming metadata
+declares `region_acquisition_version`; its validator rejects missing, inconsistent
+or negative counts, invalid durations and nested times exceeding transition time.
 
 Command timing measures record encoding and queue admission in
 `serialization`. Command-path write/flush, sync, and replacement counts are zero;
@@ -425,9 +443,21 @@ Pass `--correlate` to either actual-client driver to enable
 request UUIDs, client request/send/ack boundaries, headless output durations,
 server mailbox-wait/handler durations (`lock_ms` is how long a request waited in
 the simulation's mailbox) and acknowledgement send completion. It omits tokens,
-request bodies, private world state and protocol changes. Server diagnostics are
-written by the simulation thread between actions. All diagnostic I/O can itself
-stall.
+request bodies, private world state and protocol changes. Server timestamps are
+captured at the producing boundary; a separate worker writes stderr. Its queue
+holds at most 256 records, each with at most 16 KiB of variable detail. Save
+warnings use the same worker; client warnings and durability barriers are
+independent of diagnostic delivery. Direct `Service` use has no implicit console
+writer; `Simulation::start` installs the host sink.
+
+Delivery is best effort. Queue overflow, oversized detail and writer failure
+count lost records; when writing resumes, `server_diagnostics_dropped` reports
+coalesced loss. Timing correlation rejects such captures rather than using a
+possibly biased subset. Writer failure stops delivery without blocking play.
+Server shutdown does not join a blocked diagnostic writer or guarantee a log
+flush; an in-process worker may outlive its server until the write returns.
+Client and driver diagnostic I/O can still stall and remains included in their
+measured boundaries.
 
 ```sh
 python scripts/performance_driver.py --bin-dir target/release --output target/correlated --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture --correlate
@@ -435,8 +465,15 @@ python scripts/timing_correlation.py target/correlated --output target/correlate
 ```
 
 The report joins accepted actions by request identity and retains the original
-acknowledgement and line-receipt metrics. Native exploration additionally retains
-all intervening frame profiles and reader work/queue delay. Cross-process timestamps
+acknowledgement and line-receipt metrics.
+
+Outbound frames are encoded once by the service before queue admission.
+`server_handled` therefore includes encoding, while `server_ack_sent` measures
+the socket send/flush of the prepared frame. Preserve that distinction when
+comparing captures from earlier builds that encoded in the socket task.
+
+Native exploration additionally retains all intervening frame profiles and
+reader work/queue delay. Cross-process timestamps
 use the same host wall clock; the Python reader calibrates its monotonic clock
 once and timestamps the exact recorded boundaries through that offset. Phase
 durations use monotonic clocks. Clock adjustments can limit cross-process attribution. A receiver can

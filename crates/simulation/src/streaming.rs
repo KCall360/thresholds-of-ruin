@@ -567,11 +567,7 @@ impl Game {
     }
 
     fn actors_in(&self, region: RegionId) -> Vec<ActorId> {
-        self.actors
-            .iter()
-            .filter(|(_, a)| a.location.region == region)
-            .map(|(id, _)| *id)
-            .collect()
+        self.actors.in_region(region).collect()
     }
 
     fn freeze_region(&mut self, region: RegionId) {
@@ -597,7 +593,7 @@ impl Game {
         if delta == 0 {
             return;
         }
-        let actor = self.actors.get_mut(&id).expect("stamped actor");
+        let mut actor = self.actors.get_mut(&id).expect("stamped actor");
         actor.ready_at = actor.ready_at.saturating_add(delta);
         if let Some(pending) = actor.combat.as_mut().and_then(|c| c.pending.as_mut()) {
             pending.started += delta;
@@ -638,7 +634,7 @@ impl Game {
             .points
             .get_or_insert_with(|| self.point_requirements())
             .clone();
-        for (id, actor) in &self.actors {
+        for (id, actor) in self.actors.iter() {
             let region = actor.location.region;
             let is_active = active.contains(&region);
             if !is_active && !loaded.contains(&region) {

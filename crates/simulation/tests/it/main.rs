@@ -2,10 +2,13 @@
 //! links one test executable instead of one per file.
 
 mod action_boundaries;
+mod actor_index;
+mod ai_search;
 mod combat;
 mod diagonal;
 mod doors;
 mod enclosures;
+mod item_index;
 mod items;
 mod perception;
 mod physics;

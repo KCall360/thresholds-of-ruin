@@ -44,6 +44,35 @@ class ItemProcesses(ProcessTestCase):
         self.assertIn('an arrow', inventory)
         self.assertNotIn('healing', inventory)
 
+    def test_split_checkpoint_restore_and_rewind_preserve_stack_definitions(self):
+        self.game.stop()
+        self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
+                                wizard=True, spectator=False)
+        player, initial = self.client()
+        split = self.act(player, {'type': 'take', 'item': 10, 'quantity': 3})
+        self.assertIsNone(split['error'])
+        stack = split['state']['observation']['inventory'][0]
+        self.assertEqual(stack['name'], 'arrow')
+        self.assertEqual(stack['quantity'], 3)
+        self.assertIsNone(self.request(player, {'type': 'save'})['error'])
+        player.stop(); self.game.stop()
+        self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
+                                wizard=True, spectator=False)
+        player, resumed = self.client()
+        self.assertEqual(resumed['state']['observation'], split['state']['observation'])
+        dropped = self.act(player, {'type': 'drop', 'item': stack['id'], 'quantity': 1})
+        self.assertIsNone(dropped['error'])
+        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], 2)
+        wizard = self.wizard()
+        self.wizard_command(wizard, 'rewind initial')
+        rewound = self.request(player, {'type': 'snapshot'})
+        self.assertEqual(rewound['state']['observation'], initial['state']['observation'])
+        self.assertIsNone(self.request(player, {'type': 'save'})['error'])
+        player.stop(); wizard.stop(); self.game.stop()
+        self.start()
+        _, restored = self.client()
+        self.assertEqual(restored['state']['observation'], initial['state']['observation'])
+
     def test_ascii_quantity_picker_and_drop_present_authoritative_counts(self):
         p = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
         self.ascii_frame(p, lambda f: f['state'] is not None and not f['busy'])

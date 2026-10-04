@@ -249,3 +249,29 @@ fn deltas_rebuild_the_full_view_and_reject_another_base_atomically() {
     );
     assert_eq!(client, unchanged);
 }
+
+#[test]
+fn overflowing_delta_preserves_the_entire_client_model() {
+    for (coordinate, shift) in [(i32::MAX, 1), (i32::MIN, -1)] {
+        let row: Vec<_> = (0..8)
+            .map(|y| (format!("edge-{y}"), coordinate, y))
+            .collect();
+        let initial = snapshot(&cells(&row), 0);
+        let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+        let mut next = initial.state;
+        next.revision = 1;
+        next.observation.tick = 1;
+        let mut delta = StateDelta::between(client.state(), &next).unwrap();
+        delta.cells.shift.x = shift;
+        let unchanged = client.clone();
+        assert_eq!(
+            client.apply(delta_update(&client, delta)),
+            Err(tor_client_common::StreamError::InconsistentState)
+        );
+        assert_eq!(client, unchanged);
+        client
+            .replace_snapshot(snapshot(&[("recovered", 0, 0)], 1))
+            .unwrap();
+        assert_eq!(client.state().revision, 1);
+    }
+}

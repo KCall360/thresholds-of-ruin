@@ -107,17 +107,13 @@ impl Game {
         let view = self.observe(id).ok()?;
         let visits = ai.visits.entry(view.location).or_default();
         *visits = visits.saturating_add(1);
+        let mut search = self.route_search(id).ok();
+        let mut route = |destination| search.as_mut()?.route(destination).ok();
         let target = view
             .visible_actors
             .iter()
             .filter(|a| self.hostile(id, a.id))
-            .min_by_key(|a| {
-                (
-                    self.travel_route(id, a.location)
-                        .map_or(usize::MAX, |r| r.len()),
-                    a.id,
-                )
-            });
+            .min_by_key(|a| (route(a.location).map_or(usize::MAX, |r| r.len()), a.id));
         if let Some(target) = target {
             ai.target = Some((target.id, target.location, self.tick));
         } else if ai.target.is_some_and(|(_, at, seen)| {
@@ -132,11 +128,9 @@ impl Game {
             .find(|(low, known, _)| *low == frightened && *known == ai.target.is_some())
             .unwrap()
             .2;
-        let step = |destination| self.travel_route(id, destination).ok()?.first().copied();
         if ai.state == State::Flee {
             let (_, threat, _) = ai.target.unwrap();
-            let distance = |at: Location| self.travel_route(id, at).ok().map(|r| r.len());
-            let current = distance(threat).unwrap_or(0);
+            let current = route(threat).map_or(0, |r| r.len());
             let mut choices = Vec::new();
             for direction in Direction::HORIZONTAL
                 .into_iter()
@@ -173,7 +167,7 @@ impl Game {
                 return Some((Action::Attack { target }, ai));
             }
             if ai.state != State::Flee {
-                if let Some(step) = step(at) {
+                if let Some(step) = route(at).and_then(|r| r.first().copied()) {
                     if self.actor_translation(id, step.direction).is_some() {
                         return Some((Action::Move(step.direction), ai));
                     }
@@ -267,6 +261,28 @@ mod tests {
         game.refresh_navigation();
         game
     }
+    #[test]
+    fn one_decision_shares_its_search_across_visible_targets() {
+        let mut game = fixture();
+        let other = game
+            .spawn_actor(at(1, 3, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.configure_combat(
+            other,
+            CombatSpec {
+                faction: "hero".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        game.refresh_navigation();
+        assert_eq!(game.observe(ActorId(2)).unwrap().visible_actors.len(), 2);
+        let before = crate::diagnostics::work_counts().route_searches;
+        let (action, _) = game.choose_ai(ActorId(2)).unwrap();
+        assert_eq!(action, Action::Attack { target: ActorId(1) });
+        assert_eq!(crate::diagnostics::work_counts().route_searches - before, 1);
+    }
+
     #[test]
     fn hidden_movement_does_not_update_target_memory_and_memory_expires() {
         let mut game = fixture();

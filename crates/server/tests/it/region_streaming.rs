@@ -277,22 +277,26 @@ fn transition_work_does_not_grow_with_the_world() {
         engine.start_preloading();
         let mut totals = [0usize; 11];
         let mut step = 0;
-        let mut run = |engine: &mut Engine, actor: ActorId, action: Action| {
+        let mut run = |engine: &mut Engine, actor: ActorId, action: Option<Action>| {
             let revision = engine.revision(actor).unwrap();
             step += 1;
-            let (_, profile) = engine
-                .command_profiled(
-                    "bench",
-                    "test",
-                    actor,
-                    &format!("step-{step}"),
-                    &engine.branch().clone(),
-                    Command::Act {
-                        expected_revision: revision,
-                        action,
-                    },
-                )
-                .unwrap();
+            let (_, profile) = if let Some(action) = action {
+                engine
+                    .command_profiled(
+                        "bench",
+                        "test",
+                        actor,
+                        &format!("step-{step}"),
+                        &engine.branch().clone(),
+                        Command::Act {
+                            expected_revision: revision,
+                            action,
+                        },
+                    )
+                    .unwrap()
+            } else {
+                engine.advance_ai_profiled(actor).unwrap()
+            };
             for (total, count) in totals.iter_mut().zip([
                 profile.region_changes,
                 profile.horizon_regions_expanded,
@@ -311,10 +315,10 @@ fn transition_work_does_not_grow_with_the_world() {
         };
         for direction in [Direction::East, Direction::West] {
             for _ in 0..100 {
-                while let Some((actor, action)) = engine.next_ai_action() {
-                    run(&mut engine, actor, action);
+                while let Some(actor) = engine.next_actor().filter(|id| engine.is_ai(*id)) {
+                    run(&mut engine, actor, None);
                 }
-                run(&mut engine, ActorId(1), Action::Move { direction });
+                run(&mut engine, ActorId(1), Some(Action::Move { direction }));
             }
         }
         (totals, counts(&engine).active + counts(&engine).frozen)

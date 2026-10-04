@@ -176,6 +176,15 @@ unbounded buffering. Reconnection resumes a retained stream or requests a fresh
 snapshot. Snapshot publication and subsequent updates must have a consistent
 boundary.
 
+The server caches each actor's observation and exact projected scene at the
+committed boundary. Revision comparison, navigation refresh, and publication
+reuse that derived work where valid. Candidate views are published only after
+persistence admission; region transitions invalidate pre-transition views.
+Caches are absent from saved state and rewind boundaries. A broadcast shares
+disclosed actor state across watchers while each connection retains its own
+sequence, delta base, and control state. Private annotations remain separately
+filtered by actor and user.
+
 ASCII presentation receives ordered disclosed updates, not whole historical-memory
 copies. A bounded channel backpressures its dedicated connection worker; the
 native loop limits update work per turn before handling input. Every received
@@ -286,11 +295,23 @@ messages. Complete history remains in memory for existing queries and retries;
 ordinary command candidates contain only decision state, revisions and shared
 rewind boundaries. Retained records and receipt indexes stay owned by the engine;
 a single new record is admitted before publishing the candidate. World collections,
-items and actor navigation use deterministic copy-on-write ownership. Navigation
+items and actor navigation use deterministic copy-on-write ownership. The private
+item store owns all item insertions, removals, and edits; ground-location and
+inventory-owner indexes cannot be mutated separately. Ground keys are resolved
+region-local locations, including locations reached through portals. Observation
+and stack merging query these buckets in deterministic identity order. Indexes
+are derived backend data, rebuilt from authoritative items on checkpoint restore,
+and omitted from checkpoints and client messages. Navigation
 shares maps by source region, so discovering a local connection does not copy all
 remembered cells. This sharing
 never crosses the protocol boundary. Format-6 checkpoints also pool equal source-region
-navigation maps across retained boundaries; decoding restores shared ownership.
+navigation maps across retained boundaries. One restore-scoped context rebuilds
+world, navigation and item ownership from decoded pool indexes across the current
+game and retained rewind states; equal body definitions share immutable storage
+by complete value, including cell order. Restored games retain copy-on-write
+ownership after the context is dropped. Game validation and serialized fields
+are unchanged. Detached-region records use a separate decoding path and are not
+eagerly loaded by checkpoint restoration.
 Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 

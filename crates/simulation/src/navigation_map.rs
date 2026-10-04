@@ -1,5 +1,5 @@
-//! Ordered navigation knowledge shared by source region. Mutating a visible
-//! region must not copy all previously discovered regions into a rewind snapshot.
+//! Ordered maps shared by source region, used for navigation and spatial indexes.
+//! Mutating a local bucket must not copy the contents of other regions.
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use tor_world::{Direction, Location, RegionId, Shared};
@@ -31,6 +31,9 @@ impl<K, V> Default for RegionMap<K, V> {
     }
 }
 impl<K: RegionKey, V> RegionMap<K, V> {
+    pub fn region(&self, region: RegionId) -> Option<&BTreeMap<K, V>> {
+        self.regions.get(&region).map(|map| &**map)
+    }
     pub fn get(&self, key: &K) -> Option<&V> {
         self.regions.get(&key.region())?.get(key)
     }
@@ -45,6 +48,9 @@ impl<K: RegionKey, V> RegionMap<K, V> {
     }
 }
 impl<K: RegionKey, V: Clone> RegionMap<K, V> {
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.regions.get_mut(&key.region())?.get_mut(key)
+    }
     pub fn insert(&mut self, key: K, value: V) {
         self.regions
             .entry(key.region())

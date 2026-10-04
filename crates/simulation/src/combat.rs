@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CombatState {
-    pub spec: CombatSpec,
+    pub spec: tor_world::Shared<CombatSpec>,
     pub hp: u32,
     pub pending: Option<Preparation>,
 }
@@ -218,20 +218,17 @@ impl Game {
         &self,
         id: ActorId,
         visible: &impl Fn(tor_world::Location) -> bool,
+        perceived: &[(ActorId, crate::actor_store::BodyCells)],
     ) -> Option<CombatView> {
         let a = self.actors.get(&id)?;
         let c = a.combat.as_ref()?;
-        let actors = self
-            .actors
+        let actors = perceived
             .iter()
-            .filter(|(other, a)| {
-                **other != id
-                    && a.alive()
-                    && self
-                        .body_cells(a.location, a.orientation, &a.body)
-                        .is_some_and(|cells| cells.iter().any(|(p, _)| visible(*p)))
+            .filter(|(other, body)| {
+                *other != id && self.actors[other].alive() && body.iter().any(|(p, _)| visible(*p))
             })
-            .filter_map(|(other, a)| {
+            .filter_map(|(other, _)| {
+                let a = &self.actors[other];
                 let c = a.combat.as_ref()?;
                 let injury = if c.hp == c.spec.max_hp {
                     Injury::Healthy
@@ -394,10 +391,10 @@ impl Game {
         if !spec.valid() {
             return Err(GameError::InvalidLocation);
         }
-        let actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
+        let mut actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
         actor.combat = Some(CombatState {
             hp: spec.max_hp,
-            spec,
+            spec: tor_world::Shared::new(spec),
             pending: None,
         });
         Ok(())
@@ -413,26 +410,33 @@ impl Game {
         actor: ActorId,
         damage: &BTreeMap<DamageType, u32>,
     ) -> u32 {
-        let Some(state) = self.actors.get_mut(&actor).and_then(|a| a.combat.as_mut()) else {
+        let Some(mut edited) = self.actors.get_mut(&actor) else {
+            return 0;
+        };
+        let Some(state) = edited.combat.as_mut() else {
             return 0;
         };
         let loss = state.spec.damage_taken(damage).min(state.hp);
         state.hp -= loss;
         let died = loss > 0 && state.hp == 0;
+        let mut interrupted = false;
         if loss > 0 {
             if let Some(pending) = state.pending.as_mut().filter(|p| p.active) {
                 pending.remaining = pending
                     .remaining
                     .saturating_sub(self.tick.saturating_sub(pending.started));
                 pending.active = false;
-                self.combat.events.push(CombatEvent::Interrupted { actor });
-                if !self.is_ai(actor) {
-                    self.combat.input_boundaries.insert(actor);
-                }
-                self.actors
-                    .get_mut(&actor)
-                    .expect("existing actor")
-                    .ready_at = self.tick;
+                interrupted = true;
+            }
+        }
+        if interrupted {
+            edited.ready_at = self.tick;
+        }
+        drop(edited);
+        if interrupted {
+            self.combat.events.push(CombatEvent::Interrupted { actor });
+            if !self.is_ai(actor) {
+                self.combat.input_boundaries.insert(actor);
             }
         }
         if died {
@@ -443,18 +447,21 @@ impl Game {
 
     fn finish_death(&mut self, id: ActorId) {
         self.combat.input_boundaries.remove(&id);
-        let actor = self.actors.get_mut(&id).unwrap();
+        let mut actor = self.actors.get_mut(&id).unwrap();
         actor.combat.as_mut().unwrap().pending = None;
         let location = actor.location;
         let motion = actor.motion.clone();
         let orientation = actor.orientation;
         actor.motion = Default::default();
-        for item in self.items.values_mut() {
-            if item.location == ItemLocation::Carried(id) {
-                item.location = ItemLocation::Ground(location);
-                item.motion = motion.clone();
-                item.orientation = orientation;
-            }
+        let inventory: Vec<_> = self.items.at(ItemLocation::Carried(id)).collect();
+        for item in inventory {
+            self.items
+                .edit(item, |item| {
+                    item.location = ItemLocation::Ground(location);
+                    item.motion = motion.clone();
+                    item.orientation = orientation;
+                })
+                .expect("carried item");
         }
         let corpse_id = ItemId(self.next_item_id);
         self.next_item_id = self
@@ -471,7 +478,7 @@ impl Game {
         self.items.insert(
             corpse_id,
             Item {
-                spec,
+                spec: tor_world::Shared::new(spec),
                 quantity: 1,
                 location: ItemLocation::Ground(location),
                 motion,
@@ -498,7 +505,7 @@ impl Game {
     }
 
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<ActorId> {
-        let a = self.actors.get_mut(&actor)?;
+        let mut a = self.actors.get_mut(&actor)?;
         let p = a.combat.as_mut()?.pending.as_mut()?;
         if !p.active {
             return None;
@@ -507,9 +514,10 @@ impl Game {
             .remaining
             .saturating_sub(self.tick.saturating_sub(p.started));
         p.active = false;
+        let target = p.target;
         a.ready_at = self.tick;
         self.combat.input_boundaries.insert(actor);
-        Some(p.target)
+        Some(target)
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
@@ -595,13 +603,8 @@ impl Game {
     }
 
     pub(crate) fn start_attack(&mut self, actor: ActorId, target: ActorId) {
-        let c = self
-            .actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap();
+        let mut edited = self.actors.get_mut(&actor).unwrap();
+        let c = edited.combat.as_mut().unwrap();
         let remaining = c
             .pending
             .as_ref()
@@ -713,7 +716,7 @@ pub enum DamageType {
     Vital,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttackSpec {
     pub bonus: i32,
@@ -722,7 +725,8 @@ pub struct AttackSpec {
     pub damage: BTreeMap<DamageType, u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(not(test), derive(Clone))]
 #[serde(default, deny_unknown_fields)]
 pub struct CombatSpec {
     pub name: String,
@@ -732,6 +736,27 @@ pub struct CombatSpec {
     pub immunities: BTreeSet<DamageType>,
     pub reductions: BTreeMap<DamageType, u32>,
     pub faction: String,
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMBAT_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl Clone for CombatSpec {
+    fn clone(&self) -> Self {
+        COMBAT_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
+        Self {
+            name: self.name.clone(),
+            max_hp: self.max_hp,
+            defense: self.defense,
+            attack: self.attack.clone(),
+            immunities: self.immunities.clone(),
+            reductions: self.reductions.clone(),
+            faction: self.faction.clone(),
+        }
+    }
 }
 
 impl Default for CombatSpec {
@@ -799,6 +824,47 @@ pub fn impact_damage(incoming_velocity: i64) -> u32 {
 mod tests {
     use super::*;
     use crate::{Action, ActorId, Game};
+
+    #[test]
+    fn damage_does_not_copy_unrelated_combat_definitions() {
+        for count in [16, 256, 4096] {
+            let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(tor_world::Region {
+                    id: tor_world::RegionId(1),
+                    name: "combat".into(),
+                    bounds: tor_world::Extent::new(count + 2, 3, 1).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            for x in 0..count {
+                let actor = game
+                    .spawn_actor(
+                        tor_world::Location {
+                            region: tor_world::RegionId(1),
+                            position: tor_world::Position { x, y: 1, z: 0 },
+                        },
+                        std::num::NonZeroU64::new(100).unwrap(),
+                    )
+                    .unwrap();
+                game.configure_combat(actor, CombatSpec::default()).unwrap();
+            }
+            let old = game.clone();
+            let before = COMBAT_DEFINITION_COPIES.with(|copies| copies.get());
+            assert_eq!(
+                game.apply_damage(ActorId(1), &BTreeMap::from([(DamageType::Impact, 1)])),
+                1
+            );
+            let copied = COMBAT_DEFINITION_COPIES.with(|copies| copies.get()) - before;
+            assert_eq!(copied, 0, "actor count {count}");
+            assert_eq!(old.health(ActorId(1)), Some((30, 30)));
+            assert_eq!(game.health(ActorId(1)), Some((29, 30)));
+            assert_eq!(
+                old.health(ActorId(count as u64)),
+                game.health(ActorId(count as u64))
+            );
+        }
+    }
 
     fn fixture() -> Game {
         let mut game = Game::two_room_in_stone(42);

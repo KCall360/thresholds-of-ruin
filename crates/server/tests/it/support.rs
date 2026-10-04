@@ -92,8 +92,8 @@ pub fn wizard(
 /// runs until it needs client input. Returns the number of turns taken.
 pub fn run_ai_turns(engine: &mut Engine) -> usize {
     let mut turns = 0;
-    while let Some((actor, action)) = engine.next_ai_action() {
-        act_as(engine, actor, action).unwrap();
+    while let Some(actor) = engine.next_actor().filter(|id| engine.is_ai(*id)) {
+        engine.advance_ai(actor).unwrap();
         turns += 1;
         assert!(
             turns <= 10_000,

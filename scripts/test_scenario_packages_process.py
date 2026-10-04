@@ -9,6 +9,107 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_validator_reports_construction_references_without_rewriting_package(self):
+        cases = [
+            ('actor-ai', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], controller = "ai", ai = "missing", combat = { max_hp = 41 }, body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
+             'regions/1.toml: region 1, actor 9: Unknown actor AI profile "missing"'),
+            ('actor-body', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], body = { cells = [[0,0,0]], eye = [1,0,0], mass = 91 } }]\n',
+             'regions/1.toml: region 1, actor 9: Actor body eye must be one of its cells'),
+            ('actor-archetype', 'regions/1.toml',
+             '\nactors = [{ id = 9, at = [3,1,0], archetype = "missing" }]\n',
+             'regions/1.toml: region 1, actor 9: Unknown archetype missing'),
+            ('item-archetype', 'regions/2.toml',
+             '\nitems = [{ id = 9, at = [1,1,0], archetype = "missing" }]\n',
+             'regions/2.toml: region 2, item 9: Unknown archetype missing'),
+        ]
+        for name, source, edit, message in cases:
+            with self.subTest(reference=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios/two-room', package)
+                path = package / source
+                text = path.read_text()
+                if name == 'item-archetype':
+                    text = '\n'.join(line for line in text.splitlines() if not line.startswith('items =')) + '\n'
+                path.write_text(text + edit)
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                        capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(json.loads(result.stderr)['error'], {'code': 'scenario_invalid', 'message': message})
+                self.assertEqual({p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}, before)
+
+    def test_validator_identifies_invalid_declarations_without_rewriting_package(self):
+        cases = [
+            ('faction', 'scenario.toml', '\nfactions = { guard = ["missing"] }\n',
+             'scenario.toml: faction "guard": Invalid faction relationship'),
+            ('profile', 'scenario.toml', '\nai_profiles = { guard = { flee_percent = 101 } }\n',
+             'scenario.toml: AI profile "guard": Invalid AI profile'),
+            ('actor', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], controller = "bad" }]\n',
+             'regions/1.toml: region 1, actor 9: Invalid actor controller'),
+            ('combat', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], combat = { max_hp = 0 } }]\n',
+             'regions/1.toml: region 1, actor 9: Invalid combat attributes or faction'),
+        ]
+        for name, source, edit, message in cases:
+            with self.subTest(declaration=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios/two-room', package)
+                path = package / source
+                path.write_text(path.read_text() + edit)
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                        capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                error = json.loads(result.stderr)['error']
+                self.assertEqual(error, {'code': 'scenario_invalid', 'message': message})
+                after = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+                self.assertEqual(after, before)
+
+    def test_compiled_inheritance_and_overrides_survive_save_restart(self):
+        package = self.directory / 'compiled-package'
+        shutil.copytree(ROOT / 'scenarios/two-room', package)
+        manifest = package / 'scenario.toml'
+        text = manifest.read_text()
+        text = text.replace('"token" = { "name" = "copper token" }',
+                            '"token" = { name = "compiled coin", stackable = true, '
+                            'properties = { quality = "fine" } }')
+        text = text.replace('"turn_ticks" = 100, body =',
+                            '"turn_ticks" = 100, combat = { name = "compiler hero", max_hp = 41 }, body =')
+        manifest.write_text(text.replace('mass = 80', 'mass = 91'))
+        region = package / 'regions/1.toml'
+        text = region.read_text()
+        start = text.index('items = ')
+        region.write_text(text[:start] + '''items = [
+            { id = 1, at = [1, 1, 0], archetype = "token", quantity = 3, properties = { quality = "ordinary" } },
+            { id = 3, at = [1, 1, 0], archetype = "token", name = "named gift", stackable = false }
+        ]
+        ''')
+        validated = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
+                                   capture_output=True, text=True, timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        observation = initial['state']['observation']
+        self.assertEqual(observation['combat']['max_hp'], 41)
+        items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
+        self.assertEqual(items['compiled coin']['quantity'], 3)
+        self.assertEqual(items['named gift']['quantity'], 1)
+        taken = self.act(player, {'type': 'take', 'item': items['compiled coin']['id'], 'quantity': 2})
+        self.assertIsNone(taken['error'])
+        inventory = taken['state']['observation']['inventory']
+        self.assertEqual([(item['name'], item['quantity']) for item in inventory], [('compiled coin', 2)])
+        self.flush_save()
+        player.stop()
+        server.stop()
+        self.server(scenario=package)
+        resumed, restored = self.client()
+        self.assertEqual(restored['state'], taken['state'])
+        self.assertEqual(restored['history'], taken['history'])
+        dropped = self.act(resumed, {'type': 'drop', 'item': inventory[0]['id'], 'quantity': 1})
+        self.assertIsNone(dropped['error'])
+        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], 1)
+
     def test_validator_stale_rejection_and_ordinary_startup(self):
         package = self.directory / 'package'
         shutil.copytree(ROOT / 'scenarios/two-room', package)

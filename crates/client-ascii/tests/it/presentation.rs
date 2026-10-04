@@ -6,11 +6,9 @@ use tor_protocol::*;
 fn quantity_picker_submits_partial_pickup_and_drop() {
     let mut snapshot = state().snapshot();
     snapshot.state.observation.ground_items[0].item.quantity = 10;
-    snapshot
-        .state
-        .observation
-        .inventory
-        .push(snapshot.state.observation.ground_items[0].item.clone());
+    let mut carried = snapshot.state.observation.ground_items[0].item.clone();
+    carried.id = 4;
+    snapshot.state.observation.inventory.push(carried);
     for key in [Key::Pickup, Key::Drop] {
         let mut app = App::new();
         app.role = AccessRole::Player;
@@ -26,7 +24,7 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
             }
         } else {
             Action::Drop {
-                item: 3,
+                item: 4,
                 quantity: Some(3),
             }
         };

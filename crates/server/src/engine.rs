@@ -3,7 +3,7 @@ use std::fmt;
 use std::fs;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -19,9 +19,278 @@ use crate::journal::{
 pub(crate) const ARCHIVE_VERSION: u32 = 15;
 #[path = "checkpoint.rs"]
 mod checkpoint;
+#[path = "command_request.rs"]
+mod command_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const RULESET: &str = crate::scenario_package::RULESET;
+
+#[cfg(test)]
+mod request_validation_tests {
+    use super::*;
+
+    #[test]
+    fn receipts_and_authority_keep_their_precedence_over_stale_revisions() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let receipt = Receipt {
+            user: "test".into(),
+            frontend: "test".into(),
+            request_id: "accepted".into(),
+            actor,
+            branch: engine.branch().clone(),
+            command: Command::Act {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: Action::Wait,
+            },
+        };
+        let accepted = engine.apply_command(&receipt, None).unwrap();
+        let state = engine.state(actor).unwrap();
+        let mut profile = CommandProfile::default();
+        let repeated = engine
+            .apply_command_profiled(&receipt, None, Some(&mut profile))
+            .unwrap();
+        assert!(repeated.duplicate);
+        assert_eq!(repeated.entry, accepted.entry);
+        assert_eq!(profile.candidate_captures, 0);
+
+        let mut conflict = receipt.clone();
+        conflict.command = Command::Act {
+            expected_revision: 0,
+            action: Action::Move {
+                direction: Direction::East,
+            },
+        };
+        let mut unauthorized = receipt.clone();
+        unauthorized.request_id = "wizard".into();
+        unauthorized.branch = BranchId("unavailable".into());
+        unauthorized.command = Command::Wizard {
+            expected_revision: 0,
+            operation: WizardOperation::Teleport {
+                actor,
+                position: Position {
+                    region: 1,
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                },
+            },
+        };
+        let mut malformed = receipt.clone();
+        malformed.user.clear();
+        let mut wrong_branch = receipt.clone();
+        wrong_branch.request_id = "wrong-branch".into();
+        wrong_branch.branch = BranchId("unavailable".into());
+        for (receipt, code) in [
+            (conflict, ErrorCode::RequestConflict),
+            (unauthorized, ErrorCode::Unauthorized),
+            (malformed, ErrorCode::InvalidRequest),
+            (wrong_branch, ErrorCode::WrongBranch),
+        ] {
+            let failure = engine
+                .apply_command_profiled(&receipt, None, Some(&mut profile))
+                .unwrap_err();
+            assert_eq!(failure.code, code);
+            assert_eq!(profile.candidate_captures, 0);
+            assert_eq!(engine.state(actor).unwrap(), state);
+        }
+    }
+
+    #[test]
+    fn stale_commands_are_rejected_before_candidate_capture() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        let actor = ActorId(1);
+        let before = engine.state(actor).unwrap();
+        let expected_revision = before.revision + 1;
+        let commands = [
+            Command::Act {
+                expected_revision,
+                action: Action::Wait,
+            },
+            Command::Travel {
+                expected_revision,
+                destination: "unavailable".into(),
+            },
+            Command::RenamePlace {
+                expected_revision,
+                key: "unavailable".into(),
+                name: "name".into(),
+            },
+            Command::Wizard {
+                expected_revision,
+                operation: WizardOperation::Teleport {
+                    actor,
+                    position: Position {
+                        region: 1,
+                        x: 1,
+                        y: 1,
+                        z: 0,
+                    },
+                },
+            },
+        ];
+        for (n, command) in commands.into_iter().enumerate() {
+            let receipt = Receipt {
+                user: "test".into(),
+                frontend: "test".into(),
+                request_id: format!("stale-{n}"),
+                actor,
+                branch: engine.branch().clone(),
+                command,
+            };
+            let mut profile = CommandProfile::default();
+            let failure = engine
+                .apply_command_profiled(&receipt, None, Some(&mut profile))
+                .unwrap_err();
+            assert_eq!(failure.code, ErrorCode::StaleRevision);
+            assert_eq!(
+                profile.candidate_captures, 0,
+                "stale command {n} copied candidate state"
+            );
+            assert_eq!(engine.state(actor).unwrap(), before);
+        }
+    }
+}
+
+#[cfg(test)]
+mod observation_reuse_tests {
+    use super::*;
+
+    fn assert_matches_uncached(engine: &Engine, actor: ActorId) {
+        assert_eq!(
+            engine.state(actor).unwrap(),
+            engine.diagnostic_copy().state(actor).unwrap()
+        );
+        let before = tor_simulation::diagnostics::work_counts();
+        engine.state(actor).unwrap();
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations
+        );
+    }
+
+    #[test]
+    fn wizard_mutation_rewind_notes_and_seeded_fixtures_never_retain_stale_views() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        assert_matches_uncached(&engine, actor);
+        let branch = engine.branch().clone();
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "teleport",
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    operation: WizardOperation::Teleport {
+                        actor,
+                        position: Position {
+                            region: 2,
+                            x: 1,
+                            y: 1,
+                            z: 0,
+                        },
+                    },
+                },
+            )
+            .unwrap();
+        assert_matches_uncached(&engine, actor);
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "rewind",
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    operation: WizardOperation::Rewind { target: None },
+                },
+            )
+            .unwrap();
+        assert_matches_uncached(&engine, actor);
+        let state = engine.state(actor).unwrap();
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "note",
+                &engine.branch().clone(),
+                Command::Annotate {
+                    anchor: Anchor::State {
+                        revision: state.revision,
+                    },
+                    text: "private note".into(),
+                    source: ClientSource::User,
+                    audience: Audience::Private,
+                    category: AnnotationCategory::Note,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.state(actor).unwrap(), state);
+        assert_matches_uncached(&engine, actor);
+        engine.seed_profile_history(3).unwrap();
+        assert_matches_uncached(&engine, actor);
+    }
+
+    #[test]
+    fn repeated_reads_reuse_the_boundary_and_committed_actions_replace_it() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let initial = engine.state(actor).unwrap();
+        let before = tor_simulation::diagnostics::work_counts();
+        assert_eq!(engine.state(actor).unwrap(), initial);
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations
+        );
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "move",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: initial.revision,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        let before = tor_simulation::diagnostics::work_counts();
+        let moved = engine.state(actor).unwrap();
+        assert_ne!(moved, initial);
+        assert_eq!(engine.state(actor).unwrap(), moved);
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            before.observations,
+            "reuse the post-action view used for revision comparison"
+        );
+        engine
+            .command(
+                "test",
+                "test",
+                actor,
+                "wait",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: moved.revision,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let waited = engine.state(actor).unwrap();
+        assert!(waited.observation.tick > moved.observation.tick);
+        assert_eq!(engine.state(actor).unwrap(), waited);
+    }
+}
 
 #[cfg(test)]
 mod seed_equivalence_tests {
@@ -310,6 +579,9 @@ pub struct CommandProfile {
     /// Builds and reads the preloader had ready. Depends on timing, unlike
     /// the other counts.
     pub regions_prepared: usize,
+    /// Nested acquisition details; excluded from `exclusive_duration` because
+    /// their time is already included in `region_transition`.
+    pub region_acquisition: crate::regions::RegionAcquisitionProfile,
     /// Background preloading: what it was asked for after the command, and
     /// the deterministic work of choosing it.
     pub preload_jobs: usize,
@@ -450,6 +722,7 @@ struct Candidate {
     boundaries: VecDeque<Arc<Boundary>>,
     game: Game,
     revisions: Revisions,
+    observations: BTreeMap<ActorId, Arc<RevisionView>>,
     /// Region records this command's transition made.
     made: Vec<(
         tor_simulation::RecordId,
@@ -464,6 +737,7 @@ impl Candidate {
             boundaries: engine.boundaries.clone(),
             game: engine.game.clone(),
             revisions: engine.revisions.clone(),
+            observations: BTreeMap::new(),
             made: Vec::new(),
         }
     }
@@ -484,6 +758,7 @@ impl Candidate {
         engine.boundaries = self.boundaries;
         engine.game = self.game;
         engine.revisions = self.revisions;
+        engine.observations.replace(self.observations);
         let regions = engine.regions.as_mut()?;
         regions.publish(self.made);
         regions.preload(&engine.game)
@@ -549,7 +824,12 @@ impl Candidate {
             return Ok(());
         };
         let started = Instant::now();
-        let work = regions.transition_with(&mut self.game, &mut self.made, extra)?;
+        let work = regions.transition_with_profile(
+            &mut self.game,
+            &mut self.made,
+            extra,
+            profile.is_some(),
+        )?;
         let report = &work.report;
         if let Some(profile) = profile {
             profile.region_transition += started.elapsed();
@@ -561,8 +841,13 @@ impl Candidate {
             profile.region_records_read += work.records_read;
             profile.regions_built += report.built.len();
             profile.regions_prepared += work.prepared;
+            profile.region_acquisition.add(work.acquisition);
         }
         if let Some(before) = work.before {
+            // Loading, detaching, or activating regions can change both the
+            // projected scene and scheduler readiness. Recompute at the new
+            // boundary instead of publishing a pre-transition observation.
+            self.observations.clear();
             // Only observers whose view the transition changed move on, so
             // an update never discloses a change nobody could see.
             let stayed: Vec<_> = self
@@ -585,12 +870,49 @@ impl Candidate {
     }
 }
 
-type RevisionView = (tor_simulation::Observation, Vec<tor_world::SightCell>, bool);
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RevisionView {
+    observation: tor_simulation::Observation,
+    scene: Vec<tor_world::SightCell>,
+    ready: bool,
+}
+
+/// Derived views of the committed boundary, never encoded into a save or a
+/// rewind snapshot. The mutex preserves Engine's thread-safe read interface.
+#[derive(Debug, Default)]
+struct ObservationCache(Mutex<BTreeMap<ActorId, Arc<RevisionView>>>);
+
+impl ObservationCache {
+    fn view(&self, game: &Game, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+        let mut views = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(view) = views.get(&actor) {
+            return Ok(view.clone());
+        }
+        let view = Arc::new(revision_view(game, actor)?);
+        views.insert(actor, view.clone());
+        Ok(view)
+    }
+
+    fn replace(&mut self, views: BTreeMap<ActorId, Arc<RevisionView>>) {
+        *self
+            .0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = views;
+    }
+}
+
 fn revision_view(game: &Game, actor: ActorId) -> Result<RevisionView, Failure> {
     let (view, scene) = game
         .observe_scene(SimActor(actor.0))
         .map_err(|_| invalid_archive())?;
-    Ok((view, scene, game.next_actor() == Some(SimActor(actor.0))))
+    Ok(RevisionView {
+        observation: view,
+        scene,
+        ready: game.next_actor() == Some(SimActor(actor.0)),
+    })
 }
 
 /// Durable chronological journal, including retained futures and explicit forks.
@@ -603,6 +925,8 @@ pub struct Engine {
     game: Game,
     archive: Archive,
     revisions: Revisions,
+    observations: ObservationCache,
+    history_index: crate::history_index::HistoryIndex,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
     lock: Option<Arc<fs::File>>,
@@ -669,6 +993,8 @@ impl Engine {
             game,
             revisions,
             receipts: BTreeMap::new(),
+            observations: ObservationCache::default(),
+            history_index: crate::history_index::HistoryIndex::default(),
             path: None,
             lock: None,
             store: None,
@@ -885,11 +1211,7 @@ impl Engine {
         }
         for record in records {
             if Uuid::parse_str(&record.entry.id.0).is_err()
-                || engine
-                    .archive
-                    .records
-                    .iter()
-                    .any(|old| old.entry.id == record.entry.id)
+                || engine.history_index.find(&record.entry.id).is_some()
             {
                 return Err(invalid_archive());
             }
@@ -983,31 +1305,65 @@ impl Engine {
 
     pub fn next_ai_action(&self) -> Option<(ActorId, Action)> {
         let (actor, action) = self.game.next_ai_action()?;
-        let action = match action {
-            tor_simulation::Action::Attack { target } => Action::Attack {
-                target: ActorId(target.0),
-            },
-            tor_simulation::Action::Wait => Action::Wait,
-            tor_simulation::Action::SetDoor { door, open } => Action::SetDoor { door, open },
-            tor_simulation::Action::Move(d) => {
-                let direction = match d {
-                    tor_world::Direction::North => Direction::North,
-                    tor_world::Direction::South => Direction::South,
-                    tor_world::Direction::East => Direction::East,
-                    tor_world::Direction::West => Direction::West,
-                    tor_world::Direction::NorthEast => Direction::NorthEast,
-                    tor_world::Direction::SouthEast => Direction::SouthEast,
-                    tor_world::Direction::SouthWest => Direction::SouthWest,
-                    tor_world::Direction::NorthWest => Direction::NorthWest,
-                    tor_world::Direction::Up => Direction::Up,
-                    tor_world::Direction::Down => Direction::Down,
-                    _ => return None,
-                };
-                Action::Move { direction }
-            }
-            _ => return None,
-        };
+        let action = adapt::disclosed_action(action)?;
         Some((ActorId(actor.0), action))
+    }
+
+    /// Execute one due AI turn without preparing the same decision twice.
+    /// Candidate effects remain private until journal admission succeeds.
+    pub fn advance_ai(&mut self, actor: ActorId) -> Result<CommandResult, Failure> {
+        self.advance_ai_inner(actor, None)
+    }
+
+    pub fn advance_ai_profiled(
+        &mut self,
+        actor: ActorId,
+    ) -> Result<(CommandResult, CommandProfile), Failure> {
+        let mut profile = CommandProfile::default();
+        let result = self.advance_ai_inner(actor, Some(&mut profile))?;
+        Ok((result, profile))
+    }
+
+    fn advance_ai_inner(
+        &mut self,
+        actor: ActorId,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        if !self.is_ai(actor) || self.next_actor() != Some(actor) {
+            return Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI is not ready",
+            ));
+        }
+        let revision = self.revision(actor)?;
+        let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
+        let started = Instant::now();
+        let (action, outcome) = candidate
+            .game
+            .act_ai(SimActor(actor.0))
+            .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Scenario AI has no action"))?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.simulation_transition += started.elapsed();
+            profile.simulation_transitions += 1;
+        }
+        let receipt = Receipt {
+            user: "scenario-ai".into(),
+            frontend: "server-ai".into(),
+            request_id: Uuid::new_v4().to_string(),
+            actor,
+            branch: self.branch().clone(),
+            command: Command::Act {
+                expected_revision: revision,
+                action: adapt::disclosed_action(action).ok_or_else(|| {
+                    Failure::new(
+                        ErrorCode::InvalidAction,
+                        "Scenario AI action is unavailable",
+                    )
+                })?,
+            },
+        };
+        let checked = self.check_request(&receipt)?;
+        self.finish_checked_command(checked, None, profile, candidate, Some(outcome))
     }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
@@ -1016,7 +1372,7 @@ impl Engine {
     }
     pub fn observation(&self, actor: ActorId) -> Result<Observation, Failure> {
         self.revision(actor)?;
-        let (view, scene, ready) = self.revision_view(actor)?;
+        let view = self.revision_view(actor)?;
         let package = self.archive.scenario.package.as_deref();
         let terrain = |region: tor_world::RegionId| {
             package
@@ -1025,8 +1381,13 @@ impl Engine {
                     [t.floor.clone(), t.wall.clone(), t.door.clone()]
                 })
         };
-        let mut observation =
-            adapt::observation(view, scene, &self.archive.view_salt, ready, &terrain);
+        let mut observation = adapt::observation(
+            view.observation.clone(),
+            view.scene.clone(),
+            &self.archive.view_salt,
+            view.ready,
+            &terrain,
+        );
         observation.places = self
             .game
             .remembered_places(SimActor(actor.0))
@@ -1042,8 +1403,8 @@ impl Engine {
             .collect();
         Ok(observation)
     }
-    fn revision_view(&self, actor: ActorId) -> Result<RevisionView, Failure> {
-        revision_view(&self.game, actor)
+    fn revision_view(&self, actor: ActorId) -> Result<Arc<RevisionView>, Failure> {
+        self.observations.view(&self.game, actor)
     }
 
     /// The assets an actor's client may soon need: those of the themes of
@@ -1134,27 +1495,28 @@ impl Engine {
                 "Invalid history page size",
             ));
         }
-        let visible: Vec<_> = self
-            .archive
-            .records
-            .iter()
-            .map(|record| &record.entry)
-            .filter(|entry| &entry.branch == branch && entry.visible_to(actor, user))
-            .collect();
         let end = match before {
-            Some(id) => visible
-                .iter()
-                .position(|entry| &entry.id == id)
-                .ok_or_else(invalid_anchor)?,
-            None => visible.len(),
+            Some(id) => {
+                let position = self.history_index.find(id).ok_or_else(invalid_anchor)?;
+                let entry = &self.archive.records[position].entry;
+                #[cfg(test)]
+                HISTORY_RECORD_VISITS.with(|visits| visits.set(visits.get() + 1));
+                if &entry.branch != branch || !entry.visible_to(actor, user) {
+                    return Err(invalid_anchor());
+                }
+                position
+            }
+            None => self.archive.records.len(),
         };
-        let start = end.saturating_sub(limit);
+        let (positions, older) = self.history_index.page(actor, user, branch, end, limit);
+        #[cfg(test)]
+        HISTORY_RECORD_VISITS.with(|visits| visits.set(visits.get() + positions.len()));
         Ok(HistoryPage {
-            entries: visible[start..end]
+            entries: positions
                 .iter()
-                .map(|entry| entry.disclosed())
+                .map(|&position| self.archive.records[position].entry.disclosed())
                 .collect(),
-            older_before: (start > 0).then(|| visible[start].id.clone()),
+            older_before: older.then(|| self.archive.records[positions[0]].entry.id.clone()),
         })
     }
 
@@ -1342,6 +1704,9 @@ impl Engine {
         }
         let start = self.archive.records.len();
         let end = start.checked_add(count).ok_or_else(invalid_archive)?;
+        if count > 0 {
+            self.observations.replace(BTreeMap::new());
+        }
         if count >= REWIND_BOUNDARIES {
             self.boundaries.clear();
         }
@@ -1389,11 +1754,7 @@ impl Engine {
                     action: tor_protocol::Action::Wait,
                 },
             };
-            self.receipts.insert(
-                (receipt.user.clone(), receipt.request_id.clone()),
-                self.archive.records.len(),
-            );
-            self.archive.records.push(Record {
+            self.append_record(Record {
                 entry: entry.clone(),
                 receipt: Some(receipt),
             });
@@ -1423,50 +1784,54 @@ impl Engine {
         &mut self,
         receipt: &Receipt,
         recorded_id: Option<EntryId>,
-        mut profile: Option<&mut CommandProfile>,
+        profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
-        if matches!(receipt.command, Command::Wizard { .. }) && !self.wizard_enabled {
-            return Err(Failure::new(
-                ErrorCode::Unauthorized,
-                "Wizard operations are disabled",
-            ));
-        }
-        if !valid_label(&receipt.user)
-            || !valid_label(&receipt.frontend)
-            || !valid_label(&receipt.request_id)
-        {
-            return Err(Failure::new(
-                ErrorCode::InvalidRequest,
-                "Invalid identity or request ID",
-            ));
-        }
-        if let Some(result) = self.retry(
-            &receipt.user,
-            receipt.actor,
-            &receipt.request_id,
-            &receipt.branch,
-            &receipt.command,
-        )? {
+        if let Some(result) = self.resolve_receipt(receipt)? {
             return Ok(result);
         }
-        if &receipt.branch != self.branch() {
-            return Err(Failure::new(
-                ErrorCode::WrongBranch,
-                "Reconnect to the current branch",
-            ));
-        }
-        let revision = self.revision(receipt.actor)?;
+        let checked = self.check_request(receipt)?;
+        self.execute_checked_command(checked, recorded_id, profile)
+    }
+
+    /// Consumes metadata checked at this boundary without a callback or yield.
+    /// Target/timing validation, candidate execution, persistence admission and
+    /// publication remain ordered inside this private operation.
+    fn execute_checked_command(
+        &mut self,
+        checked: command_request::CheckedRequest<'_>,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        let candidate = self.capture_command_candidate(profile.as_deref_mut());
+        self.finish_checked_command(checked, recorded_id, profile, candidate, None)
+    }
+
+    fn capture_command_candidate(&mut self, profile: Option<&mut CommandProfile>) -> Candidate {
         if let (Some(regions), Some(store)) = (&mut self.regions, &self.store) {
             if let Some((on_disk, watermark)) = store.take_written() {
                 regions.written(on_disk, watermark);
             }
         }
         let started = Instant::now();
-        let mut candidate = Candidate::capture(self);
-        if let Some(profile) = profile.as_deref_mut() {
+        let candidate = Candidate::capture(self);
+        if let Some(profile) = profile {
             profile.rollback_capture += started.elapsed();
             profile.candidate_captures += 1;
         }
+        candidate
+    }
+
+    // `executed_ai` comes only from the uninterrupted private-candidate path
+    // above. It is not an action token that callers can retain or replay.
+    fn finish_checked_command(
+        &mut self,
+        checked: command_request::CheckedRequest<'_>,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+        mut candidate: Candidate,
+        executed_ai: Option<tor_simulation::ActionOutcome>,
+    ) -> Result<CommandResult, Failure> {
+        let (receipt, revision) = checked.into_parts();
         // Exhaustive impact decisions: new commands/actions must explicitly
         // decide whether they can change remembered geometry.
         let navigation_changed = match &receipt.command {
@@ -1483,7 +1848,7 @@ impl Engine {
             }
         };
         let mut navigation_refreshed = false;
-        let mut tick = candidate.game.tick();
+        let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
             Command::PausePreparation => {
@@ -1512,16 +1877,10 @@ impl Engine {
                 )
             }
             Command::RenamePlace {
-                expected_revision,
+                expected_revision: _,
                 key,
                 name,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before naming a place",
-                    ));
-                }
                 let location = self
                     .game
                     .remembered_places(SimActor(receipt.actor.0))
@@ -1557,15 +1916,9 @@ impl Engine {
             }
 
             Command::Travel {
-                expected_revision,
+                expected_revision: _,
                 destination,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before travelling",
-                    ));
-                }
                 self.travel_route(receipt.actor, destination)?;
                 if self.game.next_actor() != Some(SimActor(receipt.actor.0)) {
                     return Err(Failure::new(ErrorCode::InvalidAction, "Actor is not ready"));
@@ -1582,15 +1935,9 @@ impl Engine {
             }
 
             Command::Wizard {
-                expected_revision,
+                expected_revision: _,
                 operation,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh before a wizard operation",
-                    ));
-                }
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
                 let result =
                     candidate.apply_wizard(receipt, operation, &entry_id, &self.archive.records)?;
@@ -1613,15 +1960,9 @@ impl Engine {
                 )
             }
             Command::Act {
-                expected_revision,
+                expected_revision: _,
                 action,
             } => {
-                if *expected_revision != revision {
-                    return Err(Failure::new(
-                        ErrorCode::StaleRevision,
-                        "Refresh the observation before acting",
-                    ));
-                }
                 let started = Instant::now();
                 let perception_changed = match action {
                     Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
@@ -1642,11 +1983,17 @@ impl Engine {
                     profile.actors_observed += before.len();
                 }
                 let started = Instant::now();
-                let outcome = candidate
-                    .game
-                    .act(SimActor(receipt.actor.0), adapt::action(action))
-                    .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?;
-                if let Some(profile) = profile.as_deref_mut() {
+                let already_executed = executed_ai.is_some();
+                let outcome = match executed_ai {
+                    Some(outcome) => outcome,
+                    None => candidate
+                        .game
+                        .act(SimActor(receipt.actor.0), adapt::action(action))
+                        .map_err(|_| {
+                            Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
+                        })?,
+                };
+                if let Some(profile) = profile.as_deref_mut().filter(|_| !already_executed) {
                     profile.simulation_transition += started.elapsed();
                     profile.simulation_transitions += 1;
                 }
@@ -1678,18 +2025,18 @@ impl Engine {
                         profile.perception += perception_started.elapsed();
                         profile.actors_observed += 1;
                     }
-                    if navigation_changed || after.1 != old.1 {
+                    if navigation_changed || after.scene != old.scene {
                         navigation_refreshed = true;
                         let started = Instant::now();
                         candidate
                             .game
-                            .refresh_navigation_scene(SimActor(actor.0), &after.1);
+                            .refresh_navigation_scene(SimActor(actor.0), &after.scene);
                         if let Some(profile) = profile.as_deref_mut() {
                             profile.navigation_refresh += started.elapsed();
                         }
                     }
                     let started = Instant::now();
-                    let changed = after != old;
+                    let changed = after != *old;
                     if changed {
                         let revision = candidate.revisions.get_mut(&actor).expect("known actor");
                         *revision = revision.checked_add(1).ok_or_else(|| {
@@ -1700,6 +2047,7 @@ impl Engine {
                         profile.revision_detection += started.elapsed();
                         profile.revision_comparisons += 1;
                     }
+                    candidate.observations.insert(actor, Arc::new(after));
                 }
                 (
                     Author::User {
@@ -1791,11 +2139,7 @@ impl Engine {
             profile.preload_regions_expanded += preload.regions_expanded;
             profile.preload_links_examined += preload.links_examined;
         }
-        self.receipts.insert(
-            (receipt.user.clone(), receipt.request_id.clone()),
-            self.archive.records.len(),
-        );
-        self.archive.records.push(record);
+        self.append_record(record);
         if let Some(profile) = profile {
             profile.publication += started.elapsed();
         }
@@ -1853,7 +2197,7 @@ impl Engine {
         };
         let copied = self.admit(&record, &Candidate::capture(self), None)?;
         self.mark_saved(copied);
-        self.archive.records.push(record);
+        self.append_record(record);
         Ok(entry)
     }
 
@@ -1880,13 +2224,8 @@ impl Engine {
         match anchor {
             Anchor::State { revision: target } if *target <= revision => Ok(()),
             Anchor::Entry { id } => {
-                let entry = self
-                    .archive
-                    .records
-                    .iter()
-                    .map(|r| &r.entry)
-                    .find(|entry| &entry.id == id)
-                    .ok_or_else(invalid_anchor)?;
+                let position = self.history_index.find(id).ok_or_else(invalid_anchor)?;
+                let entry = &self.archive.records[position].entry;
                 if &entry.branch != self.branch()
                     || !entry.visible_to(actor, user)
                     || (audience == Audience::Actor && entry.audience == Audience::Private)
@@ -1897,6 +2236,16 @@ impl Engine {
             }
             _ => Err(invalid_anchor()),
         }
+    }
+
+    fn append_record(&mut self, record: Record) {
+        let position = self.archive.records.len();
+        self.history_index.append(&record.entry, position);
+        if let Some(receipt) = &record.receipt {
+            self.receipts
+                .insert((receipt.user.clone(), receipt.request_id.clone()), position);
+        }
+        self.archive.records.push(record);
     }
 
     // Full history copies are confined to detached diagnostics. Ordinary command
@@ -1911,6 +2260,8 @@ impl Engine {
             archive: self.archive.clone(),
             revisions: self.revisions.clone(),
             receipts: self.receipts.clone(),
+            observations: ObservationCache::default(),
+            history_index: self.history_index.clone(),
             path: self.path.clone(),
             lock: self.lock.clone(),
             store: self.store.clone(),
@@ -2338,8 +2689,65 @@ impl Candidate {
 }
 
 #[cfg(test)]
+thread_local! {
+    static HISTORY_RECORD_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod scaling_tests {
     use super::*;
+
+    #[test]
+    fn history_page_work_does_not_scan_other_users_private_entries() {
+        for hidden in [16, 256, 4096] {
+            let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+            let mut append = |user: &str, request: &str, audience| {
+                engine
+                    .command(
+                        user,
+                        "history-index",
+                        ActorId(1),
+                        request,
+                        &engine.branch().clone(),
+                        Command::Annotate {
+                            anchor: Anchor::State { revision: 0 },
+                            category: AnnotationCategory::Note,
+                            source: ClientSource::User,
+                            audience,
+                            text: request.into(),
+                        },
+                    )
+                    .unwrap()
+                    .entry
+                    .id
+            };
+            let first = append("alice", "own-private", Audience::Private);
+            let second = append("alice", "public", Audience::Actor);
+            for index in 0..hidden {
+                append("bob", &format!("hidden-{index}"), Audience::Private);
+            }
+            let before = HISTORY_RECORD_VISITS.with(|visits| visits.get());
+            let page = engine.history(ActorId(1), "alice", None, 1).unwrap();
+            assert_eq!(page.entries.len(), 1);
+            assert_eq!(page.entries[0].id, second);
+            assert_eq!(page.older_before, Some(second.clone()));
+            assert_eq!(
+                HISTORY_RECORD_VISITS.with(|visits| visits.get()) - before,
+                1,
+                "private entries: {hidden}"
+            );
+            let before = HISTORY_RECORD_VISITS.with(|visits| visits.get());
+            let page = engine
+                .history(ActorId(1), "alice", Some(&second), 1)
+                .unwrap();
+            assert_eq!(page.entries[0].id, first);
+            assert_eq!(page.older_before, None);
+            assert_eq!(
+                HISTORY_RECORD_VISITS.with(|visits| visits.get()) - before,
+                2
+            );
+        }
+    }
     use tor_test_support::performance::Trace;
 
     fn checked_action(engine: &mut Engine, actor: ActorId, action: Action, request: usize) {

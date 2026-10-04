@@ -2,15 +2,19 @@
 
 mod adapt;
 mod developer;
+mod diagnostics;
 mod engine;
 pub mod generator;
+mod history_index;
+mod outbound;
+pub use outbound::OutboundLimits;
 pub mod journal;
 pub mod performance_fixture;
 mod preload;
 pub mod region_streaming;
 mod regions;
 mod runner;
-pub use regions::Streaming;
+pub use regions::{RegionAcquisitionProfile, Streaming};
 pub mod scenario_package;
 mod session;
 mod storage;

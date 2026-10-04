@@ -4,10 +4,12 @@
 //! disclose observations and filter events; they must not serialize raw game state.
 
 mod actions;
+mod actor_store;
 pub mod ai;
 pub mod combat;
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
+mod item_store;
 mod items;
 pub use items::ItemSpec;
 pub mod checkpoint;
@@ -114,7 +116,7 @@ pub struct ActionOutcome {
 #[serde(deny_unknown_fields)]
 struct Actor {
     combat: Option<combat::CombatState>,
-    body: BodySpec,
+    body: Shared<BodySpec>,
     motion: MotionState,
     location: Location,
     orientation: u8,
@@ -138,7 +140,7 @@ enum ItemLocation {
 struct Item {
     motion: MotionState,
     orientation: u8,
-    spec: ItemSpec,
+    spec: Shared<ItemSpec>,
     quantity: u64,
     location: ItemLocation,
 }
@@ -153,8 +155,8 @@ pub struct Game {
     world: Shared<World>,
     seed: u64,
     tick: u64,
-    actors: BTreeMap<ActorId, Actor>,
-    items: Shared<BTreeMap<ItemId, Item>>,
+    actors: actor_store::ActorStore,
+    items: item_store::ItemStore,
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
@@ -224,7 +226,9 @@ impl Game {
             next
         };
         if let (Ok(item), Some(actor)) = (&result, owner) {
-            self.items.get_mut(item).expect("placed item").location = ItemLocation::Carried(actor);
+            self.items
+                .edit(*item, |item| item.location = ItemLocation::Carried(actor))
+                .expect("placed item");
         }
         result
     }
@@ -267,8 +271,8 @@ impl Game {
             world: Shared::new(world),
             seed,
             tick: 0,
-            actors: BTreeMap::new(),
-            items: Shared::default(),
+            actors: actor_store::ActorStore::default(),
+            items: item_store::ItemStore::default(),
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
@@ -298,7 +302,7 @@ impl Game {
             id,
             Actor {
                 combat: None,
-                body: BodySpec::default(),
+                body: Shared::default(),
                 motion: MotionState::default(),
                 location,
                 orientation: 0,
@@ -329,7 +333,7 @@ impl Game {
             Item {
                 motion: MotionState::default(),
                 orientation: 0,
-                spec: ItemSpec::ordinary(name),
+                spec: Shared::new(ItemSpec::ordinary(name)),
                 quantity: 1,
                 location: ItemLocation::Ground(location),
             },
@@ -381,11 +385,7 @@ impl Game {
                 position: Position { z, ..base.position },
                 ..base
             };
-            self.occupied(cell)
-                || self
-                    .items
-                    .values()
-                    .any(|i| i.location == ItemLocation::Ground(cell))
+            self.occupied(cell) || self.items.at(ItemLocation::Ground(cell)).next().is_some()
         })
     }
     pub fn door_reachable_from(&self, from: Location, door: Location) -> bool {
@@ -412,7 +412,7 @@ impl Game {
         }
         // A frozen actor's time stands at its freeze; syncing below shifts it.
         let clock = self.actor_clock(id);
-        let actor = self.actors.get_mut(&id).expect("validated actor");
+        let mut actor = self.actors.get_mut(&id).expect("validated actor");
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
@@ -422,13 +422,14 @@ impl Game {
             }
         }
         actor.visited.insert(location.region);
+        drop(actor);
         self.sync_actor_lifecycle(id);
         Ok(())
     }
 
     /// Set the asset clients draw an actor with.
     pub fn set_actor_asset(&mut self, id: ActorId, asset: Option<String>) -> Result<(), GameError> {
-        let actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.asset = asset;
         Ok(())
     }
@@ -493,8 +494,9 @@ impl Game {
             && (self.occupied(location)
                 || self
                     .items
-                    .values()
-                    .any(|item| item.location == ItemLocation::Ground(location)))
+                    .at(ItemLocation::Ground(location))
+                    .next()
+                    .is_some())
         {
             return Err(GameError::InvalidLocation);
         }
@@ -530,12 +532,10 @@ impl Game {
     }
 
     fn occupied(&self, location: Location) -> bool {
-        self.actors.values().any(|actor| {
-            actor.alive()
-                && self
-                    .body_cells(actor.location, actor.orientation, &actor.body)
-                    .is_some_and(|cells| cells.iter().any(|(at, _)| *at == location))
-        })
+        self.actors
+            .at(&self.world, location)
+            .keys()
+            .any(|id| self.actors[id].alive())
     }
 }
 

@@ -1,6 +1,6 @@
 # Scenario scripting
 
-**Status: planned, not accepted.** This note records the direction agreed in
+**Status: desired feature; runtime and implementation deferred.** This note records the direction agreed in
 discussion. Nothing is implemented, and the scenario package format is
 unchanged. Adding scripts to packages is a compatibility-breaking format
 decision that needs the maintainer's authorization before work starts. It is
@@ -8,6 +8,12 @@ sequenced after [three-dimensional sight](sight-3d.md) and after the 4e runtime
 transition contract (see [region streaming](region-streaming.md)).
 
 ## Goal
+
+Runtime selection and implementation are deferred. Luau remains a candidate,
+not an accepted dependency. The current [refactor plan](refactoring.md) uses
+language-independent contracts for scoped queries, validated effects, scheduling,
+persisted values, and pinned handler identities. The runtime-specific sketches
+below are exploratory and must be re-evaluated before any scripting work starts.
 
 Scenarios, maps, and objects need small pieces of specific behaviour: a lever
 that opens a far door, a message when the objective item reaches the exit, an
@@ -109,24 +115,12 @@ Ongoing effects, such as regeneration, use an engine primitive with a
 script-chosen rate, or a timer that re-arms itself at a coarse interval. No
 script runs every tick.
 
-## Language: Luau (provisional)
+## Language selection (deferred)
 
-The provisional choice is [Luau](https://luau.org), embedded through the `mlua`
-crate with its `luau` feature:
-
-- Lua is familiar to game modders.
-- Luau was built for untrusted game scripts. It has a sandbox mode, read-only
-  globals, and an interrupt callback for limiting work.
-- It's fast. Magic will run on the combat path, which is already over its p95
-  target (see [open performance work](performance-persistence.md#open-work)).
-- `mlua` builds Luau from bundled source. It needs a C++ compiler, which the
-  MSVC Rust toolchain provides.
-
-Rhai was considered. It's pure Rust and easy to make deterministic, but its
-tree-walking interpreter is several times slower than Luau, and magic makes
-script speed matter. Plain Lua 5.4 was rejected because it seeds string hashing
-randomly per run, which makes table iteration order vary between runs and would
-break replay. No comparison spike is planned for now.
+Luau is a candidate for later evaluation. Selection needs evidence about
+determinism, isolation, resource accounting, author tooling, and cross-platform
+builds under representative scenario workloads. No runtime dependency or
+comparison spike is part of the current refactor.
 
 ## Sandbox and budgets
 
@@ -136,11 +130,11 @@ Every package is treated as untrusted:
   library. There is no file, OS, clock, network, or debug access.
 - `math.random` is replaced by a function that draws from the game's seeded
   random stream.
-- Each call has a work limit enforced by the interrupt callback, and the runtime
-  has a memory limit. Exhausting either rejects the handler deterministically,
+- Each call needs a deterministic work budget, and the runtime needs a memory
+  limit. Exhausting either rejects the handler deterministically,
   and none of its commands are applied.
-- Scripts are compiled once when the package loads. Script text is never read
-  again during play.
+- Validated artifacts are pinned with the package and available before the
+  handler's region activates. Play never reads mutable script source files.
 
 To keep script cost small:
 
@@ -189,14 +183,15 @@ return eggs
 - The validator compiles every script and checks that every handler named in
   the manifest exists. A package with a broken script fails validation.
 
-## Runtime
+## Runtime boundary
 
-The Luau runtime can't be copied or saved, and it doesn't need to be. It lives
-outside `Game` and outside checkpoints, as a stateless service built from the
-package whenever a game is loaded, restored, or replayed. The simulation crate
-defines a small interface for running handlers. A separate crate implements it
-with `mlua`, and simulation tests can use a stub. The simulation crate does not
-depend on `mlua`.
+The future runtime lives outside `Game` and checkpoints. It receives scoped
+queries and proposes typed effects; simulation owns validation and scheduling.
+Persisted state contains values and stable handler identities, never VM objects,
+closures, or function pointers. Loading, restoring, and replay construct a fresh
+runtime from pinned artifacts. Handler failure discards proposed effects and state
+changes together. Nested effects and randomness have deterministic ordering and
+budgets. The simulation crate must remain independent of runtime implementation.
 
 ## Determinism risks
 
@@ -207,10 +202,10 @@ risks for scripts are:
   variable declared at the top of a script file keeps its value between calls.
   Freezing each module's returned table helps. How to prevent this fully is an
   open question. The replay check would catch it, but only after the fact.
-- **Table iteration order.** Luau's iteration order must be shown to be stable
-  across runs by a test, not assumed.
-- **Numbers.** Luau numbers are floating-point. The script API uses integers
-  (ticks, identifiers, hit points), which are exact.
+- **Table iteration order.** Any runtime's iteration order must be explicitly
+  controlled and verified across platforms, rather than assumed stable.
+- **Numbers.** The API must represent the full range of identifiers and ticks
+  without precision loss. Merely using a numeric type does not establish this.
 - **Randomness.** Only the seeded game stream is available.
 
 ## Open questions

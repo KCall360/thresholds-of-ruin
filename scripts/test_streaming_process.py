@@ -37,6 +37,33 @@ TO_HALL_4 = 68
 
 
 class StreamingProcesses(ProcessTestCase):
+    def test_oversized_saved_index_chunk_rejects_restart_without_changing_save(self):
+        server = self.server(scenario="two-room")
+        player, _ = self.client()
+        self.act(player, {"type": "wait"})
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        with sqlite3.connect(self.save) as db:
+            rows = db.execute("SELECT chunk,bytes FROM package ORDER BY chunk").fetchall()
+            self.assertEqual(len(rows), 1)
+            chunk, raw = rows[0]
+            self.assertEqual(chunk, 0)
+            # Valid JSON with identical facts/hash after parsing; only the
+            # stored chunk's byte bound is violated.
+            padded = raw + b" " * (512 * 1024 + 1 - len(raw))
+            db.execute("UPDATE package SET bytes=?1 WHERE chunk=0", (padded,))
+        before = self.save.read_bytes()
+        rejected = self.launch("tor-server", ["--listen", "127.0.0.1:0", "--save", self.save])
+        try:
+            status = rejected.child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            listening = rejected.until(lambda line: line.startswith("{"), seconds=2)
+            self.assertIn("address", json.loads(listening))
+            self.fail("server advertised a listener after accepting an oversized saved-index chunk")
+        self.assertNotEqual(status, 0)
+        self.assertEqual(self.save.read_bytes(), before)
+
     def streaming_server(self, wizard=False, scenario=SCENARIO):
         """A streaming game that checkpoints every four actions."""
         return self.server("--checkpoint-interval", 4, wizard=wizard, scenario=scenario, seed=5)
@@ -67,6 +94,44 @@ class StreamingProcesses(ProcessTestCase):
             else:
                 self.fail("blocked for good: " + str(moved.get("error")))
         return moved
+
+    def test_drained_source_copies_do_not_exhaust_small_save_queue(self):
+        def start():
+            return self.server("--checkpoint-interval", 4, "--save-queue-bytes", 1024,
+                scenario=SCENARIO, seed=5)
+
+        server = start()
+        player, _ = self.client()
+        observer, _ = self.client(SPECTATOR_TOKEN)
+        for _ in range(TO_HALL_4):
+            self.assertIsNone(self.request(player, {"type": "save"})["error"])
+            moved = self.act(player, {"type": "move", "direction": "east"})
+            self.assertIsNone(moved.get("error"), moved.get("error"))
+            shown = self.frame(observer,
+                lambda f: f.get("state", {}).get("observation", {}).get("tick")
+                    == moved["state"]["observation"]["tick"])
+            self.assertEqual(shown["state"], moved["state"])
+            self.assertEqual(shown["history"], moved["history"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        expected = self.request(player, {"type": "snapshot"})["state"]
+        with closing(sqlite3.connect(self.save)) as db:
+            self.assertGreater(db.execute("SELECT COUNT(*) FROM region_sources").fetchone()[0], 3)
+        player.stop()
+        observer.stop()
+        server.stop()
+        start()
+        player, resumed = self.client()
+        self.assertEqual(resumed["state"], expected)
+        observer, seen = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(seen["state"], expected)
+        continued = self.act(player, {"type": "move", "direction": "west"})
+        self.assertIsNone(continued.get("error"), continued)
+        shown = self.frame(observer,
+            lambda f: f.get("state", {}).get("observation", {}).get("tick")
+                == continued["state"]["observation"]["tick"])
+        self.assertEqual(shown["state"], continued["state"])
+        self.assertEqual(shown["history"], continued["history"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
 
     def rows(self):
         with closing(sqlite3.connect(self.save)) as db:

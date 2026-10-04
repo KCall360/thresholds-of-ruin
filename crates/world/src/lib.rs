@@ -5,6 +5,7 @@ mod scene;
 mod shadowcasting;
 mod topology;
 pub use scene::SightCell;
+pub use sight_cache::GeometrySnapshot;
 mod material;
 pub use material::{Material, Terrain};
 

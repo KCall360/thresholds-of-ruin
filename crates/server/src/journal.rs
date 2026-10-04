@@ -7,26 +7,58 @@ use tor_protocol::{
 
 impl Command {
     pub fn from_wire(command: &tor_protocol::Command) -> Result<Self, crate::Failure> {
-        if let tor_protocol::Command::Wizard {
-            expected_revision,
-            operation,
-        } = command
-        {
-            let operation = crate::developer::parse_wizard(operation).map_err(|_| {
-                crate::Failure::new(
-                    tor_protocol::ErrorCode::InvalidRequest,
-                    "Invalid developer command",
-                )
-            })?;
-            return Ok(Self::Wizard {
+        // Keep the transport and journal schemas independent: extending either
+        // enum must require an explicit decision at this boundary.
+        Ok(match command {
+            tor_protocol::Command::RenamePlace {
+                expected_revision,
+                key,
+                name,
+            } => Self::RenamePlace {
                 expected_revision: *expected_revision,
+                key: key.clone(),
+                name: name.clone(),
+            },
+            tor_protocol::Command::Travel {
+                expected_revision,
+                destination,
+            } => Self::Travel {
+                expected_revision: *expected_revision,
+                destination: destination.clone(),
+            },
+            tor_protocol::Command::Wizard {
+                expected_revision,
                 operation,
-            });
-        }
-        serde_json::from_value(serde_json::to_value(command).expect("wire command serializes"))
-            .map_err(|_| {
-                crate::Failure::new(tor_protocol::ErrorCode::InvalidRequest, "Invalid command")
-            })
+            } => Self::Wizard {
+                expected_revision: *expected_revision,
+                operation: crate::developer::parse_wizard(operation).map_err(|_| {
+                    crate::Failure::new(
+                        tor_protocol::ErrorCode::InvalidRequest,
+                        "Invalid developer command",
+                    )
+                })?,
+            },
+            tor_protocol::Command::Act {
+                expected_revision,
+                action,
+            } => Self::Act {
+                expected_revision: *expected_revision,
+                action: action.clone(),
+            },
+            tor_protocol::Command::Annotate {
+                anchor,
+                text,
+                source,
+                audience,
+                category,
+            } => Self::Annotate {
+                anchor: anchor.clone(),
+                text: text.clone(),
+                source: *source,
+                audience: *audience,
+                category: *category,
+            },
+        })
     }
 }
 
@@ -42,10 +74,42 @@ impl TryFrom<Command> for tor_protocol::Command {
                 expected_revision,
                 operation: serde_json::to_string(&operation).expect("developer command serializes"),
             }),
-            other => {
-                serde_json::from_value(serde_json::to_value(other).expect("command serializes"))
-                    .map_err(|_| "Command has no wire representation")
-            }
+            Command::RenamePlace {
+                expected_revision,
+                key,
+                name,
+            } => Ok(Self::RenamePlace {
+                expected_revision,
+                key,
+                name,
+            }),
+            Command::Travel {
+                expected_revision,
+                destination,
+            } => Ok(Self::Travel {
+                expected_revision,
+                destination,
+            }),
+            Command::Act {
+                expected_revision,
+                action,
+            } => Ok(Self::Act {
+                expected_revision,
+                action,
+            }),
+            Command::Annotate {
+                anchor,
+                text,
+                source,
+                audience,
+                category,
+            } => Ok(Self::Annotate {
+                anchor,
+                text,
+                source,
+                audience,
+                category,
+            }),
         }
     }
 }

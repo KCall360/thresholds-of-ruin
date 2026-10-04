@@ -1,7 +1,7 @@
 use crate::engine::valid_label;
 use crate::{Engine, Failure};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tor_protocol::*;
 
 /// Trusted startup configuration. Tokens are never put into game history.
@@ -27,7 +27,7 @@ struct Client {
     palette: Option<(u64, BTreeSet<String>)>,
     /// The region that palette was forecast from.
     palette_region: Option<u64>,
-    messages: mpsc::Sender<ServerMessage>,
+    messages: crate::outbound::Sender,
     close: watch::Sender<bool>,
     /// What this client was last told play waits for, since its last update
     /// or snapshot; `None` once anything has changed.
@@ -36,7 +36,7 @@ struct Client {
 
 pub(crate) struct Connection {
     pub id: u64,
-    pub messages: mpsc::Receiver<ServerMessage>,
+    pub messages: crate::outbound::Receiver,
     pub close: watch::Receiver<bool>,
 }
 
@@ -56,7 +56,7 @@ pub(crate) enum Step {
     /// It needs input from a client, or nobody is playing.
     Blocked,
     /// These clients' queues are nearly full; wait for them to read.
-    Full(Vec<(u64, mpsc::Sender<ServerMessage>)>),
+    Full(Vec<(u64, crate::outbound::Sender)>),
 }
 
 /// Until hostility and environmental danger are modeled, another perceived
@@ -80,6 +80,8 @@ struct TravelJob {
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    outbound: crate::outbound::Pool,
+    diagnostics: Option<crate::diagnostics::Diagnostics>,
     pending_pauses: BTreeSet<ActorId>,
     autonomous_enabled: bool,
     travels: BTreeMap<ActorId, TravelJob>,
@@ -95,14 +97,32 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(mut engine: Engine) -> Self {
+    pub fn new(engine: Engine) -> Self {
+        Self::with_outbound_limits(engine, crate::OutboundLimits::default())
+            .expect("valid default outbound limits")
+    }
+
+    /// Configure host output bounds before any client connects. Limits are not
+    /// persisted and are validated before startup.
+    pub fn with_outbound_limits(
+        mut engine: Engine,
+        limits: crate::OutboundLimits,
+    ) -> Result<Self, Failure> {
+        if !limits.is_valid() {
+            return Err(Failure::new(
+                ErrorCode::InvalidRequest,
+                "Invalid outbound byte limits",
+            ));
+        }
         let mut save_warning = None;
         for actor in engine.actors() {
             if let Err(error) = engine.pause_preparation(actor) {
                 save_warning = Some(error.to_string());
             }
         }
-        Self {
+        Ok(Self {
+            outbound: crate::outbound::Pool::new(limits),
+            diagnostics: None,
             pending_pauses: BTreeSet::new(),
             autonomous_enabled: false,
             travels: BTreeMap::new(),
@@ -115,7 +135,11 @@ impl Service {
             clients: BTreeMap::new(),
             controllers: BTreeMap::new(),
             next_client: 1,
-        }
+        })
+    }
+
+    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::diagnostics::Diagnostics>) {
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) fn connect(
@@ -134,7 +158,7 @@ impl Service {
         })?;
         let id = self.next_client;
         self.next_client = next;
-        let (messages, receiver) = mpsc::channel(QUEUE);
+        let (messages, receiver) = self.outbound.channel(QUEUE);
         let (close, closing) = watch::channel(false);
         let actors: Vec<_> = self
             .engine
@@ -510,10 +534,20 @@ impl Service {
             .iter()
             .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
             .collect();
+        // Disclosed state belongs to an actor at this boundary, not to a
+        // connection. Keep stream bases and sequencing per client, but resolve
+        // perception only once for everyone watching the same actor.
+        let states: BTreeMap<_, _> = recipients
+            .iter()
+            .map(|(_, actor)| *actor)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|actor| (actor, self.engine.state(actor).ok()))
+            .collect();
         for (recipient, observer) in recipients {
             // Region streaming can unload an actor nobody keeps in play (an
             // AI actor a spectator watches); its clients must reattach.
-            let Ok(state) = self.engine.state(observer) else {
+            let Some(state) = states[&observer].as_ref() else {
                 self.detach_unloaded(recipient);
                 continue;
             };
@@ -521,7 +555,7 @@ impl Service {
                 self.update(
                     recipient,
                     UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: Box::new(state.clone()),
                         event: (observer == entry.actor).then(|| Box::new(entry.clone())),
                     },
                 );
@@ -656,7 +690,7 @@ impl Service {
         let full: Vec<_> = self
             .clients
             .iter()
-            .filter(|(_, client)| client.actor.is_some() && client.messages.capacity() < HEADROOM)
+            .filter(|(_, client)| client.actor.is_some() && !client.messages.has_headroom(HEADROOM))
             .map(|(&id, client)| (id, client.messages.clone()))
             .collect();
         if !full.is_empty() {
@@ -840,37 +874,13 @@ impl Service {
     }
 
     fn advance_ai(&mut self, actor: ActorId) {
-        let action = self
-            .engine
-            .next_ai_action()
-            .filter(|(chosen, _)| *chosen == actor)
-            .map(|(_, action)| action);
         let revisions = self
             .engine
             .actors()
             .into_iter()
             .map(|id| (id, self.engine.revision(id).unwrap()))
             .collect();
-        let result = match action {
-            Some(action) => {
-                let command = crate::journal::Command::Act {
-                    expected_revision: self.engine.revision(actor).unwrap(),
-                    action,
-                };
-                self.engine.command(
-                    "scenario-ai",
-                    "server-ai",
-                    actor,
-                    &uuid::Uuid::new_v4().to_string(),
-                    &self.engine.branch().clone(),
-                    command,
-                )
-            }
-            None => Err(Failure::new(
-                ErrorCode::InvalidAction,
-                "Scenario AI has no action",
-            )),
-        };
+        let result = self.engine.advance_ai(actor);
         match result {
             Ok(result) => {
                 let _ = self.action_update(&revisions, &result.entry.disclosed());
@@ -1099,7 +1109,9 @@ impl Service {
         });
         if warning != self.save_warning {
             if let Some(message) = &warning {
-                eprintln!("{message}");
+                if let Some(diagnostics) = &self.diagnostics {
+                    diagnostics.warning(message);
+                }
                 // Never interleave a warning with the welcome/attach handshake.
                 for id in self
                     .clients
@@ -1154,6 +1166,124 @@ impl Service {
 mod tests {
     use super::*;
     use crate::Scenario;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn byte_backlog_disconnects_before_message_slots_fill_and_other_clients_continue() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "watcher".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut slow = service.connect(&account, "ascii".into()).unwrap();
+        slow.messages.try_recv().unwrap();
+        let mut healthy = service.connect(&account, "headless".into()).unwrap();
+        healthy.messages.try_recv().unwrap();
+        let branch = service.engine.branch().clone();
+        let revision = service.engine.revision(ActorId(1)).unwrap();
+        // These frames fit the existing native client's frame ceiling. Their
+        // backlog exceeds 64 MiB while still far below the 256 message slots.
+        for _ in 0..65 {
+            service.send(
+                slow.id,
+                ServerMessage::Error {
+                    request_id: None,
+                    code: ErrorCode::InvalidRequest,
+                    message: "x".repeat(1024 * 1024),
+                },
+            );
+        }
+        assert!(
+            *slow.close.borrow(),
+            "byte pressure must disconnect a slow stream"
+        );
+        assert!(!*healthy.close.borrow());
+        service.handle(
+            healthy.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        assert!(matches!(
+            healthy.messages.try_recv().unwrap(),
+            ServerMessage::Snapshot { .. }
+        ));
+        assert_eq!(service.engine.branch(), &branch);
+        assert_eq!(service.engine.revision(ActorId(1)).unwrap(), revision);
+    }
+
+    #[test]
+    fn action_broadcast_observes_once_per_actor_with_independent_client_streams() {
+        for watchers in [1, 8] {
+            let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+            let account = Account {
+                role: AccessRole::Spectator,
+                user: "observer".into(),
+                token: "test-only".into(),
+                actors: BTreeSet::from([ActorId(1)]),
+            };
+            let mut connections = Vec::new();
+            for index in 0..watchers {
+                let mut client = service
+                    .connect(&account, format!("observer-{index}"))
+                    .unwrap();
+                client.messages.try_recv().unwrap();
+                service.handle(
+                    client.id,
+                    "attach".into(),
+                    Request::Attach { actor: ActorId(1) },
+                );
+                let ServerMessage::Snapshot { snapshot, .. } = client.messages.try_recv().unwrap()
+                else {
+                    panic!("initial snapshot");
+                };
+                connections.push((client, snapshot));
+            }
+            let revisions = BTreeMap::from([(ActorId(1), 0)]);
+            let result = service
+                .engine
+                .command(
+                    "test",
+                    "test",
+                    ActorId(1),
+                    "wait",
+                    &service.engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: 0,
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+            let before = tor_simulation::diagnostics::work_counts();
+            service
+                .action_update(&revisions, &result.entry.disclosed())
+                .unwrap();
+            let after = tor_simulation::diagnostics::work_counts();
+            assert_eq!(
+                after.observations - before.observations,
+                1,
+                "watchers: {watchers}"
+            );
+            let expected = service.engine.state(ActorId(1)).unwrap();
+            for (mut client, snapshot) in connections {
+                let ServerMessage::Update { update } = client.messages.try_recv().unwrap() else {
+                    panic!("observation update");
+                };
+                assert_eq!(update.cursor.sequence, snapshot.cursor.sequence + 1);
+                assert_eq!(update.branch, snapshot.branch);
+                let (state, event) = match update.body {
+                    UpdateBody::Observation { state, event } => (*state, event),
+                    UpdateBody::ObservationDelta { state, event } => {
+                        (state.apply(&snapshot.state).unwrap(), event)
+                    }
+                    _ => panic!("observation body"),
+                };
+                assert_eq!(state, expected);
+                assert_eq!(event.unwrap().id, result.entry.id);
+            }
+        }
+    }
 
     #[test]
     fn slow_controller_during_rewind_cannot_send_control_into_the_old_branch() {
@@ -1395,6 +1525,71 @@ mod tests {
         assert_ne!(service.engine.revision(ActorId(1)).unwrap(), before);
     }
 
+    #[tokio::test]
+    async fn replenished_mailbox_cannot_starve_a_due_simulation_action() {
+        use crate::runner::Mail;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::oneshot;
+
+        fn next_mail(
+            sender: mpsc::Sender<Mail>,
+            remaining: usize,
+            observed: Arc<Mutex<Vec<Option<ActorId>>>>,
+            stopped: oneshot::Sender<Option<crate::storage::Store>>,
+        ) -> Mail {
+            Mail::Call(Box::new(move |service| {
+                observed.lock().unwrap().push(service.engine.next_actor());
+                let next = if remaining == 0 {
+                    Mail::Shutdown(stopped)
+                } else {
+                    next_mail(sender.clone(), remaining - 1, observed, stopped)
+                };
+                // One replacement always fits, so this reproduces a mailbox
+                // that never empties without relying on threads or wall time.
+                assert!(sender.try_send(next).is_ok());
+            }))
+        }
+
+        for capacity in [4, 16, 256] {
+            let (service, _client) = character_waiting_on_a_guard();
+            let (mail, mailbox) = mpsc::channel(capacity);
+            let observed = Arc::new(Mutex::new(Vec::new()));
+            let (reply, stopped) = oneshot::channel();
+            assert!(mail
+                .try_send(next_mail(
+                    mail.clone(),
+                    capacity * 3,
+                    observed.clone(),
+                    reply
+                ))
+                .is_ok());
+            crate::runner::run(service, mailbox, crate::runner::STALL).await;
+            stopped.await.unwrap();
+            let observed = observed.lock().unwrap();
+            assert_ne!(observed[0], Some(ActorId(1)));
+            assert_eq!(
+                observed[capacity],
+                Some(ActorId(1)),
+                "due AI was starved by replenished mail at capacity {capacity}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_full_mailbox_stops_before_the_next_simulation_action() {
+        let (service, _client) = character_waiting_on_a_guard();
+        let before = service.engine.next_actor();
+        let (mail, mailbox) = mpsc::channel(4);
+        for _ in 0..4 {
+            assert!(mail
+                .try_send(crate::runner::Mail::Call(Box::new(|_| {})))
+                .is_ok());
+        }
+        drop(mail);
+        let service = crate::runner::run(service, mailbox, crate::runner::STALL).await;
+        assert_eq!(service.engine.next_actor(), before);
+    }
+
     /// Mail that is already waiting, here a rewind against the current
     /// revision, is handled before the next action can change that revision.
     #[tokio::test]
@@ -1413,7 +1608,7 @@ mod tests {
                     operation: "rewind initial".into(),
                 },
             },
-            started: None,
+            timing: None,
         })
         .await
         .unwrap();

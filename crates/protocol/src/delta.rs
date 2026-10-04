@@ -47,16 +47,24 @@ pub struct StateDelta {
 pub enum DeltaError {
     /// The delta was computed against a different state.
     WrongBase,
-    /// A removed or changed cell does not fit the shifted base.
+    /// A change does not fit the base, or its translation overflows.
     InvalidChange,
 }
 
-fn add(a: Position, b: Position) -> Position {
-    Position {
-        x: a.x.wrapping_add(b.x),
-        y: a.y.wrapping_add(b.y),
-        z: a.z.wrapping_add(b.z),
-    }
+fn add(a: Position, b: Position) -> Option<Position> {
+    Some(Position {
+        x: a.x.checked_add(b.x)?,
+        y: a.y.checked_add(b.y)?,
+        z: a.z.checked_add(b.z)?,
+    })
+}
+
+fn subtract(a: Position, b: Position) -> Option<Position> {
+    Some(Position {
+        x: a.x.checked_sub(b.x)?,
+        y: a.y.checked_sub(b.y)?,
+        z: a.z.checked_sub(b.z)?,
+    })
 }
 
 fn sorted(cells: &[CellView]) -> bool {
@@ -89,10 +97,8 @@ fn best_shift(base: &[CellView], next: &[CellView]) -> Position {
             continue;
         }
         if let Some(Some(from)) = positions.get(cell.key.as_str()) {
-            let shift = Position {
-                x: cell.position.x.wrapping_sub(from.x),
-                y: cell.position.y.wrapping_sub(from.y),
-                z: cell.position.z.wrapping_sub(from.z),
+            let Some(shift) = subtract(cell.position, *from) else {
+                continue;
             };
             *votes.entry(shift).or_default() += 1;
         }
@@ -120,7 +126,10 @@ impl StateDelta {
         let mut changed = Vec::new();
         let (mut i, mut j) = (0, 0);
         while i < old.len() || j < new.len() {
-            let before = old.get(i).map(|cell| add(cell.position, shift));
+            let before = match old.get(i) {
+                Some(cell) => Some(add(cell.position, shift)?),
+                None => None,
+            };
             let after = new.get(j).map(|cell| cell.position);
             match (before, after) {
                 (Some(b), Some(a)) if b == a => {
@@ -213,7 +222,7 @@ impl StateDelta {
         let mut removed = removed.into_iter().peekable();
         let mut changed = changed.into_iter().peekable();
         for cell in old {
-            let position = add(cell.position, shift);
+            let position = add(cell.position, shift).ok_or(DeltaError::InvalidChange)?;
             while let Some(next) = changed.next_if(|next| next.position < position) {
                 cells.push(next);
             }

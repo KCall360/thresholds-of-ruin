@@ -3,6 +3,7 @@
 //! `docs/region-streaming.md`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tor_simulation::{
@@ -47,8 +48,34 @@ pub(crate) struct TransitionWork {
     pub(crate) records_read: usize,
     /// Builds and reads a preloader had already prepared.
     pub(crate) prepared: usize,
+    pub(crate) acquisition: RegionAcquisitionProfile,
     /// The game just before the transition, when it changed anything.
     pub(crate) before: Option<Game>,
+}
+
+/// Successful region acquisitions during a command's transitions. Timings are
+/// nested inside the command's region-transition duration, not extra phases.
+/// Resident cache hits do not acquire a record and are excluded. Prepared counts
+/// depend on worker timing; fallback timings exclude work done by that worker.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct RegionAcquisitionProfile {
+    pub fallback_reads: usize,
+    pub fallback_builds: usize,
+    pub prepared_reads: usize,
+    pub prepared_builds: usize,
+    pub fallback_read: Duration,
+    pub fallback_build: Duration,
+}
+
+impl RegionAcquisitionProfile {
+    pub(crate) fn add(&mut self, other: Self) {
+        self.fallback_reads += other.fallback_reads;
+        self.fallback_builds += other.fallback_builds;
+        self.prepared_reads += other.prepared_reads;
+        self.prepared_builds += other.prepared_builds;
+        self.fallback_read += other.fallback_read;
+        self.fallback_build += other.fallback_build;
+    }
 }
 
 /// Durable records kept in memory besides those not yet on disk.
@@ -76,6 +103,8 @@ pub(crate) struct Regions {
     preload: Option<Arc<Preloader>>,
     /// Builds and reads taken ready from the preloader.
     pub(crate) prepared: usize,
+    /// Scoped to a transition; never saved or used to decide game outcomes.
+    acquisition: Option<RegionAcquisitionProfile>,
     /// Regions whose files the save holds, and those built regions (or
     /// their neighbours, whose walls a build reads) need that it doesn't
     /// yet. Replay rebuilds regions from these copies.
@@ -111,6 +140,7 @@ impl Regions {
             reads: 0,
             preload: None,
             prepared: 0,
+            acquisition: None,
             saved: BTreeSet::new(),
             unsaved: BTreeSet::new(),
             failure: None,
@@ -297,6 +327,16 @@ impl Regions {
         made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
         extra: BTreeSet<RegionId>,
     ) -> Result<TransitionWork, Failure> {
+        self.transition_with_profile(game, made, extra, false)
+    }
+
+    pub(crate) fn transition_with_profile(
+        &mut self,
+        game: &mut Game,
+        made: &mut Vec<(RecordId, Shared<RegionRecord>)>,
+        extra: BTreeSet<RegionId>,
+        profile: bool,
+    ) -> Result<TransitionWork, Failure> {
         let mut work = TransitionWork::default();
         let mut t = self.horizon(game, &mut work);
         let known: Vec<_> = extra
@@ -316,11 +356,13 @@ impl Regions {
         work.before = Some(game.clone());
         let reads = self.reads;
         let prepared = self.prepared;
+        self.acquisition = profile.then(RegionAcquisitionProfile::default);
         let mut store = Pending {
             regions: self,
             made,
         };
         let result = game.transition_regions_counted(&settled, &mut store);
+        work.acquisition = self.acquisition.take().unwrap_or_default();
         let failure = self.failure.take();
         let (_, report, _) = result.map_err(|_| failure.unwrap_or_else(storage_failure))?;
         work.report = report;
@@ -392,10 +434,18 @@ impl RecordStore for Regions {
         if let Some((record, _)) = self.preload.as_ref().and_then(|p| p.take(Job::Read(id))) {
             self.reads += 1;
             self.prepared += 1;
+            if let Some(acquisition) = &mut self.acquisition {
+                acquisition.prepared_reads += 1;
+            }
             return Some(record);
         }
+        let started = self.acquisition.as_ref().map(|_| Instant::now());
         let record = Shared::new(self.disk.as_ref()?.read_region(id).ok()??);
         self.reads += 1;
+        if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started) {
+            acquisition.fallback_reads += 1;
+            acquisition.fallback_read += started.elapsed();
+        }
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
@@ -406,15 +456,28 @@ impl RecordStore for Regions {
         {
             Some((record, files)) => {
                 self.prepared += 1;
+                if let Some(acquisition) = &mut self.acquisition {
+                    acquisition.prepared_builds += 1;
+                }
                 (record.into_inner(), files)
             }
-            None => match self.package.build_region(self.seed, &self.index, region.0) {
-                Ok(built) => built,
-                Err(failure) => {
-                    self.failure = Some(failure);
-                    return None;
+            None => {
+                let started = self.acquisition.as_ref().map(|_| Instant::now());
+                match self.package.build_region(self.seed, &self.index, region.0) {
+                    Ok(built) => {
+                        if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started)
+                        {
+                            acquisition.fallback_builds += 1;
+                            acquisition.fallback_build += started.elapsed();
+                        }
+                        built
+                    }
+                    Err(failure) => {
+                        self.failure = Some(failure);
+                        return None;
+                    }
                 }
-            },
+            }
         };
         // Replaying this build needs exactly the files it read.
         self.need_files(files);

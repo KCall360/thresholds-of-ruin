@@ -109,6 +109,32 @@ fn ai_chooses_only_a_perceived_hostile() {
 }
 
 #[test]
+fn autonomous_execution_matches_recorded_action_validation_and_restoration() {
+    let mut game = duel();
+    game.configure_ai(ActorId(2), Default::default()).unwrap();
+    let unchanged = game.clone();
+    assert!(game.act_ai(ActorId(2)).is_err());
+    assert!(game.act_ai(ActorId(1)).is_err());
+    assert_eq!(game, unchanged);
+    game.act(ActorId(1), Action::Wait).unwrap();
+    let mut replay = game.clone();
+    let (_, expected) = replay.next_ai_action().unwrap();
+    let expected_outcome = replay.act(ActorId(2), expected).unwrap();
+    let before = tor_simulation::diagnostics::work_counts().route_searches;
+    let (actual, outcome) = game.act_ai(ActorId(2)).unwrap();
+    assert_eq!(
+        tor_simulation::diagnostics::work_counts().route_searches - before,
+        1
+    );
+    assert_eq!(actual, expected);
+    assert_eq!(outcome, expected_outcome);
+    assert_eq!(game, replay);
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    assert_eq!(game, restored);
+}
+
+#[test]
 fn any_starting_character_can_win_but_mobs_cannot() {
     let mut game = duel();
     let objective = Objective {

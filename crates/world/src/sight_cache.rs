@@ -22,6 +22,14 @@ fn fresh() -> u64 {
 
 type Key = (Location, u8, u8);
 
+/// Opaque, process-local geometry witness for derived backend caches.
+/// It is neither a world identity nor persisted simulation state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeometrySnapshot {
+    topology: u64,
+    regions: Shared<BTreeMap<RegionId, u64>>,
+}
+
 struct Entry {
     topology: u64,
     /// Every region the scene read, with its version when the scene was built.
@@ -102,6 +110,12 @@ impl std::fmt::Debug for SightCache {
 }
 
 impl SightCache {
+    pub(crate) fn geometry_snapshot(&self) -> GeometrySnapshot {
+        GeometrySnapshot {
+            topology: self.topology,
+            regions: self.regions.clone(),
+        }
+    }
     /// Invalidates every scene, including in clones that share the cache.
     pub(crate) fn topology_changed(&mut self) {
         self.topology = fresh();

@@ -123,6 +123,49 @@ def stream_rows(cycles=1, preloading=False, **work):
 
 
 class StreamingValidationTests(unittest.TestCase):
+    def acquisition_rows(self):
+        rows = stream_rows()
+        rows[0]['region_acquisition_version'] = 1
+        zero = dict(secs=0, nanos=0)
+        for row in rows:
+            if row['kind'] == 'sample':
+                row['profile']['regions_prepared'] = 0
+                row['profile']['region_transition'] = dict(secs=0, nanos=20)
+                row['profile']['region_acquisition'] = dict(
+                    fallback_reads=0, fallback_builds=0, prepared_reads=0,
+                    prepared_builds=0, fallback_read=zero.copy(), fallback_build=zero.copy())
+        profile = rows[1]['profile']
+        profile.update(region_records_read=2, regions_built=3, regions_prepared=2)
+        profile['region_acquisition'].update(fallback_reads=1, prepared_reads=1,
+            fallback_builds=2, prepared_builds=1, fallback_read=dict(secs=0,nanos=3),
+            fallback_build=dict(secs=0,nanos=4))
+        return rows
+
+    def test_acquisition_attribution_is_complete_and_nested(self):
+        validate(self.acquisition_rows(), selected_case='stream-r16-memory')
+
+    def test_inconsistent_missing_negative_and_double_counted_acquisitions_fail(self):
+        import copy
+        rows = self.acquisition_rows()
+        changes = [
+            lambda p: p.pop('region_acquisition'),
+            lambda p: p['region_acquisition'].update(fallback_reads=2),
+            lambda p: p['region_acquisition'].update(prepared_builds=-1),
+            lambda p: p['region_acquisition'].update(fallback_reads=True),
+            lambda p: p['region_acquisition'].update(fallback_read=dict(secs=0,nanos=30)),
+            lambda p: p['region_acquisition'].update(fallback_read=dict(secs=0,nanos=1000000000)),
+            lambda p: p['region_acquisition']['fallback_read'].pop('secs'),
+            lambda p: p.update(region_records_read=0, region_acquisition=dict(
+                fallback_reads=0, prepared_reads=0, fallback_builds=3, prepared_builds=0,
+                fallback_read=dict(secs=0,nanos=1), fallback_build=dict(secs=0,nanos=4)), regions_prepared=0),
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                changed = copy.deepcopy(rows)
+                change(changed[1]['profile'])
+                with self.assertRaises(AssertionError):
+                    validate(changed, selected_case='stream-r16-memory')
+
     def test_a_complete_walk_with_bounded_work_passes(self):
         cases, samples, ends = validate(stream_rows(), selected_case="stream-r16-memory")
         self.assertEqual(200, len(samples["stream-r16-memory"]))

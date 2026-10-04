@@ -29,11 +29,18 @@ tests and tools.
 
 The thread's loop:
 
-1. Handle every message already waiting.
+1. Handle a bounded pass of queued messages in FIFO order.
 2. Take one action (an AI action or a journey step) if anything can act, then
    go back to 1.
 3. Otherwise wait for a message, for a client's queue to drain, or for the next
    save check.
+
+Each drain pass handles at most the mailbox's capacity (256 messages in the
+server). That covers every message already waiting when the pass starts; newly
+arriving replacements cannot extend it indefinitely. The request that wakes a
+blocked loop is handled before the next pass. Saves and due simulation actions
+therefore get a turn even while more mail arrives. A closed, empty mailbox ends
+the run before another action, including when its last message fills the pass.
 
 A request waits for at most one action, never a whole run. Interruptions land
 only between actions, so no action is ever split. What happens in the game
@@ -69,17 +76,38 @@ move, or being displaced or struck (`decision_required`). See
 
 ### Outgoing queues and slow clients
 
-Each client has a 256-message queue. A journey's steps arrive almost at once,
-so the server applies backpressure instead of filling queues blindly:
+Each client has a 256-message queue of encoded frames. Host limits default to
+16 MiB per frame, 64 MiB per connection, and 256 MiB across all connections.
+The frame ceiling matches the existing native WebSocket receiver. Queued and
+in-flight payloads keep their byte leases until flush or socket destruction,
+including failed writes, close draining, timeouts and task cancellation. The
+queue retains one encoded representation; production transport does not encode
+it again. Encoding stops at the frame limit, with at most one bounded temporary
+frame prepared by the service before admission. Payload limits do not measure
+resident memory: message preparation, cached observations, allocator overhead
+and socket framing/copies are separate.
+
+Configure lower host limits with `--outbound-frame-bytes`,
+`--outbound-client-bytes` and `--outbound-total-bytes`; frame must be positive,
+at most 16 MiB, and no larger than client, which must be no larger than total.
+Invalid limits fail before opening a save. These limits are host policy, not
+saved state or wire version changes. A journey's steps arrive almost at once,
+so the server applies backpressure:
 
 - **Play pauses while any attached client's queue has fewer than 16 free
-  slots**, and resumes when the client reads. The thread keeps handling its
+  slots or less than one maximum frame's byte headroom**, and resumes when the
+  client reads. The thread keeps handling its
   mailbox while it waits.
 - **A client that stays that full for five seconds is disconnected**, like a
   socket write that times out. A slow spectator can delay a journey but can't
   stop it.
-- A queue that overflows while a request is handled still disconnects the
-  client; it never silently misses an update.
+- Slot exhaustion, byte exhaustion or frame encoding failure while handling a
+  request disconnects that stream; it must reconnect for a fresh snapshot and
+  never silently misses an update. The shared pool is an admission limit, not
+  a reason to stall an unrelated actor's simulation. Per-client byte limits
+  prevent one stream from retaining the entire shared pool with default limits;
+  aggregate pressure can still reject another stream. This is bounded resource
+  admission, not a guarantee of fair allocation among every active connection.
 - Updates stay one per step: view deltas keep them small, and clients need step
   boundaries to animate.
 

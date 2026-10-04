@@ -142,3 +142,89 @@ fn malformed_changes_are_rejected() {
     delta.cells.removed.push(Position { x: 99, y: 0, z: 0 });
     assert_eq!(delta.apply(&base), Err(DeltaError::InvalidChange));
 }
+
+fn axis_position(axis: usize, coordinate: i32, offset: i32) -> Position {
+    match axis {
+        0 => Position {
+            x: coordinate,
+            y: offset,
+            z: 0,
+        },
+        1 => Position {
+            x: offset,
+            y: coordinate,
+            z: 0,
+        },
+        2 => Position {
+            x: offset,
+            y: 0,
+            z: coordinate,
+        },
+        _ => unreachable!(),
+    }
+}
+
+fn edge_view(axis: usize, coordinate: i32, revision: u64) -> StateView {
+    let mut state = room(15, 15, revision);
+    state.observation.visible_cells = (0..8)
+        .map(|offset| {
+            let position = axis_position(axis, coordinate, offset);
+            cell(
+                position.x,
+                position.y,
+                position.z,
+                &format!("edge-{offset}"),
+            )
+        })
+        .collect();
+    state
+}
+
+#[test]
+fn delta_translation_rejects_coordinate_overflow_on_every_axis() {
+    for axis in 0..3 {
+        for (coordinate, step) in [(i32::MAX, 1), (i32::MIN, -1)] {
+            let base = edge_view(axis, coordinate, 1);
+            let mut delta = StateDelta::between(&base, &edge_view(axis, coordinate, 2)).unwrap();
+            delta.cells.shift = axis_position(axis, step, 0);
+            assert_eq!(
+                delta.apply(&base),
+                Err(DeltaError::InvalidChange),
+                "axis {axis}, step {step}"
+            );
+        }
+    }
+}
+
+#[test]
+fn delta_generation_falls_back_when_translation_is_unrepresentable() {
+    for axis in 0..3 {
+        for (from, to) in [(i32::MAX, i32::MIN), (i32::MIN, i32::MAX)] {
+            let base = edge_view(axis, from, 1);
+            let next = edge_view(axis, to, 2);
+            assert_eq!(StateDelta::between(&base, &next), None, "axis {axis}");
+            let full: StateView =
+                serde_json::from_value(serde_json::to_value(&next).unwrap()).unwrap();
+            assert_eq!(full, next);
+        }
+    }
+}
+
+#[test]
+fn delta_translation_preserves_representable_coordinate_limits() {
+    for axis in 0..3 {
+        for (from, to) in [(i32::MAX - 1, i32::MAX), (i32::MIN + 1, i32::MIN)] {
+            round_trip(&edge_view(axis, from, 1), &edge_view(axis, to, 2));
+        }
+    }
+}
+
+#[test]
+fn delta_generation_does_not_wrap_cells_that_would_be_removed() {
+    let mut base = edge_view(0, 0, 1);
+    base.observation
+        .visible_cells
+        .push(cell(i32::MAX, 0, 0, "removed"));
+    let next = edge_view(0, 1, 2);
+    assert_eq!(StateDelta::between(&base, &next), None);
+}

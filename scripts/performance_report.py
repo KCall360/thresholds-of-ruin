@@ -48,6 +48,32 @@ STREAM_BOUNDS = {"horizon_regions_expanded": 8, "horizon_links_examined": 16, "p
 PRELOAD_BOUNDS = {"preload_jobs": 4, "preload_regions_expanded": 8, "preload_links_examined": 16}
 
 
+def validate_region_acquisition(profile, required=False):
+    """Nested acquisition metrics partition successful reads/builds only."""
+    acquisition = profile.get('region_acquisition')
+    if acquisition is None:
+        assert not required, 'Missing region acquisition profile'
+        return
+    assert isinstance(acquisition, dict)
+    for name in ('fallback_reads', 'fallback_builds', 'prepared_reads', 'prepared_builds'):
+        assert type(acquisition.get(name)) is int and acquisition[name] >= 0, name
+    assert acquisition['fallback_reads'] + acquisition['prepared_reads'] == profile['region_records_read']
+    assert acquisition['fallback_builds'] + acquisition['prepared_builds'] == profile['regions_built']
+    assert acquisition['prepared_reads'] + acquisition['prepared_builds'] == profile['regions_prepared']
+
+    def nanos(value):
+        assert isinstance(value, dict)
+        assert type(value.get('secs')) is int and value['secs'] >= 0
+        assert type(value.get('nanos')) is int and 0 <= value['nanos'] < 1000000000
+        return value['secs']*1000000000 + value['nanos']
+
+    read = nanos(acquisition.get('fallback_read'))
+    build = nanos(acquisition.get('fallback_build'))
+    assert read + build <= nanos(profile.get('region_transition')), 'Nested timings exceed transition'
+    assert acquisition['fallback_reads'] or read == 0
+    assert acquisition['fallback_builds'] or build == 0
+
+
 def validate_stream(rows, case):
     """A streaming run walks the same number of steps east then west per
     cycle, with any AI turns in between, and bounded transition work per
@@ -57,6 +83,7 @@ def validate_stream(rows, case):
     assert len(meta) == 1 and len(ends) == 1, "Missing or duplicate streaming metadata or completion"
     meta, end = meta[0], ends[0]
     assert meta["workload"] == "streaming-v1"
+    assert meta.get('region_acquisition_version', 1) == 1, 'Unknown acquisition profile version'
     samples = [r for r in rows if r["kind"] == "sample"]
     assert all(s["case"] == case for s in samples), "Unexpected sample case"
     walked = [s["label"] for s in samples if s["actor"] == 1]
@@ -69,6 +96,7 @@ def validate_stream(rows, case):
         assert sample["history_start"] == history, (case, "history")
         history += 1
         profile = sample["profile"]
+        validate_region_acquisition(profile, 'region_acquisition_version' in meta)
         assert profile["simulation_transitions"] == 1
         assert profile["candidate_captures"] == 1 and profile["rollback_snapshots"] == 1
         bounds = STREAM_BOUNDS | (PRELOAD_BOUNDS if meta.get("preloading") else {})
