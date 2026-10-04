@@ -152,6 +152,24 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Save framing, checksums and strict JSON validation now have a focused codec
+module. SQLite admission, checkpoint row planning and worker transactions remain
+in storage. The existing typed parse, duplicate-free JSON parse and canonical-value
+comparison are retained, including duplicate-key, unknown/default-field,
+numeric-key and nesting rejection rules. Stored formats remain unchanged.
+
+A proposed single-parse reader passed quick/full Windows verification and
+equivalence tests, but release measurements retained a falling-physics restore
+regression. It was removed before adoption. The codec boundary retains scaling
+round trips at 16, 256 and 4,096 entries and stronger malformed-input comparisons.
+An actual headless client verifies state/history through two cold restores, with
+continued play between them. Quick and full Windows verification of the retained
+implementation passed, including debug/release workspace tests, 222 debug
+Python/process tests and all 112 release process tests. Release comparisons and
+a controlled repeat validated; all twelve deployed-client checks passed. Timing
+limits are recorded below. Reducing temporary JSON trees and enforcing byte limits
+before source/index/region copies remain open.
+
 Autonomous execution now chooses an AI action once inside private candidate state
 and uses the same journal admission, revision, region-transition and publication
 pipeline as ordinary actions. The decision never escapes across a mutation or
@@ -685,3 +703,43 @@ number nine per group and streamed restarts number three. Resident memory and
 isolated AI-decision costs remain unmeasured. Raw samples remain local and
 unpublished. Earlier restore regressions remain a follow-up for save decoding
 and immutable content pooling.
+
+### Save codec boundary release comparison
+
+Three interleaved rounds compared the retained codec extraction with the preceding
+autonomous-execution checkpoint on the same Windows host. A controlled repeat used
+identical binaries. Every run validated; body-cell, scene, navigation, physics,
+disclosed-byte and saved-byte counts were unchanged in both comparisons. The
+reader still uses the original decode algorithm. Timings are milliseconds,
+baseline to refactor; combat timings pair each decision and command sample.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 2 actors, no history / decision + command | 576 | 0.244 → 0.242 | 0.841 → 0.798 | 3.169 → 2.221 |
+| Same case, repeat | 576 | 0.245 → 0.245 | 0.829 → 0.816 | 3.404 → 2.489 |
+| 2 actors, 1,000 prior actions / decision + command | 576 | 0.231 → 0.232 | 0.729 → 0.739 | 1.319 → 1.409 |
+| Same history case, repeat | 576 | 0.231 → 0.233 | 0.730 → 0.779 | 1.288 → 1.434 |
+| 8 actors, no history / decision + command | 576 | 0.813 → 0.990 | 3.887 → 5.721 | 6.149 → 8.781 |
+| Same eight-actor case, repeat | 576 | 0.799 → 0.820 | 3.882 → 3.965 | 6.185 → 5.837 |
+| 8 actors, 1,000 prior actions / decision + command | 576 | 0.552 → 0.554 | 3.391 → 3.352 | 4.097 → 5.927 |
+| Same eight-actor history case, repeat | 576 | 0.552 → 0.552 | 3.388 → 3.387 | 4.414 → 4.160 |
+| 8 actors, no history / resume | 9 | 106.4 → 109.4 | 130.9 → 161.8 | 130.9 → 161.8 |
+| Same case, repeat / resume | 9 | 108.8 → 109.7 | 132.1 → 121.0 | 132.1 → 121.0 |
+| Falling physics / command | 576 | 0.093 → 0.093 | 11.796 → 12.270 | 20.193 → 19.985 |
+| Falling physics, repeat / command | 576 | 0.094 → 0.095 | 11.775 → 12.265 | 19.884 → 20.395 |
+| Falling physics / resume | 9 | 237.1 → 240.2 | 254.2 → 265.5 | 254.2 → 265.5 |
+| Falling physics, repeat / resume | 9 | 248.9 → 240.7 | 261.7 → 251.7 | 261.7 → 251.7 |
+
+The initial eight-actor no-history command p95 increase of 48.1% narrowed to 2.4%
+in the repeat; its paired decision/command p95 increased 2.1% in the repeat.
+Falling command p95 remained about 4% higher in both sets. Two-actor history
+paired p95 rose 6.8% in the repeat. Client application tails varied: eight-actor
+no-history p95 rose 61.5% initially and 11.2% in the repeat; two-actor history
+repeat p95 rose 39.1%, with a nearly unchanged median. Causes were not isolated.
+
+Save and restore timings varied substantially. The repeat's two-actor history
+save p95 rose from 67.751 to 161.4 ms, while falling save p95 fell from 237.9 to
+115.5 ms. Each save/restore group has only nine samples. The earlier body-sharing
+restore regression remains unresolved. This extraction establishes a focused
+format-validation boundary, with no broad latency or allocation improvement
+claimed. Raw samples remain local and unpublished; resident memory was not measured.

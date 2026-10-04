@@ -50,7 +50,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.flush_save()
         player.stop()
         server.stop()
-        self.server(scenario="first-dungeon", seed=None)
+        server = self.server(scenario="first-dungeon", seed=None)
         resumed, state = self.client()
         self.assertEqual(state["state"], boundary["state"])
         restored_observer, restored_ai = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
@@ -61,6 +61,16 @@ class HeadlessProcesses(ProcessTestCase):
         continued = next_turn(resumed, continued)
         self.assertGreater(continued["state"]["observation"]["tick"],
                            boundary["state"]["observation"]["tick"])
+        # A second cold decode must preserve the new boundary and its history.
+        boundary = self.request(resumed, {"type": "snapshot"})
+        self.flush_save()
+        restored_observer.stop()
+        resumed.stop()
+        server.stop()
+        self.server(scenario="first-dungeon", seed=None)
+        _, second_restore = self.client()
+        self.assertEqual(second_restore["state"], boundary["state"])
+        self.assertEqual(second_restore["history"], boundary["history"])
 
     def test_body_indexes_rebuild_after_portal_physics_save_and_restart(self):
         server = self.server(scenario="physics-portal", seed=None)

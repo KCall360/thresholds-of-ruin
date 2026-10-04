@@ -5,17 +5,20 @@ use crate::{
     Failure,
 };
 use rusqlite::{params, Connection};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub const MAX_PAYLOAD: usize = 1024 * 1024;
+#[path = "save_codec.rs"]
+mod codec;
+pub(crate) use codec::frame;
+pub use codec::MAX_PAYLOAD;
+use codec::{crc32c, decode, decode_region, region_frame, strict};
+
 const MAX_CHECKPOINT: usize = 64 * MAX_PAYLOAD;
-/// A region record row may be larger than a journal record.
-const MAX_REGION: usize = 16 * MAX_PAYLOAD;
 const APP_ID: i64 = 0x544f524a;
 /// SQLite `user_version`: the save format, as `ARCHIVE_VERSION`.
 const SAVE_FORMAT: i64 = crate::engine::ARCHIVE_VERSION as i64;
@@ -104,69 +107,6 @@ struct Base {
     archive: Archive,
 }
 
-fn crc32c(bytes: impl Iterator<Item = u8>) -> u32 {
-    let mut crc = !0u32;
-    for byte in bytes {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ (0x82f63b78 & 0u32.wrapping_sub(crc & 1));
-        }
-    }
-    !crc
-}
-pub(crate) fn frame<T: Serialize>(kind: u16, sequence: u64, value: &T) -> Result<Vec<u8>, Failure> {
-    let payload = serde_json::to_vec(value).map_err(|_| storage_failure())?;
-    if payload.len() > MAX_PAYLOAD {
-        return Err(storage_failure());
-    }
-    let mut bytes = Vec::with_capacity(24 + payload.len());
-    bytes.extend_from_slice(if kind == 0 { b"TORB" } else { b"TORJ" });
-    bytes.extend_from_slice(&6u16.to_le_bytes());
-    bytes.extend_from_slice(&kind.to_le_bytes());
-    bytes.extend_from_slice(&sequence.to_le_bytes());
-    bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    let crc = crc32c(bytes[4..].iter().copied().chain(payload.iter().copied()));
-    bytes.extend_from_slice(&crc.to_le_bytes());
-    bytes.extend_from_slice(&payload);
-    Ok(bytes)
-}
-/// A region record row: the journal frame layout with magic `TORR`, kind 3
-/// and the record identity in the sequence field.
-fn region_frame(id: u64, record: &tor_simulation::RegionRecord) -> Result<Vec<u8>, Failure> {
-    let payload = serde_json::to_vec(record).map_err(|_| storage_failure())?;
-    if payload.len() > MAX_REGION {
-        return Err(storage_failure());
-    }
-    let mut bytes = Vec::with_capacity(24 + payload.len());
-    bytes.extend_from_slice(b"TORR");
-    bytes.extend_from_slice(&6u16.to_le_bytes());
-    bytes.extend_from_slice(&3u16.to_le_bytes());
-    bytes.extend_from_slice(&id.to_le_bytes());
-    bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    let crc = crc32c(bytes[4..].iter().copied().chain(payload.iter().copied()));
-    bytes.extend_from_slice(&crc.to_le_bytes());
-    bytes.extend_from_slice(&payload);
-    Ok(bytes)
-}
-fn decode_region(bytes: &[u8], id: u64) -> Result<tor_simulation::RegionRecord, Failure> {
-    if bytes.len() < 24
-        || bytes.len() > MAX_REGION + 24
-        || &bytes[..4] != b"TORR"
-        || bytes[4..6] != 6u16.to_le_bytes()
-        || bytes[6..8] != 3u16.to_le_bytes()
-        || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != id
-        || u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize != bytes.len() - 24
-        || crc32c(
-            bytes[4..20]
-                .iter()
-                .copied()
-                .chain(bytes[24..].iter().copied()),
-        ) != u32::from_le_bytes(bytes[20..24].try_into().unwrap())
-    {
-        return Err(invalid_archive());
-    }
-    strict(&bytes[24..])
-}
 /// Region record rows a checkpoint's transaction writes, and the rows it
 /// keeps; it deletes every other row.
 pub(crate) struct RegionWrite {
@@ -183,94 +123,6 @@ impl RegionWrite {
                 .collect::<Result<_, Failure>>()?,
             keep: checkpoint.referenced().into_iter().map(|id| id.0).collect(),
         })
-    }
-}
-fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failure> {
-    if bytes.len() < 24 || bytes.len() > MAX_PAYLOAD + 24 {
-        return Err(invalid_archive());
-    }
-    let kind = u16::from_le_bytes(bytes[6..8].try_into().unwrap());
-    let magic = if sequence == 0 { b"TORB" } else { b"TORJ" };
-    if &bytes[..4] != magic
-        || bytes[4..6] != 6u16.to_le_bytes()
-        || u64::from_le_bytes(bytes[8..16].try_into().unwrap()) != sequence
-        || u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize != bytes.len() - 24
-        || crc32c(
-            bytes[4..20]
-                .iter()
-                .copied()
-                .chain(bytes[24..].iter().copied()),
-        ) != u32::from_le_bytes(bytes[20..24].try_into().unwrap())
-        || (sequence == 0 && kind != 0)
-        || (sequence != 0 && !matches!(kind, 1 | 2))
-    {
-        return Err(invalid_archive());
-    }
-    Ok((kind, &bytes[24..]))
-}
-fn strict<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Result<T, Failure> {
-    let value: T = serde_json::from_slice(bytes).map_err(|_| invalid_archive())?;
-    let original = serde_json::from_slice::<UniqueJson>(bytes)
-        .map_err(|_| invalid_archive())?
-        .0;
-    if serde_json::to_value(&value).map_err(|_| invalid_archive())? != original {
-        return Err(invalid_archive());
-    }
-    Ok(value)
-}
-// Typed maps otherwise silently retain the last duplicate key.
-struct UniqueJson(serde_json::Value);
-impl<'de> Deserialize<'de> for UniqueJson {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = UniqueJson;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("JSON without duplicate keys")
-            }
-            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(v.into()))
-            }
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(v.into()))
-            }
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(v.into()))
-            }
-            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(v.into()))
-            }
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(v.into()))
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<UniqueJson, E> {
-                Ok(UniqueJson(serde_json::Value::Null))
-            }
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut a: A,
-            ) -> Result<UniqueJson, A::Error> {
-                let mut values = Vec::new();
-                while let Some(v) = a.next_element::<UniqueJson>()? {
-                    values.push(v.0);
-                }
-                Ok(UniqueJson(values.into()))
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                mut a: A,
-            ) -> Result<UniqueJson, A::Error> {
-                let mut values = serde_json::Map::new();
-                while let Some(key) = a.next_key::<String>()? {
-                    if values.contains_key(&key) {
-                        return Err(serde::de::Error::custom("duplicate key"));
-                    }
-                    values.insert(key, a.next_value::<UniqueJson>()?.0);
-                }
-                Ok(UniqueJson(values.into()))
-            }
-        }
-        deserializer.deserialize_any(Visitor)
     }
 }
 fn read_region_row(
@@ -1904,11 +1756,6 @@ mod tests {
         for cut in 0..bytes.len() {
             assert!(decode(&bytes[..cut], 1).is_err());
         }
-    }
-    #[test]
-    fn strict_json_rejects_nested_duplicate_keys() {
-        assert!(strict::<serde_json::Value>(br#"{"map":{"a":1,"a":1}}"#).is_err());
-        assert!(strict::<Marker>(br#"{"save_id":"id","generation":0}"#).is_err());
     }
     #[test]
     fn uncertain_commit_retry_reconciles_bytes_and_never_overwrites() {
