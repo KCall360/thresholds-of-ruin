@@ -775,6 +775,8 @@ struct Shared {
 #[derive(Debug)]
 struct Owner {
     shared: Arc<Shared>,
+    /// Serializes producers without blocking worker progress or status readers.
+    admission: Mutex<()>,
     thread: Mutex<Option<JoinHandle<()>>>,
     save_id: String,
     path: PathBuf,
@@ -881,6 +883,7 @@ impl Store {
         Ok((
             Self(Arc::new(Owner {
                 shared,
+                admission: Mutex::new(()),
                 thread: Mutex::new(Some(thread)),
                 save_id,
                 path: owned,
@@ -908,8 +911,9 @@ impl Store {
         sources: Vec<(u64, Arc<str>)>,
         capture: Option<impl FnOnce() -> Checkpoint>,
     ) -> Result<usize, Failure> {
+        let _admission = self.0.admission.lock().unwrap();
         let shared = &self.0.shared;
-        let mut s = shared.state.lock().unwrap();
+        let s = shared.state.lock().unwrap();
         if s.status.error.is_some() || s.closing {
             return Err(storage_failure());
         }
@@ -919,6 +923,12 @@ impl Store {
             .checked_add(1)
             .filter(|v| *v <= i64::MAX as u64)
             .ok_or_else(storage_failure)?;
+        let needs_checkpoint = shared.policy.checkpoint_interval > 0
+            && sequence.saturating_sub(s.last_checkpoint_requested)
+                >= shared.policy.checkpoint_interval;
+        drop(s);
+        // The producer gate preserves sequence and checkpoint ordering while
+        // encoding and capture run outside the worker's shared status lock.
         let bytes = if kind == 2 {
             frame(
                 kind,
@@ -942,27 +952,25 @@ impl Store {
         };
         let copied = sources.iter().map(|(_, text)| text.len()).sum::<usize>();
         let len = bytes.len() + copied;
-        if !fits_queue(
-            s.status.pending_bytes,
+        Self::check_admission(
+            &mut shared.state.lock().unwrap(),
+            shared,
             bytes.len(),
             copied,
-            shared.policy.max_pending_bytes,
-        ) {
-            s.force = s.status.accepted_sequence;
-            shared.wake.notify_one();
-            return Err(Failure::new(
-                tor_protocol::ErrorCode::StorageFailure,
-                "Save queue is full; wait for saving to finish before retrying",
-            ));
-        }
-        if shared.policy.checkpoint_interval > 0
-            && sequence.saturating_sub(s.last_checkpoint_requested)
-                >= shared.policy.checkpoint_interval
-        {
-            if let Some(capture) = capture {
-                s.checkpoint = Some((sequence, capture()));
-                s.last_checkpoint_requested = sequence;
-            }
+        )?;
+        let checkpoint = if needs_checkpoint {
+            capture.map(|capture| capture())
+        } else {
+            None
+        };
+        let mut s = shared.state.lock().unwrap();
+        // A worker failure or shutdown during preparation must reject without
+        // publishing the prepared record or checkpoint.
+        Self::check_admission(&mut s, shared, bytes.len(), copied)?;
+        debug_assert_eq!(s.status.accepted_sequence.checked_add(1), Some(sequence));
+        if let Some(checkpoint) = checkpoint {
+            s.checkpoint = Some((sequence, checkpoint));
+            s.last_checkpoint_requested = sequence;
         }
         let now = Instant::now();
         s.pending.push_back(Pending {
@@ -977,6 +985,30 @@ impl Store {
         s.last_activity = now;
         shared.wake.notify_one();
         Ok(len)
+    }
+    fn check_admission(
+        state: &mut State,
+        shared: &Shared,
+        frame_bytes: usize,
+        copied_bytes: usize,
+    ) -> Result<(), Failure> {
+        if state.status.error.is_some() || state.closing {
+            return Err(storage_failure());
+        }
+        if !fits_queue(
+            state.status.pending_bytes,
+            frame_bytes,
+            copied_bytes,
+            shared.policy.max_pending_bytes,
+        ) {
+            state.force = state.status.accepted_sequence;
+            shared.wake.notify_one();
+            return Err(Failure::new(
+                tor_protocol::ErrorCode::StorageFailure,
+                "Save queue is full; wait for saving to finish before retrying",
+            ));
+        }
+        Ok(())
     }
     /// The records on disk after the latest committed checkpoint, once.
     pub(crate) fn take_written(
@@ -1503,6 +1535,157 @@ mod tests {
         walk(&mut restored, tor_protocol::Direction::West, 1);
         restored.flush().unwrap();
         assert_eq!(restored.save_status().pending_bytes, 0);
+    }
+
+    fn capture_engine(path: &Path) -> Engine {
+        let mut engine = Engine::open_with_policy(
+            path,
+            Scenario::two_room(42),
+            SavePolicy {
+                checkpoint_interval: 1,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+        engine.enable_wizard().unwrap();
+        engine
+            .command(
+                "player",
+                "test",
+                ActorId(1),
+                "capture-fixture",
+                &engine.branch().clone(),
+                crate::journal::Command::Act {
+                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    action: tor_protocol::Action::Wait,
+                },
+            )
+            .unwrap();
+        engine.flush().unwrap();
+        engine
+    }
+
+    #[test]
+    fn checkpoint_capture_does_not_block_status_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture-lock.db");
+        let engine = capture_engine(&path);
+        let store = engine.flush_handle().unwrap();
+        let before = store.status();
+        let writer = store.clone();
+        let reader = store.clone();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            let result = writer.push(
+                2,
+                &(),
+                Vec::new(),
+                Some(|| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    Checkpoint::capture(&engine)
+                }),
+            );
+            (engine, result)
+        });
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (status_tx, status_rx) = std::sync::mpsc::channel();
+        let observer = std::thread::spawn(move || {
+            status_tx.send(reader.status()).unwrap();
+        });
+        let observed = status_rx.recv_timeout(Duration::from_secs(5));
+        // Release and join before asserting, including on the failing baseline.
+        release_tx.send(()).unwrap();
+        let (engine, result) = producer.join().unwrap();
+        observer.join().unwrap();
+        result.unwrap();
+        store.flush().unwrap();
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        drop(store);
+        let restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
+        let observed = observed.expect("status waited for checkpoint capture");
+        assert_eq!(observed.accepted_sequence, before.accepted_sequence);
+        assert_eq!(observed.durable_sequence, before.durable_sequence);
+        assert_eq!(observed.pending_bytes, 0);
+    }
+
+    #[test]
+    fn failure_during_checkpoint_capture_rejects_without_consuming_sequence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture-failure.db");
+        let engine = capture_engine(&path);
+        let store = engine.flush_handle().unwrap();
+        let before = store.status();
+        let result = store.push(
+            2,
+            &(),
+            Vec::new(),
+            Some(|| {
+                store.0.shared.state.lock().unwrap().status.error =
+                    Some("injected worker failure".into());
+                Checkpoint::capture(&engine)
+            }),
+        );
+        assert_eq!(
+            result.unwrap_err().code,
+            tor_protocol::ErrorCode::StorageFailure
+        );
+        let rejected = store.status();
+        assert_eq!(rejected.accepted_sequence, before.accepted_sequence);
+        assert_eq!(rejected.durable_sequence, before.durable_sequence);
+        assert_eq!(rejected.pending_bytes, 0);
+        assert_eq!(rejected.checkpoint_sequence, before.checkpoint_sequence);
+        store.request_flush();
+        store
+            .push(2, &(), Vec::new(), Some(|| Checkpoint::capture(&engine)))
+            .unwrap();
+        store.flush().unwrap();
+        assert_eq!(
+            store.status().accepted_sequence,
+            before.accepted_sequence + 1
+        );
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        drop(store);
+        let restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
+    }
+
+    #[test]
+    fn concurrent_producers_keep_a_contiguous_durable_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("producer-order.db");
+        let engine = capture_engine(&path);
+        let store = engine.flush_handle().unwrap();
+        let before = store.status();
+        let gate = Arc::new(std::sync::Barrier::new(8));
+        let producers: Vec<_> = (0..8)
+            .map(|_| {
+                let writer = store.clone();
+                let gate = gate.clone();
+                std::thread::spawn(move || {
+                    gate.wait();
+                    writer.wizard()
+                })
+            })
+            .collect();
+        for producer in producers {
+            producer.join().unwrap().unwrap();
+        }
+        store.flush().unwrap();
+        let after = store.status();
+        assert_eq!(after.accepted_sequence, before.accepted_sequence + 8);
+        assert_eq!(after.durable_sequence, after.accepted_sequence);
+        assert_eq!(after.pending_bytes, 0);
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        drop(store);
+        // Opening validates every frame's sequence and the checkpoint prefix.
+        let restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
     }
 
     /// A saved corridor game with halls 1 and 2 detached and no checkpoint

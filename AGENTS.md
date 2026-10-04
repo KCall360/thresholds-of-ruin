@@ -128,8 +128,11 @@ deployed client checks. Readiness changes copy zero definitions in scaling tests
 encoded saves retain their existing values. Repeat measurements retained a
 restore regression, recorded in the plan; decode/content pooling remains pending.
 Storage queue accounting now releases copied-source capacity after committed
-writes; full Windows and deployed-client checks passed. Admission lock scope,
-AI preparation and the admission/scheduler split are next. The versioned queue
+writes; full Windows and deployed-client checks passed. A separate producer gate
+now releases the worker/status lock during encoding and checkpoint capture,
+verified by concurrency regressions, full Windows checks, release comparisons
+and deployed-client checks. Timing limits are recorded in the plan. Protocol
+validation, AI preparation and the admission/scheduler split are next. The versioned queue
 and stream-recovery proposal awaits explicit format authorization.
 Gameplay must admit intentions to simulation-owned
 scheduling. Derived topology indexes stay backend-only. Text-client fixes and

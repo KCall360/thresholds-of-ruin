@@ -194,6 +194,22 @@ full Windows verification passed, including 218 debug Python/process tests and
 checks. This fixes incorrect capacity accounting; no latency improvement is
 claimed.
 
+Storage producers now use a separate admission gate to preserve sequence and
+checkpoint ordering. Record encoding and checkpoint capture release the shared
+status lock, allowing the writer and status readers to proceed. Admission checks
+error, closing state and capacity again before publishing the prepared record
+and checkpoint. A failure during preparation does not consume a sequence or
+publish candidate state.
+
+The baseline concurrency regression blocked a status read until capture was
+released; the refactor allows the read while capture remains blocked. Further
+checks cover failure during capture, retry without a sequence gap, eight
+concurrent producers, checkpoint restoration and a real controller/spectator
+pair across frequent checkpoints, small-queue saves and restart. Focused checks
+passed. Quick and full Windows verification passed, including 218 debug
+Python/process tests and 108 release process tests. Updated desktop targets passed
+eight real-client checks. Release comparisons and their limits are below.
+
 Item mutations now pass through a private store that maintains ground-location
 and inventory-owner indexes. Observation, stack matching, corpse inventory
 release, and item occupancy checks use these indexes. Candidate and rewind clones
@@ -479,3 +495,36 @@ Reducing decode work and pooling immutable definitions remain follow-up work;
 the measured restore regression is unresolved. Save/resume samples number only
 nine per comparison; resident memory remains unmeasured. The scaling regression
 establishes avoided definition copies. Raw samples remain local and unpublished.
+
+### Storage-admission release comparison
+
+Three interleaved rounds compared the separate producer gate with the
+queue-accounting checkpoint on the same Windows host. Both ordinary cases use
+background SQLite journal storage. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| 8 regions, 1 actor, durable / command | 915 | 0.563 → 0.560 | 0.797 → 0.793 | 2.272 → 2.411 |
+| 64 regions, 8 actors, durable / command | 7,500 | 0.043 → 0.043 | 2.560 → 2.540 | 7.168 → 8.013 |
+| Same eight-actor case / restart | 3 | 528.0 → 505.8 | 553.6 → 512.7 | 553.6 → 512.7 |
+| Falling, 8 actors / 128 items / 8 cells / command | 576 | 0.092 → 0.093 | 11.884 → 12.024 | 21.948 → 20.952 |
+| Same falling / resume | 9 | 248.2 → 252.5 | 261.8 → 278.1 | 261.8 → 278.1 |
+| Same falling / save | 9 | 119.4 → 257.3 | 268.7 → 344.9 | 268.7 → 344.9 |
+| Same falling, repeat / command | 576 | 0.093 → 0.096 | 12.451 → 12.158 | 20.862 → 21.941 |
+| Same falling, repeat / resume | 9 | 256.8 → 266.1 | 315.6 → 274.2 | 315.6 → 274.2 |
+| Same falling, repeat / save | 9 | 71.768 → 80.173 | 264.6 → 265.1 | 264.6 → 265.1 |
+
+All runs validated. Saved/disclosed bytes, body-cell work, scenes, physics steps,
+and ordinary-command workload counts were unchanged. Durable command p95 fell
+0.5% in the small case and 0.8% with eight actors, while maxima increased in both.
+Falling command p95 increased 1.2%, resume p95 increased 6.2%, and save p95
+increased 28.3%. Save timings varied substantially between rounds. A controlled
+repeat using the same verified binaries did not retain the large save-tail
+increase: save p95 rose 0.2% and median rose 8.4 ms. Repeat command p95 fell 2.4%,
+with a higher median and maximum; resume p95 fell 13.1%, with a higher median.
+Both result sets are retained, and workload/saved/disclosed counts remained equal.
+Restart samples number only three, and save/resume samples number nine per comparison.
+These results do not establish a broad command or save-time improvement. The
+concurrency regression establishes status progress while capture is blocked;
+resident memory and lock-wait distributions remain unmeasured. Raw samples remain
+local and unpublished.

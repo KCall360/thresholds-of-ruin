@@ -75,21 +75,35 @@ class StreamingProcesses(ProcessTestCase):
 
         server = start()
         player, _ = self.client()
+        observer, _ = self.client(SPECTATOR_TOKEN)
         for _ in range(TO_HALL_4):
             self.assertIsNone(self.request(player, {"type": "save"})["error"])
             moved = self.act(player, {"type": "move", "direction": "east"})
             self.assertIsNone(moved.get("error"), moved.get("error"))
+            shown = self.frame(observer,
+                lambda f: f.get("state", {}).get("observation", {}).get("tick")
+                    == moved["state"]["observation"]["tick"])
+            self.assertEqual(shown["state"], moved["state"])
+            self.assertEqual(shown["history"], moved["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         expected = self.request(player, {"type": "snapshot"})["state"]
         with closing(sqlite3.connect(self.save)) as db:
             self.assertGreater(db.execute("SELECT COUNT(*) FROM region_sources").fetchone()[0], 3)
         player.stop()
+        observer.stop()
         server.stop()
         start()
         player, resumed = self.client()
         self.assertEqual(resumed["state"], expected)
+        observer, seen = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(seen["state"], expected)
         continued = self.act(player, {"type": "move", "direction": "west"})
         self.assertIsNone(continued.get("error"), continued)
+        shown = self.frame(observer,
+            lambda f: f.get("state", {}).get("observation", {}).get("tick")
+                == continued["state"]["observation"]["tick"])
+        self.assertEqual(shown["state"], continued["state"])
+        self.assertEqual(shown["history"], continued["history"])
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
 
     def rows(self):
