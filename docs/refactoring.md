@@ -95,6 +95,63 @@ region identities or authoritative occupancy.
    named handlers, persistent typed state, scheduling, and region suspension.
    No language, VM, or package script support is added in this refactor.
 
+## Future scenario extension contracts
+
+These constraints guide the refactor; no scripting language, runtime, package
+syntax or handler API is implemented. Adding those formats remains a separate
+explicit compatibility decision. Authors should be able to choose declarative
+rules and reusable behavior templates, then opt into named handlers for behavior
+that needs code. Both forms should compile to the same backend concepts rather
+than introducing a second mutation or scheduling system.
+
+**Queries and authority.** Controller handlers should query an actor's disclosed
+observations and remembered navigation. Scenario-world handlers may need broader
+authority, such as maintaining a hidden encounter, through explicitly granted
+region-scoped queries. A query's scope must therefore be part of its contract;
+restricting every author hook to player visibility would prevent useful scenario
+rules. Neither form grants clients access to private state. Locations remain
+region-local, with explicit portal traversal and frame conversion. Queries must
+distinguish unknown, unloaded and absent data without eagerly constructing every
+referenced region. Authority to activate or modify another region is a separate
+validated effect, subject to the normal lifecycle rules.
+
+**Effects and ordering.** Handlers produce bounded, typed proposed effects or
+gameplay intentions. They do not obtain mutable engine, store, socket or world
+references. Validate effects against private candidate state; revalidate queued
+intentions when the simulation executes them. Persist the operation's required
+inputs, state changes and result before publishing observations. Handler failure
+must reject its enclosing transaction rather than publish a partial effect batch.
+Use named hooks at documented simulation boundaries, with deterministic ordering
+and limits on recursive event production. Wall-clock callbacks and thread
+completion must not decide authoritative order. Clients invoke authorized opaque
+interaction identities, never arbitrary handler names or interpreter functions.
+
+**Determinism and limits.** Supply explicit named random streams whose identity
+and state survive save/replay/rewind. The runtime must not read wall-clock time,
+filesystem, network or ambient randomness. Define deterministic instruction/work,
+effect-count and persistent-state limits, including a total budget for an event
+cascade. A wall-clock timeout may protect the host but cannot select a different
+successful game outcome. Exhaustion follows an explicit failure policy; it must
+not silently drop effects or resume half an invocation in live state.
+
+**Persistence and lifecycle.** Persistent handler state should have a declared,
+bounded typed schema keyed by stable content and owner identities. Save values
+and scheduled intentions rather than interpreter stacks, closures or native
+handles. Pin handler inputs by content digest and eventual runtime/API identity;
+reject unsupported identities using the existing current-format policy. A
+handler's actor, region or scenario ownership determines its lifetime and clock.
+Regional timers and progress must follow freeze/thaw rules, and rewind must
+restore state and pending work together. Lazy regions must not allocate handler
+state before activation. Restoring progress must preserve the existing policy
+requiring fresh human input where appropriate. Historical runtime support or
+state migration requires its own future compatibility milestone.
+
+The immediate refactor consequences are to retain typed command/effect boundaries,
+private transaction state, simulation-owned scheduling, immutable prepared
+definitions, independent format axes and backend-controlled disclosure. Avoid
+persisting implementation-specific controller objects or exposing a general
+world-mutation escape hatch merely to make a future runtime easy to connect.
+
 ## Verification
 
 Use the repository verification tiers and process tests for touched boundaries.
@@ -104,7 +161,55 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
-## Current checkpoint: shared checkpoint restoration
+## Current checkpoint: region acquisition attribution
+
+Profiled transitions now distinguish successful synchronous reads/builds from
+prepared reads/builds, with separate fallback durations nested within total
+region-transition time. Resident record-cache hits are excluded. These details
+are diagnostic data; they are not saved, disclosed or used to resolve gameplay.
+Ordinary commands do not enable the additional acquisition clocks. Existing
+checkpoint-capture timing/counts remain in place.
+
+The failing-first regression now verifies count partitions and duration bounds
+while playing with disabled, settled, racing and stopped preloading, including
+cold restart and identical region rows. A separate check prevents nested timings
+from entering the exclusive phase sum. Report-validation regressions failed
+first on eight inconsistent/missing/invalid acquisition reports and now reject
+them. A real streaming benchmark process emits and validates the new profiles
+and timing summaries. Quick Windows verification passed, including the Rust
+workspace suite and 122 actual-process tests. Full Windows verification also
+passed, including 236 debug Python/process tests, Rust documentation and workspace
+tests in debug and release, and 122 release process tests. All twenty-one
+deployed-client/validator checks passed. No performance improvement is claimed.
+
+
+Three interleaved release rounds compared this increment with the preceding
+shared-restoration checkpoint on the same Windows host. All twelve runs
+validated, with equal comparable work, saved-byte and disclosure counts.
+Timings are milliseconds, baseline to refactor:
+
+| Workload / metric | n per side | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| stream-r16-durable / command | 2,100 | 0.2542 → 0.2432 | 0.4785 → 0.4522 | 1.3219 → 1.1993 |
+| stream-r16-durable / save | 3 | 117.3947 → 87.4694 | 217.6047 → 107.0672 | 217.6047 → 107.0672 |
+| stream-r16-durable / restart/replay | 3 | 170.8364 → 169.6671 | 183.5708 → 180.0609 | 183.5708 → 180.0609 |
+| stream-r256-durable / command | 2,100 | 0.2337 → 0.2383 | 0.4176 → 0.4301 | 0.9718 → 0.9213 |
+| stream-r256-durable / save | 3 | 100.1786 → 110.5751 | 120.1458 → 117.3521 | 120.1458 → 117.3521 |
+| stream-r256-durable / restart/replay | 3 | 166.3087 → 166.6488 | 185.2140 → 176.5394 | 185.2140 → 176.5394 |
+
+The 256-region command median rose 2.0% and p95 rose 3.0%; its save median rose
+10.4% while p95 fell 2.3%. The 16-region command p95 fell 5.5%. Save and restart
+samples number only three per side, so their tails have limited evidential weight.
+These diagnostics do not establish a broad latency or memory improvement, and
+earlier unresolved restore and falling-command tails remain open.
+
+Across each candidate workload's 2,100 samples, all nine builds were prepared
+and there were no synchronous reads or builds. The comparison therefore measures
+the prepared path, not synchronous fallback costs. The disabled/racing preloader
+regressions exercise fallback attribution separately. No raw samples or ledger
+results were published.
+
+## Shared checkpoint restoration
 
 A restore-scoped context now shares decoded worlds, navigation and item stores
 by their existing pool indexes across the current game and retained rewind

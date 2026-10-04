@@ -14,7 +14,7 @@ mod preload;
 pub mod region_streaming;
 mod regions;
 mod runner;
-pub use regions::Streaming;
+pub use regions::{RegionAcquisitionProfile, Streaming};
 pub mod scenario_package;
 mod session;
 mod storage;

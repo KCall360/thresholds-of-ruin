@@ -1,13 +1,35 @@
 """The benchmark trace driven through real headless clients and ASCII frames."""
 import json
 import os
+import subprocess
 import unittest
 from performance_driver import run_demo
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, ROOT, SUFFIX
 
 
 class PerformanceProcesses(ProcessTestCase):
+    def test_streaming_benchmark_emits_valid_nested_acquisition_profiles(self):
+        from performance_report import validate
+        build = ['cargo', 'build', '-p', 'tor-server', '--example', 'latency_bench', '--locked']
+        if os.environ.get('TOR_TEST_PROFILE', 'debug') == 'release':
+            build.append('--release')
+        with (self.directory/'benchmark-build.log').open('w', encoding='utf-8') as log:
+            subprocess.run(build, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=600)
+        output = self.directory/'acquisition.jsonl'
+        with output.open('w', encoding='utf-8') as log, (self.directory/'benchmark-stderr.log').open('w', encoding='utf-8') as errors:
+            subprocess.run([self.bin/'examples'/('latency_bench'+SUFFIX), '--case',
+                'stream-r16-durable', '--cycles', '1', '--checkpoint-interval', '64'],
+                cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=120)
+        rows = [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
+        metadata, samples, _ = validate(rows, selected_case='stream-r16-durable')
+        self.assertEqual(metadata['stream-r16-durable']['region_acquisition_version'], 1)
+        profiles = [sample['profile'] for sample in samples['stream-r16-durable']]
+        self.assertGreater(sum(profile['regions_built'] for profile in profiles), 0)
+        self.assertTrue(all('region_acquisition' in profile for profile in profiles))
+        phases = {row['phase'] for row in rows if row['kind'] == 'summary'}
+        self.assertTrue({'region_fallback_read', 'region_fallback_build'} <= phases)
+
     def test_mixed_trace_is_presented_and_verified_for_complete_cycles(self):
         output = self.directory / "demo"
         regions = int(os.environ.get("TOR_PERFORMANCE_REGIONS", "8"))

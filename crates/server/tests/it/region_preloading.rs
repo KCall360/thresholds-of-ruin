@@ -5,6 +5,21 @@ use std::path::Path;
 use tor_protocol::{Action, ActorId, Direction};
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario, Streaming};
 
+#[test]
+fn acquisition_timings_are_nested_in_the_transition_phase() {
+    use std::time::Duration;
+    let profile = tor_server::CommandProfile {
+        region_transition: Duration::from_secs(3),
+        region_acquisition: tor_server::RegionAcquisitionProfile {
+            fallback_read: Duration::from_secs(1),
+            fallback_build: Duration::from_secs(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(profile.exclusive_duration(), Duration::from_secs(3));
+}
+
 /// The seven-hall corridor with radii of zero, as in `region_streaming`.
 fn corridor() -> Scenario {
     let root =
@@ -37,6 +52,30 @@ fn step(engine: &mut Engine, direction: Direction, sequence: &mut usize) -> (usi
         )
         .unwrap_or_else(|e| panic!("step {sequence}: {e}"));
     *sequence += 1;
+    let encoded = serde_json::to_value(&profile).unwrap();
+    let acquisition = &encoded["region_acquisition"];
+    let count = |name| acquisition[name].as_u64().expect("acquisition count") as usize;
+    assert_eq!(
+        count("fallback_reads") + count("prepared_reads"),
+        profile.region_records_read
+    );
+    assert_eq!(
+        count("fallback_builds") + count("prepared_builds"),
+        profile.regions_built
+    );
+    assert_eq!(
+        count("prepared_reads") + count("prepared_builds"),
+        profile.regions_prepared
+    );
+    let duration =
+        |name| serde_json::from_value::<std::time::Duration>(acquisition[name].clone()).unwrap();
+    assert!(duration("fallback_read") + duration("fallback_build") <= profile.region_transition);
+    if count("fallback_reads") == 0 {
+        assert_eq!(duration("fallback_read"), std::time::Duration::ZERO);
+    }
+    if count("fallback_builds") == 0 {
+        assert_eq!(duration("fallback_build"), std::time::Duration::ZERO);
+    }
     (
         profile.regions_prepared,
         profile.regions_built + profile.region_records_read,

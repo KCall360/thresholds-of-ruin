@@ -24,6 +24,8 @@ fn phases(p: &CommandProfile) -> BTreeMap<String, f64> {
         ("replacement", p.journal_replace),
         ("publication", p.publication),
         ("region_transition", p.region_transition),
+        ("region_fallback_read", p.region_acquisition.fallback_read),
+        ("region_fallback_build", p.region_acquisition.fallback_build),
         ("authoritative_total", p.authoritative_total),
         (
             "unattributed",
@@ -332,7 +334,7 @@ fn streaming_case(
     println!(
         "{}",
         json!({"kind":"stream","preloading":true,"case":case,"workload":"streaming-v1","regions":halls,"actors":1,
-        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,
+        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,"region_acquisition_version":1,
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
         "storage":if durable{"background_sqlite_journal"}else{"memory"},

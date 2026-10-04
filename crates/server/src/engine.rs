@@ -579,6 +579,9 @@ pub struct CommandProfile {
     /// Builds and reads the preloader had ready. Depends on timing, unlike
     /// the other counts.
     pub regions_prepared: usize,
+    /// Nested acquisition details; excluded from `exclusive_duration` because
+    /// their time is already included in `region_transition`.
+    pub region_acquisition: crate::regions::RegionAcquisitionProfile,
     /// Background preloading: what it was asked for after the command, and
     /// the deterministic work of choosing it.
     pub preload_jobs: usize,
@@ -821,7 +824,12 @@ impl Candidate {
             return Ok(());
         };
         let started = Instant::now();
-        let work = regions.transition_with(&mut self.game, &mut self.made, extra)?;
+        let work = regions.transition_with_profile(
+            &mut self.game,
+            &mut self.made,
+            extra,
+            profile.is_some(),
+        )?;
         let report = &work.report;
         if let Some(profile) = profile {
             profile.region_transition += started.elapsed();
@@ -833,6 +841,7 @@ impl Candidate {
             profile.region_records_read += work.records_read;
             profile.regions_built += report.built.len();
             profile.regions_prepared += work.prepared;
+            profile.region_acquisition.add(work.acquisition);
         }
         if let Some(before) = work.before {
             // Loading, detaching, or activating regions can change both the
