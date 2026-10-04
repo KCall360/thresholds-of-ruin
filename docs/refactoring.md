@@ -152,6 +152,26 @@ CI before merge. Publication still requires its separate authorization.
 
 ## Current checkpoint
 
+Runtime timing records and save warnings now use a server-owned, bounded host
+worker. Producers use nonblocking admission, preserve original timing fields and
+timestamps, and never perform console writes. Record ownership accounts for loss
+through queued, in-flight and concurrently failed delivery. Capacity is 256
+records with 16 KiB variable-detail limits; loss reports are coalesced and timing
+correlation rejects incomplete captures. Shutdown does not wait for a blocked
+writer, and diagnostic delivery has no durability guarantee. Client warnings,
+gameplay and saved state retain their existing paths and formats.
+
+The failing-first real-process case reproduced client timeout with unread stderr.
+It now completes 256 queries, gameplay, a forced background-save failure and
+client warning, explicit save retry, matching restart state/history and continued
+play with stderr still blocked. Worker tests cover capacity, byte limits, writer
+failure, sender lifetime and lost queued/in-flight ownership. Timing analyzers
+reject dropped or malformed loss reports. A healthy real-client capture correlated
+all 495 accepted acknowledgements at 16 regions with eight actors. Quick/full
+Windows verification passed, including 229 debug Python/process and 117 release
+process tests; all seventeen deployed-client/validator checks passed. No
+normal-workload latency improvement is claimed.
+
 Mailbox draining is now bounded by channel capacity, preserving FIFO ordering
 and handling every request already queued at the start of a pass before a due
 action. Newly arriving mail cannot indefinitely postpone save polling or

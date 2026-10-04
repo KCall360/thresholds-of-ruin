@@ -94,7 +94,7 @@ class ProcessTestDirectory:
 class Process:
     """A real child process whose output lines are read on a background thread."""
 
-    def __init__(self, executable, args, token=TOKEN, extra_env=None):
+    def __init__(self, executable, args, token=TOKEN, extra_env=None, *, separate_stderr=False):
         environment = {k: v for k, v in os.environ.items() if k not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
         environment.update(extra_env or {})
         self.executable = Path(executable)
@@ -107,7 +107,8 @@ class Process:
         self.child = subprocess.Popen(
             [str(executable), *map(str, args)], cwd=ROOT,
             env={**environment, "TOR_SERVER_TOKEN": token},
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT,
             text=True, encoding="utf-8", bufsize=1,
         )
         self.lines = queue.Queue()
@@ -163,6 +164,8 @@ class Process:
             self.reader.join(timeout=10)
             for stream in (self.child.stdin, self.child.stdout):
                 stream.close()
+            if self.child.stderr is not None:
+                self.child.stderr.close()
 
 
 class AdventureProcess(Process):
@@ -231,7 +234,8 @@ class ProcessTestCase(unittest.TestCase):
 
     # Server.
 
-    def server(self, *args, wizard=False, scenario=None, character=None, spectator=True, seed=42, extra_env=None):
+    def server(self, *args, wizard=False, scenario=None, character=None, spectator=True, seed=42,
+               extra_env=None, separate_stderr=False):
         """Start `tor-server` on a free port and set `self.address`.
 
         `scenario` is a package name (see `package_path()`) or a path; extra
@@ -248,7 +252,7 @@ class ProcessTestCase(unittest.TestCase):
             *(["--wizard"] if wizard else []),
             *(["--scenario", package_path(scenario)] if scenario else []),
             *(["--character", str(character)] if character else []),
-            *args], extra_env=env)
+            *args], extra_env=env, separate_stderr=separate_stderr)
         self.address = json.loads(server.until(lambda line: line.startswith("{")))["address"]
         return server
 

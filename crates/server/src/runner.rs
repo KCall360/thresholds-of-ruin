@@ -21,7 +21,7 @@ pub(crate) enum Mail {
         request_id: String,
         request: Request,
         /// When the socket read it, if timing diagnostics are on.
-        started: Option<Instant>,
+        timing: Option<crate::diagnostics::RequestTiming>,
     },
     Disconnect(u64),
     /// Run something on the service between actions.
@@ -40,6 +40,7 @@ pub(crate) const STALL: Duration = Duration::from_secs(5);
 /// The running session: a thread that owns the [`Service`] and runs the game
 /// until it needs a client's input. [`crate::serve`] connects clients to it.
 pub struct Simulation {
+    pub(crate) diagnostics: Option<crate::diagnostics::Diagnostics>,
     pub(crate) mail: mpsc::Sender<Mail>,
     pub(crate) thread: std::thread::JoinHandle<Service>,
 }
@@ -47,7 +48,9 @@ pub struct Simulation {
 impl Simulation {
     /// Start the simulation thread. It stops when [`crate::serve`] shuts it
     /// down, or when every handle to it is dropped.
-    pub fn start(service: Service) -> Self {
+    pub fn start(mut service: Service) -> Self {
+        let diagnostics = crate::diagnostics::Diagnostics::stderr();
+        service.set_diagnostics(diagnostics.clone());
         let (mail, mailbox) = mpsc::channel(256);
         let thread = std::thread::Builder::new()
             .name("tor-simulation".into())
@@ -59,7 +62,11 @@ impl Simulation {
                     .block_on(run(service, mailbox, STALL))
             })
             .expect("simulation thread");
-        Self { mail, thread }
+        Self {
+            mail,
+            thread,
+            diagnostics,
+        }
     }
 
     pub fn handle(&self) -> SimulationHandle {
@@ -100,19 +107,19 @@ fn receive(service: &mut Service, mail: Mail) -> bool {
             client,
             request_id,
             request,
-            started,
+            timing,
         } => {
-            let Some(started) = started else {
+            let Some(timing) = timing else {
                 service.handle(client, request_id, request);
                 return true;
             };
             let handling = Instant::now();
             service.handle(client, request_id.clone(), request);
-            crate::transport::timing_event(
+            timing.diagnostics.timing(
                 "server_handled",
                 client,
                 &request_id,
-                (handling - started).as_secs_f64() * 1000.,
+                (handling - timing.started).as_secs_f64() * 1000.,
                 handling.elapsed().as_secs_f64() * 1000.,
             );
         }

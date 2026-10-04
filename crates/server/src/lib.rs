@@ -2,6 +2,7 @@
 
 mod adapt;
 mod developer;
+mod diagnostics;
 mod engine;
 pub mod generator;
 mod history_index;

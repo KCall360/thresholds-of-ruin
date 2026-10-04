@@ -31,9 +31,23 @@ def diagnostic_write_costs(rows):
     return costs
 
 
+def server_events(path):
+    rows = events(path)
+    dropped = 0
+    for row in rows:
+        if row['event'] == 'server_diagnostics_dropped':
+            count = row.get('dropped')
+            if type(count) is not int or count <= 0:
+                raise ValueError('Invalid server diagnostic loss record')
+            dropped += count
+    if dropped:
+        raise ValueError(f'Server diagnostics dropped {dropped} records; correlation is incomplete')
+    return {(row['request_id'], row['event']): row for row in rows}
+
+
 def correlate_ack(directory, result):
     directory = Path(directory)
-    server = {(r['request_id'],r['event']):r for r in events(directory/'server.stderr.log')}
+    server = server_events(directory/'server.stderr.log')
     clients = {actor: events(directory/f'actor-{actor}.stderr.log') for actor in range(1,result['actors']+1)}
     indexed = {actor:{(r['request_id'],r['event']):r for r in rows if r.get('request_id')}
                for actor,rows in clients.items()}
@@ -73,7 +87,7 @@ def correlate_ack(directory, result):
 
 def correlate_native(directory, result):
     directory = Path(directory)
-    server = {(r['request_id'],r['event']):r for r in events(directory/'server.stderr.log')}
+    server = server_events(directory/'server.stderr.log')
     client = events(directory/'ascii.stderr.log')
     requests = {r['revision']:r for r in client if r['event']=='client_request'}
     acknowledgements = {r['request_id']:r for r in client if r['event']=='client_ack'}

@@ -425,9 +425,21 @@ Pass `--correlate` to either actual-client driver to enable
 request UUIDs, client request/send/ack boundaries, headless output durations,
 server mailbox-wait/handler durations (`lock_ms` is how long a request waited in
 the simulation's mailbox) and acknowledgement send completion. It omits tokens,
-request bodies, private world state and protocol changes. Server diagnostics are
-written by the simulation thread between actions. All diagnostic I/O can itself
-stall.
+request bodies, private world state and protocol changes. Server timestamps are
+captured at the producing boundary; a separate worker writes stderr. Its queue
+holds at most 256 records, each with at most 16 KiB of variable detail. Save
+warnings use the same worker; client warnings and durability barriers are
+independent of diagnostic delivery. Direct `Service` use has no implicit console
+writer; `Simulation::start` installs the host sink.
+
+Delivery is best effort. Queue overflow, oversized detail and writer failure
+count lost records; when writing resumes, `server_diagnostics_dropped` reports
+coalesced loss. Timing correlation rejects such captures rather than using a
+possibly biased subset. Writer failure stops delivery without blocking play.
+Server shutdown does not join a blocked diagnostic writer or guarantee a log
+flush; an in-process worker may outlive its server until the write returns.
+Client and driver diagnostic I/O can still stall and remains included in their
+measured boundaries.
 
 ```sh
 python scripts/performance_driver.py --bin-dir target/release --output target/correlated --regions 256 --actors 8 --cycles 3 --pace-ms 0 --no-capture --correlate

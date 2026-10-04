@@ -63,7 +63,12 @@ pub async fn serve(
     let accounts = Arc::new(accounts);
     let capacity = Arc::new(Semaphore::new(128));
     let mut tasks = JoinSet::new();
-    let Simulation { mail, thread } = simulation;
+    let Simulation {
+        mail,
+        thread,
+        diagnostics,
+    } = simulation;
+    let timing = diagnostics.filter(|_| std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some());
     tokio::pin!(shutdown);
     let result = loop {
         tokio::select! {
@@ -74,9 +79,10 @@ pub async fn serve(
                 if let Ok(permit) = capacity.clone().try_acquire_owned() {
                     let mail = mail.clone();
                     let accounts = accounts.clone();
+                    let timing = timing.clone();
                     tasks.spawn(async move {
                         let _permit = permit;
-                        connection(socket, mail, accounts).await;
+                        connection(socket, mail, accounts, timing).await;
                     });
                 }
             }
@@ -105,7 +111,12 @@ pub async fn serve(
     result.map(|()| service)
 }
 
-async fn connection(socket: TcpStream, mail: mpsc::Sender<Mail>, accounts: Arc<Vec<Account>>) {
+async fn connection(
+    socket: TcpStream,
+    mail: mpsc::Sender<Mail>,
+    accounts: Arc<Vec<Account>>,
+    timing: Option<crate::diagnostics::Diagnostics>,
+) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(16 * 1024))
         .max_frame_size(Some(16 * 1024));
@@ -159,7 +170,6 @@ async fn connection(socket: TcpStream, mail: mpsc::Sender<Mail>, accounts: Arc<V
             return;
         }
     };
-    let timing = std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some();
     loop {
         tokio::select! {
             biased;
@@ -174,19 +184,21 @@ async fn connection(socket: TcpStream, mail: mpsc::Sender<Mail>, accounts: Arc<V
             },
             outgoing = client.messages.recv() => {
                 let Some(message) = outgoing else { break; };
-                let started = timing.then(std::time::Instant::now);
+                let started = timing.as_ref().map(|_| std::time::Instant::now());
                 let Ok(text) = serde_json::to_string(&message) else { break; };
                 if !matches!(timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await, Ok(Ok(()))) { break; }
-                if let (Some(started), ServerMessage::Ack { request_id, .. }) = (started, &message) {
-                    timing_event("server_ack_sent", client.id, request_id, 0., started.elapsed().as_secs_f64()*1000.);
+                if let (Some(started), Some(timing), ServerMessage::Ack { request_id, .. }) = (started, &timing, &message) {
+                    timing.timing("server_ack_sent", client.id, request_id, 0., started.elapsed().as_secs_f64()*1000.);
                 }
             }
             incoming = socket.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
                         Ok(ClientMessage::Request { request_id, request }) => {
-                            let started = timing.then(std::time::Instant::now);
-                            let request = Mail::Request { client: client.id, request_id, request, started };
+                            let timing = timing.as_ref().map(|diagnostics| crate::diagnostics::RequestTiming {
+                                started: std::time::Instant::now(), diagnostics: diagnostics.clone(),
+                            });
+                            let request = Mail::Request { client: client.id, request_id, request, timing };
                             if mail.send(request).await.is_err() {
                                 break;
                             }
@@ -235,22 +247,4 @@ async fn send_error(
     if let Ok(text) = serde_json::to_string(&response) {
         let _ = timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await;
     }
-}
-
-// Diagnostic stderr can itself block; timestamps and durations expose that
-// boundary without affecting ordinary play. For `server_handled`, `lock_ms` is
-// how long the request waited in the simulation's mailbox.
-pub(crate) fn timing_event(
-    event: &str,
-    client: u64,
-    request_id: &str,
-    lock_ms: f64,
-    duration_ms: f64,
-) {
-    eprintln!(
-        "{}",
-        serde_json::json!({"timing_version":1,"event":event,"client":client,
-        "request_id":request_id,"lock_ms":lock_ms,"duration_ms":duration_ms,
-        "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})
-    );
 }

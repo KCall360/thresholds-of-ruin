@@ -80,6 +80,7 @@ struct TravelJob {
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
 pub struct Service {
+    diagnostics: Option<crate::diagnostics::Diagnostics>,
     pending_pauses: BTreeSet<ActorId>,
     autonomous_enabled: bool,
     travels: BTreeMap<ActorId, TravelJob>,
@@ -103,6 +104,7 @@ impl Service {
             }
         }
         Self {
+            diagnostics: None,
             pending_pauses: BTreeSet::new(),
             autonomous_enabled: false,
             travels: BTreeMap::new(),
@@ -116,6 +118,10 @@ impl Service {
             controllers: BTreeMap::new(),
             next_client: 1,
         }
+    }
+
+    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::diagnostics::Diagnostics>) {
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) fn connect(
@@ -1085,7 +1091,9 @@ impl Service {
         });
         if warning != self.save_warning {
             if let Some(message) = &warning {
-                eprintln!("{message}");
+                if let Some(diagnostics) = &self.diagnostics {
+                    diagnostics.warning(message);
+                }
                 // Never interleave a warning with the welcome/attach handshake.
                 for id in self
                     .clients
@@ -1536,7 +1544,7 @@ mod tests {
                     operation: "rewind initial".into(),
                 },
             },
-            started: None,
+            timing: None,
         })
         .await
         .unwrap();

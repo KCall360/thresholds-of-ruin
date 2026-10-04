@@ -1,6 +1,8 @@
 """Running until blocked through real processes: a client that stops reading
 can't hold the game. See docs/run-until-blocked.md."""
 import json
+import os
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import unittest
@@ -17,6 +19,44 @@ STALL_SECONDS = 5
 
 
 class RunUntilBlockedProcesses(ProcessTestCase):
+    def test_blocked_timing_diagnostics_do_not_block_play_or_durable_save(self):
+        server = self.server("--save-target-ms", 1, "--save-max-ms", 5000, "--save-idle-ms", 0,
+                             extra_env={"TOR_TIMING_DIAGNOSTICS": "1"}, separate_stderr=True)
+        # Keep stderr unread: logging must not stop the simulation owner. Linux
+        # permits shrinking the pipe; Windows anonymous pipes are already small.
+        if os.name != "nt":
+            import fcntl
+            fcntl.fcntl(server.child.stderr.fileno(), fcntl.F_SETPIPE_SZ, 4096)
+        def kill_server():
+            if server.child.poll() is None:
+                server.child.kill()
+            server.child.wait(timeout=10)
+        self.addCleanup(kill_server)
+        player, initial = self.client()
+        for _ in range(256):
+            snapshot = self.request(player, {"type": "snapshot"})
+            self.assertIsNone(snapshot["error"])
+            self.assertEqual(snapshot["state"], initial["state"])
+        with sqlite3.connect(self.save) as database:
+            database.execute("BEGIN EXCLUSIVE")
+            played = self.act(player, {"type": "wait"})
+            self.assertIsNone(played["error"])
+            warning = self.frame(player, lambda f: (f.get("message") or {}).get("type") == "error")
+            self.assertIn("save failed", warning["message"]["message"].lower())
+        saved = self.request(player, {"type": "save"})
+        self.assertIsNone(saved["error"])
+        player.stop()
+        # The explicit barrier above is durable; do not require the unread
+        # diagnostic pipe to drain before ending the process.
+        server.child.kill()
+        server.child.wait(timeout=10)
+        server.stop()
+        self.server()
+        resumed, restored = self.client()
+        self.assertEqual(restored["state"], played["state"])
+        self.assertEqual(restored["history"], played["history"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
     def test_concurrent_readers_preserve_ai_progress_and_saved_boundaries(self):
         server = self.server(scenario="first-dungeon", seed=None)
         player, initial = self.client()
