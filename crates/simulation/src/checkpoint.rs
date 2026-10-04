@@ -56,6 +56,8 @@ pub struct RestoreContext<'a> {
     navigation: BTreeMap<usize, Shared<Navigation>>,
     items: BTreeMap<usize, crate::item_store::ItemStore>,
     bodies: BTreeSet<Shared<crate::BodySpec>>,
+    item_definitions: BTreeSet<Shared<crate::ItemSpec>>,
+    combat_definitions: BTreeSet<Shared<crate::combat::CombatSpec>>,
 }
 
 impl<'a> RestoreContext<'a> {
@@ -66,6 +68,8 @@ impl<'a> RestoreContext<'a> {
             navigation: BTreeMap::new(),
             items: BTreeMap::new(),
             bodies: BTreeSet::new(),
+            item_definitions: BTreeSet::new(),
+            combat_definitions: BTreeSet::new(),
         }
     }
 
@@ -95,20 +99,32 @@ impl<'a> RestoreContext<'a> {
         if let Some(items) = self.items.get(&index) {
             return Some(items.clone());
         }
-        let items =
-            crate::item_store::ItemStore::from_entries(self.shared.items.get(index)?.clone());
+        let mut entries = self.shared.items.get(index)?.clone();
+        for item in entries.values_mut() {
+            share_definition(&mut self.item_definitions, &mut item.spec);
+        }
+        let items = crate::item_store::ItemStore::from_entries(entries);
         self.items.insert(index, items.clone());
         Some(items)
     }
 
-    fn share_bodies(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
+    fn share_actor_definitions(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
         for actor in actors.values_mut() {
-            if let Some(body) = self.bodies.get(&*actor.body) {
-                actor.body = body.clone();
-            } else {
-                self.bodies.insert(actor.body.clone());
+            share_definition(&mut self.bodies, &mut actor.body);
+            if let Some(combat) = &mut actor.combat {
+                share_definition(&mut self.combat_definitions, &mut combat.spec);
             }
         }
+    }
+}
+
+/// Compare the complete value, never its identity label or allocation address.
+/// Borrowing the key avoids copying a definition merely to look it up.
+fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Shared<T>) {
+    if let Some(existing) = pool.get(&**definition) {
+        *definition = existing.clone();
+    } else {
+        pool.insert(definition.clone());
     }
 }
 
@@ -176,7 +192,7 @@ impl Game {
         mut snapshot: Snapshot,
         context: &mut RestoreContext<'_>,
     ) -> Option<Self> {
-        context.share_bodies(&mut snapshot.actors);
+        context.share_actor_definitions(&mut snapshot.actors);
         let game = Self {
             combat: snapshot.combat,
             physics: snapshot.physics,
@@ -362,6 +378,83 @@ mod tests {
                 bytes
             );
         }
+    }
+
+    #[test]
+    fn decoded_item_and_combat_definitions_share_across_distinct_boundaries() {
+        let mut game = Game::two_room_in_stone(42);
+        let at = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        game.configure_combat(actor, crate::combat::CombatSpec::default())
+            .unwrap();
+        let mut spec = crate::ItemSpec::ordinary("token".into());
+        spec.stackable = true;
+        let item = game.place_item_stack(100, at, None, 2, spec).unwrap();
+        let mut shared = SharedState::default();
+        let before = game.checkpoint(&mut shared);
+        game.items.edit(item, |entry| entry.quantity = 1).unwrap();
+        game.actors
+            .get_mut(&actor)
+            .unwrap()
+            .combat
+            .as_mut()
+            .unwrap()
+            .hp = 29;
+        let after = game.checkpoint(&mut shared);
+        let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
+        let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+            serde_json::from_slice(&bytes).unwrap();
+        let mut context = RestoreContext::new(&shared);
+        let mut restored: Vec<_> = snapshots
+            .into_iter()
+            .map(|s| context.restore(s).unwrap())
+            .collect();
+        assert!(!restored[0].items.shares_storage(&restored[1].items));
+        assert!(restored[0].items[&item]
+            .spec
+            .shares_storage(&restored[1].items[&item].spec));
+        assert!(restored[0].actors[&actor]
+            .combat
+            .as_ref()
+            .unwrap()
+            .spec
+            .shares_storage(&restored[1].actors[&actor].combat.as_ref().unwrap().spec));
+        drop(context);
+        let mut encoded_shared = SharedState::default();
+        let encoded: Vec<_> = restored
+            .iter()
+            .map(|g| g.checkpoint(&mut encoded_shared))
+            .collect();
+        assert_eq!(
+            serde_json::to_vec(&(encoded, encoded_shared)).unwrap(),
+            bytes
+        );
+        restored[0]
+            .items
+            .edit(item, |entry| entry.spec.name = "changed".into())
+            .unwrap();
+        restored[0]
+            .actors
+            .get_mut(&actor)
+            .unwrap()
+            .combat
+            .as_mut()
+            .unwrap()
+            .spec
+            .defense = 20;
+        assert_eq!(restored[1].items[&item].spec.name, "token");
+        assert_eq!(
+            restored[1].actors[&actor]
+                .combat
+                .as_ref()
+                .unwrap()
+                .spec
+                .defense,
+            10
+        );
     }
 
     #[test]

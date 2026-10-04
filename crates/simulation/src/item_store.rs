@@ -223,7 +223,7 @@ mod tests {
         Item {
             location,
             quantity: 1,
-            spec: ItemSpec::ordinary("weight".into()),
+            spec: tor_world::Shared::new(ItemSpec::ordinary("weight".into())),
             motion: MotionState::default(),
             orientation: 0,
         }

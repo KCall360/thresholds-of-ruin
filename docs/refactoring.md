@@ -161,7 +161,74 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
-## Current checkpoint: region acquisition attribution
+## Current checkpoint: shared item and combat definitions
+
+Runtime item and combat definitions use transparent shared ownership. Public
+scenario configuration values remain owned. Stack splits and damage detach mutable
+instance state without copying unrelated definition strings, maps or sets. Decoded
+checkpoint restoration interns equal item and combat definitions across distinct
+retained boundaries using their complete values, including appearance/assets,
+properties, attack rules, defenses and faction. Mutation remains copy-on-write.
+There is no process-global cache or pointer-based gameplay ordering.
+
+Failing-first regressions measured 17 item-definition copies and 16 combat-definition
+copies at 16 entities. After sharing, both count zero at 16, 256 and 4,096 entities.
+Fifty simulation unit tests pass, including decoded pooling, byte-identical
+checkpoint encoding and isolated edits. A new real-client acceptance test splits
+a stack, checkpoints, restarts, drops part, rewinds, saves and restarts again.
+Quick Windows verification passed, including 123 actual-process tests. Full Windows
+verification passed 237 debug Python/process checks, Rust documentation and all
+workspace debug/release tests, plus 123 release-process tests. All twenty-two
+deployed-client/validator checks passed against the updated desktop binaries.
+
+The ownership change preserves the current serialized formats. It does not pool
+encoded definitions, eliminate temporary decode allocations, or share all detached
+region records; those records retain a separate lazy decoding path. No resident-
+memory improvement is established by copy counts or latency measurements.
+
+The standard release comparison used three rounds and five streaming cycles
+against the preceding region-attribution checkpoint on machine `cfb2fdc044dc`.
+All eighteen runs validated; comparable work, saved-byte and disclosure counts
+matched. Compiler reference caches used the data drive; measured binaries and save
+workloads stayed on the same default system volume. All samples were retained,
+with no repeat run. Times below are milliseconds, before → after.
+
+| Case / metric | n per side | p50 | p95 | max |
+| --- | ---: | ---: | ---: | ---: |
+| stream-r256-durable / authoritative_total | 2,100 | 0.2356 → 0.2294 | 0.4147 → 0.4146 | 0.7392 → 1.4182 |
+| stream-r256-durable / final_flush_ms | 3 | 111.7968 → 113.8685 | 130.7798 → 163.2841 | 130.7798 → 163.2841 |
+| stream-r256-durable / restart_replay_ms | 3 | 180.0120 → 178.7986 | 193.6108 → 180.2188 | 193.6108 → 180.2188 |
+| i1000-id256 / client_apply_ms | 1,200 | 0.6089 → 0.6024 | 1.1218 → 0.7739 | 1.9160 → 1.5549 |
+| i1000-id256 / client_render_ms | 1,200 | 0.9442 → 0.9032 | 1.5529 → 1.2074 | 2.5739 → 2.0397 |
+| i1000-id256 / construction_ms | 60 | 8.8279 → 8.1906 | 11.4654 → 8.9861 | 18.5332 → 21.5841 |
+| i1000-id256 / knowledge_ms | 60 | 0.4361 → 0.4522 | 0.7698 → 0.6058 | 1.1708 → 0.9271 |
+| i1000-id256 / resume_ms | 60 | 50.6426 → 57.3056 | 64.0587 → 63.1765 | 69.3901 → 67.9808 |
+| i1000-id256 / save_ms | 60 | 138.9392 → 68.8905 | 203.6661 → 177.3764 | 273.4241 → 185.0448 |
+| i1000-id256 / transfer_ms | 1,200 | 0.6333 → 0.3864 | 1.1126 → 0.5280 | 1.6895 → 0.9662 |
+| i16-id8 / client_apply_ms | 1,200 | 0.1370 → 0.1392 | 0.2355 → 0.2312 | 0.5441 → 0.5067 |
+| i16-id8 / client_render_ms | 1,200 | 0.6539 → 0.6695 | 1.0646 → 1.0587 | 1.7071 → 2.4435 |
+| i16-id8 / construction_ms | 60 | 1.6619 → 1.4930 | 2.1583 → 2.2769 | 2.8173 → 3.1521 |
+| i16-id8 / knowledge_ms | 60 | 0.2793 → 0.2705 | 0.3689 → 0.3948 | 0.4767 → 0.6250 |
+| i16-id8 / resume_ms | 60 | 13.1094 → 9.9498 | 15.6822 → 15.9973 | 15.9842 → 19.4393 |
+| i16-id8 / save_ms | 60 | 57.3441 → 16.9439 | 101.1263 → 72.0126 | 165.4632 → 663.4923 |
+| i16-id8 / transfer_ms | 1,200 | 0.0591 → 0.0537 | 0.1152 → 0.1001 | 0.1857 → 0.2140 |
+| a8-h1000 / client_apply_ms | 495 | 0.3128 → 0.2934 | 0.5853 → 0.3892 | 0.8649 → 0.6871 |
+| a8-h1000 / client_draw_ms | 495 | 0.7478 → 0.7116 | 1.1470 → 0.9870 | 1.5209 → 1.2629 |
+| a8-h1000 / command_ms | 576 | 0.5756 → 0.5475 | 3.6663 → 3.5451 | 5.0189 → 4.2099 |
+| a8-h1000 / decision_ms | 576 | 0.0005 → 0.0004 | 0.5827 → 0.5625 | 1.2133 → 1.1178 |
+| a8-h1000 / resume_ms | 9 | 218.5121 → 209.5823 | 273.3757 → 226.6014 | 273.3757 → 226.6014 |
+| a8-h1000 / save_ms | 9 | 258.9126 → 253.8188 | 427.9217 → 495.8015 | 427.9217 → 495.8015 |
+
+The dense 1,000-item transfer median fell 39.0% and p95 fell 52.5%; the small
+16-item transfer median fell 9.1% and p95 fell 13.1%. These are workload-specific
+results. Small-item save max rose from 165.5 to 663.5 ms despite lower median/p95;
+eight-actor combat save p95 rose 15.9%, and streaming flush p95 rose 24.9% (only
+three samples per side). Streaming command p95 was effectively unchanged but its
+maximum rose 91.9%. Construction, knowledge and resume results are also mixed.
+No broad latency or memory gain is claimed; the previously recorded body-restore
+and falling-physics tails remain unresolved.
+
+## Region acquisition attribution
 
 Profiled transitions now distinguish successful synchronous reads/builds from
 prepared reads/builds, with separate fallback durations nested within total
@@ -388,10 +455,10 @@ memory improvement is claimed; earlier unresolved timing tails remain open.
 
 ## Proposed compatibility decision: queued gameplay and stream recovery
 
-This proposal is awaiting maintainer authorization; current formats remain
-unchanged. Implementing the admission/execution contract requires the next
+The maintainer authorized this proposal and protocol, save, gameplay and scenario
+version changes on 2026-10-04. Implementing the admission/execution contract requires the next
 protocol and save versions rather than silently changing protocol 22 and save
-format 15. Their version constants advance only after authorization.
+format 15. Advance their version constants with the corresponding implementation.
 The package format is unchanged by this proposal. No old-format reader is added.
 
 - Gameplay admission returns a stable intention identity and admission receipt.
@@ -430,7 +497,8 @@ The package format is unchanged by this proposal. No old-format reader is added.
 
 The schema and execution changes receive focused regressions, full Windows
 verification, actual-client save/retry/reconnect/rewind tests, and both-platform
-CI before merge. Publication still requires its separate authorization.
+CI before merge. The maintainer also explicitly authorized pushes and PR merges
+on 2026-10-04; verification and CI remain required.
 
 ## Outbound output budgets
 

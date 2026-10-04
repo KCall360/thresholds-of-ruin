@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use tor_world::Location;
 
 /// Authoritative identity and physical stack properties. Never a client DTO.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct ItemSpec {
     pub archetype: String,
@@ -19,6 +20,28 @@ pub struct ItemSpec {
     /// discloses the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ITEM_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl Clone for ItemSpec {
+    fn clone(&self) -> Self {
+        ITEM_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
+        Self {
+            archetype: self.archetype.clone(),
+            identity: self.identity.clone(),
+            name: self.name.clone(),
+            appearance: self.appearance.clone(),
+            concealed: self.concealed,
+            stackable: self.stackable,
+            properties: self.properties.clone(),
+            asset: self.asset.clone(),
+        }
+    }
 }
 
 impl ItemSpec {
@@ -68,7 +91,7 @@ impl Game {
         let item = self.place_authored_item(id, at, spec.name.clone(), owner)?;
         self.items
             .edit(item, |entry| {
-                entry.spec = spec;
+                entry.spec = tor_world::Shared::new(spec);
                 entry.quantity = quantity;
             })
             .expect("placed item");
@@ -224,6 +247,43 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Position, RegionId};
+
+    #[test]
+    fn stack_splits_do_not_copy_unrelated_item_definitions() {
+        for count in [16, 256, 4096] {
+            let mut game = Game::new((*Game::two_room(42).world).clone(), 42);
+            let at = Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            };
+            let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+            for id in 1..=count {
+                let mut spec = ItemSpec::ordinary(format!("token-{id}"));
+                spec.stackable = true;
+                spec.properties.insert("material".into(), "stone".into());
+                game.place_item_stack(id, at, None, 2, spec).unwrap();
+            }
+            let old = game.clone();
+            let before = ITEM_DEFINITION_COPIES.with(|copies| copies.get());
+            game.act(
+                actor,
+                crate::Action::Take {
+                    item: ItemId(1),
+                    quantity: Some(1),
+                },
+            )
+            .unwrap();
+            let copied = ITEM_DEFINITION_COPIES.with(|copies| copies.get()) - before;
+            assert_eq!(copied, 0, "item count {count}");
+            assert_eq!(old.items.len(), count as usize);
+            assert_eq!(old.items[&ItemId(1)].quantity, 2);
+            assert_eq!(game.items[&ItemId(1)].quantity, 1);
+            let taken = ItemId(count + 1);
+            assert_eq!(game.items[&taken].quantity, 1);
+            assert_eq!(game.items[&taken].location, ItemLocation::Carried(actor));
+            assert_eq!(game.items[&taken].spec, old.items[&ItemId(1)].spec);
+        }
+    }
 
     #[test]
     fn knowledge_survives_removal_of_last_instance_without_item_use_mechanics() {

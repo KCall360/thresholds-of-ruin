@@ -140,7 +140,7 @@ enum ItemLocation {
 struct Item {
     motion: MotionState,
     orientation: u8,
-    spec: ItemSpec,
+    spec: Shared<ItemSpec>,
     quantity: u64,
     location: ItemLocation,
 }
@@ -333,7 +333,7 @@ impl Game {
             Item {
                 motion: MotionState::default(),
                 orientation: 0,
-                spec: ItemSpec::ordinary(name),
+                spec: Shared::new(ItemSpec::ordinary(name)),
                 quantity: 1,
                 location: ItemLocation::Ground(location),
             },

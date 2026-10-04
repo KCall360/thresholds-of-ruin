@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CombatState {
-    pub spec: CombatSpec,
+    pub spec: tor_world::Shared<CombatSpec>,
     pub hp: u32,
     pub pending: Option<Preparation>,
 }
@@ -394,7 +394,7 @@ impl Game {
         let mut actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
         actor.combat = Some(CombatState {
             hp: spec.max_hp,
-            spec,
+            spec: tor_world::Shared::new(spec),
             pending: None,
         });
         Ok(())
@@ -478,7 +478,7 @@ impl Game {
         self.items.insert(
             corpse_id,
             Item {
-                spec,
+                spec: tor_world::Shared::new(spec),
                 quantity: 1,
                 location: ItemLocation::Ground(location),
                 motion,
@@ -716,7 +716,7 @@ pub enum DamageType {
     Vital,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttackSpec {
     pub bonus: i32,
@@ -725,7 +725,8 @@ pub struct AttackSpec {
     pub damage: BTreeMap<DamageType, u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(not(test), derive(Clone))]
 #[serde(default, deny_unknown_fields)]
 pub struct CombatSpec {
     pub name: String,
@@ -735,6 +736,27 @@ pub struct CombatSpec {
     pub immunities: BTreeSet<DamageType>,
     pub reductions: BTreeMap<DamageType, u32>,
     pub faction: String,
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMBAT_DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl Clone for CombatSpec {
+    fn clone(&self) -> Self {
+        COMBAT_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
+        Self {
+            name: self.name.clone(),
+            max_hp: self.max_hp,
+            defense: self.defense,
+            attack: self.attack.clone(),
+            immunities: self.immunities.clone(),
+            reductions: self.reductions.clone(),
+            faction: self.faction.clone(),
+        }
+    }
 }
 
 impl Default for CombatSpec {
@@ -802,6 +824,47 @@ pub fn impact_damage(incoming_velocity: i64) -> u32 {
 mod tests {
     use super::*;
     use crate::{Action, ActorId, Game};
+
+    #[test]
+    fn damage_does_not_copy_unrelated_combat_definitions() {
+        for count in [16, 256, 4096] {
+            let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(tor_world::Region {
+                    id: tor_world::RegionId(1),
+                    name: "combat".into(),
+                    bounds: tor_world::Extent::new(count + 2, 3, 1).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            for x in 0..count {
+                let actor = game
+                    .spawn_actor(
+                        tor_world::Location {
+                            region: tor_world::RegionId(1),
+                            position: tor_world::Position { x, y: 1, z: 0 },
+                        },
+                        std::num::NonZeroU64::new(100).unwrap(),
+                    )
+                    .unwrap();
+                game.configure_combat(actor, CombatSpec::default()).unwrap();
+            }
+            let old = game.clone();
+            let before = COMBAT_DEFINITION_COPIES.with(|copies| copies.get());
+            assert_eq!(
+                game.apply_damage(ActorId(1), &BTreeMap::from([(DamageType::Impact, 1)])),
+                1
+            );
+            let copied = COMBAT_DEFINITION_COPIES.with(|copies| copies.get()) - before;
+            assert_eq!(copied, 0, "actor count {count}");
+            assert_eq!(old.health(ActorId(1)), Some((30, 30)));
+            assert_eq!(game.health(ActorId(1)), Some((29, 30)));
+            assert_eq!(
+                old.health(ActorId(count as u64)),
+                game.health(ActorId(count as u64))
+            );
+        }
+    }
 
     fn fixture() -> Game {
         let mut game = Game::two_room_in_stone(42);

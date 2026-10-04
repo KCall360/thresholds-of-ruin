@@ -107,7 +107,7 @@ duplicating them. Earlier handoff notes are in the
 
 **Architecture refactor (active).** The maintainer authorized the
 [refactor plan](docs/refactoring.md). Work remains isolated from the original
-dirty interactions checkout. Twenty-two local implementation checkpoints cover
+dirty interactions checkout. Twenty-three local implementation checkpoints cover
 explicit command mappings, shared boundary observations, portal-local item/body
 and privacy-scoped history indexes, shared route searches, checked requests,
 immutable body sharing, storage accounting and concurrency, atomic observation
@@ -120,10 +120,11 @@ queueing, write failures/timeouts and task cancellation, prepared control and AI
 references, shared creature installation, item normalization and contextual
 construction-reference diagnostics, and a restore-scoped context sharing decoded
 worlds, navigation, items and equal body definitions across retained boundaries,
-and profiled region-acquisition attribution with validated nested timings.
+profiled region-acquisition attribution with validated nested timings, and shared
+item/combat definitions with full-value pooling across decoded rewind boundaries.
 Future scenario extension contracts are documented without adding a runtime.
-Current quick/full Windows verification passed, including 236 debug Python/process
-tests and 122 release process tests; all twenty-one deployed-client/validator checks passed.
+Current quick/full Windows verification passed, including 237 debug Python/process
+tests and 123 release process tests; all twenty-two deployed-client/validator checks passed.
 
 Release comparisons and their limits are recorded in the plan. Reduced query and
 copy counts do not establish broad latency or resident-memory improvements.
@@ -131,13 +132,15 @@ The body-sharing restore regression and higher falling-physics command tails
 remain unresolved. Compiler source diagnostics and reference normalization,
 content pooling, fair allocation under aggregate output pressure, further persistence work,
 and the admission/scheduler split remain open. Windows/Linux CI is still required
-before merging; publishing awaits explicit authorization.
+before merging. The maintainer explicitly authorized pushes and PR merges on
+2026-10-04; the required verification and both-platform CI gates still apply.
 
-The versioned queue and stream-recovery proposal awaits explicit format
-authorization. Gameplay must admit intentions to simulation-owned scheduling.
+The maintainer explicitly authorized protocol, save, gameplay and scenario
+version changes on 2026-10-04, including the queue and stream-recovery proposal.
+Gameplay must admit intentions to simulation-owned scheduling.
 Derived topology indexes stay backend-only. Text-client fixes and scripting
-runtime selection/implementation are deferred. Existing format versions remain
-unchanged; future scripting informs boundaries without adding a runtime.
+runtime selection/implementation are deferred. Advance format versions with the
+corresponding implementation; future scripting informs boundaries without adding a runtime.
 
 **Test suite rationalization (complete, PR #59).** Process tests share
 `scripts/process_harness.py` and use the headless client for wizard setup;
