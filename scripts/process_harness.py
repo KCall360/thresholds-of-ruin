@@ -41,6 +41,20 @@ SUFFIX = ".exe" if os.name == "nt" else ""
 _binaries = None
 
 
+def ascii_input_completion(key, *, wait_for_simulation=True):
+    """Track request acknowledgement across later presented simulation frames."""
+    acknowledged = False
+
+    def complete(frame):
+        nonlocal acknowledged
+        acknowledged |= frame.get("input_done") == key
+        return (acknowledged and not frame["busy"]
+                and (not wait_for_simulation or not any(
+                    status["phase"] == "queued" for status in (frame.get("intentions") or []))))
+
+    return complete
+
+
 def binaries():
     """Build every binary once per test run and return their directory."""
     global _binaries
@@ -287,7 +301,21 @@ class ProcessTestCase(unittest.TestCase):
         return self.command(client, {"type": "request", "request": request})
 
     def act(self, client, action):
-        return self.command(client, {"type": "act", "action": action})
+        accepted = self.command(client, {"type": "act", "action": action})
+        if accepted.get("error"):
+            return accepted
+        pending = next((status for status in accepted.get("intentions", [])
+                        if status["phase"] == "queued"), None)
+        if pending is None:
+            return accepted
+        # Request acknowledgement is admission. Assert action effects only after
+        # the matching ordered lifecycle update from simulation execution.
+        return self.frame(client, lambda frame: (
+            (frame.get("message") or {}).get("type") == "update"
+            and frame["message"]["update"]["body"]["type"] == "intention"
+            and frame["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
+            and frame["message"]["update"]["body"]["status"]["phase"] in
+                ("started", "resolved", "failed", "cancelled", "suspended")))
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""
@@ -350,10 +378,11 @@ class ProcessTestCase(unittest.TestCase):
         """The next presented ASCII frame that satisfies `predicate`."""
         return self.frame(process, lambda f: f.get("type") == "frame" and predicate(f), seconds)
 
-    def key(self, process, key):
+    def key(self, process, key, *, wait_for_simulation=True):
         """Inject an input event through the window's automation channel."""
         process.write(json.dumps({"type": "key", "key": key}))
-        return self.ascii_frame(process, lambda f: f.get("input_done") == key and not f["busy"])
+        return self.ascii_frame(process, ascii_input_completion(
+            key, wait_for_simulation=wait_for_simulation))
 
     def native_keys(self, client):
         """Send genuine OS key events to the client's only visible window."""
@@ -380,7 +409,7 @@ class ProcessTestCase(unittest.TestCase):
 
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
-                      "n": 0x4E, "F4": 0x73, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47}[name]
+                      "n": 0x4E, "F4": 0x73, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
                 self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if name in ("Up", "Right") else 0) | (0 if down else 0xC0000000)))

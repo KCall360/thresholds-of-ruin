@@ -267,7 +267,8 @@ metadata are kept alongside each fresh save. Failures remain visible in logs and
 the desktop wrapper surfaces launch errors.
 
 The driver confirms a presented, server-enforced spectator frame before starting
-player actions. Each headless ready response and error is checked. It awaits the
+player actions. Each headless admission response and error is checked, followed
+by the matching intention execution update before checking effects. It awaits the
 matching spectator state after accepted actor-1 actions. Paced runs publish
 actor-visible progress annotations outside action timing; their additional saves
 make the demonstration distinct from throughput measurements. Spectator and
@@ -276,7 +277,12 @@ player credentials remain separate, ephemeral, and out of version control.
 `request_to_ack_ms` and `request_to_presentation_ms` are observed at the driver:
 they include transport, native client processing and diagnostic JSON reporting
 (and framebuffer capture on the presentation path). They are not wire-only or
-GPU timestamps. `request_to_ready_ms` records the complete headless response.
+GPU timestamps. For queued gameplay, acknowledgement measures admission rather
+than simulation execution, so acknowledgement timings across that protocol change
+do not measure the same endpoint. The historical `request_to_ready_ms` name now
+measures receipt of the matching execution update; immediate operations still
+finish at their ready response. It does not include a later attack impact after
+wind-up has begun. Spectator presentation follows the state checked after execution.
 Pacing, snapshot requests and progress annotations are outside these intervals.
 
 ## Stable tests and verification

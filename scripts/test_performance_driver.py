@@ -10,6 +10,28 @@ from performance_driver import DiagnosticLog, JsonProcess, wall_time_ns, stop_al
 
 
 class DriverTiming(unittest.TestCase):
+    def test_admitted_action_waits_for_matching_execution_without_changing_ack_timing(self):
+        client = JsonProcess.__new__(JsonProcess)
+        client.lines = queue.Queue()
+        client.child = SimpleNamespace(stdin=io.StringIO())
+        receipt = dict(type="admitted", intention="original", actor=1,
+                       branch="branch", phase="queued")
+        client.lines.put(({"message": {"type": "ack", "receipt": receipt}}, 101.))
+        client.lines.put(({"type": "ready", "history": []}, 102.))
+        def update(identity, branch="branch", phase="resolved"):
+            return {"message": {"type": "update", "update": {"body": {
+                "type": "intention", "status": dict(intention=identity,
+                branch=branch, actor=1, phase=phase)}}}, "history": [identity]}
+        client.lines.put((update("other"), 103.))
+        client.lines.put((update("original", branch="old"), 104.))
+        client.lines.put((update("original", phase="queued"), 105.))
+        client.lines.put((update("original"), 106.))
+        with patch("performance_driver.time.perf_counter", return_value=100.):
+            frame, start, ack, executed = client.send({"type": "act"})
+        self.assertEqual(frame["history"], ["original"])
+        self.assertEqual((start, ack, executed), (100., 100., 106.))
+        self.assertEqual(client.ack_line_received, 101.)
+
     def test_failed_log_cleanup_preserves_failure_and_stops_every_owned_child(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

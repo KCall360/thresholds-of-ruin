@@ -20,6 +20,8 @@ def kind(message):
     """A server message's kind, with an update's body kind."""
     if message["type"] == "update":
         return "update." + message["update"]["body"]["type"]
+    if message["type"] == "ack":
+        return "ack." + message["receipt"]["type"]
     return message["type"]
 
 
@@ -37,6 +39,8 @@ CLIENT = [
         {"type": "history", "before": "entry-1", "limit": 20},
         *({"type": "command", "branch": "branch-1", "command": command} for command in [
             {"type": "rename_place", "expected_revision": 3, "key": "place-key", "name": "Lantern Hall"},
+            {"type": "resume_intention", "expected_revision": 3, "intention": "admission-1"},
+            {"type": "cancel_intention", "expected_revision": 3, "intention": "admission-1"},
             {"type": "travel", "expected_revision": 3, "destination": "cell-key"},
             {"type": "wizard", "expected_revision": 3, "operation": "rewind initial"},
             *({"type": "act", "expected_revision": 3, "action": action} for action in [

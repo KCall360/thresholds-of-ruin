@@ -3,6 +3,17 @@ use crate::{ActorId, Game, GameError, Item, ItemId, ItemLocation, ItemSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+// Nullable context is explicit for trusted direct rule calls. Requiring the
+// field prevents silently decoding progress from a different saved format.
+fn deserialize_intention_context<'de, D>(
+    deserializer: D,
+) -> Result<Option<crate::IntentionId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<crate::IntentionId>::deserialize(deserializer)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CombatState {
@@ -14,6 +25,9 @@ pub(crate) struct CombatState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preparation {
+    /// Backend admission identity; assigned before wind-up can advance.
+    #[serde(deserialize_with = "deserialize_intention_context")]
+    pub intention: Option<crate::IntentionId>,
     pub target: ActorId,
     pub remaining: u64,
     pub started: u64,
@@ -113,12 +127,16 @@ pub enum DisclosedCombatEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CombatEvent {
     Resolved {
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
         actor: ActorId,
         target: ActorId,
         hit: bool,
         damage: u32,
     },
     Interrupted {
+        #[serde(deserialize_with = "deserialize_intention_context")]
+        intention: Option<crate::IntentionId>,
         actor: ActorId,
     },
     Died {
@@ -256,6 +274,7 @@ impl Game {
                     target,
                     hit,
                     damage,
+                    ..
                 } if (*actor == id || *target == id)
                     || (disclosed(*actor) && disclosed(*target)) =>
                 {
@@ -271,7 +290,7 @@ impl Game {
                         },
                     })
                 }
-                CombatEvent::Interrupted { actor } if *actor == id => {
+                CombatEvent::Interrupted { actor, .. } if *actor == id => {
                     Some(DisclosedCombatEvent::Interrupted { actor: *actor })
                 }
                 CombatEvent::Died { actor } if disclosed(*actor) => {
@@ -420,12 +439,14 @@ impl Game {
         state.hp -= loss;
         let died = loss > 0 && state.hp == 0;
         let mut interrupted = false;
+        let mut intention = None;
         if loss > 0 {
             if let Some(pending) = state.pending.as_mut().filter(|p| p.active) {
                 pending.remaining = pending
                     .remaining
                     .saturating_sub(self.tick.saturating_sub(pending.started));
                 pending.active = false;
+                intention = pending.intention;
                 interrupted = true;
             }
         }
@@ -434,7 +455,9 @@ impl Game {
         }
         drop(edited);
         if interrupted {
-            self.combat.events.push(CombatEvent::Interrupted { actor });
+            self.combat
+                .events
+                .push(CombatEvent::Interrupted { actor, intention });
             if !self.is_ai(actor) {
                 self.combat.input_boundaries.insert(actor);
             }
@@ -602,7 +625,12 @@ impl Game {
         destination.map(|(at, _)| at)
     }
 
-    pub(crate) fn start_attack(&mut self, actor: ActorId, target: ActorId) {
+    pub(crate) fn start_attack(
+        &mut self,
+        actor: ActorId,
+        target: ActorId,
+        intention: Option<crate::IntentionId>,
+    ) {
         let mut edited = self.actors.get_mut(&actor).unwrap();
         let c = edited.combat.as_mut().unwrap();
         let remaining = c
@@ -611,6 +639,7 @@ impl Game {
             .filter(|p| p.target == target)
             .map_or(c.spec.attack.wind_up, |p| p.remaining);
         c.pending = Some(Preparation {
+            intention,
             target,
             remaining,
             started: self.tick,
@@ -652,9 +681,10 @@ impl Game {
                 if p.active {
                     self.actors.get_mut(&id).unwrap().ready_at = self.tick;
                 }
-                self.combat
-                    .events
-                    .push(CombatEvent::Interrupted { actor: id });
+                self.combat.events.push(CombatEvent::Interrupted {
+                    actor: id,
+                    intention: p.intention,
+                });
                 continue;
             }
             if !p.active {
@@ -690,6 +720,7 @@ impl Game {
             self.combat.events.insert(
                 resolved,
                 CombatEvent::Resolved {
+                    intention: p.intention,
                     actor: id,
                     target: p.target,
                     hit,

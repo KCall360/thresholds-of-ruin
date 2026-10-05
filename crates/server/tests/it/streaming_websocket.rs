@@ -77,6 +77,7 @@ impl Player {
             },
         };
         send(&mut self.client, &id, request).await;
+        let mut admitted = None;
         loop {
             match receive(&mut self.client)
                 .await
@@ -88,10 +89,32 @@ impl Player {
                         UpdateBody::ObservationDelta { state, .. } => {
                             state.apply(&self.state).unwrap()
                         }
+                        UpdateBody::Intention { status }
+                            if admitted.as_ref() == Some(&status.intention) =>
+                        {
+                            match status.phase {
+                                IntentionPhase::Resolved => return None,
+                                IntentionPhase::Failed => {
+                                    return Some((
+                                        ErrorCode::InvalidAction,
+                                        "Queued move failed".into(),
+                                    ));
+                                }
+                                _ => continue,
+                            }
+                        }
                         _ => continue,
                     };
                 }
-                ServerMessage::Ack { request_id, .. } if request_id == id => return None,
+                ServerMessage::Ack {
+                    request_id,
+                    receipt,
+                } if request_id == id => {
+                    let RequestReceipt::Admitted { intention, .. } = receipt else {
+                        panic!("gameplay admission receipt required")
+                    };
+                    admitted = Some(intention);
+                }
                 ServerMessage::Error {
                     request_id: Some(request_id),
                     code,

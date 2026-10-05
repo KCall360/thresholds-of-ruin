@@ -115,6 +115,9 @@ impl Service {
             ));
         }
         let mut save_warning = None;
+        for actor in engine.queued_human_actors() {
+            engine.suspend_queued_intention(actor)?;
+        }
         for actor in engine.actors() {
             if let Err(error) = engine.pause_preparation(actor) {
                 save_warning = Some(error.to_string());
@@ -306,6 +309,13 @@ impl Service {
                 self.poll_saves();
             }
             Request::AcquireControl => {
+                self.apply_pending_pauses();
+                if self.pending_pauses.contains(&actor) {
+                    return Err(Failure::new(
+                        ErrorCode::StorageFailure,
+                        "Pending gameplay suspension could not be saved",
+                    ));
+                }
                 if self.engine.is_ai(actor) {
                     return Err(Failure::new(
                         ErrorCode::Unauthorized,
@@ -386,13 +396,16 @@ impl Service {
                     .engine
                     .retry(&user, actor, request_id, &branch, &command)?
                 {
-                    self.ack(id, request_id, Some(previous.entry.id));
+                    self.ack_result(id, request_id, &previous);
                     return Ok(());
                 }
                 if matches!(
                     command,
                     crate::journal::Command::RenamePlace { .. }
+                        | crate::journal::Command::ResumeIntention { .. }
+                        | crate::journal::Command::CancelIntention { .. }
                         | crate::journal::Command::Act { .. }
+                        | crate::journal::Command::AdmitIntention { .. }
                         | crate::journal::Command::Travel { .. }
                 ) && self.controllers.get(&actor) != Some(&id)
                 {
@@ -404,7 +417,9 @@ impl Service {
                 // Only the server ends a journey; the player waits for it.
                 if matches!(
                     command,
-                    crate::journal::Command::Act { .. } | crate::journal::Command::Travel { .. }
+                    crate::journal::Command::Act { .. }
+                        | crate::journal::Command::AdmitIntention { .. }
+                        | crate::journal::Command::Travel { .. }
                 ) && self.travels.contains_key(&actor)
                 {
                     return Err(Failure::new(
@@ -421,7 +436,21 @@ impl Service {
                 let result = self
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
-                let visible_entry = result.entry.disclosed();
+                let Some(visible_entry) = result.entry.disclosed() else {
+                    if matches!(
+                        result.entry.content,
+                        crate::journal::JournalContent::IntentionAdmitted { .. }
+                            | crate::journal::JournalContent::IntentionChanged {
+                                change: crate::journal::IntentionChange::Resumed,
+                                ..
+                            }
+                    ) {
+                        self.autonomous_enabled = true;
+                    }
+                    self.intention_update(&result);
+                    self.ack_result(id, request_id, &result);
+                    return Ok(());
+                };
                 if matches!(
                     visible_entry.content,
                     HistoryContent::Action { .. } | HistoryContent::Travel { .. }
@@ -461,7 +490,15 @@ impl Service {
                     }
                     HistoryContent::Wizard { rewind, .. } => {
                         self.autonomous_enabled = false;
-                        self.pending_pauses.clear();
+                        if rewind {
+                            self.pending_pauses.clear();
+                            for actor in self.engine.queued_human_actors() {
+                                if let Err(error) = self.engine.suspend_queued_intention(actor) {
+                                    self.pending_pauses.insert(actor);
+                                    self.save_warning = Some(error.to_string());
+                                }
+                            }
+                        }
                         for actor in self.engine.actors() {
                             if let Err(error) = self.engine.pause_preparation(actor) {
                                 self.save_warning = Some(error.to_string());
@@ -514,14 +551,46 @@ impl Service {
                     }
                     HistoryContent::Annotation { .. } => self.annotation_update(&visible_entry),
                     HistoryContent::PlaceRenamed { .. } | HistoryContent::Action { .. } => {
-                        self.action_update(&revisions, &visible_entry)?;
+                        self.action_result_update(&revisions, &result)?;
                     }
                 }
-                self.ack(id, request_id, Some(result.entry.id));
+                self.ack_result(id, request_id, &result);
             }
             Request::Attach { .. } => unreachable!("handled before attachment lookup"),
         }
         Ok(())
+    }
+
+    fn action_result_update(
+        &mut self,
+        revisions: &BTreeMap<ActorId, u64>,
+        result: &crate::CommandResult,
+    ) -> Result<(), Failure> {
+        match result.entry.disclosed() {
+            Some(entry) => self.action_update(revisions, &entry),
+            None => Ok(()),
+        }?;
+        self.intention_update(result);
+        Ok(())
+    }
+
+    fn intention_update(&mut self, result: &crate::CommandResult) {
+        for status in self.engine.intention_updates(result) {
+            let recipients: Vec<_> = self
+                .clients
+                .iter()
+                .filter(|(_, client)| client.actor == Some(status.actor))
+                .map(|(&id, _)| id)
+                .collect();
+            for recipient in recipients {
+                self.update(
+                    recipient,
+                    UpdateBody::Intention {
+                        status: status.clone(),
+                    },
+                );
+            }
+        }
     }
 
     fn action_update(
@@ -669,12 +738,24 @@ impl Service {
                 .into_iter()
                 .map(|id| (id, self.engine.revision(id).unwrap()))
                 .collect();
-            match self.engine.pause_preparation(actor) {
+            match self.engine.suspend_queued_intention(actor) {
                 Ok(Some(result)) => {
-                    let _ = self.action_update(&revisions, &result.entry.disclosed());
+                    self.intention_update(&result);
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    self.pending_pauses.insert(actor);
+                    self.save_warning = Some(error.to_string());
+                    continue;
+                }
+            }
+            match self.engine.pause_preparation(actor) {
+                Ok(Some(result)) => {
+                    let _ = self.action_result_update(&revisions, &result);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.pending_pauses.insert(actor);
                     self.save_warning = Some(error.to_string());
                 }
             }
@@ -687,6 +768,9 @@ impl Service {
     /// the commands it received, never on wall-clock time.
     pub(crate) fn step(&mut self) -> Step {
         self.apply_pending_pauses();
+        if !self.pending_pauses.is_empty() {
+            return Step::Blocked;
+        }
         let full: Vec<_> = self
             .clients
             .iter()
@@ -695,6 +779,34 @@ impl Service {
             .collect();
         if !full.is_empty() {
             return Step::Full(full);
+        }
+        if let Some(next) = self.engine.next_intention_actor() {
+            if self.engine.alive(next) && !self.controllers.contains_key(&next) {
+                self.announce_waiting();
+                return Step::Blocked;
+            }
+            let revisions = self
+                .engine
+                .actors()
+                .into_iter()
+                .map(|actor| Ok((actor, self.engine.revision(actor)?)))
+                .collect::<Result<BTreeMap<_, _>, Failure>>();
+            match revisions.and_then(|revisions| {
+                self.engine
+                    .execute_next_intention()
+                    .map(|result| (revisions, result))
+            }) {
+                Ok((revisions, Some(result))) => {
+                    if let Err(error) = self.action_result_update(&revisions, &result) {
+                        self.save_warning = Some(error.to_string());
+                    }
+                    return Step::Progress;
+                }
+                Ok((_, None)) => {}
+                Err(error) => self.save_warning = Some(error.to_string()),
+            }
+            self.announce_waiting();
+            return Step::Blocked;
         }
         let Some(next) = self.engine.next_actor() else {
             self.announce_waiting();
@@ -836,10 +948,7 @@ impl Service {
             .get_mut(&actor)
             .expect("active status")
             .completed_steps += 1;
-        if self
-            .action_update(&revisions, &result.entry.disclosed())
-            .is_err()
-        {
+        if self.action_result_update(&revisions, &result).is_err() {
             self.stop_travel(actor, TravelPhase::Failed);
             return;
         }
@@ -883,7 +992,7 @@ impl Service {
         let result = self.engine.advance_ai(actor);
         match result {
             Ok(result) => {
-                let _ = self.action_update(&revisions, &result.entry.disclosed());
+                let _ = self.action_result_update(&revisions, &result);
             }
             Err(error) => {
                 self.autonomous_enabled = false;
@@ -908,6 +1017,7 @@ impl Service {
             .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
         let state = self.engine.state(actor)?;
         let snapshot = Snapshot {
+            intentions: self.engine.pending_intentions(actor),
             travel: self.travel_status.get(&actor).cloned(),
             actor,
             branch: self.engine.branch().clone(),
@@ -948,7 +1058,12 @@ impl Service {
         let entry = self
             .engine
             .annotate_backend(actor, component, anchor, category, text)?;
-        let entry = entry.disclosed();
+        let entry = entry.disclosed().ok_or_else(|| {
+            Failure::new(
+                ErrorCode::InvalidRequest,
+                "Backend note has no disclosed event",
+            )
+        })?;
         self.annotation_update(&entry);
         Ok(entry)
     }
@@ -1038,7 +1153,17 @@ impl Service {
             id,
             ServerMessage::Ack {
                 request_id: request_id.into(),
-                entry_id,
+                receipt: RequestReceipt::Immediate { entry_id },
+            },
+        );
+    }
+
+    fn ack_result(&mut self, id: u64, request_id: &str, result: &crate::CommandResult) {
+        self.send(
+            id,
+            ServerMessage::Ack {
+                request_id: request_id.into(),
+                receipt: self.engine.request_receipt(result),
             },
         );
     }
@@ -1169,6 +1294,171 @@ mod tests {
     use tokio::sync::mpsc;
 
     #[test]
+    fn recovered_queued_gameplay_is_suspended_before_control_can_restart_it() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "queued",
+                &engine.branch().clone(),
+                crate::journal::Command::AdmitIntention {
+                    expected_revision: 0,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            )
+            .unwrap();
+        let state = engine.state(actor).unwrap();
+        let mut service = Service::new(engine);
+        let status = service.engine.pending_intentions(actor);
+        assert_eq!(status[0].phase, IntentionPhase::Suspended);
+        assert_eq!(status[0].entry_id, admitted.entry.id);
+        assert_eq!(service.engine.state(actor).unwrap(), state);
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "test".into()).unwrap();
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "control".into(), Request::AcquireControl);
+        while client.messages.try_recv().is_ok() {}
+        assert!(matches!(service.step(), Step::Blocked));
+        assert_eq!(service.engine.state(actor).unwrap(), state);
+        service.handle(
+            client.id,
+            "cancel".into(),
+            Request::Command {
+                branch: service.engine.branch().clone(),
+                command: Command::CancelIntention {
+                    expected_revision: 0,
+                    intention: IntentionId(admitted.entry.id.0.clone()),
+                },
+            },
+        );
+        assert!(
+            !service.autonomous_enabled,
+            "cancellation must not restart unrelated simulation work"
+        );
+        assert!(service.engine.pending_intentions(actor).is_empty());
+        assert_eq!(service.engine.state(actor).unwrap(), state);
+    }
+
+    #[test]
+    fn client_action_is_admitted_before_simulation_applies_its_effect() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        while client.messages.try_recv().is_ok() {}
+        service.handle(
+            client.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "control".into(), Request::AcquireControl);
+        while client.messages.try_recv().is_ok() {}
+        let before = service.engine.state(ActorId(1)).unwrap();
+        let request = Request::Command {
+            branch: service.engine.branch().clone(),
+            command: Command::Act {
+                expected_revision: 0,
+                action: Action::Move {
+                    direction: Direction::East,
+                },
+            },
+        };
+        service.handle(client.id, "queued".into(), request.clone());
+        assert!(
+            service.engine.state(ActorId(1)).unwrap() == before,
+            "handling a gameplay request admits work without executing it"
+        );
+        let mut accepted = false;
+        let mut identity = None;
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Ack {
+                request_id,
+                receipt,
+            } = message
+            {
+                assert_eq!(request_id, "queued");
+                assert!(matches!(
+                    &receipt,
+                    RequestReceipt::Admitted {
+                        actor: ActorId(1),
+                        phase: IntentionPhase::Queued,
+                        ..
+                    }
+                ));
+                if let RequestReceipt::Admitted {
+                    intention,
+                    entry_id,
+                    ..
+                } = receipt
+                {
+                    identity = Some((intention, entry_id));
+                }
+                accepted = true;
+            }
+        }
+        assert!(accepted);
+        assert!(matches!(service.step(), Step::Progress));
+        let after = service.engine.state(ActorId(1)).unwrap();
+        assert!(
+            after != before,
+            "simulation step applies the admitted action"
+        );
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "queued".into(), request);
+        let mut retried = false;
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Ack {
+                request_id,
+                receipt,
+            } = message
+            {
+                assert_eq!(request_id, "queued");
+                assert!(
+                    matches!(
+                        &receipt,
+                        RequestReceipt::Admitted {
+                            phase: IntentionPhase::Resolved,
+                            ..
+                        }
+                    ),
+                    "a retry must resolve the original admitted intention"
+                );
+                if let RequestReceipt::Admitted {
+                    intention,
+                    entry_id,
+                    ..
+                } = receipt
+                {
+                    assert_eq!(Some((intention, entry_id)), identity);
+                }
+                retried = true;
+            }
+        }
+        assert!(retried);
+        assert!(
+            service.engine.state(ActorId(1)).unwrap() == after,
+            "retry must not execute again"
+        );
+    }
+
+    #[test]
     fn byte_backlog_disconnects_before_message_slots_fill_and_other_clients_continue() {
         let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
         let account = Account {
@@ -1256,9 +1546,7 @@ mod tests {
                 )
                 .unwrap();
             let before = tor_simulation::diagnostics::work_counts();
-            service
-                .action_update(&revisions, &result.entry.disclosed())
-                .unwrap();
+            service.action_result_update(&revisions, &result).unwrap();
             let after = tor_simulation::diagnostics::work_counts();
             assert_eq!(
                 after.observations - before.observations,
@@ -1340,7 +1628,7 @@ mod tests {
     }
 
     #[test]
-    fn disconnect_during_action_broadcast_keeps_control_tick_at_last_disclosed_state() {
+    fn disconnect_during_admission_broadcast_does_not_execute_queued_work() {
         let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
         let account = Account {
             role: tor_protocol::AccessRole::Player,
@@ -1387,13 +1675,24 @@ mod tests {
         ));
         assert_eq!(update.cursor.tick, 0);
         let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
-            panic!("observation update")
+            panic!("intention update")
         };
         assert!(matches!(
             update.body,
-            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+            UpdateBody::Intention {
+                status: IntentionStatus {
+                    phase: IntentionPhase::Queued,
+                    ..
+                }
+            }
         ));
-        assert_eq!(update.cursor.tick, 100);
+        assert_eq!(update.cursor.tick, 0);
+        assert!(service.engine.has_pending_intention(ActorId(1)));
+        assert!(matches!(service.step(), Step::Blocked));
+        assert_eq!(
+            service.engine.state(ActorId(1)).unwrap().observation.tick,
+            0
+        );
     }
 
     #[test]
@@ -1474,6 +1773,9 @@ mod tests {
                 },
             },
         );
+        while client.messages.try_recv().is_ok() {}
+        assert!(service.engine.has_pending_intention(ActorId(1)));
+        assert!(matches!(service.step(), Step::Progress));
         while client.messages.try_recv().is_ok() {}
         assert!(
             service.engine.next_ai_action().is_some(),

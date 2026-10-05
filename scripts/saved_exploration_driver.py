@@ -12,6 +12,7 @@ import time
 import uuid
 from performance_driver import JsonProcess, SPEC, ROOT, resolve, verify, wall_time_ns, stop_all
 from client_performance_report import validate_presentation_profile
+from process_harness import ascii_input_completion
 
 KEYS = {"north":"up", "east":"right", "south":"down", "west":"left",
         "up":"ascend", "down":"descend"}
@@ -32,8 +33,9 @@ def validate(result):
         assert sample["profile"]["network_events"] <= 16
     assert result["disclosed_cells"] == {8:1243, 256:41419}[result["regions"]]
     assert result["checkpoint_bytes"] < 16 * 1024 * 1024
-    assert 0 < result["checkpoint_sequence"] <= result["actions"]
-    assert result["tail_records"] == result["actions"] - result["checkpoint_sequence"]
+    assert result["journal_records"] == result["actions"] * 2
+    assert 0 < result["checkpoint_sequence"] <= result["journal_records"]
+    assert result["tail_records"] == result["journal_records"] - result["checkpoint_sequence"]
     assert result["tail_records"] < result["checkpoint_interval"]
     assert result["restart_equal"] and result["continued_after_restart"]
 
@@ -68,7 +70,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         window.input_unix_ns = wall_time_ns(started)
         window.child.stdin.write(json.dumps({"type":"key", "key":name}) + "\n")
         window.child.stdin.flush()
-        frame, received = window.until(lambda f:f.get("input_done") == name and not f["busy"])
+        frame, received = window.until(ascii_input_completion(name))
         assert frame["connected"] and frame["window_open"]
         return frame, (received-started)*1000
     result = {"trace_version":spec["version"], "seed":spec["seed"], "regions":regions,
@@ -108,7 +110,8 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         with sqlite3.connect(save) as db:
             sequence, size = db.execute("SELECT sequence,length(payload) FROM checkpoint").fetchone()
             tail = db.execute("SELECT count(*) FROM journal WHERE sequence>0").fetchone()[0]
-        result.update(checkpoint_sequence=sequence, checkpoint_bytes=size, tail_records=tail)
+        result.update(checkpoint_sequence=sequence, checkpoint_bytes=size, tail_records=tail,
+                      journal_records=sequence + tail)
         # Durably restart the exact completed exploration before any extra input.
         observer.stop(); owned.remove(observer)
         window.stop(); owned.remove(window)
@@ -128,7 +131,8 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         text = Process(bin_dir/("tor-client-text"+suffix), ["--script","--connect",address], token=env["TOR_SERVER_TOKEN"])
         try:
             text.until(lambda line:line == "Ready.")
-            assert "Done." in text.command("wait")
+            waited = text.command("wait")
+            assert "Action: Resolved." in waited and "Waited" in waited
             assert "Done." in text.command("save")
         finally:
             text.stop()

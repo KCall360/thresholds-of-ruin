@@ -124,7 +124,8 @@ def correlate_native(directory, result):
         handled = server[(request_id,'server_handled')]
         sent = server[(request_id,'server_ack_sent')]
         ack = acknowledgements[request_id]
-        frame_id = sample.get('presented_frame',action_frames[sample['index']])
+        frame_id = (sample['presented_frame'] if 'presented_frame' in sample
+                    else action_frames[sample['index']])
         presented = frame_times.get(frame_id)
         output.append(dict(index=sample['index'], request_id=request_id,
             presentation_ms=sample['request_to_presentation_ms'],

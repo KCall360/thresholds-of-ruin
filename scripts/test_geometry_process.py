@@ -29,7 +29,7 @@ class GeometryProcesses(ProcessTestCase):
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["inventory"][0]["name"], "stone tablet")
         self.assertEqual(arrived["state"]["observation"]["tick"], 650)
-        self.key(ascii_client, "escape")
+        self.key(ascii_client, "escape", wait_for_simulation=False)
         ascii_client.child.wait(timeout=10)
         self.assertTrue((self.save.parent / "wide.ppm").exists())
 

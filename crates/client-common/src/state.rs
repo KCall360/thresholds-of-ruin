@@ -35,6 +35,7 @@ pub struct ClientState {
 
 impl ClientState {
     pub fn from_snapshot(snapshot: Snapshot) -> Result<Self, StreamError> {
+        validate_intentions(&snapshot.intentions, snapshot.actor, &snapshot.branch)?;
         snapshot
             .state
             .validate()
@@ -133,6 +134,59 @@ impl ClientState {
         self.snapshot.travel.as_ref()
     }
 
+    pub fn intentions(&self) -> &[IntentionStatus] {
+        &self.snapshot.intentions
+    }
+
+    pub fn has_pending_intention(&self) -> bool {
+        self.intentions()
+            .iter()
+            .any(|status| status.phase.pending())
+    }
+
+    /// Explicit fresh input references the currently disclosed queued work.
+    pub fn resume_intention_request(&self) -> Option<Request> {
+        self.intention_request(true)
+    }
+
+    pub fn cancel_intention_request(&self) -> Option<Request> {
+        self.intention_request(false)
+    }
+
+    fn intention_request(&self, resume: bool) -> Option<Request> {
+        if !self.has_control() {
+            return None;
+        }
+        let intention = self
+            .intentions()
+            .iter()
+            .find(|status| {
+                if resume {
+                    status.phase == IntentionPhase::Suspended
+                } else {
+                    status.phase.pending()
+                }
+            })?
+            .intention
+            .clone();
+        let expected_revision = self.state().revision;
+        let command = if resume {
+            Command::ResumeIntention {
+                expected_revision,
+                intention,
+            }
+        } else {
+            Command::CancelIntention {
+                expected_revision,
+                intention,
+            }
+        };
+        Some(Request::Command {
+            branch: self.branch().clone(),
+            command,
+        })
+    }
+
     pub fn state(&self) -> &StateView {
         &self.snapshot.state
     }
@@ -176,6 +230,38 @@ impl ClientState {
             body => body,
         };
         match body {
+            UpdateBody::Intention { status } => {
+                if update.cursor.tick != self.snapshot.state.observation.tick
+                    || !status.valid_context(update.actor, &update.branch)
+                {
+                    return Err(StreamError::InconsistentState);
+                }
+                let previous = self
+                    .snapshot
+                    .intentions
+                    .iter()
+                    .position(|old| old.intention == status.intention);
+                if let Some(index) = previous {
+                    let old = &self.snapshot.intentions[index];
+                    if old.entry_id != status.entry_id || !status.phase.can_follow(old.phase) {
+                        return Err(StreamError::InconsistentState);
+                    }
+                } else if status.phase != IntentionPhase::Queued {
+                    return Err(StreamError::InconsistentState);
+                }
+                let mut intentions = self.snapshot.intentions.clone();
+                if let Some(index) = previous {
+                    if status.phase.active() {
+                        intentions[index] = status;
+                    } else {
+                        intentions.remove(index);
+                    }
+                } else {
+                    intentions.push(status);
+                }
+                validate_intentions(&intentions, update.actor, &update.branch)?;
+                self.snapshot.intentions = intentions;
+            }
             UpdateBody::Travel { status, entry } => {
                 if update.cursor.tick != self.snapshot.state.observation.tick {
                     return Err(StreamError::InconsistentState);
@@ -285,6 +371,32 @@ impl ClientState {
         }
         Ok(())
     }
+}
+
+fn validate_intentions(
+    intentions: &[IntentionStatus],
+    actor: ActorId,
+    branch: &BranchId,
+) -> Result<(), StreamError> {
+    if intentions.len() > 2
+        || intentions
+            .iter()
+            .any(|status| !status.phase.active() || !status.valid_context(actor, branch))
+        || intentions
+            .iter()
+            .filter(|status| status.phase.pending())
+            .count()
+            > 1
+        || intentions
+            .iter()
+            .filter(|status| status.phase == IntentionPhase::Started)
+            .count()
+            > 1
+        || intentions.len() == 2 && intentions[0].intention == intentions[1].intention
+    {
+        return Err(StreamError::InconsistentState);
+    }
+    Ok(())
 }
 
 fn validate_entry(

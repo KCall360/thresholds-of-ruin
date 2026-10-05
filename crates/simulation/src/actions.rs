@@ -12,6 +12,7 @@ use crate::{
 /// Valid only inside the uninterrupted `Game::act` or `Game::act_ai` call.
 /// Kept private so callers cannot retain an action across world changes.
 struct PreparedAction {
+    intention: Option<crate::IntentionId>,
     actor: ActorId,
     at_tick: u64,
     kind: OutcomeKind,
@@ -24,7 +25,40 @@ impl Game {
     /// are free. Immediate actions apply effects before recovery; attacks commit
     /// wind-up progress. Recovery is not partially completed work and cannot resume.
     pub fn act(&mut self, id: ActorId, action: Action) -> Result<ActionOutcome, GameError> {
-        let prepared = self.prepare_action(id, action)?;
+        self.act_with_intention(id, action, None)
+    }
+
+    pub(crate) fn act_with_intention(
+        &mut self,
+        id: ActorId,
+        action: Action,
+        intention: Option<crate::IntentionId>,
+    ) -> Result<ActionOutcome, GameError> {
+        self.act_with_context(id, action, intention, None)
+    }
+
+    pub(crate) fn act_with_context(
+        &mut self,
+        id: ActorId,
+        action: Action,
+        intention: Option<crate::IntentionId>,
+        movement_context: Option<crate::MovementContext>,
+    ) -> Result<ActionOutcome, GameError> {
+        let mut prepared = self.prepare_action(id, action)?;
+        if let Some(context) = movement_context {
+            let OutcomeKind::Moved { from, to } = prepared.kind else {
+                return Err(GameError::InvalidLocation);
+            };
+            if !context.matches(
+                from,
+                self.actors[&id].orientation,
+                to,
+                prepared.new_orientation,
+            ) {
+                return Err(GameError::InvalidLocation);
+            }
+        }
+        prepared.intention = intention;
         let ai = if let Some((expected, ai)) = self.choose_ai(id) {
             if expected != action {
                 return Err(GameError::InvalidLocation);
@@ -40,11 +74,20 @@ impl Game {
     /// The decision cannot escape or survive a mutation; replay still validates
     /// recorded actions through `act`.
     pub fn act_ai(&mut self, id: ActorId) -> Result<(Action, ActionOutcome), GameError> {
+        self.act_ai_with_intention(id, None)
+    }
+
+    pub(crate) fn act_ai_with_intention(
+        &mut self,
+        id: ActorId,
+        intention: Option<crate::IntentionId>,
+    ) -> Result<(Action, ActionOutcome), GameError> {
         if self.next_actor() != Some(id) {
             return Err(GameError::NotActorsTurn);
         }
         let (action, ai) = self.choose_ai(id).ok_or(GameError::InvalidLocation)?;
-        let prepared = self.prepare_action(id, action)?;
+        let mut prepared = self.prepare_action(id, action)?;
+        prepared.intention = intention;
         Ok((action, self.commit_action(prepared, Some(ai))))
     }
 
@@ -68,6 +111,23 @@ impl Game {
 
     /// Action-specific validity and timing are settled before any mutation.
     fn prepare_action(&self, id: ActorId, action: Action) -> Result<PreparedAction, GameError> {
+        let actor = self.validate_action_actor(id)?;
+        if self.next_actor() != Some(id) {
+            return Err(GameError::NotActorsTurn);
+        }
+        self.prepare_available_action(id, actor, action)
+    }
+
+    pub(crate) fn validate_intention_action(
+        &self,
+        id: ActorId,
+        action: Action,
+    ) -> Result<(), GameError> {
+        let actor = self.validate_action_actor(id)?;
+        self.prepare_available_action(id, actor, action).map(|_| ())
+    }
+
+    fn validate_action_actor(&self, id: ActorId) -> Result<&crate::Actor, GameError> {
         let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
         self.next_item_id
             .checked_add(self.actors.len() as u64)
@@ -75,9 +135,15 @@ impl Game {
         if actor.combat.as_ref().is_some_and(|c| c.hp == 0) {
             return Err(GameError::UnknownActor);
         }
-        if self.next_actor() != Some(id) {
-            return Err(GameError::NotActorsTurn);
-        }
+        Ok(actor)
+    }
+
+    fn prepare_available_action(
+        &self,
+        id: ActorId,
+        actor: &crate::Actor,
+        action: Action,
+    ) -> Result<PreparedAction, GameError> {
         let (kind, duration) = match action {
             Action::Attack { target } => {
                 if !self.attack_available(id, target) {
@@ -165,6 +231,7 @@ impl Game {
             .ok_or(GameError::TimeExhausted)?;
 
         Ok(PreparedAction {
+            intention: None,
             actor: id,
             at_tick,
             kind,
@@ -197,7 +264,9 @@ impl Game {
         }
         drop(actor);
         match kind {
-            OutcomeKind::AttackStarted { target } => self.start_attack(id, target),
+            OutcomeKind::AttackStarted { target } => {
+                self.start_attack(id, target, prepared.intention)
+            }
             OutcomeKind::DoorChanged { door, open } => {
                 let location = self.world.door_location(door).expect("validated door");
                 self.world.set_door(location, open);

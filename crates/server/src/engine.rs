@@ -13,16 +13,22 @@ use uuid::Uuid;
 
 use crate::adapt;
 use crate::journal::{
-    Command, HistoryContent, HistoryEntry, Position, WizardItem, WizardOperation, WizardResult,
+    Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 15;
+pub(crate) const ARCHIVE_VERSION: u32 = 16;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
+#[path = "intention.rs"]
+mod intention;
+#[cfg(test)]
+#[path = "intention_tests.rs"]
+mod intention_tests;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
+const MAX_RETAINED_BOUNDARIES: usize = REWIND_BOUNDARIES * 2;
 const RULESET: &str = crate::scenario_package::RULESET;
 
 #[cfg(test)]
@@ -496,8 +502,151 @@ pub(crate) struct Receipt {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Record {
-    pub(crate) entry: HistoryEntry,
+    pub(crate) entry: JournalEntry,
     pub(crate) receipt: Option<Receipt>,
+}
+
+impl Record {
+    pub(crate) fn change_source(&self) -> Option<(&EntryId, tor_simulation::IntentionId)> {
+        if let JournalContent::IntentionChanged {
+            admission,
+            intention,
+            ..
+        } = &self.entry.content
+        {
+            Some((admission, *intention))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn valid_change(&self, admitted: &Record) -> bool {
+        use crate::journal::IntentionChange;
+        let JournalContent::IntentionChanged {
+            admission,
+            intention,
+            change,
+        } = &self.entry.content
+        else {
+            return false;
+        };
+        if admission != &admitted.entry.id
+            || self.entry.actor != admitted.entry.actor
+            || !matches!(admitted.entry.content, JournalContent::IntentionAdmitted { intention: id, .. } if id == *intention)
+        {
+            return false;
+        }
+        match &self.receipt {
+            None => {
+                *change == IntentionChange::Suspended
+                    && self.entry.audience == Audience::Actor
+                    && self.entry.author
+                        == Author::Backend {
+                            component: "scheduler".into(),
+                        }
+            }
+            Some(receipt) => {
+                receipt.actor == self.entry.actor
+                    && receipt.branch == self.entry.branch
+                    && self.entry.author
+                        == Author::User {
+                            user: receipt.user.clone(),
+                        }
+                    && self.entry.audience == Audience::Private
+                    && match (&receipt.command, change) {
+                        (
+                            Command::ResumeIntention {
+                                admission: requested,
+                                ..
+                            },
+                            IntentionChange::Resumed,
+                        )
+                        | (
+                            Command::CancelIntention {
+                                admission: requested,
+                                ..
+                            },
+                            IntentionChange::Cancelled,
+                        ) => requested == admission,
+                        _ => false,
+                    }
+            }
+        }
+    }
+    pub(crate) fn resolution(&self) -> Option<(&EntryId, tor_simulation::IntentionId)> {
+        match &self.entry.content {
+            JournalContent::IntentionStarted {
+                admission,
+                intention,
+                ..
+            }
+            | JournalContent::IntentionFailed {
+                admission,
+                intention,
+            } => Some((admission, *intention)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn valid_resolution(&self, admitted: &Record) -> bool {
+        let Some((admission, intention)) = self.resolution() else {
+            return false;
+        };
+        let JournalContent::IntentionAdmitted {
+            intention: original,
+            action,
+        } = &admitted.entry.content
+        else {
+            return false;
+        };
+        admission == &admitted.entry.id
+            && intention == *original
+            && self.entry.actor == admitted.entry.actor
+            && self.receipt.is_none()
+            && self.entry.author
+                == Author::Backend {
+                    component: "scheduler".into(),
+                }
+            && self.entry.audience == Audience::Actor
+            && match &self.entry.content {
+                JournalContent::IntentionStarted {
+                    action: executed, ..
+                } => executed == action,
+                JournalContent::IntentionFailed { .. } => true,
+                _ => false,
+            }
+    }
+
+    /// Check audit metadata even when recovery restores a checkpoint instead of replaying.
+    pub(crate) fn valid_admission(&self) -> bool {
+        if self.receipt.as_ref().is_some_and(|receipt| {
+            matches!(
+                receipt.command,
+                Command::ResumeIntention { .. } | Command::CancelIntention { .. }
+            )
+        }) && self.change_source().is_none()
+        {
+            return false;
+        }
+        match (&self.entry.content, self.receipt.as_ref()) {
+            (JournalContent::IntentionAdmitted { intention, action }, Some(receipt)) => {
+                intention.0 != 0
+                    && matches!(&receipt.command, Command::AdmitIntention {
+                        action: requested, ..
+                    } if requested == action)
+                    && receipt.actor == self.entry.actor
+                    && receipt.branch == self.entry.branch
+                    && self.entry.audience == Audience::Private
+                    && self.entry.author
+                        == Author::User {
+                            user: receipt.user.clone(),
+                        }
+            }
+            (JournalContent::IntentionAdmitted { .. }, None) => false,
+            (_, Some(receipt)) => !matches!(receipt.command, Command::AdmitIntention { .. }),
+            (_, None) => true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -528,7 +677,7 @@ pub struct RegionCounts {
 
 #[derive(Clone, Debug)]
 pub struct CommandResult {
-    pub entry: HistoryEntry,
+    pub entry: JournalEntry,
     pub duplicate: bool,
 }
 
@@ -710,8 +859,38 @@ impl Revisions {
 #[derive(Clone, Debug)]
 struct Boundary {
     id: Option<EntryId>,
+    /// Derived from journal content, never trusted from a checkpoint payload.
+    selectable: bool,
     game: Game,
     revisions: Revisions,
+}
+
+/// Retain the union of the latest selectable states and latest raw transactions.
+/// Queue lifecycle traffic cannot evict gameplay history; the raw window keeps
+/// recent adjacent states available for checkpoint integrity checks.
+fn retain_boundaries<T>(boundaries: &mut VecDeque<T>, selectable: impl Fn(&T) -> bool) {
+    let first_raw = boundaries.len().saturating_sub(REWIND_BOUNDARIES);
+    let mut old_selectable = boundaries
+        .iter()
+        .filter(|b| selectable(b))
+        .count()
+        .saturating_sub(REWIND_BOUNDARIES);
+    let mut index = 0;
+    boundaries.retain(|boundary| {
+        let keep_selectable = if selectable(boundary) {
+            if old_selectable == 0 {
+                true
+            } else {
+                old_selectable -= 1;
+                false
+            }
+        } else {
+            false
+        };
+        let keep = index >= first_raw || keep_selectable;
+        index += 1;
+        keep
+    });
 }
 
 /// Private mutable decision state. A transaction never owns retained history,
@@ -982,6 +1161,7 @@ impl Engine {
         let branch = BranchId(Uuid::new_v4().to_string());
         let initial = Arc::new(Boundary {
             id: None,
+            selectable: true,
             game: game.clone(),
             revisions: revisions.clone(),
         });
@@ -1210,18 +1390,53 @@ impl Engine {
             regions.attach_disk(store.clone());
         }
         for record in records {
-            if Uuid::parse_str(&record.entry.id.0).is_err()
+            if !record.valid_admission()
+                || Uuid::parse_str(&record.entry.id.0).is_err()
                 || engine.history_index.find(&record.entry.id).is_some()
             {
                 return Err(invalid_archive());
             }
-            let result = if let Some(receipt) = record.receipt {
+            let result = if let Some((source, _)) = record.change_source() {
+                let index = engine
+                    .history_index
+                    .find(source)
+                    .ok_or_else(invalid_archive)?;
+                if !record.valid_change(&engine.archive.records[index]) {
+                    return Err(invalid_archive());
+                }
+                if let Some(receipt) = record.receipt {
+                    engine
+                        .apply_command(&receipt, Some(record.entry.id.clone()))
+                        .map(|result| result.entry)
+                } else {
+                    engine
+                        .suspend_queued_intention_inner(
+                            record.entry.actor,
+                            Some(record.entry.id.clone()),
+                        )?
+                        .ok_or_else(invalid_archive)
+                        .map(|result| result.entry)
+                }
+            } else if record.resolution().is_some() {
+                let (source, _) = record.resolution().expect("checked resolution");
+                let index = engine
+                    .history_index
+                    .find(source)
+                    .ok_or_else(invalid_archive)?;
+                if !record.valid_resolution(&engine.archive.records[index]) {
+                    return Err(invalid_archive());
+                }
+                engine
+                    .execute_intention(Some(record.entry.id.clone()))?
+                    .ok_or_else(invalid_archive)
+                    .map(|result| result.entry)
+            } else if let Some(receipt) = record.receipt {
                 engine
                     .apply_command(&receipt, Some(record.entry.id.clone()))
                     .map(|result| result.entry)
             } else if let (
                 Author::Backend { component },
-                HistoryContent::Annotation {
+                JournalContent::Annotation {
                     anchor,
                     category,
                     text,
@@ -1514,7 +1729,7 @@ impl Engine {
         Ok(HistoryPage {
             entries: positions
                 .iter()
-                .map(|&position| self.archive.records[position].entry.disclosed())
+                .filter_map(|&position| self.archive.records[position].entry.disclosed())
                 .collect(),
             older_before: older.then(|| self.archive.records[positions[0]].entry.id.clone()),
         })
@@ -1729,7 +1944,8 @@ impl Engine {
                     *revision = revision.checked_add(1).ok_or_else(invalid_archive)?;
                 }
             }
-            let entry = HistoryEntry {
+            let entry = JournalEntry {
+                intention_ends: Vec::new(),
                 id: new_id(),
                 branch: self.branch().clone(),
                 actor,
@@ -1738,7 +1954,7 @@ impl Engine {
                     user: "bench".into(),
                 },
                 audience: Audience::Actor,
-                content: HistoryContent::Action {
+                content: JournalContent::Action {
                     action: tor_protocol::Action::Wait,
                     event: adapt::event(outcome.kind),
                 },
@@ -1761,13 +1977,12 @@ impl Engine {
             if end - index <= REWIND_BOUNDARIES {
                 self.boundaries.push_back(Arc::new(Boundary {
                     id: Some(entry.id),
+                    selectable: true,
                     game: self.game.clone(),
                     revisions: self.revisions.clone(),
                 }));
             }
-            if self.boundaries.len() > REWIND_BOUNDARIES {
-                self.boundaries.pop_front();
-            }
+            retain_boundaries(&mut self.boundaries, |b| b.selectable);
         }
         Ok(())
     }
@@ -1823,6 +2038,110 @@ impl Engine {
 
     // `executed_ai` comes only from the uninterrupted private-candidate path
     // above. It is not an action token that callers can retain or replay.
+    /// Apply/reconcile one action inside a private candidate. A supplied outcome
+    /// comes only from an uninterrupted simulation execution against that candidate.
+    fn resolve_action_transition(
+        &self,
+        candidate: &mut Candidate,
+        actor: ActorId,
+        action: &Action,
+        executed: Option<tor_simulation::ActionOutcome>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<(tor_simulation::ActionOutcome, bool), Failure> {
+        let tick = self.game.tick();
+        let mut navigation_refreshed = false;
+        let navigation_changed = match action {
+            Action::Move { .. } | Action::SetDoor { .. } => true,
+            Action::Attack { .. } => false,
+            Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
+            Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
+        };
+        let started = Instant::now();
+        let perception_changed = match action {
+            Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
+            Action::Move { .. }
+            | Action::Attack { .. }
+            | Action::SetDoor { .. }
+            | Action::Take { .. }
+            | Action::Drop { .. } => true,
+        };
+        let before: BTreeMap<_, _> = self
+            .actors()
+            .into_iter()
+            .filter(|_| perception_changed)
+            .map(|actor| Ok((actor, self.revision_view(actor)?)))
+            .collect::<Result<_, Failure>>()?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.perception += started.elapsed();
+            profile.actors_observed += before.len();
+        }
+        let started = Instant::now();
+        let already_executed = executed.is_some();
+        let outcome = match executed {
+            Some(outcome) => outcome,
+            None => candidate
+                .game
+                .act(SimActor(actor.0), adapt::action(action))
+                .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Action is unavailable"))?,
+        };
+        if let Some(profile) = profile.as_deref_mut().filter(|_| !already_executed) {
+            profile.simulation_transition += started.elapsed();
+            profile.simulation_transitions += 1;
+        }
+        // Wait changes only tick/readiness. Other outcomes retain full
+        // comparison; new action kinds must make their impact explicit.
+        if !perception_changed {
+            let started = Instant::now();
+            for (&observer, revision) in candidate.revisions.iter_mut() {
+                if outcome.next_tick != tick
+                    || ((observer == actor) != (outcome.next_actor == Some(SimActor(observer.0))))
+                {
+                    *revision = revision.checked_add(1).ok_or_else(|| {
+                        Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
+                    })?;
+                }
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.revision_comparisons += 1;
+                }
+            }
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.revision_detection += started.elapsed();
+            }
+        }
+        for (actor, old) in before {
+            let perception_started = Instant::now();
+            let after = candidate.revision_view(actor)?;
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.perception += perception_started.elapsed();
+                profile.actors_observed += 1;
+            }
+            if navigation_changed || after.scene != old.scene {
+                navigation_refreshed = true;
+                let started = Instant::now();
+                candidate
+                    .game
+                    .refresh_navigation_scene(SimActor(actor.0), &after.scene);
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.navigation_refresh += started.elapsed();
+                }
+            }
+            let started = Instant::now();
+            let changed = after != *old;
+            if changed {
+                let revision = candidate.revisions.get_mut(&actor).expect("known actor");
+                *revision = revision
+                    .checked_add(1)
+                    .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
+            }
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.revision_detection += started.elapsed();
+                profile.revision_comparisons += 1;
+            }
+            candidate.observations.insert(actor, Arc::new(after));
+        }
+        Ok((outcome, navigation_refreshed))
+    }
+
     fn finish_checked_command(
         &mut self,
         checked: command_request::CheckedRequest<'_>,
@@ -1832,25 +2151,60 @@ impl Engine {
         executed_ai: Option<tor_simulation::ActionOutcome>,
     ) -> Result<CommandResult, Failure> {
         let (receipt, revision) = checked.into_parts();
-        // Exhaustive impact decisions: new commands/actions must explicitly
-        // decide whether they can change remembered geometry.
-        let navigation_changed = match &receipt.command {
-            Command::Act { action, .. } => match action {
-                Action::Move { .. } | Action::SetDoor { .. } => true,
-                Action::Attack { .. } => false,
-                Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
-                Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
-            },
-            Command::Wizard { .. } => true,
-            Command::PausePreparation => false,
-            Command::RenamePlace { .. } | Command::Annotate { .. } | Command::Travel { .. } => {
-                false
-            }
-        };
         let mut navigation_refreshed = false;
         let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
+            Command::ResumeIntention { admission, .. }
+            | Command::CancelIntention { admission, .. } => {
+                let change = if matches!(receipt.command, Command::ResumeIntention { .. }) {
+                    crate::journal::IntentionChange::Resumed
+                } else {
+                    crate::journal::IntentionChange::Cancelled
+                };
+                let content = self.prepare_intention_change(
+                    &mut candidate,
+                    receipt.actor,
+                    admission,
+                    change,
+                )?;
+                (
+                    Author::User {
+                        user: receipt.user.clone(),
+                    },
+                    Audience::Private,
+                    content,
+                )
+            }
+            Command::AdmitIntention { action, .. } => {
+                let intention = candidate
+                    .game
+                    .admit_intention(
+                        SimActor(receipt.actor.0),
+                        adapt::action(action),
+                        tor_simulation::IntentionOrigin::Human,
+                    )
+                    .map_err(|error| {
+                        Failure::new(
+                            if matches!(error, tor_simulation::GameError::ActorBusy) {
+                                ErrorCode::ActorBusy
+                            } else {
+                                ErrorCode::InvalidAction
+                            },
+                            "Intention is unavailable",
+                        )
+                    })?;
+                (
+                    Author::User {
+                        user: receipt.user.clone(),
+                    },
+                    Audience::Private,
+                    JournalContent::IntentionAdmitted {
+                        intention,
+                        action: action.clone(),
+                    },
+                )
+            }
             Command::PausePreparation => {
                 let target = candidate
                     .game
@@ -1868,7 +2222,7 @@ impl Engine {
                         component: "scheduler".into(),
                     },
                     Audience::Actor,
-                    HistoryContent::Action {
+                    JournalContent::Action {
                         action: Action::Attack {
                             target: ActorId(target.0),
                         },
@@ -1908,7 +2262,7 @@ impl Engine {
                         user: receipt.user.clone(),
                     },
                     Audience::Actor,
-                    HistoryContent::PlaceRenamed {
+                    JournalContent::PlaceRenamed {
                         key: key.clone(),
                         name: name.clone(),
                     },
@@ -1928,7 +2282,7 @@ impl Engine {
                         user: receipt.user.clone(),
                     },
                     Audience::Actor,
-                    HistoryContent::Travel {
+                    JournalContent::Travel {
                         destination: destination.clone(),
                     },
                 )
@@ -1947,7 +2301,7 @@ impl Engine {
                         user: receipt.user.clone(),
                     },
                     Audience::Private,
-                    HistoryContent::Wizard {
+                    JournalContent::Wizard {
                         operation: operation.clone(),
                         validation: self
                             .archive
@@ -1963,98 +2317,20 @@ impl Engine {
                 expected_revision: _,
                 action,
             } => {
-                let started = Instant::now();
-                let perception_changed = match action {
-                    Action::Wait => self.game.wait_changes_perception(SimActor(receipt.actor.0)),
-                    Action::Move { .. }
-                    | Action::Attack { .. }
-                    | Action::SetDoor { .. }
-                    | Action::Take { .. }
-                    | Action::Drop { .. } => true,
-                };
-                let before: BTreeMap<_, _> = self
-                    .actors()
-                    .into_iter()
-                    .filter(|_| perception_changed)
-                    .map(|actor| Ok((actor, self.revision_view(actor)?)))
-                    .collect::<Result<_, Failure>>()?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.perception += started.elapsed();
-                    profile.actors_observed += before.len();
-                }
-                let started = Instant::now();
-                let already_executed = executed_ai.is_some();
-                let outcome = match executed_ai {
-                    Some(outcome) => outcome,
-                    None => candidate
-                        .game
-                        .act(SimActor(receipt.actor.0), adapt::action(action))
-                        .map_err(|_| {
-                            Failure::new(ErrorCode::InvalidAction, "Action is unavailable")
-                        })?,
-                };
-                if let Some(profile) = profile.as_deref_mut().filter(|_| !already_executed) {
-                    profile.simulation_transition += started.elapsed();
-                    profile.simulation_transitions += 1;
-                }
-                // Wait changes only tick/readiness. Other outcomes retain full
-                // comparison; new action kinds must make their impact explicit.
-                if !perception_changed {
-                    let started = Instant::now();
-                    for (&actor, revision) in candidate.revisions.iter_mut() {
-                        if outcome.next_tick != tick
-                            || ((actor == receipt.actor)
-                                != (outcome.next_actor == Some(SimActor(actor.0))))
-                        {
-                            *revision = revision.checked_add(1).ok_or_else(|| {
-                                Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
-                            })?;
-                        }
-                        if let Some(profile) = profile.as_deref_mut() {
-                            profile.revision_comparisons += 1;
-                        }
-                    }
-                    if let Some(profile) = profile.as_deref_mut() {
-                        profile.revision_detection += started.elapsed();
-                    }
-                }
-                for (actor, old) in before {
-                    let perception_started = Instant::now();
-                    let after = candidate.revision_view(actor)?;
-                    if let Some(profile) = profile.as_deref_mut() {
-                        profile.perception += perception_started.elapsed();
-                        profile.actors_observed += 1;
-                    }
-                    if navigation_changed || after.scene != old.scene {
-                        navigation_refreshed = true;
-                        let started = Instant::now();
-                        candidate
-                            .game
-                            .refresh_navigation_scene(SimActor(actor.0), &after.scene);
-                        if let Some(profile) = profile.as_deref_mut() {
-                            profile.navigation_refresh += started.elapsed();
-                        }
-                    }
-                    let started = Instant::now();
-                    let changed = after != *old;
-                    if changed {
-                        let revision = candidate.revisions.get_mut(&actor).expect("known actor");
-                        *revision = revision.checked_add(1).ok_or_else(|| {
-                            Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
-                        })?;
-                    }
-                    if let Some(profile) = profile.as_deref_mut() {
-                        profile.revision_detection += started.elapsed();
-                        profile.revision_comparisons += 1;
-                    }
-                    candidate.observations.insert(actor, Arc::new(after));
-                }
+                let (outcome, refreshed) = self.resolve_action_transition(
+                    &mut candidate,
+                    receipt.actor,
+                    action,
+                    executed_ai,
+                    profile.as_deref_mut(),
+                )?;
+                navigation_refreshed = refreshed;
                 (
                     Author::User {
                         user: receipt.user.clone(),
                     },
                     Audience::Actor,
-                    HistoryContent::Action {
+                    JournalContent::Action {
                         action: action.clone(),
                         event: adapt::event(outcome.kind),
                     },
@@ -2080,7 +2356,7 @@ impl Engine {
                 (
                     author,
                     *audience,
-                    HistoryContent::Annotation {
+                    JournalContent::Annotation {
                         anchor: anchor.clone(),
                         category: *category,
                         text: text.clone(),
@@ -2088,7 +2364,14 @@ impl Engine {
                 )
             }
         };
-        candidate.transition(self.regions.as_mut(), profile.as_deref_mut())?;
+        if !matches!(
+            receipt.command,
+            Command::AdmitIntention { .. }
+                | Command::ResumeIntention { .. }
+                | Command::CancelIntention { .. }
+        ) {
+            candidate.transition(self.regions.as_mut(), profile.as_deref_mut())?;
+        }
         let started = Instant::now();
         if matches!(receipt.command, Command::Wizard { .. }) {
             candidate.game.refresh_navigation();
@@ -2102,7 +2385,8 @@ impl Engine {
                 profile.navigation_refreshes += 1;
             }
         }
-        let entry = HistoryEntry {
+        let entry = JournalEntry {
+            intention_ends: Vec::new(),
             id: entry_id,
             branch: candidate.branch().clone(),
             actor: receipt.actor,
@@ -2111,20 +2395,35 @@ impl Engine {
             audience,
             content,
         };
+        self.commit_candidate(candidate, entry, Some(receipt.clone()), profile)
+    }
+
+    fn commit_candidate(
+        &mut self,
+        mut candidate: Candidate,
+        mut entry: JournalEntry,
+        receipt: Option<Receipt>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        entry.intention_ends = intention::derive_intention_ends(
+            &self.game,
+            &candidate.game,
+            &entry,
+            candidate.branch() == self.branch(),
+        );
         let record = Record {
             entry: entry.clone(),
-            receipt: Some(receipt.clone()),
+            receipt,
         };
-        if !matches!(entry.content, HistoryContent::Annotation { .. }) {
+        if !matches!(entry.content, JournalContent::Annotation { .. }) {
             let started = Instant::now();
             candidate.boundaries.push_back(Arc::new(Boundary {
                 id: Some(entry.id.clone()),
+                selectable: entry.content.rewindable(),
                 game: candidate.game.clone(),
                 revisions: candidate.revisions.clone(),
             }));
-            if candidate.boundaries.len() > REWIND_BOUNDARIES {
-                candidate.boundaries.pop_front();
-            }
+            retain_boundaries(&mut candidate.boundaries, |b| b.selectable);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.rollback_snapshot += started.elapsed();
                 profile.rollback_snapshots += 1;
@@ -2156,7 +2455,7 @@ impl Engine {
         anchor: Anchor,
         category: AnnotationCategory,
         text: &str,
-    ) -> Result<HistoryEntry, Failure> {
+    ) -> Result<JournalEntry, Failure> {
         self.backend_note(actor, component, anchor, category, text, None)
     }
 
@@ -2168,7 +2467,7 @@ impl Engine {
         category: AnnotationCategory,
         text: &str,
         recorded_id: Option<EntryId>,
-    ) -> Result<HistoryEntry, Failure> {
+    ) -> Result<JournalEntry, Failure> {
         if !valid_label(component) {
             return Err(Failure::new(
                 ErrorCode::InvalidAnnotation,
@@ -2176,7 +2475,8 @@ impl Engine {
             ));
         }
         self.validate_note(actor, "", Audience::Actor, &anchor, text)?;
-        let entry = HistoryEntry {
+        let entry = JournalEntry {
+            intention_ends: Vec::new(),
             id: recorded_id.unwrap_or_else(new_id),
             branch: self.branch().clone(),
             actor,
@@ -2185,7 +2485,7 @@ impl Engine {
                 component: component.into(),
             },
             audience: Audience::Actor,
-            content: HistoryContent::Annotation {
+            content: JournalContent::Annotation {
                 anchor,
                 category,
                 text: text.into(),
@@ -2653,7 +2953,7 @@ impl Candidate {
                 let boundary = self
                     .boundaries
                     .iter()
-                    .find(|b| &b.id == target)
+                    .find(|b| b.selectable && &b.id == target)
                     .cloned()
                     .ok_or_else(invalid)?;
                 if boundary
@@ -2667,6 +2967,7 @@ impl Candidate {
                 // Records the abandoned future made may still be referred to
                 // by retained boundaries, so their identities stay taken.
                 self.game.continue_record_ids(&later);
+                self.game.continue_intention_ids(&later);
                 self.revisions = boundary.revisions.clone();
                 let from_branch = self.current_branch.clone();
                 self.current_branch = BranchId(entry_id.0.clone());

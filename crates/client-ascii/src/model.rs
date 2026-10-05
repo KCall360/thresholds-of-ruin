@@ -27,6 +27,8 @@ pub enum Key {
     CloseDoor,
     Control,
     Release,
+    ResumeIntention,
+    CancelIntention,
     Note,
     Enter,
     Escape,
@@ -141,6 +143,10 @@ impl App {
 
     /// Apply every disclosed boundary, even when several updates share a frame.
     pub fn update(&mut self, update: StreamUpdate) -> Result<(), tor_client_common::StreamError> {
+        let phase = match &update.body {
+            UpdateBody::Intention { status } => Some(status.phase),
+            _ => None,
+        };
         let state = self
             .state
             .as_mut()
@@ -148,6 +154,11 @@ impl App {
         let old = Some((state.branch().clone(), state.state().revision));
         state.apply(update)?;
         self.state_changed(old);
+        if self.role == AccessRole::Player {
+            if let Some(phase) = phase {
+                self.status = format!("Action: {phase:?}.");
+            }
+        }
         Ok(())
     }
 
@@ -207,6 +218,24 @@ impl App {
 
     pub fn ready(&mut self) {
         self.busy = false;
+    }
+
+    pub fn intention_hint(&self) -> Option<&'static str> {
+        if self.role == AccessRole::Spectator {
+            return None;
+        }
+        let state = self.state.as_ref()?;
+        let pending = state
+            .intentions()
+            .iter()
+            .find(|status| status.phase.pending())?;
+        Some(if !state.has_control() {
+            "Action pending. F3 acquire control; F8 resume suspended work; F9 cancel; F2 history; Esc quit"
+        } else if pending.phase == IntentionPhase::Suspended {
+            "Action suspended. F8 resume; F9 cancel; F3/R control; F2 history; Esc quit"
+        } else {
+            "Action queued. F9 cancel; F3/R control; F2 history; Esc quit"
+        })
     }
 
     pub fn disconnect(&mut self, message: String) {
@@ -677,6 +706,31 @@ impl App {
             Key::Wait => self.act(Action::Wait),
             Key::Control => self.request(Request::AcquireControl),
             Key::Release => self.request(Request::ReleaseControl),
+            Key::ResumeIntention | Key::CancelIntention => {
+                let Some(state) = &self.state else {
+                    return Effect::None;
+                };
+                if !state.has_control() {
+                    self.status = "You are observing. Press F3 to request control.".into();
+                    return Effect::None;
+                }
+                let request = if key == Key::ResumeIntention {
+                    state.resume_intention_request()
+                } else {
+                    state.cancel_intention_request()
+                };
+                if let Some(request) = request {
+                    self.request(request)
+                } else {
+                    self.status = if key == Key::ResumeIntention {
+                        "No suspended action to resume."
+                    } else {
+                        "No queued action to cancel."
+                    }
+                    .into();
+                    Effect::None
+                }
+            }
             Key::OpenDoor | Key::CloseDoor => {
                 let Some(state) = &self.state else {
                     return Effect::None;
@@ -885,6 +939,12 @@ impl App {
         let Some(state) = &self.state else {
             return Effect::None;
         };
+        if matches!(command, Command::Act { .. } | Command::Travel { .. })
+            && state.has_pending_intention()
+        {
+            self.status = "An action is already queued.".into();
+            return Effect::None;
+        }
         self.request(Request::Command {
             branch: state.branch().clone(),
             command,

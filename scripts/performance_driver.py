@@ -163,18 +163,33 @@ class JsonProcess:
         self.child.stdin.write(encoded)
         self.child.stdin.flush()
         acknowledgement = None
+        admission = None
         self.ack_line_received = None
         self.ack_line_unix_ns = None
         self.ack_request_id = None
         def ready(value):
-            nonlocal acknowledgement
+            nonlocal acknowledgement, admission
             if (value.get("message") or {}).get("type") == "ack":
                 acknowledgement = time.perf_counter()
                 self.ack_line_received = self.last_line_received
                 self.ack_line_unix_ns = self.last_line_unix_ns
                 self.ack_request_id = value["message"]["request_id"] if "request_id" in value["message"] else None
+                receipt = value["message"].get("receipt") or {}
+                if receipt.get("type") == "admitted" and receipt.get("phase") == "queued":
+                    admission = receipt
             return value.get("type") == "ready"
         frame, received = self.until(ready)
+        if admission is not None and not frame.get("error"):
+            def executed(value):
+                message = value.get("message") or {}
+                body = (message.get("update") or {}).get("body") or {}
+                status = body.get("status") or {}
+                return (message.get("type") == "update" and body.get("type") == "intention"
+                        and all(status.get(key) == admission[key]
+                                for key in ("intention", "actor", "branch"))
+                        and status.get("phase") in
+                            ("started", "resolved", "failed", "cancelled", "suspended"))
+            frame, received = self.until(executed)
         return frame, started, acknowledgement, received
 
     def snapshot(self):

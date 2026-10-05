@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +38,94 @@ pub struct EntryId(pub String);
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BranchId(pub String);
+
+/// Opaque admission identity. Backend scheduling counters never cross the wire.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct IntentionId(pub String);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentionPhase {
+    Queued,
+    Suspended,
+    Started,
+    Resolved,
+    Failed,
+    Cancelled,
+}
+
+impl IntentionPhase {
+    pub fn pending(self) -> bool {
+        matches!(self, Self::Queued | Self::Suspended)
+    }
+
+    pub fn active(self) -> bool {
+        self.pending() || self == Self::Started
+    }
+
+    pub fn can_follow(self, previous: Self) -> bool {
+        match previous {
+            Self::Queued => true,
+            Self::Suspended => matches!(
+                self,
+                Self::Suspended | Self::Queued | Self::Failed | Self::Cancelled
+            ),
+            Self::Started => matches!(
+                self,
+                Self::Started | Self::Resolved | Self::Failed | Self::Cancelled
+            ),
+            Self::Resolved | Self::Failed | Self::Cancelled => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentionStatus {
+    pub actor: ActorId,
+    pub branch: BranchId,
+    pub intention: IntentionId,
+    pub entry_id: EntryId,
+    pub phase: IntentionPhase,
+}
+
+impl IntentionStatus {
+    pub fn valid_context(&self, actor: ActorId, branch: &BranchId) -> bool {
+        self.actor == actor
+            && &self.branch == branch
+            && !self.intention.0.is_empty()
+            && self.intention.0.len() <= 64
+            && !self.entry_id.0.is_empty()
+            && self.entry_id.0.len() <= 64
+    }
+}
+
+/// Immediate operations finish at acknowledgement; gameplay is admitted first.
+/// Admission context remains stable even when a retry follows a branch change.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RequestReceipt {
+    Immediate {
+        entry_id: Option<EntryId>,
+    },
+    Admitted {
+        actor: ActorId,
+        branch: BranchId,
+        intention: IntentionId,
+        entry_id: EntryId,
+        phase: IntentionPhase,
+    },
+}
+
+impl RequestReceipt {
+    pub fn entry_id(&self) -> Option<&EntryId> {
+        match self {
+            Self::Immediate { entry_id } => entry_id.as_ref(),
+            Self::Admitted { entry_id, .. } => Some(entry_id),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -324,6 +412,14 @@ pub enum Anchor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    ResumeIntention {
+        expected_revision: u64,
+        intention: IntentionId,
+    },
+    CancelIntention {
+        expected_revision: u64,
+        intention: IntentionId,
+    },
     RenamePlace {
         expected_revision: u64,
         key: String,
@@ -484,6 +580,7 @@ pub enum Request {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    pub intentions: Vec<IntentionStatus>,
     pub travel: Option<TravelStatus>,
     pub actor: ActorId,
     pub branch: BranchId,
@@ -496,6 +593,9 @@ pub struct Snapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpdateBody {
+    Intention {
+        status: IntentionStatus,
+    },
     Travel {
         status: TravelStatus,
         entry: Option<Box<HistoryEntry>>,
@@ -565,7 +665,7 @@ pub enum ServerMessage {
     },
     Ack {
         request_id: String,
-        entry_id: Option<EntryId>,
+        receipt: RequestReceipt,
     },
     History {
         request_id: String,

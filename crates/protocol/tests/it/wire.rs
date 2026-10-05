@@ -1,6 +1,30 @@
 use tor_protocol::*;
 
 #[test]
+fn queued_intention_controls_round_trip_opaque_identity_and_reject_extra_authority() {
+    for command in [
+        Command::ResumeIntention {
+            expected_revision: 7,
+            intention: IntentionId("admission".into()),
+        },
+        Command::CancelIntention {
+            expected_revision: 7,
+            intention: IntentionId("admission".into()),
+        },
+    ] {
+        let encoded = serde_json::to_value(&command).unwrap();
+        assert_eq!(
+            serde_json::from_value::<Command>(encoded.clone()).unwrap(),
+            command
+        );
+        assert!(encoded["intention"].is_string());
+        let mut forged = encoded;
+        forged["actor"] = serde_json::json!(2);
+        assert!(serde_json::from_value::<Command>(forged).is_err());
+    }
+}
+
+#[test]
 fn transfers_accept_optional_counts_but_reject_forged_identity_and_invalid_numbers() {
     assert_eq!(
         serde_json::from_str::<Action>(r#"{"type":"take","item":10}"#).unwrap(),
@@ -170,5 +194,46 @@ fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from
     assert_eq!(
         serde_json::from_value::<CombatView>(without).unwrap(),
         combat(None)
+    );
+}
+
+#[test]
+fn gameplay_acceptance_has_a_typed_receipt_and_an_opaque_intention_identity() {
+    let response = ServerMessage::Ack {
+        request_id: "request".into(),
+        receipt: RequestReceipt::Admitted {
+            actor: ActorId(7),
+            branch: BranchId("branch".into()),
+            intention: IntentionId("opaque-intention".into()),
+            entry_id: EntryId("admission-record".into()),
+            phase: IntentionPhase::Queued,
+        },
+    };
+    let wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["receipt"]["type"], "admitted");
+    assert_eq!(wire["receipt"]["phase"], "queued");
+    assert_eq!(wire["receipt"]["intention"], "opaque-intention");
+    assert!(wire.get("entry_id").is_none());
+    assert_eq!(
+        serde_json::from_value::<ServerMessage>(wire).unwrap(),
+        response
+    );
+    assert!(serde_json::from_value::<ServerMessage>(serde_json::json!({
+        "type": "ack", "request_id": "request", "entry_id": "old-completion"
+    }))
+    .is_err());
+}
+
+#[test]
+fn immediate_completion_is_distinct_from_admitted_gameplay() {
+    let response = ServerMessage::Ack {
+        request_id: "save".into(),
+        receipt: RequestReceipt::Immediate { entry_id: None },
+    };
+    let wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["receipt"]["type"], "immediate");
+    assert_eq!(
+        serde_json::from_value::<ServerMessage>(wire).unwrap(),
+        response
     );
 }

@@ -3,6 +3,132 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_status() {
+    for role in [AccessRole::Player, AccessRole::Spectator] {
+        let initial = state().snapshot();
+        let mut app = App::new();
+        app.role = role;
+        app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
+        let banner = "Spectator access is read-only.";
+        app.status = if role == AccessRole::Player {
+            "Action: Queued.".into()
+        } else {
+            banner.into()
+        };
+        let update = |sequence, phase, actor| StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: initial.cursor.sequence + sequence,
+                tick: initial.cursor.tick,
+            },
+            body: UpdateBody::Intention {
+                status: IntentionStatus {
+                    actor,
+                    branch: initial.branch.clone(),
+                    intention: IntentionId("original".into()),
+                    entry_id: EntryId("admission".into()),
+                    phase,
+                },
+            },
+        };
+        app.update(update(1, IntentionPhase::Queued, initial.actor))
+            .unwrap();
+        let before = app.status.clone();
+        assert!(app
+            .update(update(2, IntentionPhase::Resolved, ActorId(999)))
+            .is_err());
+        assert_eq!(app.status, before);
+        assert!(app.state.as_ref().unwrap().has_pending_intention());
+        app.update(update(2, IntentionPhase::Resolved, initial.actor))
+            .unwrap();
+        assert!(!app.state.as_ref().unwrap().has_pending_intention());
+        assert!(app.intention_hint().is_none());
+        assert_eq!(
+            app.status,
+            if role == AccessRole::Player {
+                "Action: Resolved."
+            } else {
+                banner
+            }
+        );
+    }
+}
+
+#[test]
+fn intention_controls_preserve_identity_context_and_read_only_access() {
+    for (phase, key, allowed) in [
+        (IntentionPhase::Suspended, Key::ResumeIntention, true),
+        (IntentionPhase::Suspended, Key::CancelIntention, true),
+        (IntentionPhase::Queued, Key::ResumeIntention, false),
+        (IntentionPhase::Queued, Key::CancelIntention, true),
+        (IntentionPhase::Started, Key::CancelIntention, false),
+    ] {
+        for role in [AccessRole::Player, AccessRole::Spectator] {
+            let mut snapshot = state().snapshot();
+            snapshot.intentions = vec![IntentionStatus {
+                actor: snapshot.actor,
+                branch: snapshot.branch.clone(),
+                intention: IntentionId("original".into()),
+                entry_id: EntryId("admission".into()),
+                phase,
+            }];
+            let mut app = App::new();
+            app.role = role;
+            app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+            app.ready();
+            let effect = app.input(Input::Key { key });
+            if allowed && role == AccessRole::Player {
+                let Effect::Request(Request::Command { branch, command }) = effect else {
+                    panic!("intention request");
+                };
+                assert_eq!(branch, snapshot.branch);
+                let (expected_revision, intention) = match command {
+                    Command::ResumeIntention {
+                        expected_revision,
+                        intention,
+                    }
+                    | Command::CancelIntention {
+                        expected_revision,
+                        intention,
+                    } => (expected_revision, intention),
+                    _ => panic!("wrong command"),
+                };
+                assert_eq!(expected_revision, snapshot.state.revision);
+                assert_eq!(intention.0, "original");
+            } else {
+                assert_eq!(effect, Effect::None);
+            }
+            if role == AccessRole::Spectator {
+                assert!(app.status.contains("read-only"));
+                assert!(app.intention_hint().is_none());
+            } else if phase == IntentionPhase::Suspended {
+                assert!(app.intention_hint().unwrap().contains("F8 resume"));
+            }
+        }
+    }
+}
+
+#[test]
+fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_ready() {
+    let mut snapshot = state().snapshot();
+    snapshot.intentions = vec![IntentionStatus {
+        actor: snapshot.actor,
+        branch: snapshot.branch.clone(),
+        intention: IntentionId("queued".into()),
+        entry_id: EntryId("admission".into()),
+        phase: IntentionPhase::Queued,
+    }];
+    assert!(snapshot.state.observation.ready);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
+    assert!(app.status.contains("queued"));
+}
+
+#[test]
 fn quantity_picker_submits_partial_pickup_and_drop() {
     let mut snapshot = state().snapshot();
     snapshot.state.observation.ground_items[0].item.quantity = 10;
@@ -144,7 +270,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     canvas.draw(&app);
     let normal = canvas.pixels.clone();
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -158,7 +284,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
 
 fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":3,"observation":{
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
@@ -284,7 +410,7 @@ fn losing_control_or_disconnect_prevents_actions() {
 #[test]
 fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     let mut snapshot: Snapshot = serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -403,6 +529,7 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
     view.observation.position.y = i32::MAX - 1;
     app.set_state(
         ClientState::from_snapshot(Snapshot {
+            intentions: Vec::new(),
             travel: None,
             actor: ActorId(1),
             branch: original.branch().clone(),
@@ -573,7 +700,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
 #[test]
 fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,
+        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -705,7 +832,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             dead: false,
             terminal: false,
         });
-        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true,"history":{"entries":[],"older_before":null},"state":view})).unwrap();
+        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},"state":view})).unwrap();
         let mut app = App::new();
         app.role = AccessRole::Player;
         app.bump_attacks = mode;

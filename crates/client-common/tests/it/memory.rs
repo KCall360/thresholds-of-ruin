@@ -4,7 +4,7 @@ use tor_protocol::*;
 fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "actor":1,"branch":"first","cursor":{"sequence":0,"tick":tick},
-        "has_control":false,"history":{"entries":[],"older_before":null},
+        "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
             "actor":1,"tick":tick,"position":{"x":1,"y":1,"z":0},
             "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],

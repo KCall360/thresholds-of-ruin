@@ -62,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.role = tor_protocol::AccessRole::Player;
             app.set_state(
                 tor_client_common::ClientState::from_snapshot(tor_protocol::Snapshot {
+                    intentions: Vec::new(),
                     travel: None,
                     actor,
                     branch: engine.branch().clone(),
@@ -121,7 +122,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     body: tor_protocol::UpdateBody::Observation {
                         state: Box::new(state),
-                        event: Some(Box::new(result.entry.disclosed())),
+                        event: Some(Box::new(
+                            result
+                                .entry
+                                .disclosed()
+                                .expect("completed command has history"),
+                        )),
                     },
                 };
                 let start = Instant::now();

@@ -157,7 +157,14 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
     match message {
         ServerMessage::Update { update } => publish(tx, Event::Update(update)),
         ServerMessage::Snapshot { snapshot, .. } => publish(tx, Event::Snapshot(snapshot)),
-        ServerMessage::Ack { .. } => publish(
+        ServerMessage::Ack {
+            receipt: tor_protocol::RequestReceipt::Admitted { phase, .. },
+            ..
+        } => publish(tx, Event::Status(format!("Action: {phase:?}."))),
+        ServerMessage::Ack {
+            receipt: tor_protocol::RequestReceipt::Immediate { .. },
+            ..
+        } => publish(
             tx,
             Event::Status(
                 "Ready. Background saving is enabled; closing normally saves pending play.".into(),

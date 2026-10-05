@@ -48,7 +48,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
         client.child.stdin.write('{"type":"quit"}\n');client.child.stdin.flush()
         self.assertEqual(client.child.wait(timeout=10),0)
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0],2)
 
     def test_slow_writer_does_not_hold_the_session_lock(self):
         self.saving_server(target=1, maximum=1000, idle=0)
@@ -85,34 +85,40 @@ class BackgroundSaveProcesses(ProcessTestCase):
         empty = self.save.with_name("empty.db");shutil.copyfile(self.save,empty)
         self.act(client,{"type":"wait"});self.request(client,{"type":"save"})
         with sqlite3.connect(self.save) as db:
-            record = db.execute("SELECT frame FROM journal WHERE sequence=1").fetchone()[0]
-        frame_path = self.save.with_name("frame.bin");frame_path.write_bytes(record)
+            records = db.execute("SELECT frame FROM journal WHERE sequence>0 ORDER BY sequence").fetchall()
+        self.assertEqual(len(records), 2)
+        frame_paths = [self.save.with_name(f"frame-{n}.bin") for n in (1, 2)]
+        for path, (record,) in zip(frame_paths, records):
+            path.write_bytes(record)
         server.stop()
-        for committed in (False,True):
+        # Rollback exposes neither fact; admission alone exposes pending work
+        # without effects; committing both exposes the completed action.
+        for prefix in (0, 1, 2):
             shutil.copyfile(empty,self.save)
             code = """import sqlite3,sys
 from pathlib import Path
-
-
-
-
-
 c=sqlite3.connect(sys.argv[1]);c.execute('PRAGMA cache_size=1');c.execute('PRAGMA synchronous=EXTRA');c.execute('BEGIN IMMEDIATE')
-b=Path(sys.argv[2]).read_bytes();c.execute('INSERT INTO journal VALUES (1,?)',(b,))
-if sys.argv[3]=='yes': c.commit()
+prefix=int(sys.argv[2]);b=Path(sys.argv[3]).read_bytes()
+c.execute('INSERT INTO journal VALUES (1,?)',(b,))
+if prefix==2: c.execute('INSERT INTO journal VALUES (2,?)',(Path(sys.argv[4]).read_bytes(),))
+if prefix: c.commit()
 else:
  for n in range(2,80): c.execute('INSERT INTO journal VALUES (?,?)',(n,b*30))
 print('written',flush=True);sys.stdin.readline()
 """
-            child = subprocess.Popen([sys.executable,"-c",code,str(self.save),str(frame_path),"yes" if committed else "no"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            child = subprocess.Popen([sys.executable,"-c",code,str(self.save),str(prefix),*map(str,frame_paths)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             try:
                 self.assertEqual(child.stdout.readline().strip(),"written")
                 child.kill();child.wait(timeout=10)
             finally:
                 if child.poll() is None: child.kill();child.wait(timeout=10)
                 child.stdin.close();child.stdout.close();child.stderr.close()
-            current=self.saving_server(); observer, resumed=self.client()
-            self.assertEqual(resumed["state"]["observation"]["tick"],100 if committed else 0)
+            current=self.saving_server(); observer, resumed=self.client(observe=True)
+            self.assertEqual(resumed["state"]["observation"]["tick"],100 if prefix==2 else 0)
+            self.assertEqual(len(resumed["intentions"]), 1 if prefix==1 else 0)
+            if prefix==1:
+                self.assertEqual(resumed["intentions"][0]["phase"], "suspended")
+            self.assertEqual(len(resumed["history"]), 1 if prefix==2 else 0)
             observer.stop();current.stop()
 
 

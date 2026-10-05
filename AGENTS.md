@@ -107,7 +107,7 @@ duplicating them. Earlier handoff notes are in the
 
 **Architecture refactor (active).** The maintainer authorized the
 [refactor plan](docs/refactoring.md). Work remains isolated from the original
-dirty interactions checkout. Twenty-three local implementation checkpoints cover
+dirty interactions checkout. Twenty-three checkpoints, merged in PR #64, cover
 explicit command mappings, shared boundary observations, portal-local item/body
 and privacy-scoped history indexes, shared route searches, checked requests,
 immutable body sharing, storage accounting and concurrency, atomic observation
@@ -123,7 +123,7 @@ worlds, navigation, items and equal body definitions across retained boundaries,
 profiled region-acquisition attribution with validated nested timings, and shared
 item/combat definitions with full-value pooling across decoded rewind boundaries.
 Future scenario extension contracts are documented without adding a runtime.
-Current quick/full Windows verification passed, including 237 debug Python/process
+That merged checkpoint passed quick/full Windows verification, including 237 debug Python/process
 tests and 123 release process tests; all twenty-two deployed-client/validator checks passed.
 
 Release comparisons and their limits are recorded in the plan. Reduced query and
@@ -137,6 +137,34 @@ before merging. The maintainer explicitly authorized pushes and PR merges on
 
 The maintainer explicitly authorized protocol, save, gameplay and scenario
 version changes on 2026-10-04, including the queue and stream-recovery proposal.
+The separate queue branch has simulation-owned intentions plus backend admission,
+linked start/failure records, shared action reconciliation and candidate commit,
+checkpoint/replay, rejection rollback and rewind identity tests. Wire actions now
+admit work; Session.step executes it. Protocol 23 has typed immediate/admitted
+receipts, opaque intention identities, ordered lifecycle updates and pending
+snapshots. Shared clients track occupied queue slots separately from readiness.
+Queued human work suspends durably on restart, control loss and rewind. Explicit
+resume/cancel preserves its original identity; ASCII exposes F8/F9 and headless
+provides strict input forms. Movement guards preserve region-local portal-frame
+meaning. Running attacks retain their intention identity through preparation,
+interruption and impact. Rewind retention separates selectable gameplay from
+private queue traffic, with bounded snapshots and exact private-gap replay.
+All 128 server unit tests and focused recovery/native/stream-corruption process
+tests pass. The latest quick run passed Rust/tooling and all 128 process tests,
+including the validated ASCII lifecycle-status regression. The latest full run
+completed every step: all Rust/tooling, 245 debug Python/process tests and 127
+release process tests passed. Its only debug/release failures were the native
+mouse hit check against Windows LockApp; the maintainer explicitly waived local
+native mouse verification on 2026-10-05. Keep the exception visible and retain
+ordinary CI coverage. The earlier performance-driver deadline passed unchanged
+in the latest debug/release suites, but its cause remains unexplained.
+Release comparisons and a real queued trace are recorded in the plan, including
+encoding growth and increased streaming tails. Maximum-retention resident memory
+and queue-only flood measurements remain open. Push verification, plus
+Windows/Linux CI remain required before
+publication. Paused-attack resume/cancel under the original identity, AI/travel
+migration, broader lineage/region checks and stream-context work remain open.
+This queue branch is not published. See the [refactor plan](docs/refactoring.md).
 Gameplay must admit intentions to simulation-owned scheduling.
 Derived topology indexes stay backend-only. Text-client fixes and scripting
 runtime selection/implementation are deferred. Advance format versions with the
@@ -151,7 +179,7 @@ samples; test packages are named for what they set up. See the
 [testing policy](docs/testing.md).
 
 **Interactive fiction engine (text client).** The engine core and places
-merged in PR #60; prose descriptions, walking, protocol 22 and the corner rule
+merged in PR #60; prose descriptions, walking, protocol changes and the corner rule
 in PR #61. The text client's `engine` module turns input into game actions and
 everything between two prompts into one passage; the prompt returns when the
 server's `waiting` signal says it's the player's move. See the

@@ -23,7 +23,14 @@ profiling tracks their effect rather than assuming background work is free.
 
 The snapshot contains the current simulation and scheduler state, navigation
 knowledge, identities, current branch, revisions, permanent wizard flag and all
-retained rewind boundaries (at most 128). Identical worlds and item maps across those boundaries are encoded once.
+retained boundaries. The server keeps the union of the latest 128 selectable
+gameplay states and the latest 128 raw transaction states, at most 256 shared
+boundaries. Private admission and queue-control records cannot shorten the
+selectable rewind window. Selectability is derived from journal content on
+restore; it is not trusted from a saved flag. Restore checks the exact retention
+set and replays private queue transitions across gaps between retained states,
+including their recorded timing and terminal facts. The two windows are derived
+in one pass through the archive. Identical worlds and item maps across those boundaries are encoded once.
 Navigation cells and edges are pooled independently by source region, and so are
 remembered place names. Each
 navigation instance holds ordered table references; equal region contents are

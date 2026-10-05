@@ -597,7 +597,7 @@ fn load(path: &Path) -> Result<Loaded, Failure> {
                 let a = archive.as_mut().ok_or_else(invalid_archive)?;
                 if matches!(
                     envelope.record.entry.content,
-                    crate::journal::HistoryContent::Wizard { .. }
+                    crate::journal::JournalContent::Wizard { .. }
                 ) && !a.wizard_game
                 {
                     return Err(invalid_archive());
@@ -1808,6 +1808,59 @@ mod tests {
         drop(store);
         let restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
         assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
+    }
+
+    #[test]
+    fn queued_execution_rejection_retains_work_and_recovery_preserves_receipts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("queued-execution.db");
+        let mut engine = capture_engine(&path);
+        let branch = engine.branch().clone();
+        let command = crate::journal::Command::AdmitIntention {
+            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            action: tor_protocol::Action::Move {
+                direction: tor_protocol::Direction::East,
+            },
+        };
+        let admission = engine
+            .command("p", "test", ActorId(1), "queued", &branch, command.clone())
+            .unwrap();
+        engine.flush().unwrap();
+        let store = engine.flush_handle().unwrap();
+        let before = engine.state(ActorId(1)).unwrap();
+        let counts = engine.profile_counts();
+        let saved = store.status();
+        store.0.shared.state.lock().unwrap().status.error = Some("injected worker failure".into());
+        for _ in 0..2 {
+            assert_eq!(
+                engine.execute_next_intention().unwrap_err().code,
+                tor_protocol::ErrorCode::StorageFailure
+            );
+            assert_eq!(engine.state(ActorId(1)).unwrap(), before);
+            assert_eq!(engine.profile_counts(), counts);
+            assert_eq!(store.status().accepted_sequence, saved.accepted_sequence);
+        }
+        store.0.shared.state.lock().unwrap().status.error = None;
+        let executed = engine.execute_next_intention().unwrap().unwrap();
+        assert!(engine.execute_next_intention().unwrap().is_none());
+        let after = engine.state(ActorId(1)).unwrap();
+        assert_ne!(after, before);
+        engine.flush().unwrap();
+        drop(engine);
+        drop(store);
+        let mut restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+        assert_eq!(restored.state(ActorId(1)).unwrap(), after);
+        assert!(restored.execute_next_intention().unwrap().is_none());
+        let retry = restored
+            .command("p", "test", ActorId(1), "queued", &branch, command)
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, admission.entry);
+        assert!(restored
+            .history(ActorId(1), "p", None, 10)
+            .unwrap()
+            .entries
+            .contains(&executed.entry.disclosed().unwrap()));
     }
 
     #[test]

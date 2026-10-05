@@ -455,7 +455,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F6/F7 height   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            "F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit"
+            app.intention_hint().unwrap_or("F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit")
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {

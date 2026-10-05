@@ -90,6 +90,7 @@ fn main() {
         let mut app = App::new();
         app.set_state(
             ClientState::from_snapshot(Snapshot {
+                intentions: Vec::new(),
                 actor: ActorId(1),
                 branch: engine.branch().clone(),
                 cursor: StreamCursor {
@@ -145,7 +146,12 @@ fn main() {
                 },
                 body: UpdateBody::Observation {
                     state: Box::new(state),
-                    event: Some(Box::new(entry.entry.disclosed())),
+                    event: Some(Box::new(
+                        entry
+                            .entry
+                            .disclosed()
+                            .expect("completed command has history"),
+                    )),
                 },
             };
             let start = Instant::now();

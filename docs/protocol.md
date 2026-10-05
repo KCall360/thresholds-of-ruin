@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":22,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":23,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -117,10 +117,43 @@ An action uses the branch and revision from the latest observation:
 }
 ```
 
+Gameplay acknowledgements report admission, before simulation execution:
+
+```json
+{"type":"ack","request_id":"move-1","receipt":{"type":"admitted","actor":1,"branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
+```
+
+The simulation chooses when the actor's intention executes. Observations disclose
+its effects; ordered `intention` updates report lifecycle changes. Snapshots include
+pending `intentions`, separately from observation readiness. Clients keep the queue
+slot occupied until a lifecycle update frees it. An attack's `started` phase does
+not mean its wind-up and impacts have finished; snapshots retain its running
+identity and later effects conclude it. Immediate operations acknowledge with a required
+`receipt { type: "immediate", entry_id: ... }` instead.
+
+Restart, controller loss and rewind suspend queued human intentions. Acquiring
+control leaves that work suspended. Explicit `resume_intention` and
+`cancel_intention` commands reference the original opaque identity from the
+current snapshot, using its current branch and state revision:
+
+```json
+{"type":"command","branch":"<current branch>","command":{"type":"resume_intention","expected_revision":7,"intention":"<original admission identity>"}}
+```
+
+Replace `resume_intention` with `cancel_intention` to discard the queued work.
+Both require controller authority. Resume returns the same intention to the
+simulation queue; cancellation has no gameplay effect and does not enable other
+simulation work. Their ordered lifecycle updates precede the acknowledgement.
+These controls apply to queued work. ASCII exposes F8/F9; headless exposes
+`resume_intention`/`cancel_intention` inputs using the current disclosed context.
+Resuming an already-started paused attack remains part of the integration work.
+
 Requests require unique IDs per authenticated user for accepted actions and
 annotations. Retry the exact same command and ID to recover its original receipt,
 including after reconnect or restart. Reusing an accepted ID for different
-content is an error. Failed commands are not committed. A duplicate successful
+content is an error. Requests rejected before admission are not committed. An
+execution-time failure consumes the accepted intention and records its failure,
+without substituting another action. A duplicate successful
 command from a player account is acknowledged without applying or broadcasting
 it again, even after control has moved to another client. Spectator accounts
 cannot submit commands, including receipt retries.
@@ -136,6 +169,7 @@ Clients receive `update` messages without polling:
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
 | `control` | This connection gained or lost control |
+| `intention` | An opaque intention's lifecycle in this actor/branch context; no authoritative topology or queued action targets |
 
 When play stops for input, the server sends `waiting { on }` after the updates
 of that run, and again after a snapshot: `you` (this client controls the actor

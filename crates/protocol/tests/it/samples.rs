@@ -38,6 +38,8 @@ fn request_kind(request: &Request) -> &'static str {
         Request::Snapshot => "snapshot",
         Request::Palette => "palette",
         Request::Command { command, .. } => match command {
+            Command::ResumeIntention { .. } => "command.resume_intention",
+            Command::CancelIntention { .. } => "command.cancel_intention",
             Command::RenamePlace { .. } => "command.rename_place",
             Command::Travel { .. } => "command.travel",
             Command::Wizard { .. } => "command.wizard",
@@ -66,6 +68,8 @@ const CLIENT_KINDS: &[&str] = &[
     "snapshot",
     "palette",
     "command.rename_place",
+    "command.resume_intention",
+    "command.cancel_intention",
     "command.travel",
     "command.wizard",
     "command.annotate",
@@ -83,13 +87,21 @@ fn server_kind(message: &ServerMessage) -> &'static str {
         ServerMessage::Welcome { .. } => "welcome",
         ServerMessage::Snapshot { .. } => "snapshot",
         ServerMessage::Update { update } => match update.body {
+            UpdateBody::Intention { .. } => "update.intention",
             UpdateBody::Travel { .. } => "update.travel",
             UpdateBody::Observation { .. } => "update.observation",
             UpdateBody::ObservationDelta { .. } => "update.observation_delta",
             UpdateBody::Annotation { .. } => "update.annotation",
             UpdateBody::Control { .. } => "update.control",
         },
-        ServerMessage::Ack { .. } => "ack",
+        ServerMessage::Ack {
+            receipt: RequestReceipt::Immediate { .. },
+            ..
+        } => "ack.immediate",
+        ServerMessage::Ack {
+            receipt: RequestReceipt::Admitted { .. },
+            ..
+        } => "ack.admitted",
         ServerMessage::History { .. } => "history",
         ServerMessage::Error { .. } => "error",
         ServerMessage::Palette { .. } => "palette",
@@ -102,13 +114,15 @@ fn server_kind(message: &ServerMessage) -> &'static str {
 /// recorded game doesn't reach; `update.observation` is covered by the
 /// delta tests instead.
 const SERVER_KINDS: &[&str] = &[
+    "update.intention",
     "welcome",
     "snapshot",
     "update.travel",
     "update.observation_delta",
     "update.annotation",
     "update.control",
-    "ack",
+    "ack.immediate",
+    "ack.admitted",
     "history",
     "error",
     "palette",

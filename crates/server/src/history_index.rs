@@ -1,6 +1,6 @@
 //! Derived journal lookup and privacy-scoped pagination. The archive remains
 //! authoritative; positions are stable because retained records are append-only.
-use crate::journal::HistoryEntry;
+use crate::journal::JournalEntry;
 use std::collections::BTreeMap;
 use tor_protocol::{ActorId, Audience, Author, BranchId, EntryId};
 
@@ -13,11 +13,14 @@ struct Scope {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HistoryIndex {
     entries: BTreeMap<EntryId, usize>,
+    intentions: BTreeMap<tor_simulation::IntentionId, usize>,
+    resolutions: BTreeMap<(String, tor_simulation::IntentionId), usize>,
+    ends: BTreeMap<(String, tor_simulation::IntentionId), usize>,
     branches: BTreeMap<String, BTreeMap<ActorId, Scope>>,
 }
 
 impl HistoryIndex {
-    pub fn rebuild<'a>(entries: impl IntoIterator<Item = &'a HistoryEntry>) -> Self {
+    pub fn rebuild<'a>(entries: impl IntoIterator<Item = &'a JournalEntry>) -> Self {
         let mut index = Self::default();
         for (position, entry) in entries.into_iter().enumerate() {
             index.append(entry, position);
@@ -25,7 +28,7 @@ impl HistoryIndex {
         index
     }
 
-    pub fn append(&mut self, entry: &HistoryEntry, position: usize) {
+    pub fn append(&mut self, entry: &JournalEntry, position: usize) {
         assert_eq!(
             position,
             self.entries.len(),
@@ -36,6 +39,30 @@ impl HistoryIndex {
             "unique journal identity"
         );
         self.entries.insert(entry.id.clone(), position);
+        for end in &entry.intention_ends {
+            self.ends
+                .insert((entry.branch.0.clone(), end.intention), position);
+        }
+        if let crate::journal::JournalContent::IntentionStarted { intention, .. }
+        | crate::journal::JournalContent::IntentionFailed { intention, .. } = entry.content
+        {
+            self.resolutions
+                .insert((entry.branch.0.clone(), intention), position);
+        }
+        if let crate::journal::JournalContent::IntentionAdmitted { intention, .. } = entry.content {
+            assert!(
+                self.intentions.insert(intention, position).is_none(),
+                "unique intention identity"
+            );
+            return;
+        }
+        if matches!(
+            entry.content,
+            crate::journal::JournalContent::IntentionFailed { .. }
+                | crate::journal::JournalContent::IntentionChanged { .. }
+        ) {
+            return;
+        }
         let scope = self
             .branches
             .entry(entry.branch.0.clone())
@@ -55,6 +82,26 @@ impl HistoryIndex {
 
     pub fn find(&self, id: &EntryId) -> Option<usize> {
         self.entries.get(id).copied()
+    }
+
+    pub fn intention_admission(&self, id: tor_simulation::IntentionId) -> Option<usize> {
+        self.intentions.get(&id).copied()
+    }
+
+    pub fn intention_resolution(
+        &self,
+        branch: &BranchId,
+        id: tor_simulation::IntentionId,
+    ) -> Option<usize> {
+        self.resolutions.get(&(branch.0.clone(), id)).copied()
+    }
+
+    pub fn intention_end(
+        &self,
+        branch: &BranchId,
+        id: tor_simulation::IntentionId,
+    ) -> Option<usize> {
+        self.ends.get(&(branch.0.clone(), id)).copied()
     }
 
     /// Returns chronological positions plus whether an older visible page exists.
@@ -104,7 +151,7 @@ impl HistoryIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::HistoryContent;
+    use crate::journal::JournalContent;
     use tor_protocol::{Anchor, AnnotationCategory};
 
     #[test]
@@ -129,14 +176,15 @@ mod tests {
                 for audience in [Audience::Actor, Audience::Private] {
                     for branch in ["original", "rewound"] {
                         for actor in [ActorId(1), ActorId(2)] {
-                            entries.push(HistoryEntry {
+                            entries.push(JournalEntry {
+                                intention_ends: Vec::new(),
                                 id: EntryId(format!("entry-{}", entries.len())),
                                 branch: BranchId(branch.into()),
                                 actor,
                                 tick: round,
                                 author: author.clone(),
                                 audience,
-                                content: HistoryContent::Annotation {
+                                content: JournalContent::Annotation {
                                     anchor: Anchor::State { revision: 0 },
                                     category: AnnotationCategory::Note,
                                     text: "note".into(),

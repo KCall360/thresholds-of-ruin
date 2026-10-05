@@ -132,13 +132,20 @@ unresolved noun ambiguities do not consume time; in-world failed attempts follow
 the relevant action rule. Multiplayer waiting and simultaneous input policies
 are deferred.
 
+Gameplay requests first admit bounded intentions without advancing time or applying
+effects. The simulation selects due queued work and rebuilds its transient
+preparation against current state. Admission and execution each pass through a
+private candidate, persistence admission and ordered publication. A typed receipt
+acknowledges admission; client readiness comes from the simulation stream.
+
 The simulation's private action boundary separates read-only validation and timing,
 effect application, and scheduler advancement. `Game::act` completes the command
 boundary without yielding. Immediate actions apply effects and then incur recovery;
 attacks instead commit per-actor wind-up progress and resolve at a later simulation
 boundary. Fallible command validation, including timing overflow, precedes mutation.
-The server's simulation profiling interval covers the command boundary; simulation
-code introduces no wall clock.
+Existing direct-action profiling covers this internal boundary; queue admission
+and scheduled-execution timing still need coordinated profiling. Simulation code
+introduces no wall clock.
 
 Attack identity, target, remaining work, and active/suspended state are authoritative
 and checkpointed. Resolution revalidates perception, reach, and displacement before
