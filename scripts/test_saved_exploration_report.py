@@ -13,7 +13,8 @@ class SavedExplorationReport(unittest.TestCase):
                        native_ms=1, capture_ms=0, previous_report_ms=0, turn_interval_ms=1)
         return dict(trace_version=spec["version"], seed=spec["seed"], regions=8,
                     checkpoint_interval=64, actions=77, disclosed_cells=1243,
-                    checkpoint_sequence=64, checkpoint_bytes=1000000, tail_records=13,
+                    checkpoint_sequence=128, checkpoint_bytes=1000000, tail_records=26,
+                    journal_records=154,
                     restart_equal=True, continued_after_restart=True,
                     samples=[dict(index=i, label=s["label"], action=s["action"],
                                   request_to_presentation_ms=1, profile=profile.copy())
@@ -25,6 +26,7 @@ class SavedExplorationReport(unittest.TestCase):
     def test_incomplete_or_invalid_exploration_cannot_pass(self):
         result = self.result()
         for key, value in (("checkpoint_sequence",0), ("checkpoint_bytes",67108865),
+                           ("journal_records",77), ("journal_records",155),
                            ("tail_records",64), ("disclosed_cells",0),
                            ("restart_equal",False), ("continued_after_restart",False),
                            ("actions",78), ("trace_version",99)):

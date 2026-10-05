@@ -114,6 +114,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
             Some(ClientMessage::Request { .. })
         ));
         let snapshot = Snapshot {
+            intentions: Vec::new(),
             actor: ActorId(1),
             branch: BranchId("branch-1".into()),
             cursor: StreamCursor {

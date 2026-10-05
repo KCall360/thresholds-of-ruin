@@ -145,11 +145,28 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
     }
     let id = connection.request(request).await?;
     timeout(Duration::from_secs(10), async {
+        let mut admitted = None;
         loop {
             let message = connection.next().await?;
             present(connection, &message);
             let complete = match &message {
-                ServerMessage::Ack { request_id, .. } | ServerMessage::Snapshot { request_id, .. } | ServerMessage::History { request_id, .. } => request_id == &id,
+                ServerMessage::Ack { request_id, receipt } if request_id == &id => {
+                    if let RequestReceipt::Admitted { actor, branch, intention, phase: IntentionPhase::Queued, .. } = receipt {
+                        admitted = Some((*actor, branch.clone(), intention.clone()));
+                        false
+                    } else {
+                        true
+                    }
+                }
+                ServerMessage::Update { update } => match (&update.body, &admitted) {
+                    (UpdateBody::Intention { status }, Some((actor, branch, intention))) => {
+                        status.actor == *actor && status.branch == *branch
+                            && status.intention == *intention
+                            && status.phase != IntentionPhase::Queued
+                    }
+                    _ => false,
+                },
+                ServerMessage::Snapshot { request_id, .. } | ServerMessage::History { request_id, .. } => request_id == &id,
                 ServerMessage::Error { request_id, .. } => request_id.as_ref() == Some(&id),
                 _ => false,
             };
@@ -163,6 +180,7 @@ fn present(connection: &Connection, message: &ServerMessage) {
     match message {
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Travel { .. } => {}
+            UpdateBody::Intention { status } => println!("Action: {:?}.", status.phase),
             UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
                 if let Some(entry) = event {
                     println!("{}", history(entry));
@@ -205,7 +223,14 @@ fn present(connection: &Connection, message: &ServerMessage) {
         ServerMessage::Error { code, message, .. } => {
             println!("Server error {code:?}: {}", safe(message))
         }
-        ServerMessage::Ack { .. } => println!("Done."),
+        ServerMessage::Ack {
+            receipt: RequestReceipt::Admitted { phase, .. },
+            ..
+        } => println!("Action: {phase:?}."),
+        ServerMessage::Ack {
+            receipt: RequestReceipt::Immediate { .. },
+            ..
+        } => println!("Done."),
         ServerMessage::Welcome { .. } => {}
     }
 }

@@ -20,8 +20,10 @@ and ordered effects are published. Retries resolve existing receipts; reconnect
 must not duplicate an uncertain action. Queue, cancellation, restart, rewind,
 and region-freezing semantics belong in deterministic saved state.
 
-The target gameplay flow has two persistence/publication boundaries. This is the
-planned architecture; the general intent-admission queue is not implemented yet.
+The gameplay flow has two persistence/publication boundaries. The integration
+branch connects the simulation queue, backend admission and execution, journal
+replay, and client lifecycle tracking. AI/travel migration, paused-attack recovery
+under the original intention identity, and further stream-context work remain.
 
 ```mermaid
 flowchart TD
@@ -161,7 +163,142 @@ at multiple world sizes and compare release workload measurements before claimin
 performance improvements. Windows and Linux CI remain required before merge.
 Compatibility-breaking decisions must be stated explicitly before adoption.
 
-## Current checkpoint: shared item and combat definitions
+## Work in progress: saved intentions
+
+The simulation now separates bounded intention admission from scheduled execution.
+Admission does not apply gameplay effects. Execution rebuilds preparation against
+current state, preserves actor scheduling order, and records the original intention
+alongside either its outcome or a failure. Human work can be suspended/resumed;
+checkpoint state preserves the queue, and rewinds continue its identity watermark.
+Focused tests pass, including capacity/rejection atomicity, malformed saved
+action rejection, single-decision AI execution and resolution of dead queued actors.
+Session uses the simulation's selection to resolve dead queued work even when
+no actor is due or controlled. Attack preparation retains its admission identity
+before wind-up advances, and impact/interruption facts carry the same identity.
+Tests cover restored progress, impact during execution, interruption and rejection
+of missing, zero or future saved identities. Backend journal entries now retain
+terminal intention facts atomically with the effects that produced them. Running
+attack contexts appear in snapshots, and completion during another actor's turn
+updates the original receipt and ordered lifecycle stream. Checkpoint restoration
+validates terminal identities, actors and outcomes against retained state boundaries.
+Server unit tests and a real server/text combat process test pass.
+Backend admission now uses the checked-request/candidate/persistence/publication
+boundary. Its distinct journal record retains a retryable receipt without claiming
+an action effect or appearing in disclosed history. Focused tests cover admission
+without state changes, retry, replay/checkpoint recovery, storage rejection and
+corrupted receipt/queue linkage. Backend scheduled execution now shares action
+reconciliation and candidate publication with immediate operations. Typed start
+and failure records link to the admission; no synthetic RPC receipt is persisted
+for execution. Tests cover exact replay/checkpoint restore, duplicate/foreign
+linkage rejection, rejected execution preserving work, durable restart/retry and
+rewind identity continuation. Wire actions now admit work; session simulation steps
+execute it. Protocol receipts distinguish immediate completion from admitted work,
+with opaque admission identities and branch context. Ordered lifecycle updates and
+pending snapshots drive shared client state and input guards. A real server,
+headless player and spectator test proves acceptance before effects and ordered
+resolution; protocol and shared/native/text client suites pass. Text changes are
+limited to transport and execution-failure handling.
+Scripted transport and the performance driver now wait for the matching actor,
+branch and intention lifecycle before inspecting effects. Driver acknowledgement
+timestamps remain separate from execution completion. Focused real-process tests
+cover piped input, save/restart and single/multiple-client performance workloads.
+Persistence process tests cover rollback, admission-only and completed-action
+durable prefixes, plus checkpoint-and-tail recovery with continued play.
+Queued movement retains its region-local origin, orientation, destination and
+portal frame change. Execution checks this guard against its fresh preparation;
+teleports and changed mappings fail instead of reinterpreting the direction.
+The guard is required in saved work and contains no cached permission or prepared
+action. Simulation tests cover restored context, rotated portals and rejection
+without state/time/RNG effects; a real multi-actor process test covers teleport
+while work waits in the queue.
+Queued human work now suspends durably on restart, control loss and rewind.
+Separate lifecycle facts replay without fabricated execution receipts or disclosed
+gameplay history. Explicit protocol resume/cancel commands validate current
+branch/revision, controller authority and original admission linkage. Cancellation
+preserves simulation time and does not enable autonomous progress. Storage rejection
+preserves queue/archive state; startup refuses to run if required suspension cannot
+be journaled. Server tests cover recovery, retries, corrupted linkage and atomicity;
+real-process tests cover control reacquisition, restart, observer denial, resume,
+cancellation and a rewound branch that survives another restart.
+Shared client state builds explicit queued controls from the current disclosed
+identity, branch and revision. ASCII exposes F8/F9 with a persistent queue-state
+hint; headless exposes strict JSON input forms without identity overrides. Tests
+cover abandoned contexts, control loss, read-only protection, genuine native key
+events and real server recovery through the new input forms.
+Validated lifecycle updates also refresh the ASCII action status after execution;
+rejected updates leave it unchanged, and spectator status remains read-only.
+Unit and real-window regressions cover a completed action leaving an empty queue.
+Private queue traffic no longer consumes the selectable rewind budget. Retention
+keeps the union of 128 selectable gameplay states and 128 recent raw transaction
+states, capped at 256 shared boundaries. Checkpoint restore derives the exact set
+in one archive pass and replays private metadata through any gaps. Tests cover
+admission traffic, repeated suspend/resume, expiry, checkpoint/replay/rewind and
+corrupt metadata outside the raw window. Format checks passed in the full tier.
+The release comparison and real queued trace below evaluate ordinary costs;
+maximum-retention resident memory and queue-only flood costs remain follow-up
+measurements.
+Running-preparation recovery, AI/travel migration, region lifecycle edge cases,
+complete lifecycle linkage and stream recovery remain
+pending. Broad server/process verification and format/CI gates remain
+required before publishing this integration branch. The latest full run completed
+all steps with passing non-mouse checks; the maintainer waived local native mouse
+verification because Windows LockApp covers the owned game window. CI retains
+the ordinary Windows/Linux suite. Push and CI gates remain pending.
+
+Three interleaved release rounds compared checkpoint 23 (`9ec78718`) with the
+queue integration working tree on the same Windows host and SSD (fingerprint
+`cfb2fdc044dc`). All twelve runs passed their workload validators. The head was
+dirty; these are local diagnostic measurements, not published ledger claims.
+The benchmark uses trusted direct-engine actions, so its command endpoint does
+not measure TCP admission or queue execution. Times below are milliseconds;
+each timing cell lists p50 / p95 / maximum.
+
+| Case | Metric | n per side | Checkpoint 23 | Queue integration |
+| --- | --- | ---: | ---: | ---: |
+| 64 regions, 8 actors, 1,000 seeded history | Command | 7,488 | 0.0413 / 2.5158 / 6.8817 | 0.0429 / 2.4839 / 9.5632 |
+| Same | Final flush | 3 | 711.411 / 757.416 / 757.416 | 629.578 / 703.025 / 703.025 |
+| Same | Restart/replay | 3 | 427.022 / 450.456 / 450.456 | 415.139 / 421.276 / 421.276 |
+| 256-region streaming | Command | 2,100 | 0.2276 / 0.4135 / 0.8615 | 0.2333 / 0.4283 / 1.7190 |
+| Same | Final flush | 3 | 106.992 / 129.618 / 129.618 | 114.292 / 153.720 / 153.720 |
+| Same | Restart/replay | 3 | 165.686 / 181.259 / 181.259 | 183.285 / 183.812 / 183.812 |
+
+Operation, observation, transition, revision-comparison and rewind counts stayed
+equal. Ordinary journal bytes rose from 1,492,887 to 1,542,807; checkpoint bytes
+rose from 630,163 to 635,323 and final file bytes from 4,964,352 to 5,156,864.
+Streaming journal bytes rose from 477,018 to 491,018 while final file bytes stayed
+679,936. New required intention metadata therefore has a measurable encoding
+cost. Ordinary command p95 was similar, but command maxima increased in both
+cases. Streaming flush tails and restore median also increased. Three flush and
+restore samples per side do not establish a broad performance improvement;
+these tails remain part of the latency investigation.
+
+A separate current-release TCP trace completed one cycle with eight actors and
+eight regions: 495 successful actions, two deliberate rejections, 495 correlated
+acknowledgements, and 61 checked spectator presentations. Diagnostics were
+retained in memory during measurement. The saved file was 704,512 bytes with
+991 journal rows. This is a current-path measurement, without a matched old-path
+comparison. The historical `request_to_ready_ms` field measures receipt of the
+matching execution lifecycle update for these actions.
+
+| Queued trace endpoint | n | p50 ms | p95 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: |
+| Admission acknowledgement line | 495 | 4.741 | 10.151 | 74.563 |
+| Execution update receipt | 495 | 11.205 | 32.879 | 88.413 |
+| Actor-1 spectator presentation | 61 | 85.293 | 188.801 | 225.774 |
+
+Presentation includes the ASCII client's configured observation pacing. Admission
+acknowledgement is a different endpoint from the older synchronous completion
+acknowledgement; comparing those as a latency gain would be misleading. The
+trace does not measure attack-impact completion or peak resident memory.
+
+This integration uses protocol 23, save/archive 16, ruleset `dungeon-v18`, and
+validator `tor-scenario-7`. Scenario package version 2 and binary frame version 6
+remain current. The required queue, movement and execution-context fields and
+typed lifecycle payloads have no legacy-reader defaults. Further format changes
+will accompany their corresponding implementations and verification.
+Previous saves/builds remain preserved; no historical-format reader is introduced.
+
+## Shared item and combat definitions
 
 Runtime item and combat definitions use transparent shared ownership. Public
 scenario configuration values remain owned. Stack splits and damage detach mutable
@@ -456,9 +593,10 @@ memory improvement is claimed; earlier unresolved timing tails remain open.
 ## Proposed compatibility decision: queued gameplay and stream recovery
 
 The maintainer authorized this proposal and protocol, save, gameplay and scenario
-version changes on 2026-10-04. Implementing the admission/execution contract requires the next
-protocol and save versions rather than silently changing protocol 22 and save
-format 15. Advance their version constants with the corresponding implementation.
+version changes on 2026-10-04. Implement the admission/execution contract with
+explicitly versioned protocol and save schemas. The persisted simulation queue
+advances the save version first; advance other version constants with the
+corresponding server/client implementation.
 The package format is unchanged by this proposal. No old-format reader is added.
 
 - Gameplay admission returns a stable intention identity and admission receipt.

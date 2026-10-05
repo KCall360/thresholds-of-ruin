@@ -7,6 +7,11 @@ mod actions;
 mod actor_store;
 pub mod ai;
 pub mod combat;
+mod intention;
+pub use intention::{
+    IntentionExecution, IntentionId, IntentionOrigin, IntentionState, IntentionWork,
+    MovementContext, QueuedIntention,
+};
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
@@ -47,7 +52,13 @@ pub struct ActorId(pub u64);
 )]
 pub struct ItemId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Action {
     Attack { target: ActorId },
     SetDoor { door: u64, open: bool },
@@ -70,6 +81,9 @@ pub enum GameError {
     DoorUnavailable,
     TimeExhausted,
     IdentityExhausted,
+    ActorBusy,
+    QueueFull,
+    InvalidIntention,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,6 +174,7 @@ pub struct Game {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    intentions: Shared<intention::IntentionQueue>,
     /// Region streaming state; empty unless regions were frozen or detached.
     lifecycle: streaming::Lifecycle,
 }
@@ -276,6 +291,7 @@ impl Game {
             next_actor_id: 1,
             next_item_id: 1,
             next_door_id: 1,
+            intentions: Shared::default(),
             lifecycle: streaming::Lifecycle::default(),
         }
     }

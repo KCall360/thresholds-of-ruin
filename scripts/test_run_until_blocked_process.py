@@ -1,6 +1,5 @@
 """Running until blocked through real processes: a client that stops reading
 can't hold the game. See docs/run-until-blocked.md."""
-import json
 import os
 import sqlite3
 import subprocess
@@ -167,11 +166,11 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         stalled = self.launch("tor-client-headless", ["--connect", relay.address], token=SPECTATOR_TOKEN)
         self.frame(stalled, lambda f: f["type"] == "ready")
         relay.gate.clear()
-        # Pipe every turn at once: the player never waits on the spectator.
-        player.write((json.dumps({"type": "act", "action": {"type": "wait"}}) + "\n") * TURNS)
+        # Wait for this actor's simulation effects before filling its one queue
+        # slot again. Delivery to the stalled spectator cannot gate these turns.
         final = None
         for _ in range(TURNS):
-            final = self.frame(player, lambda f: f["type"] == "ready", seconds=STALL_SECONDS * 6)
+            final = self.act(player, {"type": "wait"})
             self.assertIsNone(final["error"])
         tick = initial["state"]["observation"]["tick"] + TURNS * 100
         self.assertEqual(final["state"]["observation"]["tick"], tick)

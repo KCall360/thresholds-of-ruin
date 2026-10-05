@@ -4,7 +4,7 @@ use tor_protocol::*;
 fn snapshot(revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
         "actor":1,"branch":"validation","cursor":{"sequence":0,"tick":revision},
-        "has_control":false,"history":{"entries":[],"older_before":null},
+        "has_control":false,"intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
             "actor":1,"tick":revision,"position":{"x":0,"y":0,"z":0},
             "places":[{"key":"here","name":"Here","origin":"authored"}],
@@ -24,6 +24,121 @@ fn snapshot(revision: u64) -> Snapshot {
 }
 
 type Corrupt = fn(&mut Observation);
+
+#[test]
+fn intention_controls_require_current_control_and_never_reuse_an_abandoned_context() {
+    let mut initial = snapshot(9);
+    initial.has_control = true;
+    initial.state.observation.ready = false;
+    initial.intentions = vec![IntentionStatus {
+        actor: initial.actor,
+        branch: initial.branch.clone(),
+        intention: IntentionId("original".into()),
+        entry_id: EntryId("admission".into()),
+        phase: IntentionPhase::Suspended,
+    }];
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    assert!(
+        matches!(client.resume_intention_request(), Some(Request::Command { branch, command:
+        Command::ResumeIntention { expected_revision: 9, intention } })
+        if branch == initial.branch && intention.0 == "original")
+    );
+    client
+        .apply(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 9,
+            },
+            body: UpdateBody::Control { has_control: false },
+        })
+        .unwrap();
+    assert!(client.resume_intention_request().is_none());
+    assert!(client.cancel_intention_request().is_none());
+    let mut replaced = snapshot(11);
+    replaced.branch = BranchId("replacement".into());
+    replaced.has_control = true;
+    replaced.intentions = vec![IntentionStatus {
+        actor: replaced.actor,
+        branch: replaced.branch.clone(),
+        intention: IntentionId("new-work".into()),
+        entry_id: EntryId("new-admission".into()),
+        phase: IntentionPhase::Queued,
+    }];
+    client.replace_snapshot(replaced.clone()).unwrap();
+    assert!(client.resume_intention_request().is_none());
+    assert!(
+        matches!(client.cancel_intention_request(), Some(Request::Command { branch, command:
+        Command::CancelIntention { expected_revision: 11, intention } })
+        if branch == replaced.branch && intention.0 == "new-work")
+    );
+    replaced.intentions[0].phase = IntentionPhase::Started;
+    client.replace_snapshot(replaced).unwrap();
+    assert!(client.resume_intention_request().is_none());
+    assert!(client.cancel_intention_request().is_none());
+}
+
+#[test]
+fn intention_lifecycle_is_separate_from_observation_readiness_and_rejects_foreign_context_atomically(
+) {
+    let initial = snapshot(0);
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    let queued = IntentionStatus {
+        actor: initial.actor,
+        branch: initial.branch.clone(),
+        intention: IntentionId("opaque".into()),
+        entry_id: EntryId("admission".into()),
+        phase: IntentionPhase::Queued,
+    };
+    client
+        .apply(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 0,
+            },
+            body: UpdateBody::Intention {
+                status: queued.clone(),
+            },
+        })
+        .unwrap();
+    assert_eq!(client.state(), &initial.state);
+    assert!(client.has_pending_intention());
+    let before = client.clone();
+    let mut foreign = queued.clone();
+    foreign.actor = ActorId(2);
+    foreign.phase = IntentionPhase::Resolved;
+    assert_eq!(
+        client.apply(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            cursor: StreamCursor {
+                sequence: 2,
+                tick: 0
+            },
+            body: UpdateBody::Intention { status: foreign },
+        }),
+        Err(StreamError::InconsistentState)
+    );
+    assert_eq!(client, before);
+    let mut resolved = queued;
+    resolved.phase = IntentionPhase::Resolved;
+    client
+        .apply(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch,
+            cursor: StreamCursor {
+                sequence: 2,
+                tick: 0,
+            },
+            body: UpdateBody::Intention { status: resolved },
+        })
+        .unwrap();
+    assert!(!client.has_pending_intention());
+    assert_eq!(client.state(), &initial.state);
+}
 
 fn corruptions() -> [(&'static str, Corrupt); 12] {
     [

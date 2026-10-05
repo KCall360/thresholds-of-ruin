@@ -8,7 +8,7 @@ from process_harness import ProcessTestCase
 
 class ClientResponsivenessProcesses(ProcessTestCase):
     def saving_server(self, interval):
-        """A 256-region server that saves at once and checkpoints every `interval` actions."""
+        """A 256-region server that saves at once and checkpoints every `interval` records."""
         return self.server("--regions", 256, "--checkpoint-interval", interval, "--save-target-ms", 1,
                            "--save-max-ms", 1000, "--save-idle-ms", 0, seed=None, spectator=False)
 
@@ -42,9 +42,9 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         self.assertIsNone(self.request(observer, {"type":"save"})["error"])
         with sqlite3.connect(self.save) as db:
             if interval:
-                self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], sequence + 1)
+                self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], sequence + 2)
             else:
-                self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], sequence + 1)
+                self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0], sequence + 2)
         key("Escape", True)
         self.ascii_frame(window, lambda f: f["note"] is None)
         key("Escape", False)
@@ -89,6 +89,16 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         for _ in range(160):
             final = self.frame(player, lambda f: f.get("type") == "ready")
             self.assertIsNone(final["error"])
+        # The last ready frame acknowledges admission; effects follow on the
+        # ordered simulation stream. Compare both frontends at that completion.
+        if final["state"]["observation"]["tick"] != 16000:
+            pending = next(s for s in final["intentions"] if s["phase"] == "queued")
+            final = self.frame(player, lambda f: (
+                (f.get("message") or {}).get("type") == "update"
+                and f["message"]["update"]["body"]["type"] == "intention"
+                and f["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
+                and f["message"]["update"]["body"]["status"]["phase"] == "resolved"))
+        self.assertEqual(final["state"]["observation"]["tick"], 16000)
         presented = opened if opened["state"]["observation"]["tick"] == 16000 else self.ascii_frame(
             window, lambda f: f["state"]["observation"]["tick"] == 16000)
         self.assertEqual(presented["state"], final["state"])
@@ -98,7 +108,7 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         self.assertLessEqual(presented["profile"]["network_events"], 16)
         self.assertIsNone(self.request(player, {"type":"save"})["error"])
         with sqlite3.connect(self.save) as db:
-            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 160)
+            self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 320)
 
 
 if __name__ == "__main__":

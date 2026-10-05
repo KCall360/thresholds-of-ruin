@@ -354,16 +354,43 @@ impl Viewer {
             },
         };
         send(&mut self.client, &id, request).await;
+        let mut admitted = None;
         loop {
             let message = receive(&mut self.client).await.expect("connected");
+            let resolved = match &message {
+                ServerMessage::Update { update } => match &update.body {
+                    UpdateBody::Intention { status }
+                        if admitted.as_ref() == Some(&status.intention) =>
+                    {
+                        match status.phase {
+                            IntentionPhase::Resolved => Some(None),
+                            IntentionPhase::Failed => Some(Some(ErrorCode::InvalidAction)),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
             match self.take(message) {
-                Some(ServerMessage::Ack { request_id, .. }) if request_id == id => return None,
+                Some(ServerMessage::Ack {
+                    request_id,
+                    receipt,
+                }) if request_id == id => {
+                    let RequestReceipt::Admitted { intention, .. } = receipt else {
+                        panic!("gameplay admission receipt required")
+                    };
+                    admitted = Some(intention);
+                }
                 Some(ServerMessage::Error {
                     request_id: Some(request_id),
                     code,
                     ..
                 }) if request_id == id => return Some(code),
                 _ => {}
+            }
+            if let Some(result) = resolved {
+                return result;
             }
         }
     }

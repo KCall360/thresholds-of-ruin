@@ -76,6 +76,57 @@ async fn attach(client: &mut Client) -> Snapshot {
         other => panic!("{other:?}"),
     }
 }
+
+/// Check the admission/effect lifecycle on both ordered streams.
+async fn completed_action(player: &mut Client, observer: &mut Client, id: &str) -> StreamUpdate {
+    let ServerMessage::Update { update: queued } = receive(player).await else {
+        panic!("queued lifecycle required")
+    };
+    let UpdateBody::Intention { status } = &queued.body else {
+        panic!("queued lifecycle required")
+    };
+    assert_eq!(status.phase, IntentionPhase::Queued);
+    let ServerMessage::Update { update: watched } = receive(observer).await else {
+        panic!("observer queued lifecycle required")
+    };
+    assert_eq!(watched, queued);
+    let ServerMessage::Ack {
+        request_id,
+        receipt,
+    } = receive(player).await
+    else {
+        panic!("admission receipt required before effect")
+    };
+    assert_eq!(request_id, id);
+    assert!(
+        matches!(receipt, RequestReceipt::Admitted { intention, entry_id, phase: IntentionPhase::Queued, .. }
+        if intention == status.intention && entry_id == status.entry_id)
+    );
+    let ServerMessage::Update { update: effect } = receive(player).await else {
+        panic!("simulation effect required")
+    };
+    assert!(matches!(
+        effect.body,
+        UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+    ));
+    let ServerMessage::Update { update: watched } = receive(observer).await else {
+        panic!("observer effect required")
+    };
+    assert_eq!(watched, effect);
+    for client in [player, observer] {
+        let ServerMessage::Update { update } = receive(client).await else {
+            panic!("resolution required")
+        };
+        let UpdateBody::Intention { status: resolved } = update.body else {
+            panic!("resolution required")
+        };
+        assert_eq!(resolved.phase, IntentionPhase::Resolved);
+        assert_eq!(resolved.intention, status.intention);
+        assert_eq!(resolved.entry_id, status.entry_id);
+        assert_eq!(update.cursor.sequence, effect.cursor.sequence + 1);
+    }
+    *effect
+}
 async fn launch() -> (
     String,
     SimulationHandle,
@@ -158,22 +209,12 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
         },
     )
     .await;
-    for client in [&mut text, &mut ascii] {
-        match receive(client).await {
-            ServerMessage::Update { update } => {
-                let (state, event) = observation(update.body, &initial.state);
-                assert_eq!(state.observation.inventory.len(), 1);
-                assert_eq!(state.observation.tick, 50);
-                assert_eq!(state.revision, 1);
-                assert!(event.is_some());
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-    assert!(matches!(
-        receive(&mut text).await,
-        ServerMessage::Ack { .. }
-    ));
+    let update = completed_action(&mut text, &mut ascii, "take").await;
+    let (state, event) = observation(update.body, &initial.state);
+    assert_eq!(state.observation.inventory.len(), 1);
+    assert_eq!(state.observation.tick, 50);
+    assert_eq!(state.revision, 1);
+    assert!(event.is_some());
     request(&mut text, "release", Request::ReleaseControl).await;
     receive(&mut text).await;
     receive(&mut text).await;
@@ -522,14 +563,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             },
         };
         request(&mut player, &id, command.clone()).await;
-        let ServerMessage::Update { update: played } = receive(&mut player).await else {
-            panic!()
-        };
-        receive(&mut player).await;
-        let ServerMessage::Update { update: watched } = receive(&mut spectator).await else {
-            panic!()
-        };
-        assert_eq!(watched, played);
+        let watched = completed_action(&mut player, &mut spectator, &id).await;
         let event;
         (state, event) = observation(watched.body, &state);
         assert_eq!(state.revision, revision as u64 + 1);
@@ -577,7 +611,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut spectator).await else {
         panic!("No duplicate or rejected action updates")
     };
-    assert_eq!(snapshot.cursor.sequence, 4);
+    assert_eq!(snapshot.cursor.sequence, 10);
     assert_eq!(snapshot.state.revision, 3);
     assert_eq!(snapshot.history.entries, entries);
     spectator.close(None).await.unwrap();

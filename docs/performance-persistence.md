@@ -63,7 +63,8 @@ established under the workspace's `unsafe` prohibition.
   pooled by source region, so explored worlds stay small. See
   [checkpoints](checkpoints.md).
 - **State sharing.** Command candidates own only decision state, revisions, the
-  current branch, and at most 128 shared rewind boundaries. World collections,
+  current branch, and the union of 128 selectable rewind states and 128 raw audit
+  states (at most 256 shared boundaries). World collections,
   items, and navigation use copy-on-write ownership. Waits construct no scenes;
   other actions build one scene per observation and reuse it.
 - **Client delivery.** Client updates are validated before mutation without

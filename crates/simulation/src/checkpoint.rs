@@ -21,6 +21,7 @@ pub struct Snapshot {
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
+    intentions: Shared<crate::intention::IntentionQueue>,
     /// Region streaming state in [`SharedState`], omitted while empty so
     /// games that never stream save exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,6 +172,7 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
+            intentions: self.intentions.clone(),
             lifecycle: (!self.lifecycle.is_empty()).then(|| {
                 let lifecycles = &mut shared.lifecycles;
                 lifecycles
@@ -209,6 +211,7 @@ impl Game {
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
+            intentions: snapshot.intentions,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
                 // An empty state is always omitted, so encodings stay unique.
@@ -218,7 +221,8 @@ impl Game {
             },
         };
         let mut occupied = BTreeSet::new();
-        if !game.lifecycle_state_valid()
+        if !game.intentions_valid()
+            || !game.lifecycle_state_valid()
             || !game.physics_valid()
             || !game.combat_valid()
             || (game.actors.is_empty() && !game.has_detached_actors())

@@ -25,10 +25,10 @@ class StreamRecoveryProcesses(ProcessTestCase):
         relay.gate.clear()
         final = None
         for _ in range(4):
-            final = self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
+            final = self.act(player, {'type': 'wait'})
             self.assertIsNone(final['error'])
         self.assertTrue(relay.held.wait(5), 'Relay did not hold an actual server update')
-        # Server progress is established by acknowledgements while delivery is
+        # Server progress is established by execution updates while delivery is
         # stopped, rather than by a machine-specific latency threshold.
         self.assertEqual(final['state']['observation']['tick'], 400)
         if kind == 'ascii':
@@ -49,9 +49,9 @@ class StreamRecoveryProcesses(ProcessTestCase):
             slow.until(lambda line: 'Time passes.' in line)
 
         relay.drop_observation.set()
-        self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
+        self.act(player, {'type': 'wait'})
         self.assertTrue(relay.dropped.wait(5))
-        final = self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
+        final = self.act(player, {'type': 'wait'})
         if kind == 'ascii':
             failed = self.ascii_frame(slow, lambda f: not f['connected'])
             self.assertIn('SequenceMismatch', failed['status'])
@@ -73,7 +73,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
             for entry in final['history']:
                 self.assertIn(entry['id'], history)
             self.assertIn('Spectator access is read-only', initial)
-        self.assertIsNone(self.command(player, {'type': 'act', 'action': {'type': 'wait'}})['error'])
+        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
 
     def test_ascii_delayed_delivery_gap_and_relaunch(self):
         self.exercise('ascii')
@@ -88,7 +88,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
         self.addCleanup(relay.close)
         spectator, initial = self.playable(kind, relay.address)
         getattr(relay, corruption).set()
-        final = self.command(player, {'type': 'act', 'action': {'type': 'wait'}})
+        final = self.act(player, {'type': 'wait'})
         self.assertIsNone(final['error'])
         self.assertTrue(relay.corrupted.wait(5), 'No actual delta was corrupted')
         if kind == 'ascii':
@@ -109,7 +109,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
             history = replacement.until(lambda line: line == '> ')
             for entry in final['history']:
                 self.assertIn(entry['id'], history)
-        self.assertIsNone(self.command(player, {'type': 'act', 'action': {'type': 'wait'}})['error'])
+        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
 
     def test_ascii_overflowing_delta_and_relaunch(self):
         self.exercise_invalid_state('ascii', 'overflow_delta')
@@ -135,9 +135,9 @@ class StreamRecoveryProcesses(ProcessTestCase):
             # Explicit barriers make turn handoff independent of which client's
             # socket/input task the OS schedules first.
             self.assertIsNone(self.request(player, {'type':'snapshot'})['error'])
-            self.assertIsNone(self.command(player, {'type':'act','action':{'type':'wait'}})['error'])
+            self.assertIsNone(self.act(player, {'type':'wait'})['error'])
             self.assertIsNone(self.request(other, {'type':'snapshot'})['error'])
-            changed = self.command(other, {'type':'act','action':{'type':'set_door','door':door,'open':opened}})
+            changed = self.act(other, {'type':'set_door','door':door,'open':opened})
             self.assertIsNone(changed['error'])
             told = 'The wooden door to the east swings ' + ('open.' if opened else 'shut.')
             output = text.until(lambda line: told in line)

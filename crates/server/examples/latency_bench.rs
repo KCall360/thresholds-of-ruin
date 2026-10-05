@@ -84,6 +84,7 @@ impl Runner {
     fn new(engine: Engine, case: String) -> Self {
         let state = engine.state(ActorId(1)).unwrap();
         let snapshot = Snapshot {
+            intentions: Vec::new(),
             actor: ActorId(1),
             branch: engine.branch().clone(),
             cursor: StreamCursor {
@@ -182,7 +183,7 @@ impl Runner {
         let mut event = None;
         if let Ok((result, p)) = result {
             if action.is_none() {
-                let tor_server::journal::HistoryContent::Action {
+                let tor_server::journal::JournalContent::Action {
                     action: selected, ..
                 } = &result.entry.content
                 else {
@@ -202,7 +203,8 @@ impl Runner {
             let state = self.engine.state(ActorId(1)).unwrap();
             self.sequence += 1;
             let tick = state.observation.tick;
-            let event = (actor == ActorId(1)).then(|| Box::new(entry.disclosed()));
+            let event = (actor == ActorId(1))
+                .then(|| Box::new(entry.disclosed().expect("completed command has history")));
             // Send what the server sends: a delta against the client's state.
             let start = Instant::now();
             let delta = StateDelta::between(self.app.state.as_ref().unwrap().state(), &state);

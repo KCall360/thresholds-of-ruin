@@ -49,6 +49,7 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | Any key during a journey | Show the rest of the journey at once; journeys can't be cancelled |
 | `[` / `]` | Show journey steps more slowly / quickly (`--pace <ms>` sets the start, default 75) |
 | F3 / R | Acquire / release actor control |
+| F8 / F9 | Resume a suspended queued action / cancel queued work; requires control |
 | F4 | Compose a note anchored to the state where composition began |
 | Tab in note editor | Switch between private and actor-visible audience; defaults to private |
 | Enter / Backspace in note editor | Save / edit the note |

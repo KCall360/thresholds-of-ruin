@@ -51,7 +51,7 @@ class AsciiProcesses(ProcessTestCase):
         self.assertNotIn("Secret", str(shared))
         self.flush_save()
         before = self.save.read_bytes()
-        for key in ["control", "release", "right", "pickup", "wait", "note"]:
+        for key in ["control", "release", "right", "pickup", "wait", "note", "resume_intention", "cancel_intention"]:
             denied = self.key(spectator, key)
             self.assertIn("read-only", denied["status"])
             self.assertFalse(denied["has_control"])
@@ -98,7 +98,7 @@ class AsciiProcesses(ProcessTestCase):
         before = moved["state"]
         self.key(ascii_client, "release")
         self.assertIn("Control: yours", text.command("control"))
-        self.key(ascii_client, "escape")
+        self.key(ascii_client, "escape", wait_for_simulation=False)
         self.assertEqual(ascii_client.child.wait(timeout=10), 0)
         text.stop()
         self.game.stop()

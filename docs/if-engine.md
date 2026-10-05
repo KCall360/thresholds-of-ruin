@@ -391,7 +391,7 @@ Following the [testing policy](testing.md):
    [places and ways](#places-and-ways).
 4. **Prose descriptions, atmosphere and verbosity** (done): see
    [descriptions](#descriptions) and [atmosphere](#atmosphere).
-5. **Protocol 22** (done): the `waiting` signal ends turns, the objective's
+5. **Waiting signal** (done): the `waiting` signal ends turns, the objective's
    exit is disclosed by key (`go to exit`; "The exit is to the west."), and
    places carry authored names, with invented ones left unsaid.
 
@@ -407,4 +407,3 @@ named unless it says otherwise.
 2. **Fewer surveys.** A `look` surveys the place three times (description,
    anchor, ways); cache one survey per state revision if descriptions get
    slower.
-

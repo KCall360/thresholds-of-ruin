@@ -34,7 +34,9 @@ class TimingCorrelation(unittest.TestCase):
         result = dict(samples=[dict(index=0, presented_frame=1, request_to_presentation_ms=9,
                       input_unix_ns=0,line_unix_ns=9000000,reader_work_ms=.1,queue_delay_ms=.2,
                       intermediate_profiles=[dict(previous_report_ms=99)])])
-        frames = [dict(frame=1, input_done='right', busy=False, state=dict(revision=1),
+        # Simulation effects can be presented after the input acknowledgement;
+        # the driver's explicit frame must work without a legacy inferred frame.
+        frames = [dict(frame=1, input_done=None, busy=False, state=dict(revision=1),
                        presented_unix_ns=7000000,profile=dict(previous_report_ms=99)),
                   dict(frame=2,profile=dict(previous_report_ms=2,previous_report_encode_ms=.5,previous_report_write_ms=1.5))]
         with tempfile.TemporaryDirectory() as directory:

@@ -3,7 +3,7 @@ use tor_protocol::*;
 
 fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"branch","cursor":{"sequence":0,"tick":0},"has_control":true,"travel":null,
+        "actor":1,"branch":"branch","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"travel":null,
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":0,"observation":{"actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"places":[],"visible_cells":[],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true}}
     })).unwrap()).unwrap()
@@ -71,7 +71,7 @@ fn ordered_travel_status_is_separate_from_action_revisions_and_rejects_regressio
     );
     assert_eq!(client, before);
     client.replace_snapshot(serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"rewound","cursor":{"sequence":0,"tick":0},"has_control":true,"travel":null,
+        "actor":1,"branch":"rewound","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"travel":null,
         "history":{"entries":[],"older_before":null},"state":client.state()
     })).unwrap()).unwrap();
     assert!(client.travel().is_none());

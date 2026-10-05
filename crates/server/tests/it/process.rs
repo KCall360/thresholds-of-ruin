@@ -131,6 +131,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         ),
         ("save", Request::Save),
     ];
+    let mut wait_admission = None;
     for (id, request) in commands {
         let request = ClientMessage::Request {
             request_id: id.into(),
@@ -144,7 +145,35 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
             .unwrap();
         loop {
             match next_message(&mut socket).await {
-                ServerMessage::Ack { request_id, .. } if request_id == id => break,
+                ServerMessage::Ack {
+                    request_id,
+                    receipt,
+                } if request_id == id => {
+                    if id == "wait" {
+                        let RequestReceipt::Admitted {
+                            intention,
+                            entry_id,
+                            phase,
+                            ..
+                        } = receipt
+                        else {
+                            panic!("wait must acknowledge admission")
+                        };
+                        assert_eq!(phase, IntentionPhase::Queued);
+                        wait_admission = Some((intention, entry_id));
+                    } else {
+                        break;
+                    }
+                }
+                ServerMessage::Update { update }
+                    if id == "wait"
+                        && matches!(&update.body, UpdateBody::Intention { status }
+                        if status.phase == IntentionPhase::Resolved
+                            && wait_admission.as_ref().is_some_and(|(intention, entry)|
+                                &status.intention == intention && &status.entry_id == entry)) =>
+                {
+                    break
+                }
                 ServerMessage::Update { .. } => {}
                 other => panic!("{other:?}"),
             }
@@ -201,11 +230,19 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
         .await
         .unwrap();
     let message = next_message(&mut socket).await;
+    let (intention, entry_id) = wait_admission.expect("durable admission identity");
+    assert_ne!(entry_id, snapshot.history.entries[0].id);
     assert_eq!(
         message,
         ServerMessage::Ack {
             request_id: "wait".into(),
-            entry_id: Some(snapshot.history.entries[0].id.clone()),
+            receipt: RequestReceipt::Admitted {
+                actor: ActorId(1),
+                branch: snapshot.branch.clone(),
+                intention,
+                entry_id,
+                phase: IntentionPhase::Resolved,
+            },
         }
     );
 }

@@ -61,7 +61,16 @@ impl Engine {
         }
         let revision = self.revision(receipt.actor)?;
         let expected = match &receipt.command {
-            Command::Act {
+            Command::AdmitIntention {
+                expected_revision, ..
+            }
+            | Command::ResumeIntention {
+                expected_revision, ..
+            }
+            | Command::CancelIntention {
+                expected_revision, ..
+            }
+            | Command::Act {
                 expected_revision, ..
             } => Some((*expected_revision, "Refresh the observation before acting")),
             Command::Travel {

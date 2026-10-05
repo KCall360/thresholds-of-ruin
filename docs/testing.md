@@ -87,6 +87,12 @@ by client:
 Set `graphical = True` on a class that opens native windows. Test modules
 never import each other; anything two of them share belongs in the harness.
 
+`act()` waits for the matching simulation lifecycle update after admission;
+`command()` returns at request acknowledgement. Native `key()` tracks the input
+acknowledgement across frames and waits until queued work has executed. Use
+`wait_for_simulation=False` when testing a queue control whose acknowledgement
+must return while work remains queued for a later turn.
+
 ### Scenario packages, fixtures and wizard commands
 
 - Use ordinary validated [scenario packages](scenario-packages.md) for the initial

@@ -115,7 +115,9 @@ impl Reader<'_> {
                 UpdateBody::Control { has_control } => {
                     self.beats.push(Beat::Control(*has_control));
                 }
-                UpdateBody::Travel { .. } | UpdateBody::Annotation { .. } => {}
+                UpdateBody::Travel { .. }
+                | UpdateBody::Annotation { .. }
+                | UpdateBody::Intention { .. } => {}
             },
             ServerMessage::Snapshot { .. } => {
                 self.resynced = true;
@@ -183,10 +185,17 @@ async fn settle(
             } if request_id.as_ref() == Some(&id) => return Ok(Settled::Rejected(*code)),
             ServerMessage::Ack {
                 request_id,
-                entry_id,
+                receipt: accepted,
             } if *request_id == id => {
                 acked = true;
-                receipt = entry_id.clone();
+                receipt = accepted.entry_id().cloned();
+            }
+            ServerMessage::Update { update }
+                if matches!(&update.body,
+                UpdateBody::Intention { status } if matches!(status.phase, IntentionPhase::Failed | IntentionPhase::Cancelled)
+                    && receipt.as_ref() == Some(&status.entry_id)) =>
+            {
+                return Ok(Settled::Rejected(ErrorCode::InvalidAction));
             }
             ServerMessage::Snapshot { request_id, .. } if *request_id == id => {
                 return Ok(Settled::Done);

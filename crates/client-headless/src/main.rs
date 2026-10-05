@@ -14,6 +14,8 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Input {
+    ResumeIntention {},
+    CancelIntention {},
     Act {
         action: Action,
     },
@@ -92,11 +94,27 @@ async fn run() -> Result<(), Error> {
                         let result = match input {
                             Ok(Input::Quit) => break,
                             Ok(Input::Inspect) => None,
+                            Ok(Input::ResumeIntention {} | Input::CancelIntention {}) => {
+                                let resume = matches!(input, Ok(Input::ResumeIntention {}));
+                                if connection.role() == AccessRole::Spectator {
+                                    Some("Spectator access is read-only".into())
+                                } else if !connection.state.has_control() {
+                                    Some("Actor control is required".into())
+                                } else {
+                                    let request = if resume { connection.state.resume_intention_request() }
+                                        else { connection.state.cancel_intention_request() };
+                                    if let Some(request) = request { transact(&mut connection, request).await? }
+                                    else { Some(if resume { "No suspended action to resume" }
+                                        else { "No queued action to cancel" }.into()) }
+                                }
+                            }
                             Ok(Input::Act { action }) => {
                                 if connection.role() == AccessRole::Spectator {
                                     Some("Spectator access is read-only".into())
                                 } else if !connection.state.has_control() {
                                     Some("Actor control is required".into())
+                                } else if connection.state.has_pending_intention() {
+                                    Some("Actor already has a queued action".into())
                                 } else {
                                     let request = Request::Command {
                                         branch: connection.state.branch().clone(),
@@ -133,7 +151,7 @@ async fn run() -> Result<(), Error> {
                             }
                             Ok(Input::Request { request }) => transact(&mut connection, request).await?,
                             Err(_) => Some(
-                                "Invalid input; expected a JSON act, wizard, request, inspect or quit"
+                                "Invalid input; expected a JSON act, resume_intention, cancel_intention, wizard, request, inspect or quit"
                                     .into(),
                             ),
                         };
@@ -196,6 +214,7 @@ fn emit(
         "has_control": connection.state.has_control(),
         "history": connection.state.history(),
         "travel": connection.state.travel(),
+        "intentions": connection.state.intentions(),
         "memory": connection.state.memory().collect::<Vec<_>>(),
         "palette": &connection.palette,
         "message": message,
@@ -223,6 +242,19 @@ fn emit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn intention_inputs_do_not_accept_forged_actor_or_identity_fields() {
+        for kind in ["resume_intention", "cancel_intention"] {
+            assert!(
+                serde_json::from_value::<super::Input>(serde_json::json!({"type":kind})).is_ok()
+            );
+            for field in ["actor", "intention", "branch"] {
+                let mut forged = serde_json::json!({"type":kind});
+                forged[field] = serde_json::json!("forged");
+                assert!(serde_json::from_value::<super::Input>(forged).is_err());
+            }
+        }
+    }
     use super::*;
 
     #[test]

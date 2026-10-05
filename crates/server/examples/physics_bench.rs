@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 app.role = tor_protocol::AccessRole::Player;
                 app.set_state(
                     tor_client_common::ClientState::from_snapshot(tor_protocol::Snapshot {
+                        intentions: Vec::new(),
                         travel: None,
                         actor: player,
                         branch: engine.branch().clone(),

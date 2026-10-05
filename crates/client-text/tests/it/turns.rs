@@ -11,6 +11,8 @@ use tor_protocol::*;
 #[allow(clippy::large_enum_variant)] // Test frames are few and short-lived.
 enum Frame {
     Ack,
+    Admitted,
+    Intention(IntentionPhase),
     Reject(ErrorCode),
     /// The next observation, with the action event it follows.
     View(StateView, Option<Event>),
@@ -59,6 +61,7 @@ impl Scripted {
         respond: impl FnMut(&Request, &StateView) -> Vec<Frame> + 'static,
     ) -> Self {
         let snapshot = Snapshot {
+            intentions: Vec::new(),
             travel: None,
             actor: ActorId(1),
             branch: branch(),
@@ -147,11 +150,38 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::Admitted => ServerMessage::Ack {
+                    request_id: id.clone(),
+                    receipt: RequestReceipt::Admitted {
+                        actor: ActorId(1),
+                        branch: branch(),
+                        intention: IntentionId(format!("intent-{id}")),
+                        entry_id: EntryId(format!("intent-{id}")),
+                        phase: IntentionPhase::Queued,
+                    },
+                },
+                Frame::Intention(phase) => {
+                    let (tick, _) = self.last();
+                    self.update(
+                        tick,
+                        UpdateBody::Intention {
+                            status: IntentionStatus {
+                                actor: ActorId(1),
+                                branch: branch(),
+                                intention: IntentionId(format!("intent-{id}")),
+                                entry_id: EntryId(format!("intent-{id}")),
+                                phase,
+                            },
+                        },
+                    )
+                }
                 Frame::Ack => ServerMessage::Ack {
                     request_id: id.clone(),
-                    entry_id: destination
-                        .as_ref()
-                        .map(|_| EntryId(format!("journey-{id}"))),
+                    receipt: RequestReceipt::Immediate {
+                        entry_id: destination
+                            .as_ref()
+                            .map(|_| EntryId(format!("journey-{id}"))),
+                    },
                 },
                 Frame::Reject(code) => ServerMessage::Error {
                     request_id: Some(id.clone()),
@@ -664,6 +694,33 @@ async fn a_refusal_stops_the_chain_and_says_why() {
         "You can't pick that up from here."
     );
     assert_eq!(link.sent.len(), 1);
+}
+
+#[tokio::test]
+async fn execution_failure_after_admission_stops_the_command_chain() {
+    let mut link = Scripted::new(state(), |request, now| match request {
+        Request::Command {
+            command:
+                Command::Act {
+                    action: Action::Take { .. },
+                    ..
+                },
+            ..
+        } => vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Admitted,
+            Frame::Intention(IntentionPhase::Failed),
+            Frame::Waiting(Waiting::You),
+        ],
+        other => obliging(other, now),
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "take token, then take tablet").await,
+        "You can't pick that up from here."
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert!(!link.client.has_pending_intention());
 }
 
 #[tokio::test]

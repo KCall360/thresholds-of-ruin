@@ -73,7 +73,12 @@ fn wizard_marker_rewind_and_retained_future_survive_restart() {
         .history_branch(ActorId(1), "wizard", &original, None, 100)
         .unwrap()
         .entries
-        .contains(&placed.entry.disclosed()));
+        .contains(
+            &placed
+                .entry
+                .disclosed()
+                .expect("completed command has history")
+        ));
     let state = engine.state(ActorId(1)).unwrap();
     let branch = engine.branch().clone();
     drop(engine);

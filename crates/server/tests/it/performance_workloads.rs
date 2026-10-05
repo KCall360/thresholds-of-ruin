@@ -1,6 +1,6 @@
 use tor_protocol::{Action, ActorId, Direction};
 use tor_server::{
-    journal::{Command, HistoryContent},
+    journal::{Command, JournalContent},
     Engine, Scenario,
 };
 use tor_test_support::performance::Trace;
@@ -36,7 +36,7 @@ fn step(engine: &mut Engine, action: Action) {
         .unwrap();
     assert!(matches!(
         result.entry.content,
-        HistoryContent::Action { .. }
+        JournalContent::Action { .. }
     ));
 }
 

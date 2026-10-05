@@ -348,7 +348,7 @@ mod tests {
     ) {
         let message = ServerMessage::Ack {
             request_id: "inflight".into(),
-            entry_id: None,
+            receipt: tor_protocol::RequestReceipt::Immediate { entry_id: None },
         };
         let bytes = serde_json::to_vec(&message).unwrap().len();
         let pool = Arc::new(crate::outbound::Pool::new(crate::OutboundLimits {

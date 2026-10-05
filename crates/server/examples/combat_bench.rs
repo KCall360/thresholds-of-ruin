@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut ai_times = Vec::new();
                 let mut app = tor_client_ascii::App::new();
                 let snapshot = tor_protocol::Snapshot {
+                    intentions: Vec::new(),
                     travel: None,
                     actor: player,
                     branch: engine.branch().clone(),

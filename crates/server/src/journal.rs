@@ -10,6 +10,20 @@ impl Command {
         // Keep the transport and journal schemas independent: extending either
         // enum must require an explicit decision at this boundary.
         Ok(match command {
+            tor_protocol::Command::ResumeIntention {
+                expected_revision,
+                intention,
+            } => Self::ResumeIntention {
+                expected_revision: *expected_revision,
+                admission: EntryId(intention.0.clone()),
+            },
+            tor_protocol::Command::CancelIntention {
+                expected_revision,
+                intention,
+            } => Self::CancelIntention {
+                expected_revision: *expected_revision,
+                admission: EntryId(intention.0.clone()),
+            },
             tor_protocol::Command::RenamePlace {
                 expected_revision,
                 key,
@@ -41,7 +55,7 @@ impl Command {
             tor_protocol::Command::Act {
                 expected_revision,
                 action,
-            } => Self::Act {
+            } => Self::AdmitIntention {
                 expected_revision: *expected_revision,
                 action: action.clone(),
             },
@@ -66,6 +80,20 @@ impl TryFrom<Command> for tor_protocol::Command {
     type Error = &'static str;
     fn try_from(command: Command) -> Result<Self, Self::Error> {
         match command {
+            Command::ResumeIntention {
+                expected_revision,
+                admission,
+            } => Ok(Self::ResumeIntention {
+                expected_revision,
+                intention: tor_protocol::IntentionId(admission.0),
+            }),
+            Command::CancelIntention {
+                expected_revision,
+                admission,
+            } => Ok(Self::CancelIntention {
+                expected_revision,
+                intention: tor_protocol::IntentionId(admission.0),
+            }),
             Command::PausePreparation => Err("Preparation suspension is backend-only"),
             Command::Wizard {
                 expected_revision,
@@ -90,7 +118,11 @@ impl TryFrom<Command> for tor_protocol::Command {
                 expected_revision,
                 destination,
             }),
-            Command::Act {
+            Command::AdmitIntention {
+                expected_revision,
+                action,
+            }
+            | Command::Act {
                 expected_revision,
                 action,
             } => Ok(Self::Act {
@@ -114,19 +146,22 @@ impl TryFrom<Command> for tor_protocol::Command {
     }
 }
 
-impl HistoryEntry {
+impl JournalEntry {
     /// Only this projection crosses the network; journal topology stays private.
-    pub fn disclosed(&self) -> tor_protocol::HistoryEntry {
+    pub fn disclosed(&self) -> Option<tor_protocol::HistoryEntry> {
         use tor_protocol::{Event as VisibleEvent, HistoryContent as Content};
         let content = match &self.content {
-            HistoryContent::PlaceRenamed { key, name } => Content::PlaceRenamed {
+            JournalContent::IntentionAdmitted { .. }
+            | JournalContent::IntentionFailed { .. }
+            | JournalContent::IntentionChanged { .. } => return None,
+            JournalContent::PlaceRenamed { key, name } => Content::PlaceRenamed {
                 key: key.clone(),
                 name: name.clone(),
             },
-            HistoryContent::Travel { destination } => Content::Travel {
+            JournalContent::Travel { destination } => Content::Travel {
                 destination: destination.clone(),
             },
-            HistoryContent::Wizard { result, .. } => Content::Wizard {
+            JournalContent::Wizard { result, .. } => Content::Wizard {
                 summary: match result {
                     WizardResult::Rewound { .. } => "Timeline rewound.",
                     _ => "Developer setup completed.",
@@ -134,7 +169,8 @@ impl HistoryEntry {
                 .into(),
                 rewind: matches!(result, WizardResult::Rewound { .. }),
             },
-            HistoryContent::Action { action, event } => Content::Action {
+            JournalContent::Action { action, event }
+            | JournalContent::IntentionStarted { action, event, .. } => Content::Action {
                 action: action.clone(),
                 event: match event {
                     Event::PreparationPaused => VisibleEvent::PreparationPaused,
@@ -172,7 +208,7 @@ impl HistoryEntry {
                     Event::Waited => VisibleEvent::Waited,
                 },
             },
-            HistoryContent::Annotation {
+            JournalContent::Annotation {
                 anchor,
                 category,
                 text,
@@ -182,7 +218,7 @@ impl HistoryEntry {
                 text: text.clone(),
             },
         };
-        tor_protocol::HistoryEntry {
+        Some(tor_protocol::HistoryEntry {
             id: self.id.clone(),
             branch: self.branch.clone(),
             actor: self.actor,
@@ -190,7 +226,7 @@ impl HistoryEntry {
             author: self.author.clone(),
             audience: self.audience,
             content,
-        }
+        })
     }
 }
 
@@ -214,6 +250,18 @@ pub struct RegionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    ResumeIntention {
+        expected_revision: u64,
+        admission: EntryId,
+    },
+    CancelIntention {
+        expected_revision: u64,
+        admission: EntryId,
+    },
+    AdmitIntention {
+        expected_revision: u64,
+        action: Action,
+    },
     PausePreparation,
     RenamePlace {
         expected_revision: u64,
@@ -395,9 +443,39 @@ pub enum WizardResult {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentionChange {
+    Suspended,
+    Resumed,
+    Cancelled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum HistoryContent {
+pub enum JournalContent {
+    IntentionChanged {
+        admission: EntryId,
+        intention: tor_simulation::IntentionId,
+        change: IntentionChange,
+    },
+    /// The scheduler started this action. Attack impacts may resolve later.
+    IntentionStarted {
+        admission: EntryId,
+        intention: tor_simulation::IntentionId,
+        action: Action,
+        event: Event,
+    },
+    /// Execution revalidation failed; no substitute action was selected.
+    IntentionFailed {
+        admission: EntryId,
+        intention: tor_simulation::IntentionId,
+    },
+    /// Receipt of accepted work, before its simulation effect. Not a history event.
+    IntentionAdmitted {
+        intention: tor_simulation::IntentionId,
+        action: Action,
+    },
     PlaceRenamed {
         key: String,
         name: String,
@@ -421,20 +499,59 @@ pub enum HistoryContent {
     },
 }
 
+impl JournalContent {
+    pub(crate) fn rewindable(&self) -> bool {
+        match self {
+            Self::IntentionAdmitted { .. }
+            | Self::IntentionFailed { .. }
+            | Self::IntentionChanged { .. }
+            | Self::Annotation { .. } => false,
+            Self::IntentionStarted { .. }
+            | Self::Action { .. }
+            | Self::Wizard { .. }
+            | Self::Travel { .. }
+            | Self::PlaceRenamed { .. } => true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentionEndKind {
+    Resolved,
+    Failed,
+    Cancelled,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HistoryEntry {
+#[serde(deny_unknown_fields)]
+pub struct IntentionEnd {
+    pub actor: ActorId,
+    pub intention: tor_simulation::IntentionId,
+    pub kind: IntentionEndKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalEntry {
+    /// Terminal work facts admitted atomically with this record's state effects.
+    pub intention_ends: Vec<IntentionEnd>,
     pub id: EntryId,
     pub branch: BranchId,
     pub actor: ActorId,
     pub tick: u64,
     pub author: Author,
     pub audience: Audience,
-    pub content: HistoryContent,
+    pub content: JournalContent,
 }
 
-impl HistoryEntry {
+impl JournalEntry {
     pub fn visible_to(&self, actor: ActorId, user: &str) -> bool {
-        self.actor == actor
+        !matches!(
+            self.content,
+            JournalContent::IntentionAdmitted { .. }
+                | JournalContent::IntentionFailed { .. }
+                | JournalContent::IntentionChanged { .. }
+        ) && self.actor == actor
             && (self.audience == Audience::Actor
                 || match &self.author {
                     Author::User { user: owner } | Author::Frontend { user: owner, .. } => {
