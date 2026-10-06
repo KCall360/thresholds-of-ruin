@@ -31,29 +31,29 @@ CLIENT = [
         {"type": "continue"},
         {"type": "save"},
         {"type": "history_branch", "branch": "branch-1", "before": None, "limit": 50},
-        {"type": "attach", "actor": 1},
+        {"type": "attach", "actor": "1"},
         {"type": "acquire_control"},
         {"type": "release_control"},
         {"type": "snapshot"},
         {"type": "palette"},
         {"type": "history", "before": "entry-1", "limit": 20},
         *({"type": "command", "context": {
-            "stream": {"stream": "sample-attachment", "epoch": 1}, "readiness_revision": 3},
+            "stream": {"stream": "sample-attachment", "epoch": "1"}, "readiness_revision": "3"},
             "branch": "branch-1", "command": command} for command in [
-            {"type": "rename_place", "expected_revision": 3, "key": "place-key", "name": "Lantern Hall"},
-            {"type": "resume_intention", "expected_revision": 3, "intention": "admission-1"},
-            {"type": "cancel_intention", "expected_revision": 3, "intention": "admission-1"},
-            {"type": "travel", "expected_revision": 3, "destination": "cell-key"},
-            {"type": "wizard", "expected_revision": 3, "operation": "rewind initial"},
-            *({"type": "act", "expected_revision": 3, "action": action} for action in [
-                {"type": "attack", "target": 2},
-                {"type": "set_door", "door": 7, "open": True},
+            {"type": "rename_place", "expected_revision": "3", "key": "place-key", "name": "Lantern Hall"},
+            {"type": "resume_intention", "expected_revision": "3", "intention": "admission-1"},
+            {"type": "cancel_intention", "expected_revision": "3", "intention": "admission-1"},
+            {"type": "travel", "expected_revision": "3", "destination": "cell-key"},
+            {"type": "wizard", "expected_revision": "3", "operation": "rewind initial"},
+            *({"type": "act", "expected_revision": "3", "action": action} for action in [
+                {"type": "attack", "target": "2"},
+                {"type": "set_door", "door": "7", "open": True},
                 {"type": "move", "direction": "north_east"},
-                {"type": "take", "item": 4, "quantity": 2},
-                {"type": "drop", "item": 4, "quantity": None},
+                {"type": "take", "item": "4", "quantity": "2"},
+                {"type": "drop", "item": "4", "quantity": None},
                 {"type": "wait"},
             ]),
-            {"type": "annotate", "anchor": {"type": "state", "revision": 3}, "text": "A note",
+            {"type": "annotate", "anchor": {"type": "state", "revision": "3"}, "text": "A note",
              "source": "user", "audience": "private", "category": "note"},
             {"type": "annotate", "anchor": {"type": "entry", "id": "entry-1"}, "text": "An explanation",
              "source": "frontend", "audience": "actor", "category": "explanation"},
@@ -71,7 +71,7 @@ class Recorder(ProcessTestCase):
         self.request(player, {"type": "history", "limit": 5, "before": None})
         self.act(player, {"type": "move", "direction": "east"})
         self.act(player, {"type": "move", "direction": "east"})
-        self.act(player, {"type": "take", "item": 999999})
+        self.act(player, {"type": "take", "item": "999999"})
         state = self.request(player, {"type": "snapshot"})
         state = self.request(player, {"type": "command", "context": state["input_context"], "branch": state["branch"], "command": {
             "type": "annotate", "anchor": {"type": "state", "revision": state["state"]["revision"]},
@@ -88,7 +88,7 @@ class Recorder(ProcessTestCase):
         self.request(watcher, {"type": "snapshot"})
         # The headless client consumes the welcome itself, so it's written here.
         server_samples = {"welcome": {"type": "welcome", "protocol": PROTOCOL, "user": "sample-user",
-                                      "actors": [1], "role": "player"}}
+                                      "actors": ["1"], "role": "player"}}
         for client in (player, watcher):
             for line in client.transcript + [line for line in list(client.lines.queue) if line]:
                 if line.startswith("{"):
@@ -101,7 +101,7 @@ class Recorder(ProcessTestCase):
             "protocol": PROTOCOL,
             "client": CLIENT,
             "server": [server_samples[k] for k in sorted(server_samples)],
-        }, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        }, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         print(f"{output.relative_to(ROOT)}: {len(CLIENT)} client and {len(server_samples)} server samples: "
               + ", ".join(sorted(server_samples)))
 

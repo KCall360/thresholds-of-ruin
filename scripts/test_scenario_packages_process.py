@@ -93,12 +93,12 @@ class ScenarioPackageProcesses(ProcessTestCase):
         observation = initial['state']['observation']
         self.assertEqual(observation['combat']['max_hp'], 41)
         items = {entry['item']['name']: entry['item'] for entry in observation['ground_items']}
-        self.assertEqual(items['compiled coin']['quantity'], 3)
-        self.assertEqual(items['named gift']['quantity'], 1)
-        taken = self.act(player, {'type': 'take', 'item': items['compiled coin']['id'], 'quantity': 2})
+        self.assertEqual(items['compiled coin']['quantity'], '3')
+        self.assertEqual(items['named gift']['quantity'], '1')
+        taken = self.act(player, {'type': 'take', 'item': items['compiled coin']['id'], 'quantity': '2'})
         self.assertIsNone(taken['error'])
         inventory = taken['state']['observation']['inventory']
-        self.assertEqual([(item['name'], item['quantity']) for item in inventory], [('compiled coin', 2)])
+        self.assertEqual([(item['name'], item['quantity']) for item in inventory], [('compiled coin', '2')])
         self.flush_save()
         player.stop()
         server.stop()
@@ -106,9 +106,9 @@ class ScenarioPackageProcesses(ProcessTestCase):
         resumed, restored = self.client()
         self.assertEqual(restored['state'], taken['state'])
         self.assertEqual(restored['history'], taken['history'])
-        dropped = self.act(resumed, {'type': 'drop', 'item': inventory[0]['id'], 'quantity': 1})
+        dropped = self.act(resumed, {'type': 'drop', 'item': inventory[0]['id'], 'quantity': '1'})
         self.assertIsNone(dropped['error'])
-        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], 1)
+        self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], '1')
 
     def test_validator_stale_rejection_and_ordinary_startup(self):
         package = self.directory / 'package'

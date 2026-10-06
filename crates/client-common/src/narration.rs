@@ -266,12 +266,19 @@ mod tests {
     use super::*;
 
     fn observation() -> Observation {
-        serde_json::from_value(serde_json::json!({
-            "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},
-            "visible_cells":[],"ground_items":[],"inventory":[],
-            "visible_actors":[],"ready":true,"places":[]
-        }))
-        .unwrap()
+        Observation {
+            combat: None,
+            motion: None,
+            places: Vec::new(),
+            actor: ActorId(1),
+            tick: 0,
+            position: Position { x: 0, y: 0, z: 0 },
+            visible_cells: Vec::new(),
+            ground_items: Vec::new(),
+            inventory: Vec::new(),
+            visible_actors: Vec::new(),
+            ready: true,
+        }
     }
 
     #[test]
@@ -300,16 +307,25 @@ mod tests {
     #[test]
     fn doors_require_consecutive_sight_and_do_not_name_a_cause() {
         let mut before = observation();
-        before.visible_cells.push(
-            serde_json::from_value(serde_json::json!({
-                "key":"seen","position":{"x":1,"y":0,"z":0},"wall":false,
-                "material":"stone","place_hint":false,
-                "stairs_up":false,"stairs_down":false,
-                "door":{"id":3,"name":"iron gate","description":"","open":false,
-                    "reachable":true,"approaches":[]}
-            }))
-            .unwrap(),
-        );
+        before.visible_cells.push(CellView {
+            key: "seen".into(),
+            position: Position { x: 1, y: 0, z: 0 },
+            wall: false,
+            material: "stone".into(),
+            place_hint: false,
+            stairs_up: false,
+            stairs_down: false,
+            asset: None,
+            door: Some(DoorView {
+                id: 3,
+                name: "iron gate".into(),
+                description: String::new(),
+                open: false,
+                reachable: true,
+                approaches: Vec::new(),
+                asset: None,
+            }),
+        });
         let mut after = before.clone();
         after.visible_cells[0].door.as_mut().unwrap().open = true;
         assert_eq!(changes(&before, &after), ["The iron gate is now open."]);

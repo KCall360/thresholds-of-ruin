@@ -99,12 +99,12 @@ class RunUntilBlockedProcesses(ProcessTestCase):
 
         def read_snapshots(client):
             started.wait(timeout=15)
-            tick = initial["state"]["observation"]["tick"]
+            tick = int(initial["state"]["observation"]["tick"])
             for _ in range(32):
                 frame = self.request(client, {"type": "snapshot"})
                 self.assertIsNone(frame["error"])
                 self.assertEqual(frame["branch"], initial["branch"])
-                next_tick = frame["state"]["observation"]["tick"]
+                next_tick = int(frame["state"]["observation"]["tick"])
                 self.assertGreaterEqual(next_tick, tick)
                 tick = next_tick
 
@@ -121,8 +121,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
                 future.result(timeout=30)
 
         boundary = self.request(player, {"type": "snapshot"})
-        self.assertGreater(boundary["state"]["observation"]["tick"],
-                           initial["state"]["observation"]["tick"])
+        self.assertGreater(int(boundary["state"]["observation"]["tick"]),
+                           int(initial["state"]["observation"]["tick"]))
         self.assertTrue(boundary["state"]["observation"]["ready"])
         for client in watchers:
             watching = self.request(client, {"type": "snapshot"})
@@ -172,8 +172,8 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         for _ in range(TURNS):
             final = self.act(player, {"type": "wait"})
             self.assertIsNone(final["error"])
-        tick = initial["state"]["observation"]["tick"] + TURNS * 100
-        self.assertEqual(final["state"]["observation"]["tick"], tick)
+        tick = int(initial["state"]["observation"]["tick"]) + TURNS * 100
+        self.assertEqual(int(final["state"]["observation"]["tick"]), tick)
         # Released after the stall timeout, the spectator finds itself disconnected.
         relay.gate.set()
         self.assertNotEqual(stalled.child.wait(timeout=STALL_SECONDS * 4), 0)

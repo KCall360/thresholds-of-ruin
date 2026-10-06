@@ -26,9 +26,16 @@ exit unsuccessfully; uncertain commands are never automatically retried.
 
 Send one input object per line, waiting for `ready` before the next command:
 
+Structured input and printed state/messages use the protocol's canonical decimal
+strings for all 64-bit identities, quantities, ticks, revisions and durations,
+and for signed motion velocity components. Return received strings unchanged in
+requests; compare them using exact integer arithmetic. JSON numbers are rejected
+for these fields. Protocol versions, bounded counts and 32-bit positions remain
+numbers. See [integer representation](protocol.md#integer-representation).
+
 ```json
 {"type":"inspect"}
-{"type":"act","action":{"type":"take","item":1}}
+{"type":"act","action":{"type":"take","item":"1"}}
 {"type":"act","action":{"type":"move","direction":"east"}}
 {"type":"act","action":{"type":"wait"}}
 {"type":"resume_intention"}

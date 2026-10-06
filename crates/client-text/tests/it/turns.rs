@@ -305,19 +305,19 @@ impl Link for Scripted {
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":0,"observation":{
-        "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
+        "wizard_game":false,"revision":"0","observation":{
+        "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":1,"appearance":"item","identified":true,"id":2,"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"2","name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
         "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
-            "recovery_remaining":0,"actors":[],"events":[],"objective":null,
+            "recovery_remaining":"0","actors":[],"events":[],"objective":null,
             "victory":false,"dead":false,"terminal":false}}})).unwrap()
 }
 
@@ -1008,8 +1008,8 @@ async fn stacks_of_alike_things_are_counted_together() {
     let stack = |id: u64, name: &str, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
-            "item": {"quantity": quantity, "appearance": "item", "identified": true,
-                "id": id, "name": name, "description": ""}}))
+            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+                "id": id.to_string(), "name": name, "description": ""}}))
         .unwrap()
     };
     s.observation.ground_items = vec![
@@ -1305,8 +1305,8 @@ fn open_ground(find: usize) -> Scripted {
                 there.observation.ground_items.push(
                     serde_json::from_value(serde_json::json!({
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
-                        "item": {"quantity": 1, "appearance": "item", "identified": true,
-                            "id": 7, "name": "pebble", "description": ""}}))
+                        "item": {"quantity": "1", "appearance": "item", "identified": true,
+                            "id": "7", "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
             }
@@ -1407,8 +1407,8 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     let mut s = state();
     let arrows = |id: u64, quantity: u64| {
         serde_json::from_value::<ItemView>(serde_json::json!({
-            "quantity": quantity, "appearance": "item", "identified": true,
-            "id": id, "name": "arrow", "description": ""}))
+            "quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "id": id.to_string(), "name": "arrow", "description": ""}))
         .unwrap()
     };
     s.observation.inventory = vec![arrows(20, 2), arrows(21, 15)];

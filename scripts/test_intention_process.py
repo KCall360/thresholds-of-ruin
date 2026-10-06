@@ -16,6 +16,28 @@ def lifecycle(frame, identity, phase):
 
 
 class IntentionProcesses(ProcessTestCase):
+    def test_decimal_readiness_revisions_cross_digit_boundaries_in_real_play(self):
+        self.server(scenario="two-room")
+        player, initial = self.client()
+        previous = int(initial["readiness"]["revision"])
+        for _ in range(12):
+            completed = self.act(player, {"type": "wait"})
+            self.assertIsNone(completed["error"])
+            encoded = completed["readiness"]["revision"]
+            self.assertIsInstance(encoded, str)
+            self.assertEqual(encoded, str(int(encoded)))
+            self.assertGreater(int(encoded), previous)
+            previous = int(encoded)
+        self.assertGreaterEqual(previous, 10)
+        noted = self.request(player, {
+            "type": "command", "context": completed["input_context"],
+            "branch": completed["branch"], "command": {
+                "type": "annotate", "anchor": {
+                    "type": "state", "revision": completed["state"]["revision"]},
+                "text": "Exact decimal context after queued execution"}})
+        self.assertIsNone(noted["error"])
+        self.assertEqual(noted["state"], completed["state"])
+
     def test_completed_action_returns_current_input_context_for_the_next_command(self):
         self.server(scenario="two-room")
         player, _ = self.client()
@@ -48,7 +70,7 @@ class IntentionProcesses(ProcessTestCase):
             self.assertEqual(denied["intentions"], [])
         self.assertIsNone(self.act(player, {"type": "wait"})["error"])
         boundary = self.request(player, {"type": "snapshot"})
-        self.assertEqual(boundary["state"]["revision"], initial["state"]["revision"] + 1)
+        self.assertEqual(int(boundary["state"]["revision"]), int(initial["state"]["revision"]) + 1)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         player.stop(); observer.stop(); server.stop()
         self.server(scenario="two-room")
@@ -61,22 +83,22 @@ class IntentionProcesses(ProcessTestCase):
         player, initial = self.client()
         observer, watched = self.client(SPECTATOR_TOKEN)
         self.assertTrue(initial["readiness"]["admission"])
-        spectator_readiness = {"revision": 0, "admission": False, "resume": [], "cancel": []}
+        spectator_readiness = {"revision": "0", "admission": False, "resume": [], "cancel": []}
         self.assertEqual(watched["readiness"], spectator_readiness)
         revision = initial["readiness"]["revision"]
         released = self.request(player, {"type": "release_control"})
         self.assertEqual(released["readiness"], {
-            "revision": revision + 1, "admission": False, "resume": [], "cancel": []})
+            "revision": str(int(revision) + 1), "admission": False, "resume": [], "cancel": []})
         reacquired = self.request(player, {"type": "acquire_control"})
         self.assertTrue(reacquired["readiness"]["admission"])
-        self.assertEqual(reacquired["readiness"]["revision"], revision + 2)
+        self.assertEqual(int(reacquired["readiness"]["revision"]), int(revision) + 2)
         self.assertEqual(reacquired["state"], initial["state"])
         self.assertEqual(reacquired["branch"], initial["branch"])
         start = len(player.transcript)
         finished = self.act(player, {"type": "move", "direction": "east"})
         self.assertIsNone(finished["error"])
         self.assertTrue(finished["readiness"]["admission"])
-        self.assertEqual(finished["readiness"]["revision"], revision + 4)
+        self.assertEqual(int(finished["readiness"]["revision"]), int(revision) + 4)
         permissions = []
         for line in player.transcript[start:]:
             if line.startswith("{"):
@@ -136,7 +158,7 @@ class IntentionProcesses(ProcessTestCase):
             deltas(observer, observer_start, watched)
             reset = snapshot(player)
             self.assertEqual(reset["context"]["stream"], first["context"]["stream"])
-            self.assertEqual(reset["context"]["epoch"], first["context"]["epoch"] + 1)
+            self.assertEqual(int(reset["context"]["epoch"]), int(first["context"]["epoch"]) + 1)
             self.assertEqual(reset["state"], result["state"])
             first = reset
             watched = snapshot(observer)
@@ -211,7 +233,7 @@ class IntentionProcesses(ProcessTestCase):
         self.assertEqual(validated.returncode, 0, validated.stderr)
         server = self.server(scenario=package)
         player, _ = self.client()
-        accepted = self.command(player, {"type": "act", "action": {"type": "attack", "target": 2}})
+        accepted = self.command(player, {"type": "act", "action": {"type": "attack", "target": "2"}})
         self.assertIsNone(accepted["error"])
         identity = accepted["intentions"][0]["intention"]
         started = self.frame(player, lambda frame: lifecycle(frame, identity, "started"))
@@ -339,7 +361,7 @@ class IntentionProcesses(ProcessTestCase):
         self.assertEqual(failed["intentions"], [])
         self.assertFalse(any(entry["content"]["type"] == "action"
                              for entry in failed["history"]))
-        self.assertEqual(failed["state"]["observation"]["tick"], 0)
+        self.assertEqual(failed["state"]["observation"]["tick"], "0")
 
     def test_acceptance_precedes_effect_and_spectator_receives_ordered_resolution(self):
         self.server(scenario="travel")
@@ -354,8 +376,8 @@ class IntentionProcesses(ProcessTestCase):
         self.assertEqual(accepted["state"], initial["state"])
         self.assertEqual(accepted["intentions"][0]["intention"], receipt["intention"])
         resolved = self.frame(player, lambda frame: lifecycle(frame, receipt["intention"], "resolved"))
-        self.assertGreater(resolved["state"]["revision"], initial["state"]["revision"])
-        self.assertGreater(resolved["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
+        self.assertGreater(int(resolved["state"]["revision"]), int(initial["state"]["revision"]))
+        self.assertGreater(int(resolved["state"]["observation"]["tick"]), int(initial["state"]["observation"]["tick"]))
         self.assertEqual(resolved["intentions"], [])
         queued_watch = self.frame(watcher, lambda frame: lifecycle(frame, receipt["intention"], "queued"))
         self.assertEqual(queued_watch["state"], initial["state"])
@@ -374,8 +396,8 @@ class IntentionNativeProcesses(ProcessTestCase):
         self.assertEqual(completed["intentions"], [])
         self.assertIsNone(completed["action_hint"])
         self.assertEqual(completed["status"], "Action: Resolved.")
-        self.assertGreater(completed["state"]["observation"]["tick"],
-                           initial["state"]["observation"]["tick"])
+        self.assertGreater(int(completed["state"]["observation"]["tick"]),
+                           int(initial["state"]["observation"]["tick"]))
 
     def test_native_resume_and_cancel_keys_preserve_original_queue_identity(self):
         self.server(wizard=True)

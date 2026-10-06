@@ -321,8 +321,8 @@ class ProcessTestCase(unittest.TestCase):
             return executed
         # Completed/suspended work changes the available controls. Return after
         # that ordered permission update, so callers can capture a fresh context.
-        revision = executed["readiness"]["revision"]
-        return self.frame(client, lambda frame: frame["readiness"]["revision"] > revision)
+        revision = int(executed["readiness"]["revision"])
+        return self.frame(client, lambda frame: int(frame["readiness"]["revision"]) > revision)
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""

@@ -32,7 +32,7 @@ class CheckpointProcesses(ProcessTestCase):
         self.assertEqual(resumed["history"], saved["history"])
         for _ in range(3):
             continued = self.act(player, {"type": "wait"})
-        self.assertEqual(continued["state"]["observation"]["tick"], 1300)
+        self.assertEqual(continued["state"]["observation"]["tick"], "1300")
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 24)
@@ -46,7 +46,7 @@ class CheckpointProcesses(ProcessTestCase):
         for n in range(1, 10):
             player.command("wait")
             saved = self.ascii_frame(spectator,
-                lambda f: f["state"]["observation"]["tick"] == n*100)
+                lambda f: f["state"]["observation"]["tick"] == str(n*100))
         self.assertIn("Done.", player.command("save"))
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 16)
@@ -61,7 +61,7 @@ class CheckpointProcesses(ProcessTestCase):
         self.assertEqual(resumed["history"], saved["history"])
         player.command("wait")
         self.ascii_frame(spectator,
-            lambda f: f["state"]["observation"]["tick"] == 1000)
+            lambda f: f["state"]["observation"]["tick"] == "1000")
 
     def test_checkpoint_writer_wait_does_not_block_new_actions(self):
         import time

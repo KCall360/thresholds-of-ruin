@@ -38,10 +38,10 @@ class AdventureProcesses(ProcessTestCase):
         fetched = self.say(player, "get tablet")
         self.assertTrue(fetched.startswith("You walk over to the stone tablet and pick it up.\nGallery\nYou are in "), fetched)
         observer, initial = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(initial["state"]["observation"]["tick"], 750)
+        self.assertEqual(initial["state"]["observation"]["tick"], '750')
         self.assertEqual([i["name"] for i in initial["state"]["observation"]["inventory"]], ["stone tablet"])
         self.assertEqual(initial["travel"]["phase"], "arrived")
-        self.assertEqual(initial["travel"]["completed_steps"], 7)
+        self.assertEqual(initial["travel"]["completed_steps"], "7")
         kinds = [h["content"]["type"] for h in initial["history"]]
         self.assertEqual(kinds, ["travel"] + ["action"] * 8)
 
@@ -101,7 +101,7 @@ class AdventureProcesses(ProcessTestCase):
         self.assertIn("You go down.", self.say(player, "down"))
         self.assertIn("You go up.", self.say(player, "up"))
         observer, state = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(state["state"]["observation"]["tick"], 550)
+        self.assertEqual(state["state"]["observation"]["tick"], '550')
         self.assertEqual([i["name"] for i in state["state"]["observation"]["inventory"]], ["stone tablet"])
         for hidden in ("Upper gallery", "offset", "region", "quarter_turns"):
             self.assertNotIn(hidden, "\n".join(player.transcript))
@@ -112,7 +112,7 @@ class AdventureProcesses(ProcessTestCase):
         self.assertIn("You walk east.", self.say(player, "east"))
         self.assertEqual("You walk over to the stone tablet and pick it up.\n> ", self.say(player, "get tablet"))
         _, state = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(state["state"]["observation"]["tick"], 650)
+        self.assertEqual(state["state"]["observation"]["tick"], '650')
         self.assertNotIn("East space", "\n".join(player.transcript))
 
     def test_new_actor_interrupts_and_arrival_does_not_override_pickup_caution(self):
@@ -129,7 +129,7 @@ class AdventureProcesses(ProcessTestCase):
                 self.assertNotIn("and pick it up", interrupted)
                 observer, state = self.client(SPECTATOR_TOKEN)
                 self.assertEqual(state["travel"]["phase"], expected_phase)
-                self.assertEqual(state["travel"]["completed_steps"], 1)
+                self.assertEqual(state["travel"]["completed_steps"], "1")
                 self.assertEqual(state["state"]["observation"]["inventory"], [])
                 self.assertIn("nothing special about the figure", self.say(player, "examine figure"))
                 for process in (player, observer, server): process.stop()
@@ -150,7 +150,7 @@ class AdventureProcesses(ProcessTestCase):
         # headless client resubmits a stale command at the disclosed revision.
         self.wizard_command(wizard, "rewind initial")
         observer, state = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(state["state"]["observation"]["tick"], 0)
+        self.assertEqual(state["state"]["observation"]["tick"], '0')
         self.assertIsNone(state["travel"])
         self.assertEqual(state["state"]["observation"]["inventory"], [])
         # Fresh attachment cannot inherit an old client's compound intent.

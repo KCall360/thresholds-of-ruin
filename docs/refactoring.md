@@ -1823,8 +1823,8 @@ saved-action tests had selected the protocol Action serializer instead of the
 save-owned adapter. Explicitly qualifying the adapter corrected the tests. All
 five schema tests then passed with protocol-26 decimal-string wire encoding,
 including the already independent production nested-journal tests. The prototype
-is preserved separately; this checkpoint retains protocol 25. The corrected
-checkpoint requires renewed verification and final-head CI before merging.
+is preserved separately; that checkpoint retains the preceding wire schema.
+The corrected checkpoint requires renewed verification and final-head CI before merging.
 
 ### Explicit journal lease ownership (in development)
 
@@ -1846,8 +1846,11 @@ failure; it was not directly observed in that CI run.
 The deterministic ownership and retained-intention checkpoint regressions passed
 in debug and release. All eight background-save process tests passed, including
 three checkpointed immediate restarts that verify restored state and history.
-Renewed full verification and final-head Windows/Linux CI remain required before
-publication. The previous desktop build stays active until those gates pass.
+Exact head `2f6a741` subsequently passed the complete local full gate and all
+five final-head Windows/Linux CI checks. PR #70 merged, and the three desktop
+launchers use its verified immutable build. Five binary hashes and all four
+launcher helper files were verified after activation; earlier builds and saves
+remain retained.
 
 ### Journal lease release comparison
 
@@ -1872,3 +1875,85 @@ restart p95 rose 0.1%; restart groups have only three samples each. Flush tails
 included a large baseline spike. These measurements do not establish a speedup
 or isolate the unlock cost from host scheduling. Raw reports remain local and
 unpublished. Broader persistence and restoration tails remain open work.
+
+
+## Lossless wire integers (in development)
+
+Protocol 26 encodes every 64-bit wire integer as a canonical decimal string,
+including actor/item/door identities, ticks, revisions, stream counters,
+quantities, durations, travel steps and signed motion velocity components.
+Strict Serde adapters reject numeric tokens, noncanonical forms and overflow;
+typed Rust values remain integers. Optional quantities preserve missing/null
+semantics. Versions, bounded counts and 32-bit coordinates remain JSON numbers.
+This supports future JavaScript consumers without losing values above 2^53.
+
+The preceding persisted-schema checkpoint keeps saved actor/action/history and
+revision encodings numeric independently of this change. Save format, ruleset
+and scenario versions remain unchanged. Diagnostics and benchmark metadata also
+retain their numeric schemas. Headless diagnostic palette revisions are numeric;
+the embedded protocol palette revision is a decimal string. Regression coverage
+asserts both representations rather than coercing every JSON field alike.
+
+Python consumers return identifiers and contexts unchanged and convert counters
+to exact integers where arithmetic or ordering is required. The benchmark driver
+now waits for the permission update following a completed admitted intention,
+so its next command has current input context. Started preparation still returns
+at its lifecycle boundary. Original acknowledgement timing remains unchanged.
+The place workload explicitly selects its documented two-room baseline rather
+than relying on the default gameplay scenario.
+
+Boundary tests cover integer extremes, values above JavaScript's exact range,
+canonical rejection, optional fields and signed triples. Recorded wire samples
+cover all current message kinds. All 834 debug Rust workspace tests passed.
+Affected process regressions passed for items, portal physics, three-dimensional
+sight, authored inheritance, memory, privacy, travel, preparation, checkpoint
+restart, streaming recovery, native presentation and eight-client scheduling.
+The focused final Python caller run passed all 60 tests. The first full gate
+passed all 834 Rust tests in each profile and all 141 release process tests;
+259 of 260 debug Python tests passed. Its sole failure was a stale version
+reference in this plan. Correcting that reference requires a renewed successful
+full gate; the failed run does not satisfy publication. Final-head Windows/Linux
+CI remains required before merging. No scripting runtime or text-client product
+changes are included; the remaining architecture sequences and performance tails remain active work.
+
+
+### Wire integer release comparison
+
+Three interleaved five-cycle rounds compared the preceding persisted-schema
+checkpoint with the wire-integer checkpoint on machine fingerprint
+`6a1878811f37`, using the same HDD save volume and checkpoint interval 256.
+All 24 reports validated, with no failed runs or competing build processes.
+Operation, recovery and history counts, checkpoint/journal bytes and final save
+sizes matched. Timings below are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-memory / command | 915 | 0.563 → 0.575 | 0.816 → 0.818 | 1.312 → 1.652 |
+| Same case / restart | 3 | 168.306 → 164.124 | 185.266 → 180.773 | 185.266 → 180.773 |
+| r64-a8-h100-memory / command | 7,500 | 0.030 → 0.029 | 2.568 → 2.485 | 4.795 → 9.445 |
+| Same case / restart | 3 | 1,534.891 → 1,488.742 | 1,554.832 → 1,493.815 | 1,554.832 → 1,493.815 |
+| r8-a1-h100-durable / command | 915 | 0.562 → 0.564 | 0.801 → 0.795 | 1.113 → 1.993 |
+| Same case / flush | 3 | 116.919 → 121.075 | 598.690 → 131.107 | 598.690 → 131.107 |
+| Same case / restart | 3 | 111.357 → 112.196 | 111.971 → 113.321 | 111.971 → 113.321 |
+| r64-a8-h100-durable / command | 7,500 | 0.039 → 0.038 | 2.562 → 2.482 | 7.464 → 8.017 |
+| Same case / flush | 3 | 357.131 → 341.033 | 372.589 → 373.548 | 372.589 → 373.548 |
+| Same case / restart | 3 | 174.074 → 171.075 | 192.723 → 172.153 | 192.723 → 172.153 |
+
+The larger memory case had one refactor command maximum of 9.445 ms, with
+5.864 ms in navigation and 3.408 ms in perception. Those measured phases do not
+include wire JSON encoding. A focused repeat using the same frozen binaries,
+three rounds and 7,500 commands per side gave p50 0.029 → 0.029 ms,
+p95 2.556 → 2.480 ms and max 7.546 → 6.913 ms; all six reports validated with
+matching counts. The original spike remains evidence, and its cause is
+unresolved. The repeat does not establish that it is fixed or harmless.
+
+For each small run, encoded StreamUpdate bytes rose from 1,507,417 to 1,519,297
+(0.8%); each large run rose from 2,226,571 to 2,261,365 (1.6%). Full-state bytes
+rose from 6,943,375 to 6,949,465 and 18,634,595 to 18,657,179 respectively.
+These totals omit the ServerMessage envelope. The benchmark times delta
+construction separately but does not time JSON serialization; it cannot prove
+an encoding speedup or complete encoded full-versus-delta selection. Those
+measurement and selection changes remain part of the next protocol work.
+Flush/restart groups have only three samples, and the small baseline flush
+contains a spike. No broad speedup is claimed. Raw reports remain local and
+unpublished; persistence, restoration and simulation tails remain open work.

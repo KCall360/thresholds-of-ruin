@@ -274,7 +274,7 @@ impl Runner {
         println!(
             "{}",
             json!({"kind":"sample","case":self.case,"cycle":cycle,"step":index,"attempt":self.attempt,
-            "actor":actor,"label":label,"action":action,"expected":expected,
+            "actor":actor.0,"label":label,"action":action,"expected":expected,
             "history_start":history_start,"history_end":self.engine.profile_counts().0,"rewind_count":self.engine.profile_counts().1,
             "client_memory":self.app.state.as_ref().unwrap().memory().count(),"phases_ms":timings,
             "save_status":self.engine.save_status(),"profile":profile,"event":event.map(|e|e.content)})

@@ -38,15 +38,15 @@ class BackgroundSaveProcesses(ProcessTestCase):
         server = self.saving_server()
         client, _ = self.client()
         first = self.act(client,{"type":"wait"})
-        self.assertEqual(first["state"]["observation"]["tick"],100)
+        self.assertEqual(first["state"]["observation"]["tick"],"100")
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT max(sequence) FROM journal").fetchone()[0],0)
         self.assertIsNone(self.request(client,{"type":"save"})["error"])
-        self.assertEqual(self.act(client,{"type":"wait"})["state"]["observation"]["tick"],200)
+        self.assertEqual(self.act(client,{"type":"wait"})["state"]["observation"]["tick"],"200")
         server.child.kill(); server.child.wait(timeout=10) # deliberately bypass save-and-quit
         server = self.saving_server()
         _, resumed = self.client()
-        self.assertEqual(resumed["state"]["observation"]["tick"],100)
+        self.assertEqual(resumed["state"]["observation"]["tick"],"100")
         self.assertEqual(resumed["history"],first["history"])
 
     def test_saved_journal_shapes_and_disclosed_history_survive_restart(self):
@@ -59,6 +59,9 @@ class BackgroundSaveProcesses(ProcessTestCase):
                         "text": "Stored schema boundary", "source": "frontend",
                         "audience": "actor", "category": "bookmark"}})
         self.assertIsNone(note["error"])
+        self.assertIs(type(note["state"]["revision"]), str)
+        self.assertIs(type(note["state"]["observation"]["actor"]), str)
+        self.assertIs(type(note["state"]["observation"]["tick"]), str)
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         with sqlite3.connect(self.save) as db:
             records = [json.loads(frame[24:])["record"] for (frame,) in
@@ -117,7 +120,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
             start=time.monotonic()
             result=self.act(client,{"type":"wait"})
             self.assertLess(time.monotonic()-start,1.5)
-            self.assertEqual(result["state"]["observation"]["tick"],200)
+            self.assertEqual(result["state"]["observation"]["tick"],"200")
             db.rollback()
         self.assertIsNone(self.request(client,{"type":"save"})["error"])
 
@@ -131,7 +134,7 @@ class BackgroundSaveProcesses(ProcessTestCase):
             self.assertIn("save failed",failed["message"]["message"].lower())
             # A persistent warning must follow the new attachment snapshot.
             replacement, snapshot = self.client()
-            self.assertEqual(snapshot["state"]["observation"]["tick"],100)
+            self.assertEqual(snapshot["state"]["observation"]["tick"],"100")
             db.rollback()
         self.assertIsNone(self.request(replacement,{"type":"save"})["error"])
 
@@ -169,7 +172,7 @@ print('written',flush=True);sys.stdin.readline()
                 if child.poll() is None: child.kill();child.wait(timeout=10)
                 child.stdin.close();child.stdout.close();child.stderr.close()
             current=self.saving_server(); observer, resumed=self.client(observe=True)
-            self.assertEqual(resumed["state"]["observation"]["tick"],100 if prefix==2 else 0)
+            self.assertEqual(resumed["state"]["observation"]["tick"],"100" if prefix==2 else "0")
             self.assertEqual(len(resumed["intentions"]), 1 if prefix==1 else 0)
             if prefix==1:
                 self.assertEqual(resumed["intentions"][0]["phase"], "suspended")

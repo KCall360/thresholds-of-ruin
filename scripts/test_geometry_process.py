@@ -28,7 +28,7 @@ class GeometryProcesses(ProcessTestCase):
         self.play(player, fixture["walk"])
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["inventory"][0]["name"], "stone tablet")
-        self.assertEqual(arrived["state"]["observation"]["tick"], 650)
+        self.assertEqual(arrived["state"]["observation"]["tick"], '650')
         self.key(ascii_client, "escape", wait_for_simulation=False)
         ascii_client.child.wait(timeout=10)
         self.assertTrue((self.save.parent / "wide.ppm").exists())
@@ -66,7 +66,7 @@ class GeometryProcesses(ProcessTestCase):
         self.play(wizard, fixture["walk"])
         arrived = self.request(observer, {"type": "snapshot"})
         self.assertEqual(arrived["state"]["observation"]["position"], fixture["destination"])
-        self.assertEqual(arrived["state"]["observation"]["tick"], fixture["tick"])
+        self.assertEqual(arrived["state"]["observation"]["tick"], str(fixture["tick"]))
         ascii_seen = self.ascii_frame(ascii_client, lambda frame: frame["state"]["revision"] == arrived["state"]["revision"])
         self.assertEqual(ascii_seen["state"], arrived["state"])
         for client in (wizard, observer, ascii_client):

@@ -7,6 +7,26 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, load_fixture
 
 
 class HeadlessProcesses(ProcessTestCase):
+    def test_diagnostic_actor_and_revision_keep_numeric_schema_independent_of_wire(self):
+        self.server()
+        player = self.launch("tor-client-headless", ["--connect", self.address],
+                             extra_env={"TOR_TIMING_DIAGNOSTICS": "1"})
+        self.frame(player, lambda f: f.get("type") == "ready")
+        player.write(json.dumps({"type": "request", "request": {"type": "snapshot"}}))
+        snapshot = self.frame(player, lambda f: f.get("type") == "ready")
+        self.assertIsNone(snapshot["error"])
+        self.assertIs(type(snapshot["state"]["revision"]), str)
+        self.assertIs(type(snapshot["state"]["observation"]["actor"]), str)
+        diagnostics = [json.loads(line) for line in player.transcript if line.startswith("{")]
+        requests = [row for row in diagnostics if row.get("event") == "client_request"]
+        self.assertTrue(requests)
+        for row in requests:
+            self.assertEqual(row["timing_version"], 1)
+            self.assertIs(type(row["actor"]), int)
+            self.assertIs(type(row["revision"]), int)
+            self.assertEqual(row["actor"], int(snapshot["state"]["observation"]["actor"]))
+            self.assertEqual(row["revision"], int(snapshot["state"]["revision"]))
+
     def test_checkpointed_portal_bodies_survive_cold_restore_rewind_and_replay(self):
         server = self.server('--checkpoint-interval', 1, wizard=True, scenario='physics-portal', seed=None)
         player, initial = self.client()
@@ -76,7 +96,7 @@ class HeadlessProcesses(ProcessTestCase):
         observer, ai_state = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
         ai_entries = [entry for entry in ai_state["history"]
                       if entry["author"] == {"type": "backend", "component": "scheduler"}
-                      and entry["actor"] == 3 and entry["content"]["type"] == "action"]
+                      and entry["actor"] == "3" and entry["content"]["type"] == "action"]
         self.assertTrue(ai_entries)
         self.assertEqual(len({entry["id"] for entry in ai_entries}), len(ai_entries))
         observer.stop()
@@ -94,8 +114,8 @@ class HeadlessProcesses(ProcessTestCase):
         continued = self.act(resumed, {"type": "wait"})
         self.assertIsNone(continued["error"])
         continued = next_turn(resumed, continued)
-        self.assertGreater(continued["state"]["observation"]["tick"],
-                           boundary["state"]["observation"]["tick"])
+        self.assertGreater(int(continued["state"]["observation"]["tick"]),
+                           int(boundary["state"]["observation"]["tick"]))
         # A second cold decode must preserve the new boundary and its history.
         boundary = self.request(resumed, {"type": "snapshot"})
         self.flush_save()
@@ -114,8 +134,8 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertIsNone(crossed["error"])
         observation = crossed["state"]["observation"]
         self.assertTrue(observation["motion"]["displaced"])
-        self.assertGreater(observation["motion"]["velocity"][0], 4096)
-        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+        self.assertGreater(int(observation["motion"]["velocity"][0]), 4096)
+        self.assertTrue(any(actor["id"] == "1" and actor["position"]["z"] == 1
                             for actor in observation["visible_actors"]))
         self.flush_save()
         player.stop()
@@ -125,7 +145,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertEqual(state["state"], crossed["state"])
         continued = self.act(resumed, {"type": "wait"})
         self.assertIsNone(continued["error"])
-        self.assertTrue(any(actor["id"] == 1 and actor["position"]["z"] == 1
+        self.assertTrue(any(actor["id"] == "1" and actor["position"]["z"] == 1
                             for actor in continued["state"]["observation"]["visible_actors"]))
         self.assertNotIn('"region"', json.dumps(continued["state"]["observation"]))
         # Definitions and derived portal bodies remain stable across another
@@ -144,7 +164,7 @@ class HeadlessProcesses(ProcessTestCase):
         for n in range(104):
             result = self.request(player, {
                 "type": "command", "context": initial["input_context"], "branch": initial["branch"],
-                "command": {"type": "annotate", "anchor": {"type": "state", "revision": 0},
+                "command": {"type": "annotate", "anchor": {"type": "state", "revision": '0'},
                             "text": f"Note {n}", "source": "user", "category": "note",
                             "audience": "actor" if n % 9 == 0 else "private"}})
             self.assertIsNone(result["error"])
@@ -212,7 +232,7 @@ class HeadlessProcesses(ProcessTestCase):
             sequences.append(seen["message"]["update"]["cursor"]["sequence"])
         self.assertEqual(sequences[:3], [sequences[0]] * 3)
         self.assertGreater(sequences[0], sequences[-1])
-        self.assertGreater(second["state"]["revision"], initial["state"]["revision"])
+        self.assertGreater(int(second["state"]["revision"]), int(initial["state"]["revision"]))
 
     def test_normal_play_spectator_stream_denials_and_resume(self):
         server = self.server()
@@ -294,7 +314,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertIn("Invalid input", invalid["error"])
         invalid = self.command(player, {"type": "act", "action": {"type": "wait"}, "extra": True})
         self.assertIn("Invalid input", invalid["error"])
-        failed = self.act(player, {"type": "take", "item": 999999})
+        failed = self.act(player, {"type": "take", "item": '999999'})
         self.assertIsNotNone(failed["error"])
         self.assertEqual(failed["memory"], initial["memory"])
         self.assertEqual(failed["state"], initial["state"])
@@ -305,7 +325,7 @@ class HeadlessProcesses(ProcessTestCase):
         controlled = self.request(observer, {"type": "acquire_control"})
         self.assertTrue(controlled["has_control"])
         waited = self.act(observer, {"type": "wait"})
-        self.assertEqual(waited["state"]["observation"]["tick"], 100)
+        self.assertEqual(waited["state"]["observation"]["tick"], '100')
         rejected = self.launch("tor-client-headless", ["--connect", self.address], token="wrong-test-credential")
         self.assertNotEqual(rejected.child.wait(timeout=10), 0)
         output = rejected.until(lambda line: json.loads(line)["type"] == "fatal")

@@ -100,7 +100,7 @@ class StreamRelay:
                         if self.overflow_delta.is_set():
                             state['cells']['shift']['x'] = 2147483647
                         else:
-                            state['inventory'].append({'id':123, 'quantity':0, 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
+                            state['inventory'].append({'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
                         payload = json.dumps(message, separators=(',', ':')).encode()
                         length = len(payload)
                         if length < 126:

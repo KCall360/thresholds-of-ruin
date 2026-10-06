@@ -288,7 +288,7 @@ class StreamingProcesses(ProcessTestCase):
         first = self.frame(player, lambda f: f["type"] == "ready")
         palette = self.palette_of(player)
         self.assertIsNone(palette["request_id"])
-        self.assertEqual(palette["palette"]["revision"], 1)
+        self.assertEqual(palette["palette"]["revision"], '1')
         self.assertEqual(palette["palette"]["body"]["type"], "full")
         self.assertEqual(set(palette["palette"]["body"]["assets"]), everything)
         cells = first["state"]["observation"]["visible_cells"]
@@ -300,14 +300,14 @@ class StreamingProcesses(ProcessTestCase):
         spectator.child.stdin.flush()
         answered = self.palette_of(spectator)
         self.assertIsNotNone(answered["request_id"])
-        self.assertEqual(answered["palette"]["revision"], 2)
+        self.assertEqual(answered["palette"]["revision"], '2')
         self.assertEqual(set(answered["palette"]["body"]["assets"]), everything)
         done = self.frame(spectator, lambda f: f["type"] == "ready")
         self.assertIsNone(done["error"])
         # Reconnecting starts over with the whole palette.
         spectator.stop()
         again, _ = self.client(SPECTATOR_TOKEN)
-        self.assertEqual(self.palette_of(again)["palette"]["revision"], 1)
+        self.assertEqual(self.palette_of(again)["palette"]["revision"], '1')
 
     def test_real_clients_describe_and_report_from_their_palettes(self):
         self.streaming_server(scenario=GENERATED)
@@ -328,6 +328,8 @@ class StreamingProcesses(ProcessTestCase):
         held = self.frame(observer, lambda f: f["palette"]["revision"] == 1)
         self.assertEqual(held["palette"], {"revision": 1, "assets": everything, "stale": False})
         self.assertEqual(held["message"]["type"], "palette")
+        self.assertIs(type(held["palette"]["revision"]), int)
+        self.assertEqual(held["message"]["palette"]["revision"], "1")
         # Asking again replaces it with the answer's revision.
         answered = self.request(observer, {"type": "palette"})
         self.assertEqual(answered["palette"], {"revision": 2, "assets": everything, "stale": False})
@@ -345,7 +347,7 @@ class StreamingProcesses(ProcessTestCase):
         # A different future: take the pebble before leaving hall 1, so its
         # new record differs from the abandoned one still on disk.
         self.walk(wizard, "east", 6)
-        taken = self.act(wizard, {"type": "take", "item": 10})
+        taken = self.act(wizard, {"type": "take", "item": '10'})
         self.assertIsNone(taken.get("error"), taken)
         far = self.walk(wizard, "east", TO_HALL_4 - 6)
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])

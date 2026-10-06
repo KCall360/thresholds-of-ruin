@@ -123,7 +123,7 @@ def run_saved_exploration(bin_dir, output, regions=8, interval=64, correlate=Fal
         result["restart_to_frame_ms"] = (time.perf_counter()-started)*1000
         result["restart_equal"] = resumed["state"] == before["state"] and resumed["branch"] == before["branch"] and resumed["history"] == before["history"]
         continued, elapsed = key(window, "wait")
-        result["continued_after_restart"] = continued["state"]["revision"] == before["state"]["revision"] + 1
+        result["continued_after_restart"] = int(continued["state"]["revision"]) == int(before["state"]["revision"]) + 1
         result["restart_input_ms"] = elapsed
         key(window, "release")
         # Text player follows the same recovered state and explicit-save barrier.

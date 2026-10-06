@@ -30,17 +30,17 @@ class StreamRecoveryProcesses(ProcessTestCase):
         self.assertTrue(relay.held.wait(5), 'Relay did not hold an actual server update')
         # Server progress is established by execution updates while delivery is
         # stopped, rather than by a machine-specific latency threshold.
-        self.assertEqual(final['state']['observation']['tick'], 400)
+        self.assertEqual(final['state']['observation']['tick'], '400')
         if kind == 'ascii':
             slow.child.stdin.write('{"type":"key","key":"places"}\n')
             slow.child.stdin.flush()
             paused = self.ascii_frame(slow, lambda f: f['input_done'] == 'places')
-            self.assertEqual(paused['state']['observation']['tick'], 0)
+            self.assertEqual(paused['state']['observation']['tick'], '0')
             self.assertTrue(paused['connected'])
             self.assertTrue(paused['places_open'])
         relay.gate.set()
         if kind == 'ascii':
-            caught_up = self.ascii_frame(slow, lambda f: f['state']['observation']['tick'] == 400)
+            caught_up = self.ascii_frame(slow, lambda f: f['state']['observation']['tick'] == '400')
             self.assertEqual(caught_up['state'], final['state'])
             self.assertEqual(caught_up['history'], final['history'])
             self.assertEqual(caught_up['narration'], ['Time passes.'])
@@ -58,7 +58,7 @@ class StreamRecoveryProcesses(ProcessTestCase):
         # Continue authoritative play while the single repair frame is held.
         final = self.act(player, {'type': 'wait'})
         self.assertIsNone(final['error'])
-        self.assertEqual(final['state']['observation']['tick'], 600)
+        self.assertEqual(final['state']['observation']['tick'], '600')
         relay.repair_gate.set()
         self.assert_recovered(kind, slow, final)
         self.assertEqual(relay.attachments, 1)

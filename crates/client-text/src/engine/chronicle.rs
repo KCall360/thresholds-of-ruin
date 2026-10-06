@@ -300,18 +300,18 @@ mod tests {
 
     fn view() -> StateView {
         serde_json::from_value(serde_json::json!({
-            "wizard_game":false,"revision":1,"observation":{
-            "actor":1,"tick":5,"position":{"x":0,"y":0,"z":0},"ready":true,
+            "wizard_game":false,"revision":"1","observation":{
+            "actor":"1","tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":[{"key":"here","position":{"x":0,"y":0,"z":0},
                 "wall":false,"material":"stone","place_hint":false,
                 "stairs_up":false,"stairs_down":false,
-                "door":{"id":7,"name":"Oak Door","description":"","open":false,
+                "door":{"id":"7","name":"Oak Door","description":"","open":false,
                     "reachable":true,"approaches":[]}}],
             "ground_items":[],"inventory":[],
-            "visible_actors":[{"id":2,"name":"ruin scout","description":"",
+            "visible_actors":[{"id":"2","name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
             "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,
-                "preparation_active":false,"recovery_remaining":0,"actors":[],
+                "preparation_active":false,"recovery_remaining":"0","actors":[],
                 "events":[],"objective":null,"victory":false,"dead":false,
                 "terminal":false}}}))
         .unwrap()

@@ -348,11 +348,22 @@ mod tests {
         Arc<tokio::sync::Notify>,
     ) {
         let message = ServerMessage::Ack {
-            context: serde_json::from_value(serde_json::json!({
-                "input":{"stream":{"stream":"transport-test","epoch":0},"readiness_revision":0},
-                "actor":1,"branch":"transport-test","cursor":{"sequence":0,"tick":0},"revision":0
-            }))
-            .unwrap(),
+            context: ReplyContext {
+                input: InputContext {
+                    stream: StreamContext {
+                        stream: StreamId("transport-test".into()),
+                        epoch: 0,
+                    },
+                    readiness_revision: 0,
+                },
+                actor: ActorId(1),
+                branch: BranchId("transport-test".into()),
+                cursor: StreamCursor {
+                    sequence: 0,
+                    tick: 0,
+                },
+                revision: 0,
+            },
             request_id: "inflight".into(),
             receipt: tor_protocol::RequestReceipt::Immediate {
                 actor: tor_protocol::ActorId(1),

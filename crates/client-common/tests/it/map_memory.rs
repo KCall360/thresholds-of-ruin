@@ -3,11 +3,11 @@ use tor_protocol::*;
 
 fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
-        "actor":1,"branch":"map","cursor":{"sequence":0,"tick":revision},
+        "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
+        "actor":"1","branch":"map","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision,"observation":{
-            "actor":1,"tick":revision,"position":{"x":0,"y":0,"z":0},
+        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+            "actor":"1","tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
                 "stairs_up":false,"stairs_down":false,"place_hint":false

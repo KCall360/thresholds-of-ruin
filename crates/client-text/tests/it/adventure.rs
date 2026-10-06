@@ -15,16 +15,16 @@ use tor_protocol::*;
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision":0,"observation":{
-        "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
+        "wizard_game":false,"revision":"0","observation":{
+        "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":1,"appearance":"item","identified":true,"id":2,"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"2","name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -664,13 +664,15 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                 continue;
             }
             if ch == 'r' {
-                actors.push(serde_json::json!({"id": 50 + actors.len(), "name": "rat",
-                    "description": "", "position": {"x": x, "y": y, "z": 0}}));
+                actors.push(
+                    serde_json::json!({"id": (50 + actors.len()).to_string(), "name": "rat",
+                    "description": "", "position": {"x": x, "y": y, "z": 0}}),
+                );
             }
             if ch == 'i' {
                 items.push(serde_json::json!({"reachable": x == 0 && y == 0,
-                    "item": {"quantity": 1, "appearance": "item", "identified": true,
-                        "id": 1, "name": "copper token", "description": ""},
+                    "item": {"quantity": "1", "appearance": "item", "identified": true,
+                        "id": "1", "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
             }
             for z in [-1, 0, 1] {
@@ -682,7 +684,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                     "material": "stone",
                     "place_hint": false, "stairs_up": false, "stairs_down": false,
                     "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
-                        "id": 9, "name": "oak door", "description": "",
+                        "id": "9", "name": "oak door", "description": "",
                         "open": ch == '\'', "reachable": false, "approaches": []
                     })),
                 }));
@@ -690,8 +692,8 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
         }
     }
     serde_json::from_value(serde_json::json!({
-        "wizard_game": false, "revision": 0, "observation": {
-            "actor": 1, "tick": 0, "position": {"x": 0, "y": 0, "z": 0},
+        "wizard_game": false, "revision": "0", "observation": {
+            "actor": "1", "tick": "0", "position": {"x": 0, "y": 0, "z": 0},
             "ready": true, "places": [], "visible_cells": cells,
             "ground_items": items, "inventory": [], "visible_actors": actors
         }
@@ -845,8 +847,8 @@ fn things_and_figures_are_told_in_sentences() {
     let token = |id: u64, x: i32, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
-            "item": {"quantity": quantity, "appearance": "item", "identified": true,
-                "id": id, "name": "copper token", "description": ""}}))
+            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+                "id": id.to_string(), "name": "copper token", "description": ""}}))
         .unwrap()
     };
     s.observation.ground_items = vec![token(1, 0, 1), token(2, 0, 2), token(3, 3, 1)];
@@ -868,8 +870,8 @@ fn things_and_figures_are_told_in_sentences() {
         serde_json::from_value(serde_json::json!({
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
             "preparation_remaining": null, "preparation_active": false,
-            "recovery_remaining": 0, "events": [], "objective": null,
-            "actors": [{"actor": 50, "hostile": true, "injury": "badly_wounded"}]
+            "recovery_remaining": "0", "events": [], "objective": null,
+            "actors": [{"actor": "50", "hostile": true, "injury": "badly_wounded"}]
         }))
         .unwrap(),
     );
@@ -906,7 +908,7 @@ fn look_leaves_the_objective_to_status() {
         serde_json::from_value(serde_json::json!({
             "hp": 7, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
             "preparation_remaining": null, "preparation_active": false,
-            "recovery_remaining": 0, "events": [], "objective": "reach_exit", "actors": []
+            "recovery_remaining": "0", "events": [], "objective": "reach_exit", "actors": []
         }))
         .unwrap(),
     );
@@ -1070,7 +1072,7 @@ fn a_disclosed_exit_is_described_and_can_be_gone_to() {
         serde_json::from_value(serde_json::json!({
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
             "preparation_remaining": null, "preparation_active": false,
-            "recovery_remaining": 0, "events": [], "objective": "reach_exit",
+            "recovery_remaining": "0", "events": [], "objective": "reach_exit",
             "exit": "cell-3", "actors": []
         }))
         .unwrap(),
