@@ -10,7 +10,9 @@ fn autonomous_execution_prepares_one_ai_decision() {
     let actor = engine.next_actor().expect("AI turn is due");
     assert!(engine.is_ai(actor));
     let (_, profile) = engine.advance_ai_profiled(actor).unwrap();
-    assert_eq!(profile.candidate_captures, 1);
+    // Admission and execution are separate durable transactions; the decision
+    // and its simulation transition still occur only once, during execution.
+    assert_eq!(profile.candidate_captures, 2);
     assert_eq!(profile.simulation_transitions, 1);
     assert_eq!(
         tor_simulation::diagnostics::work_counts().route_searches - before,
@@ -40,7 +42,10 @@ fn autonomous_execution_preserves_disclosures_and_both_restore_paths() {
         let (actor, action) = reference.next_ai_action().unwrap();
         let old = crate::support::act_as(&mut reference, actor, action).unwrap();
         let new = engine.advance_ai(actor).unwrap();
-        assert_eq!(new.entry.content, old.entry.content);
+        assert_eq!(
+            new.entry.disclosed().unwrap().content,
+            old.entry.disclosed().unwrap().content
+        );
         assert_eq!(new.entry.tick, old.entry.tick);
         let expected: Vec<_> = engine
             .actors()

@@ -75,7 +75,8 @@ class HeadlessProcesses(ProcessTestCase):
             next_turn(player, result)
         observer, ai_state = self.client(token=SPECTATOR_TOKEN, observe=True, actor=3)
         ai_entries = [entry for entry in ai_state["history"]
-                      if entry["author"].get("user") == "scenario-ai"]
+                      if entry["author"] == {"type": "backend", "component": "scheduler"}
+                      and entry["actor"] == 3 and entry["content"]["type"] == "action"]
         self.assertTrue(ai_entries)
         self.assertEqual(len({entry["id"] for entry in ai_entries}), len(ai_entries))
         observer.stop()

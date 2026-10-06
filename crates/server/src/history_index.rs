@@ -52,7 +52,7 @@ impl HistoryIndex {
             self.resolutions
                 .insert((entry.branch.0.clone(), intention), position);
         }
-        if let crate::journal::JournalContent::IntentionAdmitted { intention, .. } = entry.content {
+        if let Some((intention, _)) = entry.content.admission() {
             assert!(
                 self.intentions.insert(intention, position).is_none(),
                 "unique intention identity"

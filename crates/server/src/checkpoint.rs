@@ -152,6 +152,15 @@ fn replay_private_boundary(
                 return Err(invalid_archive());
             }
         }
+        JournalContent::AutonomousIntentionAdmitted { intention } => {
+            if game
+                .admit_ai_intention(SimActor(record.entry.actor.0))
+                .map_err(|_| invalid_archive())?
+                != *intention
+            {
+                return Err(invalid_archive());
+            }
+        }
         JournalContent::IntentionChanged {
             intention, change, ..
         } => {
@@ -231,7 +240,11 @@ impl DiskCheckpoint {
             } else if record.resolution().is_none()
                 && record.change_source().is_none()
                 && (!matches!(record.entry.author, Author::Backend { .. })
-                    || !matches!(record.entry.content, JournalContent::Annotation { .. }))
+                    || !matches!(
+                        record.entry.content,
+                        JournalContent::Annotation { .. }
+                            | JournalContent::AutonomousIntentionAdmitted { .. }
+                    ))
             {
                 return Err(invalid_archive());
             }
@@ -361,16 +374,13 @@ impl DiskCheckpoint {
                 {
                     return Err(invalid_archive());
                 }
-                if let JournalContent::IntentionAdmitted { intention, action } =
-                    &record.entry.content
-                {
+                if let Some((intention, work)) = record.entry.content.admission() {
                     if game
                         .pending_intention(SimActor(record.entry.actor.0))
                         .is_none_or(|queued| {
-                            queued.id != *intention
-                                || queued.origin != tor_simulation::IntentionOrigin::Human
-                                || queued.work
-                                    != tor_simulation::IntentionWork::Action(adapt::action(action))
+                            queued.id != intention
+                                || queued.origin != work.origin()
+                                || !work.matches(queued.work)
                                 || queued.state != tor_simulation::IntentionState::Queued
                         })
                     {

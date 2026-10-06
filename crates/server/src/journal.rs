@@ -152,6 +152,7 @@ impl JournalEntry {
         use tor_protocol::{Event as VisibleEvent, HistoryContent as Content};
         let content = match &self.content {
             JournalContent::IntentionAdmitted { .. }
+            | JournalContent::AutonomousIntentionAdmitted { .. }
             | JournalContent::IntentionFailed { .. }
             | JournalContent::IntentionContinuationFailed { .. }
             | JournalContent::IntentionChanged { .. } => return None,
@@ -484,6 +485,10 @@ pub enum JournalContent {
         admission: EntryId,
         intention: tor_simulation::IntentionId,
     },
+    /// A backend decision admitted without an authenticated RPC or chosen action.
+    AutonomousIntentionAdmitted {
+        intention: tor_simulation::IntentionId,
+    },
     /// Receipt of accepted work, before its simulation effect. Not a history event.
     IntentionAdmitted {
         intention: tor_simulation::IntentionId,
@@ -512,10 +517,51 @@ pub enum JournalContent {
     },
 }
 
+/// Admission ownership remains explicit independently of its later chosen action.
+#[derive(Clone, Copy)]
+pub(crate) enum AdmittedWork<'a> {
+    Human(&'a Action),
+    AutonomousDecision,
+}
+
+impl AdmittedWork<'_> {
+    pub(crate) fn origin(self) -> tor_simulation::IntentionOrigin {
+        match self {
+            Self::Human(_) => tor_simulation::IntentionOrigin::Human,
+            Self::AutonomousDecision => tor_simulation::IntentionOrigin::Autonomous,
+        }
+    }
+
+    pub(crate) fn matches(self, work: tor_simulation::IntentionWork) -> bool {
+        match self {
+            Self::Human(action) => {
+                let original = crate::adapt::action(action);
+                work == tor_simulation::IntentionWork::Action(original)
+                    || matches!((work, original),
+                        (tor_simulation::IntentionWork::ResumeAttack { target },
+                            tor_simulation::Action::Attack { target: expected }) if target == expected)
+            }
+            Self::AutonomousDecision => work == tor_simulation::IntentionWork::AiDecision,
+        }
+    }
+}
+
 impl JournalContent {
+    pub(crate) fn admission(&self) -> Option<(tor_simulation::IntentionId, AdmittedWork<'_>)> {
+        match self {
+            Self::IntentionAdmitted { intention, action } => {
+                Some((*intention, AdmittedWork::Human(action)))
+            }
+            Self::AutonomousIntentionAdmitted { intention } => {
+                Some((*intention, AdmittedWork::AutonomousDecision))
+            }
+            _ => None,
+        }
+    }
     pub(crate) fn rewindable(&self) -> bool {
         match self {
             Self::IntentionAdmitted { .. }
+            | Self::AutonomousIntentionAdmitted { .. }
             | Self::IntentionFailed { .. }
             | Self::IntentionContinuationFailed { .. }
             | Self::IntentionChanged { .. }
@@ -573,6 +619,7 @@ impl JournalEntry {
         !matches!(
             self.content,
             JournalContent::IntentionAdmitted { .. }
+                | JournalContent::AutonomousIntentionAdmitted { .. }
                 | JournalContent::IntentionFailed { .. }
                 | JournalContent::IntentionContinuationFailed { .. }
                 | JournalContent::IntentionChanged { .. }

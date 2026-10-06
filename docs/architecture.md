@@ -52,8 +52,15 @@ outcomes can extend them without changing the d20 rule implicitly. Wind-up is
 persisted progress; recovery remains scheduler time. Physics applies impact damage
 at contact, using the same death and interruption rules as attacks.
 
-AI consumes its actor's perception and expiring memory. Its deterministic choice
-is committed through ordinary journaled actions. The server bounds autonomous
+AI consumes its actor's perception and expiring memory. The backend admits a
+decision to the simulation-owned queue without choosing an action or advancing
+time or RNG. Simulation execution chooses once, then the server reconciles effects
+and admits the linked execution to persistence before publishing it. Both records
+follow the existing [asynchronous save policy](background-saving.md); ordinary
+publication does not wait for disk, and an explicit save waits for the committed
+batch. The private admission and
+backend execution have no authenticated RPC receipt. Reopening or retrying queued
+work preserves its original intention identity. The server bounds autonomous
 work between delivery/input opportunities and records human preparation suspension
 on control loss or recovery boundaries. Backend suspension commands have no wire
 representation. Clients receive only their own exact health/progress and visible

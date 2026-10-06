@@ -2,7 +2,7 @@
 format = 2
 id = "two-room"
 version = "1.1"
-ruleset = "dungeon-v19"
+ruleset = "dungeon-v20"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

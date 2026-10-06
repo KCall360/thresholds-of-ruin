@@ -97,7 +97,7 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
             "version = \"latest\"",
             "major.minor",
         ),
-        ("scenario.toml", "dungeon-v19", "missing-v1", "dependency"),
+        ("scenario.toml", "dungeon-v20", "missing-v1", "dependency"),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         ("regions", "size = [6, 3, 2]", "size = [0, 3, 2]", "bounds"),
         ("regions", "2/landing", "999/landing", "anchor"),

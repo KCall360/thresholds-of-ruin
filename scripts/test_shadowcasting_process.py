@@ -41,7 +41,7 @@ class ShadowcastingProcesses(ProcessTestCase):
         self.assertEqual(window.child.wait(timeout=10),0)
         self.assertTrue(capture.read_bytes().startswith(b"P6\n1200 800\n255\n"))
         text.stop(); observer.stop(); wizard.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v19")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v20")
         self.server(wizard=True)
         _, resumed=self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],closed["state"])

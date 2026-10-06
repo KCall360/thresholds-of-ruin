@@ -16,7 +16,7 @@ use crate::journal::{
     Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 19;
+pub(crate) const ARCHIVE_VERSION: u32 = 20;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -603,15 +603,15 @@ impl Record {
         let Some((admission, intention)) = self.resolution() else {
             return false;
         };
-        let JournalContent::IntentionAdmitted {
-            intention: original,
-            action,
-        } = &admitted.entry.content
-        else {
+        let Some((original, work)) = admitted.entry.content.admission() else {
             return false;
         };
+        let original_action = match work {
+            crate::journal::AdmittedWork::Human(action) => Some(action),
+            crate::journal::AdmittedWork::AutonomousDecision => None,
+        };
         admission == &admitted.entry.id
-            && intention == *original
+            && intention == original
             && self.entry.actor == admitted.entry.actor
             && self.receipt.is_none()
             && self.entry.author
@@ -622,13 +622,15 @@ impl Record {
             && match &self.entry.content {
                 JournalContent::IntentionStarted {
                     action: executed, ..
-                } => executed == action,
+                } => original_action.is_none_or(|action| executed == action),
                 JournalContent::IntentionContinued {
                     action: executed, ..
-                } => executed == action && matches!(action, Action::Attack { .. }),
+                } => original_action.is_some_and(|action| {
+                    executed == action && matches!(action, Action::Attack { .. })
+                }),
                 JournalContent::IntentionFailed { .. } => true,
                 JournalContent::IntentionContinuationFailed { .. } => {
-                    matches!(action, Action::Attack { .. })
+                    original_action.is_some_and(|action| matches!(action, Action::Attack { .. }))
                 }
                 _ => false,
             }
@@ -659,6 +661,15 @@ impl Record {
                             user: receipt.user.clone(),
                         }
             }
+            (JournalContent::AutonomousIntentionAdmitted { intention }, None) => {
+                intention.0 != 0
+                    && self.entry.audience == Audience::Private
+                    && self.entry.author
+                        == Author::Backend {
+                            component: "scheduler".into(),
+                        }
+            }
+            (JournalContent::AutonomousIntentionAdmitted { .. }, Some(_)) => false,
             (JournalContent::IntentionAdmitted { .. }, None) => false,
             (_, Some(receipt)) => !matches!(receipt.command, Command::AdmitIntention { .. }),
             (_, None) => true,
@@ -1092,6 +1103,13 @@ impl ObservationCache {
         Ok(view)
     }
 
+    fn snapshot(&self) -> BTreeMap<ActorId, Arc<RevisionView>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     fn replace(&mut self, views: BTreeMap<ActorId, Arc<RevisionView>>) {
         *self
             .0
@@ -1453,6 +1471,13 @@ impl Engine {
                     .execute_intention(Some(record.entry.id.clone()))?
                     .ok_or_else(invalid_archive)
                     .map(|result| result.entry)
+            } else if matches!(
+                record.entry.content,
+                JournalContent::AutonomousIntentionAdmitted { .. }
+            ) {
+                engine
+                    .admit_ai_inner(record.entry.actor, Some(record.entry.id.clone()), None)
+                    .map(|result| result.entry)
             } else if let Some(receipt) = record.receipt {
                 engine
                     .apply_command(&receipt, Some(record.entry.id.clone()))
@@ -1561,10 +1586,11 @@ impl Engine {
         Some((ActorId(actor.0), action))
     }
 
-    /// Execute one due AI turn without preparing the same decision twice.
-    /// Candidate effects remain private until journal admission succeeds.
+    /// Convenience driver: admit a decision, then execute it through the queue.
+    /// Session journals admission and execution as separate boundaries.
     pub fn advance_ai(&mut self, actor: ActorId) -> Result<CommandResult, Failure> {
-        self.advance_ai_inner(actor, None)
+        self.ensure_ai_admission(actor, None)?;
+        self.execute_intention(None)?.ok_or_else(invalid_archive)
     }
 
     pub fn advance_ai_profiled(
@@ -1572,51 +1598,13 @@ impl Engine {
         actor: ActorId,
     ) -> Result<(CommandResult, CommandProfile), Failure> {
         let mut profile = CommandProfile::default();
-        let result = self.advance_ai_inner(actor, Some(&mut profile))?;
+        self.ensure_ai_admission(actor, Some(&mut profile))?;
+        let result = self
+            .execute_intention_profiled(None, Some(&mut profile))?
+            .ok_or_else(invalid_archive)?;
         Ok((result, profile))
     }
 
-    fn advance_ai_inner(
-        &mut self,
-        actor: ActorId,
-        mut profile: Option<&mut CommandProfile>,
-    ) -> Result<CommandResult, Failure> {
-        if !self.is_ai(actor) || self.next_actor() != Some(actor) {
-            return Err(Failure::new(
-                ErrorCode::InvalidAction,
-                "Scenario AI is not ready",
-            ));
-        }
-        let revision = self.revision(actor)?;
-        let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
-        let started = Instant::now();
-        let (action, outcome) = candidate
-            .game
-            .act_ai(SimActor(actor.0))
-            .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Scenario AI has no action"))?;
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.simulation_transition += started.elapsed();
-            profile.simulation_transitions += 1;
-        }
-        let receipt = Receipt {
-            user: "scenario-ai".into(),
-            frontend: "server-ai".into(),
-            request_id: Uuid::new_v4().to_string(),
-            actor,
-            branch: self.branch().clone(),
-            command: Command::Act {
-                expected_revision: revision,
-                action: adapt::disclosed_action(action).ok_or_else(|| {
-                    Failure::new(
-                        ErrorCode::InvalidAction,
-                        "Scenario AI action is unavailable",
-                    )
-                })?,
-            },
-        };
-        let checked = self.check_request(&receipt)?;
-        self.finish_checked_command(checked, None, profile, candidate, Some(outcome))
-    }
     pub fn revision(&self, actor: ActorId) -> Result<u64, Failure> {
         self.revisions
             .any(actor, &self.game)
@@ -2056,7 +2044,7 @@ impl Engine {
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
         let candidate = self.capture_command_candidate(profile.as_deref_mut());
-        self.finish_checked_command(checked, recorded_id, profile, candidate, None)
+        self.finish_checked_command(checked, recorded_id, profile, candidate)
     }
 
     fn capture_command_candidate(&mut self, profile: Option<&mut CommandProfile>) -> Candidate {
@@ -2074,8 +2062,6 @@ impl Engine {
         candidate
     }
 
-    // `executed_ai` comes only from the uninterrupted private-candidate path
-    // above. It is not an action token that callers can retain or replay.
     /// Apply/reconcile one action inside a private candidate. A supplied outcome
     /// comes only from an uninterrupted simulation execution against that candidate.
     fn resolve_action_transition(
@@ -2085,7 +2071,7 @@ impl Engine {
         action: &Action,
         executed: Option<tor_simulation::ActionOutcome>,
         mut profile: Option<&mut CommandProfile>,
-    ) -> Result<(tor_simulation::ActionOutcome, bool), Failure> {
+    ) -> Result<tor_simulation::ActionOutcome, Failure> {
         let tick = self.game.tick();
         let mut navigation_refreshed = false;
         let navigation_changed = match action {
@@ -2177,7 +2163,12 @@ impl Engine {
             }
             candidate.observations.insert(actor, Arc::new(after));
         }
-        Ok((outcome, navigation_refreshed))
+        if navigation_refreshed {
+            if let Some(profile) = profile {
+                profile.navigation_refreshes += 1;
+            }
+        }
+        Ok(outcome)
     }
 
     fn finish_checked_command(
@@ -2186,10 +2177,8 @@ impl Engine {
         recorded_id: Option<EntryId>,
         mut profile: Option<&mut CommandProfile>,
         mut candidate: Candidate,
-        executed_ai: Option<tor_simulation::ActionOutcome>,
     ) -> Result<CommandResult, Failure> {
         let (receipt, revision) = checked.into_parts();
-        let mut navigation_refreshed = false;
         let mut tick = self.game.tick();
         let entry_id = recorded_id.unwrap_or_else(new_id);
         let (author, audience, content) = match &receipt.command {
@@ -2355,14 +2344,13 @@ impl Engine {
                 expected_revision: _,
                 action,
             } => {
-                let (outcome, refreshed) = self.resolve_action_transition(
+                let outcome = self.resolve_action_transition(
                     &mut candidate,
                     receipt.actor,
                     action,
-                    executed_ai,
+                    None,
                     profile.as_deref_mut(),
                 )?;
-                navigation_refreshed = refreshed;
                 (
                     Author::User {
                         user: receipt.user.clone(),
@@ -2418,11 +2406,6 @@ impl Engine {
                 profile.navigation_refreshes += 1;
             }
         }
-        if navigation_refreshed && matches!(receipt.command, Command::Act { .. }) {
-            if let Some(profile) = profile.as_deref_mut() {
-                profile.navigation_refreshes += 1;
-            }
-        }
         let entry = JournalEntry {
             intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
@@ -2473,6 +2456,11 @@ impl Engine {
                 profile.rollback_snapshot += started.elapsed();
                 profile.rollback_snapshots += 1;
             }
+        }
+        // Admission changes queue identity only. Already-built committed views
+        // remain valid across this boundary and execution can reuse them.
+        if entry.content.admission().is_some() {
+            candidate.observations = self.observations.snapshot();
         }
         let copied = self.admit(&record, &candidate, profile.as_deref_mut())?;
         let started = Instant::now();

@@ -1,6 +1,7 @@
 """Saved intention admission and execution through the real server and clients."""
 import json
 import shutil
+import sqlite3
 import subprocess
 
 from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN
@@ -15,6 +16,48 @@ def lifecycle(frame, identity, phase):
 
 
 class IntentionProcesses(ProcessTestCase):
+    def test_autonomous_journal_uses_private_admission_and_backend_execution_without_rpc(self):
+        server = self.server(scenario="dungeon-loop")
+        player, _ = self.client()
+        watcher, initial = self.client(SPECTATOR_TOKEN, actor=2)
+        self.assertEqual(initial["intentions"], [])
+        self.act(player, {"type": "wait"})
+        observed = self.frame(watcher, lambda frame: any(
+            entry.get("author", {}).get("component") == "scheduler"
+            and entry.get("content", {}).get("type") == "action"
+            for entry in (frame.get("history") or [])))
+        self.assertEqual(observed["intentions"], [])
+        self.assertFalse(observed["has_control"])
+        boundary = self.request(watcher, {"type": "snapshot"})
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            rows = db.execute("SELECT sequence,frame FROM journal WHERE sequence>0 "
+                "UNION ALL SELECT sequence,frame FROM history ORDER BY sequence").fetchall()
+        records = [json.loads(frame[24:])["record"] for _, frame in rows]
+        admissions = [record for record in records
+            if record["entry"]["content"]["type"] == "autonomous_intention_admitted"]
+        self.assertGreater(len(admissions), 0)
+        for admission in admissions:
+            entry = admission["entry"]
+            self.assertIsNone(admission["receipt"])
+            self.assertEqual(entry["actor"], 2)
+            self.assertEqual(entry["audience"], "private")
+            self.assertEqual(entry["author"], {"type": "backend", "component": "scheduler"})
+            executions = [record for record in records
+                if record["entry"]["content"].get("admission") == entry["id"]]
+            self.assertEqual(len(executions), 1)
+            self.assertIsNone(executions[0]["receipt"])
+            self.assertEqual(executions[0]["entry"]["content"]["type"], "intention_started")
+            self.assertEqual(executions[0]["entry"]["content"]["intention"],
+                             entry["content"]["intention"])
+            self.assertNotIn(entry["id"], [visible["id"] for visible in boundary["history"]])
+        server.stop(); player.stop(); watcher.stop()
+        self.server(scenario="dungeon-loop")
+        _, recovered = self.client(SPECTATOR_TOKEN, actor=2)
+        self.assertEqual(recovered["state"], boundary["state"])
+        self.assertEqual(recovered["history"], boundary["history"])
+        self.assertEqual(recovered["intentions"], [])
+
     def test_running_attack_restart_release_resume_and_cancel_keep_original_identity(self):
         package = self.directory / "paused-attack"
         shutil.copytree(ROOT / "scenarios/tests/dungeon-loop", package)

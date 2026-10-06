@@ -2,11 +2,7 @@
 use super::*;
 
 pub(super) fn admitted_work_matches(work: tor_simulation::IntentionWork, action: &Action) -> bool {
-    let original = adapt::action(action);
-    work == tor_simulation::IntentionWork::Action(original)
-        || matches!((work, original),
-            (tor_simulation::IntentionWork::ResumeAttack { target },
-                tor_simulation::Action::Attack { target: expected }) if target == expected)
+    crate::journal::AdmittedWork::Human(action).matches(work)
 }
 
 /// Private lifecycle work can change disclosed preparation/readiness without a turn.
@@ -60,18 +56,31 @@ pub(super) fn derive_intention_suspensions(
     if !same_branch {
         return Vec::new();
     }
-    let mut suspensions: Vec<_> = before
+    let mut active: BTreeMap<_, _> = before
         .loaded_actor_ids()
         .filter_map(|actor| {
-            let original = before.preparation(actor)?;
-            let intention = original.intention?;
+            let preparation = before.preparation(actor)?;
+            preparation
+                .active
+                .then_some((preparation.intention?, actor))
+        })
+        .collect();
+    // A successful start or continuation becomes active within this boundary.
+    // Another scheduled effect can interrupt it before the boundary publishes.
+    if let JournalContent::IntentionStarted { intention, .. }
+    | JournalContent::IntentionContinued { intention, .. } = entry.content
+    {
+        active.insert(intention, SimActor(entry.actor.0));
+    }
+    active
+        .into_iter()
+        .filter_map(|(intention, actor)| {
             let current = after.preparation(actor)?;
-            if !original.active
-                || current.active
+            if current.active
                 || current.intention != Some(intention)
                 || matches!(entry.content, JournalContent::IntentionChanged {
-                intention: changed, change: IntentionChange::Suspended, ..
-            } if changed == intention)
+                    intention: changed, change: IntentionChange::Suspended, ..
+                } if changed == intention)
             {
                 return None;
             }
@@ -80,9 +89,7 @@ pub(super) fn derive_intention_suspensions(
                 intention,
             })
         })
-        .collect();
-    suspensions.sort_by_key(|suspension| suspension.intention);
-    suspensions
+        .collect()
 }
 
 pub(super) fn derive_intention_ends(
@@ -142,6 +149,81 @@ pub(super) fn derive_intention_ends(
 }
 
 impl Engine {
+    /// A convenience-driver retry resumes the admitted decision, without a new ID.
+    pub(super) fn ensure_ai_admission(
+        &mut self,
+        actor: ActorId,
+        profile: Option<&mut CommandProfile>,
+    ) -> Result<(), Failure> {
+        if !self.is_ai(actor)
+            || self.next_actor() != Some(actor)
+            || self
+                .next_intention_actor()
+                .is_some_and(|selected| selected != actor)
+        {
+            return Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI is not ready",
+            ));
+        }
+        match self.game.pending_intention(SimActor(actor.0)) {
+            Some(queued)
+                if queued.origin == tor_simulation::IntentionOrigin::Autonomous
+                    && queued.work == tor_simulation::IntentionWork::AiDecision
+                    && queued.state == tor_simulation::IntentionState::Queued =>
+            {
+                Ok(())
+            }
+            Some(_) => Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI queue is unavailable",
+            )),
+            None => self.admit_ai_inner(actor, None, profile).map(|_| ()),
+        }
+    }
+
+    /// Admission queues a decision without observation, route search or RNG work.
+    pub(crate) fn admit_ai(&mut self, actor: ActorId) -> Result<CommandResult, Failure> {
+        self.admit_ai_inner(actor, None, None)
+    }
+
+    pub(super) fn admit_ai_inner(
+        &mut self,
+        actor: ActorId,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<CommandResult, Failure> {
+        if !self.is_ai(actor) || self.next_actor() != Some(actor) {
+            return Err(Failure::new(
+                ErrorCode::InvalidAction,
+                "Scenario AI is not ready",
+            ));
+        }
+        let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
+        let intention = candidate
+            .game
+            .admit_ai_intention(SimActor(actor.0))
+            .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Scenario AI has no queue slot"))?;
+        let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
+            intention_ends: Vec::new(),
+            id: recorded_id.unwrap_or_else(new_id),
+            branch: candidate.branch().clone(),
+            actor,
+            tick: self.game.tick(),
+            author: Author::Backend {
+                component: "scheduler".into(),
+            },
+            audience: Audience::Private,
+            content: JournalContent::AutonomousIntentionAdmitted { intention },
+        };
+        self.commit_candidate(candidate, entry, None, profile)
+    }
+
+    pub(crate) fn next_intention_origin(&self) -> Option<tor_simulation::IntentionOrigin> {
+        let actor = self.game.next_intention_actor()?;
+        Some(self.game.pending_intention(actor)?.origin)
+    }
     pub(crate) fn queued_human_actors(&self) -> Vec<ActorId> {
         self.game
             .queued_intentions()
@@ -259,6 +341,9 @@ impl Engine {
         phase: IntentionPhase,
     ) -> Option<IntentionStatus> {
         let entry = &self.archive.records[self.history_index.intention_admission(id)?].entry;
+        if !matches!(entry.content, JournalContent::IntentionAdmitted { .. }) {
+            return None;
+        }
         Some(IntentionStatus {
             actor: entry.actor,
             branch: branch.clone(),
@@ -351,6 +436,16 @@ impl Engine {
     }
 
     pub(crate) fn intention_status(&self, result: &CommandResult) -> Option<IntentionStatus> {
+        if let JournalContent::IntentionStarted { admission, .. }
+        | JournalContent::IntentionFailed { admission, .. }
+        | JournalContent::IntentionContinued { admission, .. }
+        | JournalContent::IntentionContinuationFailed { admission, .. } = &result.entry.content
+        {
+            let root = &self.archive.records[self.history_index.find(admission)?].entry;
+            if !matches!(root.content, JournalContent::IntentionAdmitted { .. }) {
+                return None;
+            }
+        }
         match &result.entry.content {
             JournalContent::IntentionChanged {
                 intention, change, ..
@@ -525,10 +620,23 @@ impl Engine {
         &mut self,
         recorded_id: Option<EntryId>,
     ) -> Result<Option<CommandResult>, Failure> {
-        let mut candidate = self.capture_command_candidate(None);
+        self.execute_intention_profiled(recorded_id, None)
+    }
+
+    pub(super) fn execute_intention_profiled(
+        &mut self,
+        recorded_id: Option<EntryId>,
+        mut profile: Option<&mut CommandProfile>,
+    ) -> Result<Option<CommandResult>, Failure> {
+        let mut candidate = self.capture_command_candidate(profile.as_deref_mut());
+        let started = Instant::now();
         let Some(execution) = candidate.game.execute_next_intention() else {
             return Ok(None);
         };
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.simulation_transition += started.elapsed();
+            profile.simulation_transitions += 1;
+        }
         let actor = ActorId(execution.intention.actor.0);
         let intention = execution.intention.id;
         let source = self
@@ -536,17 +644,13 @@ impl Engine {
             .intention_admission(intention)
             .ok_or_else(invalid_archive)?;
         let admitted = &self.archive.records[source].entry;
-        let JournalContent::IntentionAdmitted {
-            intention: admitted_id,
-            action: admitted_action,
-        } = &admitted.content
-        else {
+        let Some((admitted_id, admitted_work)) = admitted.content.admission() else {
             return Err(invalid_archive());
         };
         if admitted.actor != actor
-            || *admitted_id != intention
-            || execution.intention.origin != tor_simulation::IntentionOrigin::Human
-            || !admitted_work_matches(execution.intention.work, admitted_action)
+            || admitted_id != intention
+            || execution.intention.origin != admitted_work.origin()
+            || !admitted_work.matches(execution.intention.work)
         {
             return Err(invalid_archive());
         }
@@ -561,14 +665,14 @@ impl Engine {
                     .action
                     .and_then(adapt::disclosed_action)
                     .ok_or_else(invalid_archive)?;
-                let (outcome, _) = self.resolve_action_transition(
+                let outcome = self.resolve_action_transition(
                     &mut candidate,
                     actor,
                     &action,
                     Some(outcome),
-                    None,
+                    profile.as_deref_mut(),
                 )?;
-                candidate.transition(self.regions.as_mut(), None)?;
+                candidate.transition(self.regions.as_mut(), profile.as_deref_mut())?;
                 if continuation {
                     JournalContent::IntentionContinued {
                         admission,
@@ -619,7 +723,7 @@ impl Engine {
             audience: Audience::Actor,
             content,
         };
-        self.commit_candidate(candidate, entry, None, None)
+        self.commit_candidate(candidate, entry, None, profile)
             .map(Some)
     }
 }
