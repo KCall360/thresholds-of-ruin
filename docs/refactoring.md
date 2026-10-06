@@ -1964,7 +1964,7 @@ contains a spike. No broad speedup is claimed. Raw reports remain local and
 unpublished; persistence, restoration and simulation tails remain open work.
 
 
-## Bounded typed wire decoding (in development)
+## Bounded typed wire decoding (merged, PR #72)
 
 Request and response decoding now share explicit byte/depth policies in the
 protocol codec. A scan bounds UTF-8 bytes and object/array nesting before typed
@@ -2064,3 +2064,87 @@ command slowdown; restart remained higher. Neither run establishes that tails
 are resolved or that this checkpoint improves engine performance. The safety
 scan's CPU cost is measured separately above. All raw reports remain local;
 no release assets or ledger entry were published.
+
+
+## Complete observation encoding and disclosure admission (in development)
+
+The server now chooses full/delta observations by complete encoded response size,
+with equal sizes preferring full. A counting sink avoids allocating both complete
+texts; only the selected bounded text enters outbound admission. The response
+ceiling cannot be raised by a caller, and a fitting delta can replace an oversized
+full response. The narrowing-view regression failed before the change: the old
+cell-count heuristic sent 6,484 bytes where a valid complete delta used 1,288.
+Tests cover UTF-8/escaping, exact ties, ceilings, serializer errors, checked shifts
+and exact reconstructed states. This does not yet add collection deltas.
+
+Output reserves queue capacity before preparation and admits encoded text and
+byte leases once. Sequence, observation tick and disclosure base commit afterward.
+Snapshots follow the same boundary for reset context and readiness. Both paths
+transfer the owned full state into the retained base, eliminating its extra clone.
+Rejected output disconnects the stream; snapshot rejection tests retain the
+existing behavior and prove an independent peer continues with unchanged engine
+state. Socket/lease ownership and ordered causing effects remain covered.
+
+The real headless process verifies smaller complete deltas, exact bases and
+validated reconstruction across player/spectator resets, save and cold restart.
+The streaming diagnostic process validates wire measurement version 2, durable
+restart and region-acquisition profiles. All 373 affected Rust tests and the
+focused process checks passed. The benchmark now calls the same encoder and
+decoder as production, measuring encoding, decoding, client application and
+rendering separately. It retains per-observation sizes and validates exact wire
+summary totals/quantiles. Legacy partial DTO sizes and construction-only timing
+remain distinct historical measurements. Release comparison, final full local
+verification and final-head CI remain required; no broad performance gain is
+claimed. Collection patches preserving order and portal occurrence identities,
+fair output pressure and the other open architecture sequences remain in scope.
+
+
+### Observation release diagnostics (2026-10-06)
+
+The comparison against decoder head `f85ca2e` used three ABAB rounds, five
+cycles, and 8/256-region single-actor memory/durable cases. All 24 reports
+validated, all raw/binary hashes and 530 frozen input hashes were verified, and
+operation, history, recovery, save and checkpoint counts matched without round
+variation. Both sides used machine `cfb2fdc044dc` with saves on the C: system SSD.
+Raw bundles remain local; no release/upload or ledger publication was authorized.
+
+Authoritative command timings below have n=915 successful samples per side/case.
+
+| Case | p50 ms base / candidate | p95 ms base / candidate | max ms base / candidate |
+| --- | --- | --- | --- |
+| 8 regions, memory | 0.5792 / 0.5702 | 0.8448 / 0.8350 | 2.5329 / 2.4949 |
+| 256 regions, memory | 0.6387 / 0.6477 | 0.9026 / 0.9078 | 2.7890 / 1.9541 |
+| 8 regions, durable | 0.5792 / 0.5766 | 0.8322 / 0.8200 | 1.1949 / 3.6867 |
+| 256 regions, durable | 0.6668 / 0.6704 | 0.9416 / 0.9177 | 1.5820 / 2.4535 |
+
+The small durable candidate maximum spent 3.2113 ms in perception; the large
+maximum spent 1.1243 ms in navigation and 1.1086 ms in perception. Encoding and
+decoding occur outside the authoritative interval, but the changed benchmark
+work between commands can affect scheduling and caches; attribution is not a
+causal explanation. A focused small durable repeat reused identical binaries:
+all six reports validated and counts matched. Command p50/p95/max were
+0.5852/0.8421/1.1883 ms versus 0.5892/0.8489/1.9803 ms (n=915 each). The original
+3.6867 ms spike did not recur, but the candidate maximum remained higher.
+
+Flush/restart groups have only three samples. Main durable flush p95 was
+328.7662 / 382.1172 ms for 8 regions and 398.2035 / 300.4846 ms for 256 regions;
+restart p95 was 183.9333 / 181.6646 ms and 206.3720 / 205.1699 ms respectively.
+The repeat restart median rose from 173.4480 to 188.7450 ms and p95 from 185.5319
+to 191.0552 ms. Persistence and restart tails remain unresolved; no general
+latency improvement is established.
+
+Each candidate run selected 305 deltas, totalling 1,527,532 complete-envelope
+bytes versus 7,111,372 bytes for full responses. Both region counts expose the
+same observation workload; this does not prove CPU or memory scaling for larger
+individual observations. Candidate encoding p50/p95/max ranged across the cases
+from 0.1046-0.1065 / 0.2049-0.2221 / 0.3656-0.7925 ms; decoding ranged from
+0.0522-0.0537 / 0.1515-0.1638 / 0.2100-0.3820 ms (n=915 per case). Baseline
+construction-only timing cannot be compared to these complete encoding/decoding
+intervals. Its byte totals omit the response envelope and retain legacy metric
+names. These measurements exclude network delivery and native presentation.
+
+Diff review subsequently restored five accidentally re-encoded Unicode test
+literals in three files. Measured production code and benchmark inputs remained
+unchanged; immutable measured copies retain provenance. The corrected source
+passed all 50 protocol tests. Full verification is still required on the final
+corrected source; earlier checks are not a substitute for that gate.

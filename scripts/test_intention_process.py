@@ -132,10 +132,23 @@ class IntentionProcesses(ProcessTestCase):
             for line in client.transcript[start:]:
                 if not line.startswith("{"):
                     continue
-                message = json.loads(line).get("message") or {}
+                frame = json.loads(line)
+                message = frame.get("message") or {}
                 update = message.get("update") or {}
                 if (update.get("body") or {}).get("type") == "observation_delta":
                     updates.append(update)
+                    # The real client has applied and validated this exact response.
+                    # Compare complete envelopes using its reconstructed full state,
+                    # without implementing a second delta application in the test.
+                    self.assertTrue(frame["synchronized"])
+                    self.assertEqual(update["body"]["state"]["revision"], frame["state"]["revision"])
+                    full = dict(message, update=dict(update, body=dict(
+                        type="observation", state=frame["state"], event=update["body"]["event"])))
+                    encoded_size = lambda value: len(json.dumps(value, ensure_ascii=False,
+                        separators=(",", ":")).encode("utf-8"))
+                    self.assertLess(encoded_size(message), encoded_size(full),
+                                    "A delta must be strictly smaller than its complete full response")
+                    self.assertLessEqual(encoded_size(message), 16*1024*1024)
             self.assertTrue(updates, "real process must receive an observation delta")
             expected = {"cursor": base["cursor"], "revision": base["state"]["revision"]}
             for update in updates:

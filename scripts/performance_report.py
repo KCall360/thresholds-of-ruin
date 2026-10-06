@@ -118,7 +118,69 @@ def validate_stream(rows, case):
     return {case: meta}, {case: samples}, {case: end}
 
 
+def validate_wire_profiles(rows):
+    """Version 2 measures complete envelopes and the shared encode/decode path.
+
+    Historical unversioned sizes cover state/update DTOs only. Keep those raw
+    diagnostics readable without interpreting them as complete-message results.
+    """
+    metadata = {}
+    samples, summaries = defaultdict(list), defaultdict(list)
+    for row in rows:
+        kind, case = row.get("kind"), row.get("case")
+        if kind in ("case", "traversal", "stream"):
+            assert case not in metadata, "Duplicate wire case metadata"
+            version = row.get("wire_profile_version", 1)
+            assert type(version) is int and version in (1, 2), "Unknown wire profile version"
+            metadata[case] = version
+        elif kind == "sample":
+            samples[case].append(row)
+        elif kind == "wire":
+            summaries[case].append(row)
+    assert set(samples) | set(summaries) <= set(metadata), "Wire measurements lack case metadata"
+    for case, version in metadata.items():
+        observations = []
+        for sample in samples[case]:
+            phases = sample.get("phases_ms", {})
+            wire = sample.get("observation_wire")
+            if version == 1:
+                assert wire is None and not ({"wire_encoding", "wire_decoding"} & phases.keys()), "Mixed wire versions"
+                continue
+            assert "observation_wire" in sample, "Missing observation measurement field"
+            assert "delta_encoding" not in phases, "Construction-only timing in complete wire profile"
+            if wire is None:
+                assert not ({"wire_encoding", "wire_decoding"} & phases.keys()), "Missing observation sizes"
+                continue
+            assert isinstance(wire, dict) and type(wire.get("version")) is int and wire["version"] == 2
+            full, sent, delta = wire.get("full_bytes"), wire.get("sent_bytes"), wire.get("delta")
+            assert type(full) is int and type(sent) is int and 0 < sent <= full
+            assert sent <= 16 * 1024 * 1024, "Selected envelope exceeds response ceiling"
+            assert type(delta) is bool and (sent < full if delta else sent == full)
+            for name in ("wire_encoding", "wire_decoding"):
+                value = phases.get(name)
+                assert type(value) in (int, float) and math.isfinite(value) and value >= 0, name
+            observations.append((full, sent, delta))
+        if version == 1:
+            assert all(r.get("wire_profile_version", 1) == 1 for r in summaries[case]), "Mixed wire summaries"
+            continue
+        assert len(summaries[case]) == bool(observations), "Missing or duplicate wire summary"
+        if not observations:
+            continue
+        summary = summaries[case][0]
+        assert type(summary.get("wire_profile_version")) is int and summary["wire_profile_version"] == 2
+        sent_sizes = sorted(item[1] for item in observations)
+        expected = dict(n=len(observations), deltas=sum(item[2] for item in observations),
+                        full_bytes_total=sum(item[0] for item in observations),
+                        sent_bytes_total=sum(sent_sizes),
+                        sent_p50_bytes=sent_sizes[math.ceil(len(sent_sizes)*0.50)-1],
+                        sent_p95_bytes=sent_sizes[math.ceil(len(sent_sizes)*0.95)-1],
+                        sent_max_bytes=sent_sizes[-1])
+        for name, value in expected.items():
+            assert type(summary.get(name)) is int and summary[name] == value, (case, name)
+
+
 def validate(rows, quick=False, phase_b=False, phase_c=False, selected_case=None, phase_d=False, discovery_only=False, saved_discovery=False):
+    validate_wire_profiles(rows)
     if selected_case in STREAM_CASES:
         return validate_stream(rows, selected_case)
     discovery_only = discovery_only or saved_discovery

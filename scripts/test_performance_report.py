@@ -72,6 +72,47 @@ class DiscoveryValidationTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate(rows, quick=True, discovery_only=True)
 
+class CompleteWireValidationTests(unittest.TestCase):
+    def rows(self):
+        rows = DiscoveryValidationTests().rows()
+        for row in rows:
+            if row["kind"] == "traversal":
+                row["wire_profile_version"] = 2
+            elif row["kind"] == "sample":
+                row["observation_wire"] = dict(version=2, full_bytes=1000, sent_bytes=400, delta=True)
+                row["phases_ms"] = dict(wire_encoding=0.2, wire_decoding=0.3)
+        for case in ("traversal-r8", "traversal-r256"):
+            n = sum(r["kind"] == "sample" and r["case"] == case for r in rows)
+            rows.append(dict(kind="wire", case=case, wire_profile_version=2, n=n, deltas=n,
+                             full_bytes_total=1000*n, sent_bytes_total=400*n,
+                             sent_p50_bytes=400, sent_p95_bytes=400, sent_max_bytes=400))
+        return rows
+
+    def test_complete_envelope_profile_is_valid(self):
+        validate(self.rows(), quick=True, discovery_only=True)
+
+    def test_corrupt_or_incomplete_wire_measurements_fail(self):
+        mutations = [
+            lambda r: r[-1].update(sent_bytes_total=1),
+            lambda r: r.pop(),
+            lambda r: r[1]["observation_wire"].update(sent_bytes=1001),
+            lambda r: r[1]["observation_wire"].update(delta=1),
+            lambda r: r[1]["phases_ms"].update(wire_decoding=float("nan")),
+            lambda r: r[1]["phases_ms"].pop("wire_encoding"),
+            lambda r: r[0].pop("wire_profile_version"),
+            lambda r: r[-1].update(wire_profile_version=1),
+            lambda r: r[1]["phases_ms"].update(delta_encoding=0.1),
+            lambda r: r[-1].update(sent_p95_bytes=401),
+            lambda r: r[1].pop("observation_wire"),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                rows = self.rows()
+                mutate(rows)
+                with self.assertRaises(AssertionError):
+                    validate(rows, quick=True, discovery_only=True)
+
+
 class SavedDiscoveryTests(unittest.TestCase):
     def fixture(self):
         samples = [dict(history_end=i, profile=dict(checkpoint_captures=int(i % 2 == 0), records_serialized=1),

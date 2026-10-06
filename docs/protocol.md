@@ -340,10 +340,19 @@ bounded snapshot repair. The reply does not install missing state or permissions
 receipts remain known while repair runs, and query payloads are quarantined.
 Another attachment or actor is a connection error even during recovery.
 Disconnect still requires a new attachment. Broader pressure/reconnect coverage
-and protocol closeout remain refactor work. The server sends a full
-`observation` instead when a delta would
-not be smaller, for example after a teleport. Snapshots are always complete, and
-reconnects and rewinds always start from one, so a delta never skips a state.
+and protocol closeout remain refactor work. The server compares complete encoded
+`ServerMessage` envelopes, including context, cursor and event, and selects a
+delta only when it is strictly smaller than the full response. Equal sizes prefer
+a full `observation`. Size counting precedes allocation of the selected text;
+only that selected text is encoded for outbound admission. A full response that
+exceeds the response ceiling may use a fitting delta. If neither representation
+fits, the connection closes without publishing a partial response.
+
+Snapshots are always complete; reconnects and rewinds start from one, so a delta
+never skips a state. Sequence, observation tick, reset context and disclosure base
+advance only after the response enters the ordered output queue. The server then
+retains the owned full state as the next base without copying it again. Output
+rejection closes that stream rather than retaining an unpublished base.
 
 Readiness is part of that disclosed state. A same-tick turn handoff advances the
 revisions of the actors whose readiness changes, even when their geometry and

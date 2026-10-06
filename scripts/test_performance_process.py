@@ -25,6 +25,16 @@ class PerformanceProcesses(ProcessTestCase):
         self.assertTrue(all(type(row['actor']) is int for row in rows if row['kind'] == 'sample'))
         metadata, samples, _ = validate(rows, selected_case='stream-r16-durable')
         self.assertEqual(metadata['stream-r16-durable']['region_acquisition_version'], 1)
+        self.assertEqual(metadata['stream-r16-durable']['wire_profile_version'], 2)
+        observations = [sample for sample in samples['stream-r16-durable'] if sample['observation_wire']]
+        self.assertTrue(observations)
+        self.assertTrue(all({'wire_encoding', 'wire_decoding'} <= sample['phases_ms'].keys()
+                            for sample in observations))
+        self.assertTrue(all('delta_encoding' not in sample['phases_ms'] for sample in observations))
+        wire = [row for row in rows if row['kind'] == 'wire']
+        self.assertEqual(len(wire), 1)
+        self.assertEqual(wire[0]['n'], len(observations))
+        self.assertLessEqual(wire[0]['sent_bytes_total'], wire[0]['full_bytes_total'])
         profiles = [sample['profile'] for sample in samples['stream-r16-durable']]
         self.assertGreater(sum(profile['regions_built'] for profile in profiles), 0)
         self.assertTrue(all('region_acquisition' in profile for profile in profiles))

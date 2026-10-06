@@ -4,7 +4,8 @@ use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use tor_client_ascii::{render::Canvas, App};
 use tor_client_common::ClientState;
 use tor_protocol::{
-    ActorId, HistoryPage, Snapshot, StateDelta, StreamCursor, StreamUpdate, UpdateBody,
+    decode_response, encode_response, ActorId, HistoryPage, ObservationEncoding, ServerMessage,
+    Snapshot, StreamCursor, StreamUpdate, UpdateBody, MAX_RESPONSE_BYTES,
 };
 use tor_server::{journal::Command, CommandProfile, Engine, Scenario};
 use tor_test_support::performance::{Step, Trace, TraceAction};
@@ -59,11 +60,11 @@ struct Runner {
     attempt: usize,
     case: String,
     distributions: Distributions,
-    /// Per observation update: full state bytes, sent update bytes, and
+    /// Per observation update: complete full envelope bytes, selected envelope bytes, and
     /// whether a delta was sent.
     wire_bytes: Vec<(usize, usize, bool)>,
 }
-/// Observation message sizes, full state against what was sent.
+/// Complete response envelope sizes, full observation against selected encoding.
 fn summarize_wire(case: &str, mut samples: Vec<(usize, usize, bool)>) {
     if samples.is_empty() {
         return;
@@ -74,7 +75,7 @@ fn summarize_wire(case: &str, mut samples: Vec<(usize, usize, bool)>) {
     let percentile = |p: usize| samples[(samples.len() * p).div_ceil(100).saturating_sub(1)].1;
     println!(
         "{}",
-        json!({"kind":"wire","case":case,"n":samples.len(),"deltas":deltas,
+        json!({"kind":"wire","case":case,"wire_profile_version":2,"n":samples.len(),"deltas":deltas,
         "full_bytes_total":full,"sent_bytes_total":sent,
         "sent_p50_bytes":percentile(50),"sent_p95_bytes":percentile(95),
         "sent_max_bytes":samples.last().unwrap().1})
@@ -202,7 +203,8 @@ impl Runner {
             profile = Some(p);
             event = Some(result.entry);
         }
-        // Construct outside timing; apply sequentially to the same growing client.
+        let mut observation_wire = None;
+        // Construct outside timing; encode, decode and apply to the same growing client.
         if let Some(entry) = event.as_ref().filter(|_| {
             self.engine.revision(ActorId(1)).unwrap()
                 > self.app.state.as_ref().unwrap().state().revision
@@ -212,43 +214,51 @@ impl Runner {
             let tick = state.observation.tick;
             let event = (actor == ActorId(1))
                 .then(|| Box::new(entry.disclosed().expect("completed command has history")));
-            // Send what the server sends: a delta against the client's state.
+            let message = ServerMessage::Update {
+                update: Box::new(StreamUpdate {
+                    context: fixture_context(),
+                    actor: ActorId(1),
+                    branch: self.engine.branch().clone(),
+                    cursor: StreamCursor {
+                        sequence: self.sequence,
+                        tick,
+                    },
+                    body: UpdateBody::Observation {
+                        state: Box::new(state),
+                        event,
+                    },
+                }),
+            };
+            // The reference includes the same complete envelope, outside timing.
+            let full_bytes = serde_json::to_vec(&message).unwrap().len();
+            let client = self.app.state.as_ref().unwrap();
             let start = Instant::now();
-            let delta = StateDelta::between(self.app.state.as_ref().unwrap().state(), &state);
+            let encoded = encode_response(
+                &message,
+                Some((client.observation_base(), client.state())),
+                MAX_RESPONSE_BYTES,
+            )
+            .unwrap();
             timings.insert(
-                "delta_encoding".into(),
+                "wire_encoding".into(),
                 start.elapsed().as_secs_f64() * 1000.,
             );
-            let full_bytes = serde_json::to_vec(&state).unwrap().len();
-            let body = match delta {
-                Some(delta) => UpdateBody::ObservationDelta {
-                    base: self.app.state.as_ref().unwrap().observation_base(),
-                    state: Box::new(delta),
-                    event,
-                },
-                None => UpdateBody::Observation {
-                    state: Box::new(state),
-                    event,
-                },
-            };
-            let update = StreamUpdate {
-                context: fixture_context(),
-                actor: ActorId(1),
-                branch: self.engine.branch().clone(),
-                cursor: StreamCursor {
-                    sequence: self.sequence,
-                    tick,
-                },
-                body,
-            };
-            let update_bytes = serde_json::to_vec(&update).unwrap().len();
-            self.wire_bytes.push((
-                full_bytes,
-                update_bytes,
-                matches!(update.body, UpdateBody::ObservationDelta { .. }),
-            ));
+            let sent_bytes = encoded.text.len();
+            let delta = encoded.observation == Some(ObservationEncoding::Delta);
+            self.wire_bytes.push((full_bytes, sent_bytes, delta));
+            observation_wire = Some(json!({"version":2,"full_bytes":full_bytes,
+                "sent_bytes":sent_bytes,"delta":delta}));
             let start = Instant::now();
-            self.app.state.as_mut().unwrap().apply(update).unwrap();
+            let decoded = decode_response(&encoded.text).unwrap();
+            timings.insert(
+                "wire_decoding".into(),
+                start.elapsed().as_secs_f64() * 1000.,
+            );
+            let ServerMessage::Update { update } = decoded else {
+                panic!("observation encoder returned a different response kind");
+            };
+            let start = Instant::now();
+            self.app.state.as_mut().unwrap().apply(*update).unwrap();
             timings.insert(
                 "client_application".into(),
                 start.elapsed().as_secs_f64() * 1000.,
@@ -277,6 +287,7 @@ impl Runner {
             "actor":actor.0,"label":label,"action":action,"expected":expected,
             "history_start":history_start,"history_end":self.engine.profile_counts().0,"rewind_count":self.engine.profile_counts().1,
             "client_memory":self.app.state.as_ref().unwrap().memory().count(),"phases_ms":timings,
+            "observation_wire":observation_wire,
             "save_status":self.engine.save_status(),"profile":profile,"event":event.map(|e|e.content)})
         );
     }
@@ -345,7 +356,7 @@ fn streaming_case(
     println!(
         "{}",
         json!({"kind":"stream","preloading":true,"case":case,"workload":"streaming-v1","regions":halls,"actors":1,
-        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,"region_acquisition_version":1,
+        "steps_per_cycle":2*STREAM_LEG,"cycles":cycles,"commit":commit,"dirty":dirty,"profile_version":2,"wire_profile_version":2,"region_acquisition_version":1,
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
         "storage":if durable{"background_sqlite_journal"}else{"memory"},
@@ -514,7 +525,7 @@ fn main() {
                         "{}",
                         json!({"kind":"case","case":case,"regions":regions,"actors":actors,"history_start":history,
             "seed":trace.seed,"trace_version":trace.version,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
             "build_profile":if cfg!(debug_assertions){"debug"}else{"release"},"cycles":cycles,"warmup":0,
             "storage":if durable{"background_sqlite_journal"}else{"memory"},"client_observer":1,
             "save_policy":{"target_ms":save_policy.target_interval.as_millis(),"max_ms":save_policy.max_unsaved_age.as_millis(),"idle_ms":save_policy.idle_interval.as_millis(),"queue_bytes":save_policy.max_pending_bytes,"checkpoint_interval":save_policy.checkpoint_interval},
@@ -580,7 +591,7 @@ fn main() {
             "storage":if saved_discovery {"background_sqlite_journal"} else {"memory"},
             "checkpoint_interval":save_policy.checkpoint_interval,
             "trace_version":trace.version,"seed":trace.seed,"commit":String::from_utf8_lossy(&commit.stdout).trim(),
-            "dirty":!dirty.success(),"profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
+            "dirty":!dirty.success(),"profile_version":2,"wire_profile_version":2,"build_profile":if cfg!(debug_assertions){"debug"}else{"release"},
             "cycles":if quick {2} else {regions-1},"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH})
         );
         eprintln!("Starting {case}");

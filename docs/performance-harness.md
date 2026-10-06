@@ -191,6 +191,23 @@ Case metadata records seed, trace version, commit, dirty working-tree flag,
 platform, architecture, build profile, storage mode, cycles and warmup (currently
 zero). Small per-label sample counts remain visible and limit tail conclusions.
 
+Observation diagnostics declare `wire_profile_version: 2` independently of the
+engine profile and action trace versions. `wire_encoding` times the shared server
+response encoder: candidate construction, complete-envelope size counting and
+serialization of the selected response. `wire_decoding` times shared bounded
+typed decoding of that response. Client application and rendering retain separate
+intervals. These measurements occur after the authoritative command interval and
+exclude socket transmission, session scheduling and semantic validation.
+
+Each command sample includes `observation_wire`, either null when no observation
+was sent or the full/selected complete response byte counts and selection kind.
+The wire summary includes the `ServerMessage` envelope and is checked against
+those samples, including exact totals and nearest-rank percentiles. Earlier
+unversioned diagnostics timed candidate construction as `delta_encoding` and
+counted full state/selected update DTOs without their response envelopes. The
+comparison tool keeps those historical byte metrics under distinct legacy names;
+they cannot establish a like-for-like change in complete-message sizes or CPU cost.
+
 Top-level measured command phases are exclusive: candidate capture, checkpoint capture, simulation,
 navigation refresh, revision-view perception, revision comparison, rewind
 snapshot, serialization, underlying write/flush, file sync, replacement, and
