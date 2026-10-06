@@ -39,6 +39,7 @@ class StreamRelay:
         self.dropped = threading.Event()
         self.overflow_delta = threading.Event()
         self.invalid_inventory = threading.Event()
+        self.overdeep = threading.Event()
         self.corrupted = threading.Event()
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
@@ -92,26 +93,16 @@ class StreamRelay:
                         self.drop_observation.clear()
                         self.dropped.set()
                         continue
-                if message is not None and (self.overflow_delta.is_set() or self.invalid_inventory.is_set()):
-                    if message.get('type') == 'update' and message['update']['body']['type'] == 'observation_delta':
-                        # Keep the envelope and sequence valid to isolate
-                        # rejection of arithmetic or reconstructed state.
-                        state = message['update']['body']['state']
-                        if self.overflow_delta.is_set():
-                            state['cells']['shift']['x'] = 2147483647
-                        else:
-                            state['inventory'].append({'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
-                        payload = json.dumps(message, separators=(',', ':')).encode()
-                        length = len(payload)
-                        if length < 126:
-                            prefix, extra = bytes((0x81, length)), b''
-                        elif length <= 65535:
-                            prefix, extra = bytes((0x81, 126)), struct.pack('!H', length)
-                        else:
-                            prefix, extra = bytes((0x81, 127)), struct.pack('!Q', length)
-                        self.overflow_delta.clear()
-                        self.invalid_inventory.clear()
-                        self.corrupted.set()
+                if message is not None and self.corrupt_observation(message):
+                    payload = json.dumps(message, separators=(',', ':')).encode()
+                    length = len(payload)
+                    if length < 126:
+                        prefix, extra = bytes((0x81, length)), b''
+                    elif length <= 65535:
+                        prefix, extra = bytes((0x81, 126)), struct.pack('!H', length)
+                    else:
+                        prefix, extra = bytes((0x81, 127)), struct.pack('!Q', length)
+                    self.corrupted.set()
                 if message is not None:
                     if message.get('type') == 'snapshot':
                         if message['request_id'] == 'attach':
@@ -128,6 +119,32 @@ class StreamRelay:
             self.errors.append(error)
         finally:
             self.close_sockets()
+
+    def corrupt_observation(self, message):
+        """Apply one requested test corruption while preserving its envelope."""
+        if message.get('type') != 'update':
+            return False
+        body = message['update']['body']
+        if body['type'] not in ('observation', 'observation_delta'):
+            return False
+        state = body['state']
+        if self.overdeep.is_set():
+            ignored = None
+            for _ in range(65):
+                ignored = [ignored]
+            state['ignored'] = ignored
+        elif body['type'] != 'observation_delta':
+            return False
+        elif self.overflow_delta.is_set():
+            state['cells']['shift']['x'] = 2147483647
+        elif self.invalid_inventory.is_set():
+            state['inventory'].append({'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
+        else:
+            return False
+        self.overflow_delta.clear()
+        self.invalid_inventory.clear()
+        self.overdeep.clear()
+        return True
 
     def forward(self, source, target):
         try:

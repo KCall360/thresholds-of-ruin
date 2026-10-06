@@ -612,3 +612,24 @@ python scripts/perf_compare.py BASE --case combat --case r8-a1-h100-memory --cas
 Keep raw samples, p50/p95/max and operation counts with the feature findings in
 [dungeon gameplay](dungeon.md). Do not mix results collected during builds or
 process-test runs. Existing provisional targets and deferred 3p work still apply.
+
+
+## Wire decoder diagnostic
+
+Run `cargo run --release -p tor-protocol --example wire_decode_bench --locked -- 200`
+to compare ordinary typed Serde parsing with the bounded decoder in the same
+executable. It uses identical complete JSON messages, alternates method order,
+and checks every result outside timing. Cases cover a small hello, the request
+byte ceiling, and synthetic disclosed snapshots with 8, 256 and 4,096 cells.
+The large hello measures codec construction rather than account authorization;
+the snapshots measure DTO parsing rather than world geometry or topology.
+
+The version-1 JSON-lines report contains a header, one sample per case/method,
+and an end record with the expected sample count. `decode_ms` includes the
+bounded preflight when selected and typed DTO construction. Equality checks,
+DTO destruction, semantic validation, networking and presentation are outside
+the interval. Keep n, p50/p95/max, method order and encoded bytes; retain raw
+samples locally until publication is authorized. This is a same-build method
+comparison, not a historical commit comparison or an end-to-end latency claim.
+Pair it with the existing targeted release comparisons when publishing a
+protocol checkpoint; engine timings do not measure native JSON decoding.

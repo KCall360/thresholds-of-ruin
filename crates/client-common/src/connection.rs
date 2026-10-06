@@ -508,7 +508,7 @@ async fn send(socket: &mut Socket, message: ClientMessage) -> Result<(), Connect
 async fn receive(socket: &mut Socket) -> Result<ServerMessage, ConnectionError> {
     loop {
         match socket.next().await.ok_or("Server disconnected")?? {
-            Message::Text(text) => return Ok(serde_json::from_str(&text)?),
+            Message::Text(text) => return Ok(decode_response(&text)?),
             Message::Close(_) => return Err("Server disconnected".into()),
             Message::Ping(_) | Message::Pong(_) => {}
             _ => return Err("Unexpected non-text server frame".into()),

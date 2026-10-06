@@ -32,8 +32,8 @@ replay, and client lifecycle tracking. Published preparation recovery adds
 original-identity resume/cancel, durable interruption facts, explicit paused
 preparation, and a typed lifecycle proof shared by replay and checkpoint recovery.
 Autonomous decisions use the published common queue path. Native travel integration
-is published; further stream context and the remaining work sequences
-stay in scope.
+is published, along with stream contexts and recovery. The remaining work
+sequences stay in scope.
 
 ```mermaid
 flowchart TD
@@ -361,7 +361,7 @@ Protocol, authored validator schema and binary framing are unchanged. Full and
 both-platform CI gates passed for publication. No broad performance gain is
 claimed; native travel and the remaining work sequences stay in scope.
 
-## Native travel scheduling integration (in progress)
+## Native travel scheduling integration (merged, PR #68)
 
 Each journey step now has a private backend admission linked to the accepted
 travel request and a consecutive step ordinal. The simulation owns its queue,
@@ -384,8 +384,10 @@ boundaries, mismatched pending identity, unloaded cancellation facts, exact
 replay/checkpoint restoration, real storage rejection/reopen in checkpoint and
 journal modes, and startup rejection/retry. Actual server/headless tests verify
 private admission, receipt-free linked execution, observer disclosure and durable
-state/history. Full, performance and publication gates remain pending. Text-client
-fixes and scripting runtime implementation remain deferred.
+state/history. The integration is merged after required verification and
+Windows/Linux CI, and the desktop launchers use its verified immutable build.
+Remaining persistence and restoration tails stay in scope. Text-client fixes
+and scripting runtime implementation remain deferred.
 
 ## Stream context and exact observation bases (merged, PR #69)
 
@@ -1755,7 +1757,7 @@ removed the extra scene/body work and reduced the command p95 increase to the
 restart p95 remained higher; both comparisons are retained rather than selecting
 only favorable timings. Raw samples remain local and unpublished.
 
-## Save-owned nested schemas (in development)
+## Save-owned nested schemas (merged, PR #70)
 
 The journal owns its command enum, but nested protocol values previously invoked
 wire serializers directly. Save-owned typed Serde adapters now specify persisted
@@ -1765,7 +1767,7 @@ encoding. Current stored
 shapes remain unchanged, and the existing strict save decoder remains the single
 validation path. This avoids changing saved numeric fields when future wire
 integers become decimal strings. Further separation of simulation state from save
-DTOs and JavaScript-safe wire encoding remain in scope.
+DTOs remains in scope; JavaScript-safe wire encoding is published.
 
 A failing-first action-shape test and five schema tests cover numeric extremes,
 nested journal receipts, annotation metadata, intention facts, revision maps and
@@ -1826,7 +1828,7 @@ including the already independent production nested-journal tests. The prototype
 is preserved separately; that checkpoint retains the preceding wire schema.
 The corrected checkpoint requires renewed verification and final-head CI before merging.
 
-### Explicit journal lease ownership (in development)
+### Explicit journal lease ownership (merged, PR #70)
 
 The corrected schema head (`e3b5cb90`) passed the complete local Windows gate,
 including native mouse verification in both profiles. Its final-head CI passed
@@ -1877,7 +1879,7 @@ or isolate the unlock cost from host scheduling. Raw reports remain local and
 unpublished. Broader persistence and restoration tails remain open work.
 
 
-## Lossless wire integers (in development)
+## Lossless wire integers (merged, PR #71)
 
 Protocol 26 encodes every 64-bit wire integer as a canonical decimal string,
 including actor/item/door identities, ticks, revisions, stream counters,
@@ -1911,10 +1913,13 @@ restart, streaming recovery, native presentation and eight-client scheduling.
 The focused final Python caller run passed all 60 tests. The first full gate
 passed all 834 Rust tests in each profile and all 141 release process tests;
 259 of 260 debug Python tests passed. Its sole failure was a stale version
-reference in this plan. Correcting that reference requires a renewed successful
-full gate; the failed run does not satisfy publication. Final-head Windows/Linux
-CI remains required before merging. No scripting runtime or text-client product
-changes are included; the remaining architecture sequences and performance tails remain active work.
+reference in this plan. After correction, the renewed full gate passed all eight
+steps: 260 debug Python tests, 834 Rust tests in each profile and 141 release
+process tests, with no skipped tests. Exact tested contents passed all five
+final-head CI jobs, including Windows and Linux. The checkpoint is merged, and
+the desktop launchers use its verified immutable build. The failed first run
+remains recorded. No scripting runtime or text-client product changes are included;
+the remaining architecture sequences and performance tails remain active work.
 
 
 ### Wire integer release comparison
@@ -1957,3 +1962,105 @@ measurement and selection changes remain part of the next protocol work.
 Flush/restart groups have only three samples, and the small baseline flush
 contains a spike. No broad speedup is claimed. Raw reports remain local and
 unpublished; persistence, restoration and simulation tails remain open work.
+
+
+## Bounded typed wire decoding (in development)
+
+Request and response decoding now share explicit byte/depth policies in the
+protocol codec. A scan bounds UTF-8 bytes and object/array nesting before typed
+construction, including ignored fields, while respecting strings and escapes.
+It uses constant auxiliary space; Serde retains syntax/schema and trailing-input
+validation. The server's hello/input paths and shared native receive path use
+the same helpers. Disclosed-state semantic validation remains a separate step.
+No simulation time, authority, journal or topology rule moves into the codec.
+
+An ignored deeply nested response was accepted by the preceding decoder. A
+failing-first unit regression, fragmented scripted-peer test and actual headless
+client process reproduced that behavior before the fix. The peer test accepts
+an exact-depth control, including a multibyte character split across frames,
+and rejects one level over without changing client state or requesting repair.
+The process test rejects the malicious observation, reconnects normally, and
+keeps an independent player able to play and save. Existing native gap and
+invalid-state recovery cases remain intact. A real server process rejects deep
+hello/request messages, trailing JSON and an oversized assembled fragmented
+request without publishing actions or changing healthy-client state/history;
+explicit save and cold reopen preserve that state.
+
+Focused coverage currently passes all 44 protocol tests, 71 shared-client tests,
+two transport ownership tests and eight real-client recovery process tests,
+plus the server request-rejection/persistence check. A diagnostic example tests
+synthetic disclosed payload construction and compares typed parsing methods in
+one executable. Both the direct release measurement and targeted engine
+comparison below passed their report validation. Full verification and final CI
+remain required. This checkpoint adds no language runtime, text-client product
+behavior, DTO shape or persisted-format change. Collection deltas, complete
+encoded selection, fair output pressure, scenario normalization/generation,
+independent save DTOs, history scaling and future scoped extension seams remain
+part of the full refactor scope.
+
+
+### Decoder CPU diagnostic (2026-10-06)
+
+The release diagnostic validated all 2,000 samples: five payloads, 200 samples
+per method, alternating Serde/bounded order. Every typed result matched; frozen
+source inputs remained unchanged. This compares two methods in one executable,
+not historical commits. Timings include DTO construction and exclude equality,
+destruction, semantic validation, networking and rendering. Values below are
+milliseconds, Serde reference → bounded decoder; n is 200 per method.
+
+| Payload | Encoded bytes | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| Hello | 86 | 0.0005 → 0.0006 | 0.0006 → 0.0008 | 0.0473 → 0.0586 |
+| Request byte ceiling | 16,384 | 0.0033 → 0.0198 | 0.0034 → 0.0200 | 0.0099 → 0.0240 |
+| Snapshot, 8 cells | 2,622 | 0.0202 → 0.0234 | 0.0216 → 0.0255 | 0.0402 → 0.2138 |
+| Snapshot, 256 cells | 49,554 | 0.4758 → 0.5284 | 0.5296 → 0.5791 | 0.7258 → 1.1871 |
+| Snapshot, 4,096 cells | 785,346 | 7.0600 → 7.9908 | 7.6619 → 8.5134 | 7.8822 → 9.2803 |
+
+The extra pass has measurable cost, especially for a long string that Serde
+can parse cheaply. The large snapshot median rises about 13%; no decoding
+speedup is claimed. Synthetic observer-relative positions test DTO size rather
+than region geometry or portal topology. Sub-microsecond hello results and
+single maxima are sensitive to timer granularity and scheduling. This sample
+does not establish the cost of every permitted 16 MiB response or an allocation
+bound for every DTO. Raw samples, binary/source hashes and machine metadata
+remain local; no release or ledger upload was made.
+
+
+### Decoder checkpoint engine comparison
+
+Three interleaved five-cycle rounds compared the preceding wire checkpoint with
+the decoder working tree. All 24 reports validated, without failed runs or
+competing builds. Source hashes stayed unchanged during the run. Operation,
+history, recovery and save/checkpoint size counts match in all four cases.
+This comparison used the C-worktree SSD save volume (machine fingerprint
+`cfb2fdc044dc`); older HDD measurements are not directly comparable. Times below
+are milliseconds, baseline → candidate, with n per side.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-memory / command | 915 | 0.549 → 0.559 | 0.790 → 0.810 | 1.220 → 1.608 |
+| r8-a1-h100-memory / restart | 3 | 164.461 → 166.618 | 172.604 → 167.034 | 172.604 → 167.034 |
+| r64-a8-h100-memory / command | 7500 | 0.029 → 0.029 | 2.465 → 2.497 | 6.788 → 7.554 |
+| r64-a8-h100-memory / restart | 3 | 1486.924 → 1505.329 | 1511.246 → 1662.785 | 1511.246 → 1662.785 |
+| r8-a1-h100-durable / command | 915 | 0.581 → 0.624 | 0.845 → 1.142 | 3.491 → 2.564 |
+| r8-a1-h100-durable / flush | 3 | 75.703 → 104.354 | 96.982 → 411.821 | 96.982 → 411.821 |
+| r8-a1-h100-durable / restart | 3 | 177.716 → 185.659 | 239.267 → 186.695 | 239.267 → 186.695 |
+| r64-a8-h100-durable / command | 7500 | 0.043 → 0.040 | 2.535 → 2.513 | 9.519 → 9.276 |
+| r64-a8-h100-durable / flush | 3 | 932.711 → 721.450 | 12802.224 → 1345.533 | 12802.224 → 1345.533 |
+| r64-a8-h100-durable / restart | 3 | 467.384 → 465.840 | 502.956 → 468.508 | 502.956 → 468.508 |
+
+The small durable candidate's command round p95 values were 0.819, 0.817 and
+1.626 ms; the third round contains slower navigation and perception samples.
+The measured command interval does not include wire decoding. The original
+command slowdown and flush/restart tails remain evidence; no cause was proven.
+
+A focused small-durable repeat used the same frozen binaries and machine,
+with three interleaved rounds and six validated reports. Counts matched again.
+Its command n=915 per side gave p50 0.566 → 0.577 ms, p95 0.796 → 0.802 ms,
+and max 2.339 → 1.904 ms. Flush n=3 gave p50 130.178 → 81.380 ms,
+p95/max 144.817 → 106.016 ms. Restart n=3 gave p50 165.015 → 183.744 ms
+and p95/max 167.202 → 185.053 ms. The repeat did not reproduce the larger
+command slowdown; restart remained higher. Neither run establishes that tails
+are resolved or that this checkpoint improves engine performance. The safety
+scan's CPU cost is measured separately above. All raw reports remain local;
+no release assets or ledger entry were published.

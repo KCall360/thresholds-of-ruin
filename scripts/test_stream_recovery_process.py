@@ -188,6 +188,41 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertFalse(shown['has_control'])
             self.assertIn('You notice a figure.' if opened else 'You can no longer see the figure.', shown['narration'])
 
+    def test_headless_overdeep_response_is_fatal_while_healthy_player_continues(self):
+        self.server()
+        upstream = self.address
+        player, _ = self.client()
+        relay = StreamRelay(upstream)
+        self.addCleanup(relay.close)
+        self.address = relay.address
+        spectator, initial = self.client(SPECTATOR_TOKEN, observe=True)
+        self.address = upstream
+        relay.overdeep.set()
+        final = self.act(player, {'type': 'wait'})
+        self.assertIsNone(final['error'])
+        self.assertTrue(relay.corrupted.wait(5), 'No actual observation was corrupted')
+
+        def rejection_or_observation(frame):
+            if frame['type'] == 'fatal':
+                return True
+            message = frame.get('message') or {}
+            return (message.get('type') == 'update' and
+                    message['update']['body']['type'] in ('observation', 'observation_delta'))
+
+        rejected = self.frame(spectator, rejection_or_observation)
+        self.assertEqual(rejected['type'], 'fatal', 'Overdeep observations must never be presented')
+        self.assertIn('nesting', rejected['error'])
+        self.assertEqual(spectator.child.wait(timeout=10), 1)
+        self.assertEqual(relay.repairs, 0, 'Malformed wire input must not trigger stream repair')
+        self.assertEqual(relay.attachments, 1)
+        self.assertFalse(relay.errors)
+        replacement, recovered = self.client(SPECTATOR_TOKEN, observe=True)
+        self.assertEqual(recovered['state'], final['state'])
+        self.assertGreater(int(recovered['state']['revision']), int(initial['state']['revision']))
+        self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
+        saved = self.request(player, {'type': 'save'})
+        self.assertIsNone(saved['error'])
+
 
 if __name__ == '__main__':
     unittest.main()

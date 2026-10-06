@@ -30,6 +30,27 @@ clients are supported now. Browser origins are rejected. Remote TLS deployment
 and account administration remain future work; a secure tunnel can carry the
 same protocol to a loopback server.
 
+## Decode boundaries
+
+The shared protocol codec decodes complete client and server envelopes directly
+into typed messages. It checks UTF-8 byte limits before deserialization: 16 KiB
+for requests and 16 MiB for responses, including the entire JSON envelope and
+trailing whitespace. WebSocket limits also apply to the complete assembled
+message, so fragmentation cannot bypass the byte ceiling.
+
+Both directions permit at most 64 nested objects/arrays, with the root container
+counted as one. An allocation-free scan enforces this bound even inside ignored
+fields; quoted delimiters and escaped strings do not contribute to nesting.
+Serde still checks syntax, escaping, duplicate/unknown fields according to each
+DTO's schema, and trailing content. The scan does not build a JSON value tree or
+replace semantic snapshot/delta validation.
+
+Malformed wire input terminates that connection. Clients preserve their last
+accepted model and reconnect for a fresh snapshot; malformed input does not
+start stream repair. Valid decoded messages with a recoverable stream gap follow
+the existing bounded repair policy. Request rejection precedes command admission
+and publication; an unrelated healthy connection remains usable.
+
 ## Read-only spectators
 
 Before starting the server, optionally set `TOR_SPECTATOR_TOKEN` to a separate
