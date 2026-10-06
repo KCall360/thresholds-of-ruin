@@ -307,7 +307,9 @@ The authored validator schema, scenario package version 2 and binary frame
 version 6 are unchanged. Required queue, movement, execution-context and derived
 lifecycle fields have no legacy-reader defaults. Previous saves and builds remain
 preserved; unsupported versions fail explicitly. Full verification and publication
-of this recovery slice remain in progress.
+of the recovery slice completed in [PR #66](https://github.com/KCall360/thresholds-of-ruin/pull/66).
+Its tested head `e1c1081` passed full local verification and all five Windows/Linux
+CI checks; the desktop launchers use that head after 28 deployed-build smoke tests.
 
 The current recovery implementation resumes and cancels paused attack progress
 under its original identity, records interruption facts atomically, and shares
@@ -317,9 +319,46 @@ large retained-window save/reopen diagnostics and their memory limits are record
 in [checkpoints](checkpoints.md). Client controls and ASCII hints select queued
 work before independent preparation through one shared selector, independent of
 delivery order. Focused regressions, affected client suites and real intention
-process tests pass. Final local verification and both-platform CI remain required.
+process tests pass. Recovery publication verification and both-platform CI passed.
 AI/travel migration, stream context, scenario compiler work, persistence scaling
 and latency/memory investigations remain within the full refactor scope.
+
+## Autonomous scheduling integration (in progress)
+
+AI decisions now enter the simulation-owned queue through a private, typed backend
+admission. Admission chooses no action and changes no time, RNG, observation or
+physics state. The existing queue execution path chooses the action once, reconciles
+effects, admits the journal and publishes observations. No authenticated RPC receipt
+is fabricated. Session admits and executes the due decision within its existing
+bounded scheduling step; queued human work still requires its controller, while
+autonomous work requires enabled play and a living controlled player.
+
+Replay, checkpoint private-boundary recovery and retained-state validation share
+admission ownership and execution-target checks. A driver retry reuses the admitted
+identity. Focused tests cover effect-free admission, exact queue restoration,
+execution rejection without publication, retry after reopen, retained queue rewind
+with allocator high-water marks, and forged actor, author and preparation target.
+Actual-process tests verify private backend admissions, receipt-free linked
+execution, spectator disclosure, and exact state/history after restart. The existing one-decision/one-route-search/one-
+simulation-transition contracts pass. A release-comparison failure exposed attacks
+started and interrupted inside one simulation boundary: the old suspension derivation
+only considered preparation already present before execution. Derivation now includes
+successful starts and continuations, preserving strict checkpoint phase validation.
+A permanent combat regression checks replay and checkpoint recovery at every boundary.
+Effect-free admissions retain already-built committed observations. A failing-first
+work-count regression exposed cache invalidation that rebuilt all pre-action views;
+shared admission publication now preserves those views. Navigation refresh accounting
+belongs to common action reconciliation for both immediate and queued execution.
+Fresh admission and execution are separate journaled command boundaries and capture
+two candidates; a queued retry captures only execution. They use the existing
+[asynchronous save policy](background-saving.md) and can share a storage batch.
+Ordinary publication does not wait for disk; an explicit save provides the barrier.
+
+This integration advances the current save and ruleset versions in the
+[format registry](milestones.md), with all 33 scenario certificates regenerated.
+Protocol, authored validator schema and binary framing are unchanged. It remains
+unpublished pending the required full/CI gates. No broad performance gain is
+claimed, and travel migration and the remaining work sequences stay in scope.
 
 ## Shared item and combat definitions
 
@@ -1514,3 +1553,37 @@ unchanged; record inputs grew by 67,500 bytes in the ordinary case and 18,900 by
 in streaming because recovery facts are persisted. Those extra bytes do not
 establish the cause of the spikes. Commit-batch tails and substantial large-save
 restore memory remain explicit performance follow-ups; neither is declared fixed.
+
+
+### Autonomous queue release comparison
+
+Three interleaved rounds compared autonomous queue execution with the preceding
+verified recovery implementation on the same Windows host and HDD save volume.
+All six runs validated. The eight-actor, 1,000-action history group uses the
+unchanged combat workload; timings are milliseconds, baseline to refactor.
+
+| Metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| Command | 576 | 0.549 → 0.568 | 3.309 → 3.381 | 3.750 → 4.773 |
+| Client application | 495 | 0.300 → 0.298 | 0.380 → 0.373 | 0.618 → 0.792 |
+| Client draw | 495 | 0.710 → 0.703 | 0.967 → 0.985 | 1.443 → 1.618 |
+| Restart | 9 | 207.3 → 259.9 | 214.4 → 267.5 | 214.4 → 267.5 |
+| Explicit save | 9 | 320.8 → 352.0 | 335.5 → 1,322.5 | 335.5 → 1,322.5 |
+
+Scene, body-cell, navigation-refresh and disclosed-byte counts match exactly.
+Saved bytes grew from 8,822,784 to 11,415,552 with separate durable decision
+admissions. Command p95 rose 2.2%; restart p95 rose 24.8%. The save groups have
+only nine samples, and save p95 rose 294.2% with a long final tail. No broad
+performance improvement is claimed. Additional admission records explain added
+journal work but do not establish the cause of restart or save timing changes;
+restore profiling and persistence tails remain open refactor work.
+
+The first comparison exposed a checkpoint failure before any current-branch
+sample completed; all three failed runs are retained. After correcting same-step
+suspension facts, all six runs validated, but command p95 rose 14.7%, scenes and
+body cells increased, and restart p95 rose 34.5%. A failing-first observation-count
+regression identified admission cache invalidation. Preserving unchanged views
+removed the extra scene/body work and reduced the command p95 increase to the
+2.2% shown above. That intermediate comparison's save p95 fell 21.9%, while
+restart p95 remained higher; both comparisons are retained rather than selecting
+only favorable timings. Raw samples remain local and unpublished.

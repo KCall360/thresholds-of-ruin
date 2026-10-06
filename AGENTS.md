@@ -147,28 +147,35 @@ The three desktop launchers use a verified immutable foundation build; their
 real-client smoke checks passed. Local native mouse verification is explicitly
 waived while LockApp covers the desktop; retain ordinary CI coverage.
 
-**Preparation recovery (in progress, unpublished).** The isolated recovery
-branch resumes/cancels paused attacks under their original admission, preserves
-spent progress, publishes changed observations before lifecycle updates, and
-records combat interruption facts with the causing action. A typed lifecycle
-model shared by replay and checkpoint validation replaces overlapping flags,
-restores phases at rewind targets, and validates saved queue/preparation state
-at its actual journal boundary. Its canonical actor-owned state permits one queue
-and one preparation, distinguishes a suspended continuation from paused progress,
-and proves the exact saved queue presence. The wire phase `Paused` distinguishes
-preparation from `Suspended` queued work. Backend, shared-client and real combat/
-restart regressions pass. Baseline full verification passed debug/release Rust,
-247 Python/tooling/process tests and release process acceptance. Further lifecycle
-review and focused regressions are underway; publication gates remain open. The recovery slice uses protocol 24, save 19 and dungeon-v19; the authored
-validator schema remains unchanged. Certificates and wire samples are regenerated.
-Complete review, verification of subsequent changes and CI before publishing.
-The latest checkpoint full run completed all non-mouse checks successfully in
-28.2 minutes; debug and release native mouse checks failed because LockApp
-covered the game window. Record the explicit local waiver separately; this was
-not a successful full gate. Subsequent shared-client/ASCII selection regressions
-failed first and passed after centralizing queue-before-preparation selection;
-both affected client suites, clippy and six intention process tests passed.
-These later edits invalidate reuse of the earlier full-run inputs.
+**Preparation recovery (merged, PR #66).** Paused attacks resume/cancel under
+the original admission and preserve spent progress. Interruption facts commit
+with their causing action; changed observations precede lifecycle updates. One
+actor-owned lifecycle model proves replay/checkpoint phase and target linkage,
+including independent queued work and preparation. Full-value actor/queue pooling
+preserves copy-on-write isolation across retained boundaries. Substantial restore
+memory and persistence batch tails remain open; see [checkpoints](docs/checkpoints.md)
+and the [refactor plan](docs/refactoring.md).
+
+The published commit `e1c1081` passed unchanged-input full verification (247 debug
+Python/process tests, debug/release Rust, 129 release process tests, both local
+mouse checks), all five Windows/Linux CI checks, and 28 deployed-build smoke tests.
+The three desktop launchers use this verified immutable recovery build with matching
+scenario files. Previous builds, configuration backups and saves remain preserved.
+The earlier local mouse waiver did not need to be used for this publication run.
+
+**Autonomous integration (in progress, separate branch).** Recovery PR #66 is
+merged at `1d22c86` after successful unchanged-input full verification and all
+five Windows/Linux CI checks. The desktop build uses its exact tested head
+`e1c1081`. The next branch admits AI decisions through
+typed backend records and executes them through the common queue path. No RPC
+receipt is fabricated. All 28 affected intention unit tests, nine performance contracts, seven
+actual-process intention tests, documentation checks and server clippy pass.
+Release comparison passes after fixing same-step suspension facts and observation
+cache invalidation. Extra saved bytes, slower restart and persistence tails remain
+open. Fresh full/CI format publication gates remain.
+Scenario certificates match the current [format registry](docs/milestones.md).
+Keep desktop deployment pinned to a verified published commit and its matching
+scenario files, never the uncommitted autonomous branch.
 
 The maintainer requires clean, robust, rational code. Review each increment for
 clear ownership, explicit domain states, cohesive interfaces and repeated rules.

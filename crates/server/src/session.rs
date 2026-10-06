@@ -782,32 +782,7 @@ impl Service {
             return Step::Full(full);
         }
         if let Some(next) = self.engine.next_intention_actor() {
-            if self.engine.alive(next) && !self.controllers.contains_key(&next) {
-                self.announce_waiting();
-                return Step::Blocked;
-            }
-            let revisions = self
-                .engine
-                .actors()
-                .into_iter()
-                .map(|actor| Ok((actor, self.engine.revision(actor)?)))
-                .collect::<Result<BTreeMap<_, _>, Failure>>();
-            match revisions.and_then(|revisions| {
-                self.engine
-                    .execute_next_intention()
-                    .map(|result| (revisions, result))
-            }) {
-                Ok((revisions, Some(result))) => {
-                    if let Err(error) = self.action_result_update(&revisions, &result) {
-                        self.save_warning = Some(error.to_string());
-                    }
-                    return Step::Progress;
-                }
-                Ok((_, None)) => {}
-                Err(error) => self.save_warning = Some(error.to_string()),
-            }
-            self.announce_waiting();
-            return Step::Blocked;
+            return self.execute_queued_intention(next);
         }
         let Some(next) = self.engine.next_actor() else {
             self.announce_waiting();
@@ -829,8 +804,54 @@ impl Service {
             self.announce_waiting();
             return Step::Blocked;
         }
-        self.advance_ai(next);
-        Step::Progress
+        self.admit_ai(next);
+        match self.engine.next_intention_actor() {
+            Some(next) => self.execute_queued_intention(next),
+            None => Step::Blocked,
+        }
+    }
+
+    /// All due work uses this path, including an AI decision just admitted above.
+    fn execute_queued_intention(&mut self, next: ActorId) -> Step {
+        let allowed = match self.engine.next_intention_origin() {
+            Some(tor_simulation::IntentionOrigin::Human) => {
+                !self.engine.alive(next) || self.controllers.contains_key(&next)
+            }
+            Some(tor_simulation::IntentionOrigin::Autonomous) => {
+                self.autonomous_enabled
+                    && self
+                        .controllers
+                        .keys()
+                        .any(|&actor| self.engine.alive(actor))
+            }
+            None => false,
+        };
+        if !allowed {
+            self.announce_waiting();
+            return Step::Blocked;
+        }
+        let revisions = self
+            .engine
+            .actors()
+            .into_iter()
+            .map(|actor| Ok((actor, self.engine.revision(actor)?)))
+            .collect::<Result<BTreeMap<_, _>, Failure>>();
+        match revisions.and_then(|revisions| {
+            self.engine
+                .execute_next_intention()
+                .map(|result| (revisions, result))
+        }) {
+            Ok((revisions, Some(result))) => {
+                if let Err(error) = self.action_result_update(&revisions, &result) {
+                    self.save_warning = Some(error.to_string());
+                }
+                return Step::Progress;
+            }
+            Ok((_, None)) => {}
+            Err(error) => self.save_warning = Some(error.to_string()),
+        }
+        self.announce_waiting();
+        Step::Blocked
     }
 
     /// Tell each attached client what stopped play waits for, once per stop.
@@ -983,14 +1004,14 @@ impl Service {
         }
     }
 
-    fn advance_ai(&mut self, actor: ActorId) {
+    fn admit_ai(&mut self, actor: ActorId) {
         let revisions = self
             .engine
             .actors()
             .into_iter()
             .map(|id| (id, self.engine.revision(id).unwrap()))
             .collect();
-        let result = self.engine.advance_ai(actor);
+        let result = self.engine.admit_ai(actor);
         match result {
             Ok(result) => {
                 let _ = self.action_result_update(&revisions, &result);

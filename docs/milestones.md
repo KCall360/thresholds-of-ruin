@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **24**, save format **19**, ruleset
-**`dungeon-v19`**, scenario validator **`tor-scenario-7`**. The server rejects
+**Current formats:** protocol **24**, save format **20**, ruleset
+**`dungeon-v20`**, scenario validator **`tor-scenario-7`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -21,7 +21,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
-| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots and client input guards; recovery suspension, AI/travel, running attacks and stream recovery remain pending |
+| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path under verification; travel migration and stream context remain pending |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
 | Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations |
@@ -41,10 +41,12 @@ only; wizard history is bounded; generated regions are limited to rooms and
 corridors between authored ones; and the ASCII client doesn't draw from asset
 palettes yet.
 
-The [architecture refactor](refactoring.md) is active. Its initial scope removes
-implicit command conversions and repeated per-client observation work. Text-client
-fixes and scripting runtime selection remain deferred. Format versions above are
-unchanged; queued intention admission and the remaining refactor stages are pending.
+The [architecture refactor](refactoring.md) is active. Typed boundaries, shared observations, topology-aware indexes, queued gameplay,
+paused-preparation recovery and checkpoint pooling are implemented. Autonomous
+decisions now use the common queue path and are undergoing publication verification.
+Travel migration, stream context, scenario compiler follow-up, history scaling and
+measured latency/memory work remain; see the refactor plan for the full scope.
+Text-client fixes and scripting runtime selection remain deferred.
 
 ## Completed milestones
 

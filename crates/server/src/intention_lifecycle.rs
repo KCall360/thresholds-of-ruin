@@ -12,6 +12,8 @@ type Phases = BTreeMap<ActorId, ActorPhases>;
 struct WorkPhase {
     intention: Id,
     phase: Phase,
+    /// Original execution target, derived from the typed start record.
+    target: Option<ActorId>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -45,6 +47,7 @@ impl ActorPhases {
             *slot = Some(WorkPhase {
                 intention: id,
                 phase,
+                target: None,
             });
         }
         Ok(())
@@ -139,6 +142,7 @@ impl EffectScope {
                 ..
             }
             | JournalContent::IntentionAdmitted { .. }
+            | JournalContent::AutonomousIntentionAdmitted { .. }
             | JournalContent::PlaceRenamed { .. }
             | JournalContent::Travel { .. }
             | JournalContent::Annotation { .. }
@@ -219,6 +223,17 @@ impl<'a> JournalLifecycle<'a> {
         phases.get(&actor)?.phase(id)
     }
 
+    fn target_at(&self, phases: &Phases, id: Id) -> Option<ActorId> {
+        let actor = self.root(id)?.entry.actor;
+        phases
+            .get(&actor)?
+            .work
+            .iter()
+            .flatten()
+            .find(|work| work.intention == id)?
+            .target
+    }
+
     fn phase(&self, id: Id) -> Result<Phase, Failure> {
         self.phase_at(&self.phases, id).ok_or_else(invalid_archive)
     }
@@ -281,7 +296,8 @@ impl<'a> JournalLifecycle<'a> {
             return Err(invalid_archive());
         }
         match &entry.content {
-            JournalContent::IntentionAdmitted { intention, .. } => {
+            JournalContent::IntentionAdmitted { intention, .. }
+            | JournalContent::AutonomousIntentionAdmitted { intention } => {
                 if self.roots.insert(*intention, record).is_some() {
                     return Err(invalid_archive());
                 }
@@ -326,6 +342,23 @@ impl<'a> JournalLifecycle<'a> {
                     return Err(invalid_archive());
                 }
                 self.transition(*intention, Phase::Running)?;
+                if let Action::Attack { target } = action {
+                    let actor = self
+                        .root(*intention)
+                        .ok_or_else(invalid_archive)?
+                        .entry
+                        .actor;
+                    let owned = Arc::make_mut(&mut self.phases)
+                        .get_mut(&actor)
+                        .ok_or_else(invalid_archive)?;
+                    owned
+                        .work
+                        .iter_mut()
+                        .flatten()
+                        .find(|work| work.intention == *intention)
+                        .ok_or_else(invalid_archive)?
+                        .target = Some(*target);
+                }
                 if !matches!(action, Action::Attack { .. }) {
                     self.require_end(record, *intention, IntentionEndKind::Resolved)?;
                 }
@@ -464,6 +497,7 @@ impl<'a> JournalLifecycle<'a> {
                 (
                     Some(Phase::InitialQueued | Phase::InitialSuspended),
                     tor_simulation::IntentionWork::Action(_)
+                        | tor_simulation::IntentionWork::AiDecision
                 ) | (
                     Some(Phase::ProgressQueued | Phase::ProgressQueueSuspended),
                     tor_simulation::IntentionWork::ResumeAttack { .. }
@@ -472,9 +506,9 @@ impl<'a> JournalLifecycle<'a> {
             work_matches_phase
                 && root.entry.actor.0 == queued.actor.0
                 && queued.state == queued_phase
-                && queued.origin == tor_simulation::IntentionOrigin::Human
-                && matches!(&root.entry.content, JournalContent::IntentionAdmitted { action, .. }
-                    if super::intention::admitted_work_matches(queued.work, action))
+                && root.entry.content.admission().is_some_and(|(_, work)| {
+                    queued.origin == work.origin() && work.matches(queued.work)
+                })
         }) {
             return false;
         }
@@ -483,11 +517,14 @@ impl<'a> JournalLifecycle<'a> {
                 progress.intention.is_none_or(|id| {
                     self.root(id).is_some_and(|root| {
                         root.entry.actor.0 == actor.0
-                            && matches!(root.entry.content, JournalContent::IntentionAdmitted {
-                                action: Action::Attack { target }, .. } if target.0 == progress.target.0)
+                            && self.target_at(phases, id) == Some(ActorId(progress.target.0))
                     }) && match self.phase_at(phases, id) {
                         Some(Phase::Running) => progress.active,
-                        Some(Phase::ProgressPaused | Phase::ProgressQueued | Phase::ProgressQueueSuspended) => !progress.active,
+                        Some(
+                            Phase::ProgressPaused
+                            | Phase::ProgressQueued
+                            | Phase::ProgressQueueSuspended,
+                        ) => !progress.active,
                         _ => false,
                     }
                 })

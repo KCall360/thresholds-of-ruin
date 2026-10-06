@@ -4,6 +4,417 @@ use super::*;
 mod intention_admission_tests {
     use super::*;
 
+    fn autonomous_fixture() -> Engine {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let scenario = crate::scenario_package::load(&source, 42, None, false).unwrap();
+        autonomous_fixture_from(scenario)
+    }
+
+    fn autonomous_fixture_from(scenario: Scenario) -> Engine {
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        engine
+            .command(
+                "player",
+                "test",
+                actor,
+                "wait-before-ai",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        if engine.next_intention_actor().is_some() {
+            engine.execute_next_intention().unwrap().unwrap();
+        }
+        let next = engine.next_actor().expect("AI is due");
+        assert!(engine.is_ai(next));
+        engine
+    }
+
+    #[test]
+    fn repeated_autonomous_combat_replays_and_restores_every_execution_boundary() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let template = crate::scenario_package::load(&source, 42, None, false).unwrap();
+        let mut package = (**template.package.as_ref().unwrap()).clone();
+        package.manifest.objective = None;
+        let hero = package.manifest.characters[0].combat.as_mut().unwrap();
+        hero.max_hp = 1_000_000;
+        hero.attack
+            .damage
+            .values_mut()
+            .for_each(|damage| *damage = 1);
+        let mut regions = package.region_defs().unwrap();
+        let enemy = &mut regions[0].actors[0];
+        enemy.at = [2, 1, 0];
+        enemy.combat.as_mut().unwrap().max_hp = 1_000_000;
+        let directory = tempfile::tempdir().unwrap();
+        crate::scenario_package::write_package(directory.path(), &package.manifest, &regions)
+            .unwrap();
+        crate::scenario_package::validate(directory.path()).unwrap();
+        let scenario = crate::scenario_package::load(directory.path(), 42, None, false).unwrap();
+        let mut engine = Engine::memory(scenario).unwrap();
+        for turn in 0..64 {
+            let actor = engine.next_actor().unwrap();
+            if engine.is_ai(actor) {
+                engine.advance_ai(actor).unwrap();
+            } else {
+                engine
+                    .command(
+                        "player",
+                        "combat",
+                        actor,
+                        &turn.to_string(),
+                        &engine.branch().clone(),
+                        Command::Act {
+                            expected_revision: engine.revision(actor).unwrap(),
+                            action: Action::Attack { target: ActorId(2) },
+                        },
+                    )
+                    .unwrap();
+            }
+            let restored = Engine::replay(engine.archive.clone(), None, None)
+                .unwrap_or_else(|error| panic!("combat boundary {turn}: {error:?}"));
+            assert_eq!(restored.game, engine.game, "combat boundary {turn}");
+            let checkpoint = Checkpoint::capture(&engine)
+                .encode("combat", turn + 1)
+                .restore(engine.archive.clone())
+                .unwrap_or_else(|error| panic!("combat checkpoint {turn}: {error:?}"));
+            assert_eq!(checkpoint.game, engine.game, "combat checkpoint {turn}");
+        }
+    }
+
+    #[test]
+    fn autonomous_execution_is_journaled_without_a_fabricated_rpc_receipt() {
+        let mut engine = autonomous_fixture();
+        let next = engine.next_actor().unwrap();
+        let first = engine.archive.records.len();
+        engine.advance_ai(next).unwrap();
+        assert!(
+            engine.archive.records[first..]
+                .iter()
+                .all(|record| record.receipt.is_none()),
+            "autonomous scheduling must not manufacture authenticated RPC receipts"
+        );
+    }
+
+    #[test]
+    fn autonomous_admission_is_effect_free_and_restores_the_exact_queued_decision() {
+        let mut engine = autonomous_fixture();
+        let actor = engine.next_actor().unwrap();
+        let revisions = engine.revisions.clone();
+        let mut expected = engine.game.clone();
+        let identity = expected.admit_ai_intention(SimActor(actor.0)).unwrap();
+        let before = tor_simulation::diagnostics::work_counts();
+        let admission = engine.admit_ai(actor).unwrap();
+        let after = tor_simulation::diagnostics::work_counts();
+        assert_eq!(after.route_searches, before.route_searches);
+        assert_eq!(after.observations, before.observations);
+        assert_eq!(after.physics_steps, before.physics_steps);
+        assert_eq!(
+            engine.game, expected,
+            "only the queue and identity counter may change"
+        );
+        assert_eq!(engine.revisions, revisions);
+        assert!(admission.entry.intention_ends.is_empty());
+        assert!(admission.entry.intention_suspensions.is_empty());
+        assert!(admission.entry.disclosed().is_none());
+        assert!(matches!(admission.entry.content,
+            JournalContent::AutonomousIntentionAdmitted { intention } if intention == identity));
+        assert!(
+            engine.pending_intentions(actor).is_empty(),
+            "backend decisions are not human controls"
+        );
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        let restored = Checkpoint::capture(&engine)
+            .encode("queued-ai", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        let mut expected_executed = engine;
+        let execution = expected_executed.execute_next_intention().unwrap().unwrap();
+        for mut recovered in [replayed, restored] {
+            assert_eq!(recovered.game, expected);
+            let resumed = recovered.execute_next_intention().unwrap().unwrap();
+            assert_eq!(resumed.entry.content, execution.entry.content);
+            assert_eq!(recovered.game, expected_executed.game);
+            assert!(recovered.archive.records.last().unwrap().receipt.is_none());
+        }
+    }
+
+    #[test]
+    fn autonomous_admission_reuses_unchanged_disclosed_observations() {
+        let mut engine = autonomous_fixture();
+        let actor = engine.next_actor().unwrap();
+        let before: Vec<_> = engine
+            .actors()
+            .into_iter()
+            .map(|observer| (observer, engine.state(observer).unwrap()))
+            .collect();
+        let counts = tor_simulation::diagnostics::work_counts();
+        engine.admit_ai(actor).unwrap();
+        for (observer, state) in before {
+            assert_eq!(engine.state(observer).unwrap(), state);
+        }
+        assert_eq!(
+            tor_simulation::diagnostics::work_counts().observations,
+            counts.observations,
+            "effect-free admission must reuse committed views"
+        );
+    }
+
+    #[test]
+    fn autonomous_driver_retries_the_existing_admission_instead_of_allocating_another() {
+        for profiled in [false, true] {
+            let mut engine = autonomous_fixture();
+            let actor = engine.next_actor().unwrap();
+            let admission = engine.admit_ai(actor).unwrap();
+            let first = engine.archive.records.len();
+            let result = if profiled {
+                let (result, profile) = engine.advance_ai_profiled(actor).unwrap();
+                assert_eq!(
+                    profile.candidate_captures, 1,
+                    "retry only captures execution"
+                );
+                assert_eq!(profile.simulation_transitions, 1);
+                result
+            } else {
+                engine.advance_ai(actor).unwrap()
+            };
+            assert_eq!(engine.archive.records.len(), first + 1);
+            assert!(matches!(result.entry.content,
+                JournalContent::IntentionStarted { admission: original, .. } if original == admission.entry.id));
+            assert!(engine.game.pending_intention(SimActor(actor.0)).is_none());
+        }
+    }
+
+    #[test]
+    fn rejected_autonomous_execution_keeps_the_saved_admission_retryable() {
+        for interval in [1, 4096] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("queued-ai.db");
+            let scenario = autonomous_fixture().archive.scenario.clone();
+            let policy = crate::SavePolicy {
+                checkpoint_interval: interval,
+                ..Default::default()
+            };
+            let mut engine =
+                Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+            let player = ActorId(1);
+            engine
+                .command(
+                    "p",
+                    "test",
+                    player,
+                    "wait",
+                    &engine.branch().clone(),
+                    Command::Act {
+                        expected_revision: engine.revision(player).unwrap(),
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+            let actor = engine.next_actor().unwrap();
+            assert!(engine.is_ai(actor));
+            let admitted = engine.admit_ai(actor).unwrap();
+            engine.flush().unwrap();
+            drop(engine);
+            let mut rejected = Engine::open_with_policy(
+                &path,
+                scenario.clone(),
+                crate::SavePolicy {
+                    max_pending_bytes: 1,
+                    ..policy.clone()
+                },
+            )
+            .unwrap();
+            let before = rejected.game.clone();
+            let records = rejected.archive.records.len();
+            let sequence = rejected.save_status().accepted_sequence;
+            let counts = rejected.profile_counts();
+            for _ in 0..2 {
+                assert!(rejected.advance_ai(actor).is_err());
+                assert_eq!(rejected.game, before);
+                assert_eq!(rejected.archive.records.len(), records);
+                assert_eq!(rejected.save_status().accepted_sequence, sequence);
+                assert_eq!(rejected.profile_counts(), counts);
+            }
+            drop(rejected);
+            let mut recovered = Engine::open_with_policy(&path, scenario, policy).unwrap();
+            assert_eq!(recovered.game, before);
+            let result = recovered.advance_ai(actor).unwrap();
+            assert!(matches!(result.entry.content,
+                JournalContent::IntentionStarted { admission, .. } if admission == admitted.entry.id));
+            assert!(recovered.archive.records.last().unwrap().receipt.is_none());
+            recovered.flush().unwrap();
+        }
+    }
+
+    #[test]
+    fn checkpoint_rejects_forged_autonomous_author_actor_and_preparation_target() {
+        // Keep the guard's preparation alive across the player's next due turn.
+        let (_directory, scenario) = interruption_scenario_with_guard_windup(600);
+        let mut engine = autonomous_fixture_from(scenario);
+        let actor = engine.next_actor().unwrap();
+        engine.advance_ai(actor).unwrap();
+        assert!(engine.game.preparation(SimActor(actor.0)).is_some());
+        for corruption in ["author", "actor", "target"] {
+            let mut archive = engine.archive.clone();
+            if corruption == "target" {
+                let record = archive.records.last_mut().unwrap();
+                let JournalContent::IntentionStarted { action, event, .. } =
+                    &mut record.entry.content
+                else {
+                    panic!("AI execution");
+                };
+                *action = Action::Attack { target: actor };
+                *event = crate::journal::Event::AttackStarted { target: actor };
+            } else {
+                let record = archive
+                    .records
+                    .iter_mut()
+                    .find(|record| {
+                        matches!(
+                            record.entry.content,
+                            JournalContent::AutonomousIntentionAdmitted { .. }
+                        )
+                    })
+                    .unwrap();
+                if corruption == "author" {
+                    record.entry.author = Author::User {
+                        user: "scenario-ai".into(),
+                    };
+                } else {
+                    record.entry.actor = ActorId(1);
+                }
+            }
+            assert!(
+                Checkpoint::capture(&engine)
+                    .encode("forged-ai", 1)
+                    .restore(archive)
+                    .is_err(),
+                "forged {corruption} must not match saved autonomous work"
+            );
+        }
+    }
+
+    #[test]
+    fn autonomous_rewind_restores_the_original_queue_and_preserves_future_identity_watermark() {
+        let mut engine = autonomous_fixture();
+        engine.enable_wizard().unwrap();
+        let player = ActorId(1);
+        let actor = engine.next_actor().unwrap();
+        let first = engine.admit_ai(actor).unwrap();
+        let JournalContent::AutonomousIntentionAdmitted {
+            intention: first_id,
+        } = first.entry.content
+        else {
+            panic!("AI admission");
+        };
+        let marker = engine
+            .command(
+                "p",
+                "test",
+                player,
+                "retain-ai",
+                &engine.branch().clone(),
+                Command::Wizard {
+                    expected_revision: engine.revision(player).unwrap(),
+                    operation: WizardOperation::SetPlaceHint {
+                        position: Position {
+                            region: 1,
+                            x: 3,
+                            y: 1,
+                            z: 0,
+                        },
+                        present: true,
+                    },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                player,
+                "future-player",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(player).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        engine.advance_ai(actor).unwrap();
+        let abandoned_id = engine
+            .archive
+            .records
+            .iter()
+            .rev()
+            .find_map(|record| match record.entry.content {
+                JournalContent::AutonomousIntentionAdmitted { intention } => Some(intention),
+                _ => None,
+            })
+            .unwrap();
+        assert!(abandoned_id > first_id);
+        let old_branch = engine.branch().clone();
+        engine
+            .command(
+                "p",
+                "test",
+                player,
+                "rewind-ai",
+                &old_branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(player).unwrap(),
+                    operation: WizardOperation::Rewind {
+                        target: Some(marker.entry.id),
+                    },
+                },
+            )
+            .unwrap();
+        assert_ne!(engine.branch(), &old_branch);
+        assert_eq!(
+            engine.game.pending_intention(SimActor(actor.0)).unwrap().id,
+            first_id
+        );
+        for recovered in [
+            Engine::replay(engine.archive.clone(), None, None).unwrap(),
+            Checkpoint::capture(&engine)
+                .encode("rewound-ai", 1)
+                .restore(engine.archive.clone())
+                .unwrap(),
+        ] {
+            assert_eq!(recovered.game, engine.game);
+            assert_eq!(recovered.branch(), engine.branch());
+        }
+        let repeated = engine.advance_ai(actor).unwrap();
+        assert!(
+            matches!(repeated.entry.content, JournalContent::IntentionStarted { admission, intention, .. }
+            if admission == first.entry.id && intention == first_id)
+        );
+        engine
+            .command(
+                "p",
+                "test",
+                player,
+                "new-player",
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(player).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let latest = engine.admit_ai(actor).unwrap();
+        assert!(matches!(latest.entry.content,
+            JournalContent::AutonomousIntentionAdmitted { intention } if intention > abandoned_id));
+    }
+
     #[test]
     fn boundary_retention_is_a_bounded_union_of_gameplay_and_audit_windows() {
         let mut retained = VecDeque::new();
@@ -1195,6 +1606,10 @@ mod intention_admission_tests {
     /// A validated authored fixture where the guard interrupts spent player work.
     /// Keep its directory alive while a saved scenario may refer to package inputs.
     fn interruption_scenario() -> (tempfile::TempDir, Scenario) {
+        interruption_scenario_with_guard_windup(30)
+    }
+
+    fn interruption_scenario_with_guard_windup(windup: i64) -> (tempfile::TempDir, Scenario) {
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/tests/dungeon-loop");
         let directory = tempfile::tempdir().unwrap();
@@ -1206,7 +1621,7 @@ mod intention_admission_tests {
         let mut region: toml::Value =
             toml::from_str(&std::fs::read_to_string(source.join("regions/1.toml")).unwrap())
                 .unwrap();
-        region["actors"][0]["combat"]["attack"]["wind_up"] = 30.into();
+        region["actors"][0]["combat"]["attack"]["wind_up"] = windup.into();
         region["actors"][0]["combat"]["max_hp"] = 100.into();
         std::fs::write(
             directory.path().join("scenario.toml"),
