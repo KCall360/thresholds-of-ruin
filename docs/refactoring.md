@@ -1843,8 +1843,32 @@ old descriptor cannot release a replacement owner's lock. Descriptor inheritance
 during concurrent process spawning is a possible explanation for the Linux
 failure; it was not directly observed in that CI run.
 
-The deterministic ownership regression, retained-intention checkpoint test, and
-a real-server test with three checkpointed immediate restarts passed in debug.
-Release verification, before/after measurements, renewed full verification and
-final-head Windows/Linux CI remain required before publication. The previous
-desktop build stays active until those gates pass.
+The deterministic ownership and retained-intention checkpoint regressions passed
+in debug and release. All eight background-save process tests passed, including
+three checkpointed immediate restarts that verify restored state and history.
+Renewed full verification and final-head Windows/Linux CI remain required before
+publication. The previous desktop build stays active until those gates pass.
+
+### Journal lease release comparison
+
+Three interleaved five-cycle rounds compared `e3b5cb90` with `21347939` on the
+same Windows host and HDD save volume (machine fingerprint `6a1878811f37`).
+Checkpoint interval 256 exercised both journal records and checkpoint captures.
+All twelve reports validated, with no failed runs or competing build processes.
+Operation counts, recovery counts, retained history and save/checkpoint bytes
+were identical. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-durable / command | 915 | 0.570 → 0.569 | 0.807 → 0.810 | 2.008 → 1.639 |
+| r8-a1-h100-durable / flush | 3 | 110.632 → 108.330 | 141.220 → 116.041 | 141.220 → 116.041 |
+| r8-a1-h100-durable / restart | 3 | 115.702 → 129.207 | 125.138 → 130.212 | 125.138 → 130.212 |
+| r64-a8-h100-durable / command | 7,500 | 0.039 → 0.039 | 2.582 → 2.586 | 8.995 → 6.894 |
+| r64-a8-h100-durable / flush | 3 | 389.368 → 374.957 | 1465.359 → 392.555 | 1465.359 → 392.555 |
+| r64-a8-h100-durable / restart | 3 | 184.487 → 178.808 | 193.309 → 193.488 | 193.309 → 193.488 |
+
+Command p95 rose 0.4%/0.2%. One-actor restart p95 rose 4.1%, while eight-actor
+restart p95 rose 0.1%; restart groups have only three samples each. Flush tails
+included a large baseline spike. These measurements do not establish a speedup
+or isolate the unlock cost from host scheduling. Raw reports remain local and
+unpublished. Broader persistence and restoration tails remain open work.

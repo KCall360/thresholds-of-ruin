@@ -393,8 +393,10 @@ passed the full local Windows gate and Windows CI; Linux failed an immediate
 checkpoint reopen with a held journal lock. A deterministic failing-first
 regression demonstrates that a copied descriptor can outlive the final Rust
 owner. One storage-owned guard now explicitly unlocks at that owner boundary,
-while retaining the worker's lease and shutdown join. Debug ownership, checkpoint
-and three-restart process regressions passed. Release checks, measurements, a
-renewed full gate and final-head CI remain required. See the
+while retaining the worker's lease and shutdown join. Ownership and checkpoint
+regressions passed debug/release; all eight background-save process tests passed.
+The three-round durable comparison validated all twelve reports with equal
+counts/save sizes and no speedup claim. A renewed full gate and final-head CI
+remain required. See the
 [refactor plan](docs/refactoring.md#explicit-journal-lease-ownership-in-development).
 The decimal-string wire work is preserved separately and remains incomplete.
