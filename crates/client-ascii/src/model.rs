@@ -225,12 +225,13 @@ impl App {
             return None;
         }
         let state = self.state.as_ref()?;
-        let pending = state
-            .intentions()
-            .iter()
-            .find(|status| status.phase.pending())?;
+        let pending = state.intention_for_input()?;
         Some(if !state.has_control() {
             "Action pending. F3 acquire control; F8 resume suspended work; F9 cancel; F2 history; Esc quit"
+        } else if pending.phase == IntentionPhase::Paused {
+            "Attack paused. F8 resume; F9 cancel; F3/R control; F2 history; Esc quit"
+        } else if pending.phase == IntentionPhase::Started {
+            "Attack in progress. F9 cancel; F3/R control; F2 history; Esc quit"
         } else if pending.phase == IntentionPhase::Suspended {
             "Action suspended. F8 resume; F9 cancel; F3/R control; F2 history; Esc quit"
         } else {

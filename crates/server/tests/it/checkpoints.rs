@@ -81,6 +81,182 @@ fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
 }
 
 #[test]
+fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
+    use tor_server::{
+        journal::{JournalContent, Position, WizardOperation},
+        ActorSetup,
+    };
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("retained-queues.db");
+    let mut scenario = Scenario::two_room(42);
+    scenario.regions = 3;
+    scenario.actors = (0..4)
+        .flat_map(|y| {
+            (0..16).map(move |x| ActorSetup {
+                position: Position {
+                    region: 1,
+                    x,
+                    y,
+                    z: 0,
+                },
+                turn_ticks: 100,
+            })
+        })
+        .collect();
+    let mut engine = Engine::memory(scenario).unwrap();
+    let branch = engine.branch().clone();
+    let mut roots = std::collections::BTreeMap::new();
+    for id in 1..=64 {
+        let actor = ActorId(id);
+        let result = engine
+            .command(
+                "player",
+                "test",
+                actor,
+                &format!("admit-{id}"),
+                &branch,
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        roots.insert(actor, result.entry.id);
+    }
+    engine.enable_wizard().unwrap();
+    let mark = |engine: &mut Engine, id: &str| {
+        engine
+            .command(
+                "player",
+                "test",
+                ActorId(1),
+                id,
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    operation: WizardOperation::Teleport {
+                        actor: ActorId(1),
+                        position: Position {
+                            region: 1,
+                            x: 0,
+                            y: 0,
+                            z: 0,
+                        },
+                    },
+                },
+            )
+            .unwrap();
+    };
+    for index in 0..129 {
+        mark(&mut engine, &format!("mark-{index}"));
+    }
+    let mut last_admission = None;
+    for index in 0..64 {
+        engine
+            .command(
+                "player",
+                "test",
+                ActorId(1),
+                &format!("cancel-{index}"),
+                &branch,
+                Command::CancelIntention {
+                    expected_revision: engine.revision(ActorId(1)).unwrap(),
+                    admission: roots[&ActorId(1)].clone(),
+                },
+            )
+            .unwrap();
+        let command = Command::AdmitIntention {
+            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            action: Action::Wait,
+        };
+        let result = engine
+            .command(
+                "player",
+                "test",
+                ActorId(1),
+                &format!("readmit-{index}"),
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        roots.insert(ActorId(1), result.entry.id);
+        last_admission = Some(command);
+    }
+    assert_eq!(engine.profile_counts().1, 256);
+    let mut engine = engine
+        .attach_profile_save_with_policy(
+            &path,
+            SavePolicy {
+                checkpoint_interval: 1,
+                ..SavePolicy::default()
+            },
+        )
+        .unwrap();
+    // A private queue change captures without overlapping the selectable window.
+    engine
+        .command(
+            "player",
+            "test",
+            ActorId(2),
+            "capture",
+            &branch,
+            Command::CancelIntention {
+                expected_revision: engine.revision(ActorId(2)).unwrap(),
+                admission: roots[&ActorId(2)].clone(),
+            },
+        )
+        .unwrap();
+    engine.flush().unwrap();
+    let bytes = engine.save_status().checkpoint_bytes;
+    assert!(
+        bytes > 0 && bytes < 1024 * 1024,
+        "shared queue checkpoint is {bytes} bytes"
+    );
+    assert_eq!(engine.profile_checkpoint_encoding().unwrap().0, bytes);
+    let expected: Vec<_> = (1..=64)
+        .map(|id| engine.state(ActorId(id)).unwrap())
+        .collect();
+    drop(engine);
+    let mut restored = Engine::open(&path, Scenario::two_room(0)).unwrap();
+    assert_eq!(restored.recovery_profile().records_replayed, 0);
+    assert_eq!(restored.profile_counts().1, 256);
+    for (index, state) in expected.into_iter().enumerate() {
+        assert_eq!(restored.state(ActorId(index as u64 + 1)).unwrap(), state);
+    }
+    let retry = restored
+        .command(
+            "player",
+            "test",
+            ActorId(1),
+            "readmit-63",
+            &branch,
+            last_admission.unwrap(),
+        )
+        .unwrap();
+    assert!(retry.duplicate);
+    assert_eq!(retry.entry.id, roots[&ActorId(1)]);
+    let started = restored.execute_next_intention().unwrap().unwrap();
+    assert!(
+        matches!(&started.entry.content, JournalContent::IntentionStarted { admission, action: Action::Wait, .. }
+        if admission == &roots[&ActorId(1)])
+    );
+    restored
+        .command(
+            "player",
+            "test",
+            ActorId(3),
+            "cancel-restored",
+            &branch,
+            Command::CancelIntention {
+                expected_revision: restored.revision(ActorId(3)).unwrap(),
+                admission: roots[&ActorId(3)].clone(),
+            },
+        )
+        .unwrap();
+    restored.flush().unwrap();
+}
+
+#[test]
 fn checkpoint_rotates_replay_tail_without_losing_history_or_retry_results() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("game.db");

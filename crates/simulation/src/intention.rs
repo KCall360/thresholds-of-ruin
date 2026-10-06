@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_QUEUED_INTENTIONS: usize = 4096;
 
+pub(crate) mod checkpoint;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct IntentionId(pub u64);
@@ -34,6 +36,7 @@ pub enum IntentionState {
 pub enum IntentionWork {
     Action(Action),
     AiDecision,
+    ResumeAttack { target: ActorId },
 }
 
 /// Region-local movement meaning at admission, including portal frame changes.
@@ -241,6 +244,7 @@ impl Game {
             let action = match intention.work {
                 IntentionWork::Action(action) => Some(action),
                 IntentionWork::AiDecision => None,
+                IntentionWork::ResumeAttack { target } => Some(Action::Attack { target }),
             };
             return Some(IntentionExecution {
                 intention,
@@ -268,6 +272,22 @@ impl Game {
                     Err(error) => (None, Err(error)),
                 }
             }
+            IntentionWork::ResumeAttack { target } => {
+                let action = Action::Attack { target };
+                let outcome = if self.preparation(actor).is_some_and(|preparation| {
+                    preparation.intention == Some(intention.id)
+                        && preparation.target == target
+                        && !preparation.active
+                }) {
+                    self.act_with_context(actor, action, Some(intention.id), None)
+                } else {
+                    Err(GameError::InvalidIntention)
+                };
+                if outcome.is_err() {
+                    self.discard_intention_preparation(actor, intention.id);
+                }
+                (Some(action), outcome)
+            }
         };
         self.intentions.entries.remove(&actor);
         Some(IntentionExecution {
@@ -277,22 +297,42 @@ impl Game {
         })
     }
 
-    pub fn cancel_intention(
-        &mut self,
-        actor: ActorId,
-        id: IntentionId,
-    ) -> Result<QueuedIntention, GameError> {
+    pub fn cancel_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
         if self
             .pending_intention(actor)
-            .is_none_or(|entry| entry.id != id)
+            .is_some_and(|queued| queued.id == id)
         {
-            return Err(GameError::InvalidIntention);
+            self.intentions.entries.remove(&actor);
+            self.discard_intention_preparation(actor, id);
+            return Ok(());
         }
-        Ok(self
-            .intentions
-            .entries
-            .remove(&actor)
-            .expect("checked intention"))
+        if self.discard_intention_preparation(actor, id) {
+            Ok(())
+        } else {
+            Err(GameError::InvalidIntention)
+        }
+    }
+
+    fn discard_intention_preparation(&mut self, actor: ActorId, id: IntentionId) -> bool {
+        let Some(mut state) = self.actors.get_mut(&actor) else {
+            return false;
+        };
+        let Some(combat) = state.combat.as_mut() else {
+            return false;
+        };
+        let Some(preparation) = combat.pending.as_ref().filter(|p| p.intention == Some(id)) else {
+            return false;
+        };
+        let active = preparation.active;
+        combat.pending = None;
+        if active {
+            state.ready_at = self.tick;
+        }
+        drop(state);
+        if !self.is_ai(actor) {
+            self.combat.input_boundaries.insert(actor);
+        }
+        true
     }
 
     pub fn suspend_human_intentions(&mut self) {
@@ -304,6 +344,15 @@ impl Game {
     }
 
     pub fn suspend_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
+        if !self.is_ai(actor)
+            && self
+                .preparation(actor)
+                .is_some_and(|p| p.intention == Some(id) && p.active)
+        {
+            self.pause_preparation(actor)
+                .ok_or(GameError::InvalidIntention)?;
+            return Ok(());
+        }
         if self.pending_intention(actor).is_none_or(|entry| {
             entry.id != id
                 || entry.origin != IntentionOrigin::Human
@@ -320,6 +369,28 @@ impl Game {
     }
 
     pub fn resume_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
+        if self.pending_intention(actor).is_none() {
+            let preparation = self.preparation(actor).ok_or(GameError::InvalidIntention)?;
+            if preparation.intention != Some(id) || preparation.active || self.is_ai(actor) {
+                return Err(GameError::InvalidIntention);
+            }
+            if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
+                return Err(GameError::QueueFull);
+            }
+            let target = preparation.target;
+            self.intentions.entries.insert(
+                actor,
+                QueuedIntention {
+                    id,
+                    actor,
+                    work: IntentionWork::ResumeAttack { target },
+                    origin: IntentionOrigin::Human,
+                    state: IntentionState::Queued,
+                    movement_context: None,
+                },
+            );
+            return Ok(());
+        }
         if self.pending_intention(actor).is_none_or(|entry| {
             entry.id != id
                 || entry.origin != IntentionOrigin::Human
@@ -369,13 +440,42 @@ impl Game {
                         ) => item.0 != 0 && quantity.is_none_or(|quantity| quantity != 0),
                         IntentionWork::Action(Action::Move(_) | Action::Wait) => true,
                         IntentionWork::AiDecision => entry.origin == IntentionOrigin::Autonomous,
+                        IntentionWork::ResumeAttack { target } => {
+                            target.0 != 0
+                                && target != *actor
+                                && entry.origin == IntentionOrigin::Human
+                                && if self.actors.contains_key(actor) {
+                                    self.preparation(*actor).is_some_and(|preparation| {
+                                        preparation.intention == Some(entry.id)
+                                            && preparation.target == target
+                                            && !preparation.active
+                                    })
+                                } else {
+                                    self.known_actor_region(*actor).is_some()
+                                }
+                        }
                     }
             })
             && self
                 .actors
-                .values()
-                .filter_map(|actor| actor.combat.as_ref()?.pending.as_ref()?.intention)
-                .all(|id| id.0 != 0 && id.0 < self.intentions.next_id && ids.insert(id))
+                .iter()
+                .filter_map(|(actor, state)| {
+                    Some((*actor, state.combat.as_ref()?.pending.as_ref()?))
+                })
+                .all(|(actor, preparation)| {
+                    preparation.intention.is_none_or(|id| {
+                        id.0 != 0
+                            && id.0 < self.intentions.next_id
+                            && (ids.insert(id)
+                                || self.pending_intention(actor).is_some_and(|queued| {
+                                    queued.id == id
+                                        && queued.work
+                                            == IntentionWork::ResumeAttack {
+                                                target: preparation.target,
+                                            }
+                                }))
+                    })
+                })
     }
 }
 
@@ -455,13 +555,12 @@ mod tests {
             }),
         ] {
             let mut invalid = original.clone();
-            invalid[0]["intentions"]["entries"][actor.0.to_string()]["movement_context"] =
-                invalid_context;
+            invalid[1]["intentions"]["entries"][0]["movement_context"] = invalid_context;
             let (snapshot, shared) = serde_json::from_value(invalid).unwrap();
             assert!(Game::restore_checkpoint(snapshot, &shared).is_none());
         }
         let mut missing = original;
-        missing[0]["intentions"]["entries"][actor.0.to_string()]
+        missing[1]["intentions"]["entries"][0]
             .as_object_mut()
             .unwrap()
             .remove("movement_context");
@@ -560,6 +659,154 @@ mod tests {
         assert_eq!(game, expected);
     }
 
+    fn paused_attack_fixture() -> (Game, ActorId, ActorId, IntentionId) {
+        let (mut game, actor) = fixture();
+        let target = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 2, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        for id in [actor, target] {
+            game.configure_combat(id, crate::combat::CombatSpec::default())
+                .unwrap();
+        }
+        game.actors.get_mut(&target).unwrap().ready_at = 50;
+        let intention = game
+            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let full_wind_up = game.preparation(actor).unwrap().remaining;
+        game.pause_preparation(actor).unwrap();
+        let preparation = game.preparation(actor).unwrap().clone();
+        assert!(preparation.remaining > 0 && preparation.remaining < full_wind_up);
+        (game, actor, target, intention)
+    }
+
+    #[test]
+    fn paused_attack_resume_queues_original_identity_without_restarting_progress() {
+        let (mut game, actor, target, intention) = paused_attack_fixture();
+        let preparation = game.preparation(actor).unwrap().clone();
+        let tick = game.tick();
+        let combat = game.combat.clone();
+        game.resume_intention(actor, intention).unwrap();
+        assert_eq!(
+            game.tick(),
+            tick,
+            "resume admits work without advancing time"
+        );
+        assert_eq!(
+            game.combat, combat,
+            "admission preserves combat and RNG state"
+        );
+        assert_eq!(game.preparation(actor), Some(&preparation));
+        assert_eq!(game.pending_intention(actor).unwrap().id, intention);
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        assert_eq!(restored, game);
+        let execution = restored.execute_next_intention().unwrap();
+        assert_eq!(execution.intention.id, intention);
+        execution.outcome.unwrap();
+        if let Some(progress) = restored.preparation(actor) {
+            assert_eq!(progress.intention, Some(intention));
+            assert_eq!(progress.target, target);
+            assert!(progress.remaining <= preparation.remaining);
+            assert!(progress.active);
+        } else {
+            assert!(restored.combat_events().iter().any(|event| matches!(event,
+                crate::combat::CombatEvent::Resolved { intention: Some(id), .. } if *id == intention)));
+        }
+    }
+
+    #[test]
+    fn cancelling_original_progress_preserves_independent_queued_work() {
+        let (mut game, actor, _, original) = paused_attack_fixture();
+        let later = game
+            .admit_intention(actor, Action::Wait, IntentionOrigin::Human)
+            .unwrap();
+        let queued = game.pending_intention(actor).unwrap().clone();
+        let next_id = game.intentions.next_id;
+        game.cancel_intention(actor, original).unwrap();
+        assert!(game.preparation(actor).is_none());
+        assert_eq!(game.pending_intention(actor), Some(&queued));
+        assert_eq!(game.intentions.next_id, next_id);
+        let executed = game.execute_next_intention().unwrap();
+        assert_eq!(executed.intention.id, later);
+        executed.outcome.unwrap();
+    }
+
+    #[test]
+    fn cancelling_paused_or_queued_continuation_removes_original_progress_without_time() {
+        for queued in [false, true] {
+            let (mut game, actor, _, intention) = paused_attack_fixture();
+            if queued {
+                game.resume_intention(actor, intention).unwrap();
+            }
+            let before = game.clone();
+            assert!(game
+                .cancel_intention(actor, IntentionId(intention.0 + 1))
+                .is_err());
+            assert_eq!(game, before, "wrong identity must preserve progress");
+            game.cancel_intention(actor, intention).unwrap();
+            assert_eq!(game.tick(), before.tick());
+            assert_eq!(
+                game.combat, before.combat,
+                "cancellation preserves RNG and combat events"
+            );
+            assert_eq!(game.intentions.next_id, before.intentions.next_id);
+            assert!(game.preparation(actor).is_none());
+            assert!(game.pending_intention(actor).is_none());
+            assert!(game.resume_intention(actor, intention).is_err());
+            assert!(game.cancel_intention(actor, intention).is_err());
+            let mut shared = crate::checkpoint::SharedState::default();
+            let snapshot = game.checkpoint(&mut shared);
+            assert_eq!(Game::restore_checkpoint(snapshot, &shared), Some(game));
+        }
+    }
+
+    #[test]
+    fn failed_continuation_concludes_original_progress_without_retargeting() {
+        let (mut game, actor, target, intention) = paused_attack_fixture();
+        game.resume_intention(actor, intention).unwrap();
+        game.teleport(
+            target,
+            Location {
+                region: RegionId(1),
+                position: Position { x: 3, y: 1, z: 0 },
+            },
+        )
+        .unwrap();
+        let alternate = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 2, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.configure_combat(alternate, crate::combat::CombatSpec::default())
+            .unwrap();
+        let tick = game.tick();
+        let health = game.health(alternate);
+        let rng = serde_json::to_value(&game.combat).unwrap()["rng"].clone();
+        let execution = game.execute_next_intention().unwrap();
+        assert_eq!(execution.intention.id, intention);
+        assert_eq!(execution.outcome, Err(GameError::InvalidLocation));
+        assert_eq!(game.tick(), tick);
+        assert_eq!(game.health(alternate), health);
+        assert_eq!(serde_json::to_value(&game.combat).unwrap()["rng"], rng);
+        assert!(
+            game.preparation(actor).is_none(),
+            "failed continuation is terminal"
+        );
+        assert!(game.pending_intention(actor).is_none());
+    }
+
     #[test]
     fn admitted_attack_identity_survives_wind_up_restore_and_impact() {
         let (mut game, actor) = fixture();
@@ -594,11 +841,17 @@ mod tests {
         let mut shared = crate::checkpoint::SharedState::default();
         let snapshot = game.checkpoint(&mut shared);
         for corrupt in [0, intention.0 + 1] {
-            let mut value = serde_json::to_value(&snapshot).unwrap();
-            value["actors"]["1"]["combat"]["pending"]["intention"] = serde_json::json!(corrupt);
-            assert!(
-                Game::restore_checkpoint(serde_json::from_value(value).unwrap(), &shared).is_none()
-            );
+            let value = serde_json::to_value(&snapshot).unwrap();
+            let mut pool = serde_json::to_value(&shared).unwrap();
+            let actors = value["actors"].as_u64().unwrap() as usize;
+            pool["actors"][actors]["1"]["combat"]["pending"]["intention"] =
+                serde_json::json!(corrupt);
+            let invalid_shared = serde_json::from_value(pool).unwrap();
+            assert!(Game::restore_checkpoint(
+                serde_json::from_value(value).unwrap(),
+                &invalid_shared
+            )
+            .is_none());
         }
         let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
         assert_eq!(restored, game);
@@ -860,8 +1113,8 @@ mod tests {
         let original = serde_json::to_value((snapshot, shared)).unwrap();
         for field in ["quantity", "item"] {
             let mut invalid = original.clone();
-            invalid[0]["intentions"]["entries"][actor.0.to_string()]["work"]["action"]["value"]
-                [field] = serde_json::json!(0);
+            invalid[1]["intentions"]["entries"][0]["work"]["action"]["value"][field] =
+                serde_json::json!(0);
             let (snapshot, shared) = serde_json::from_value(invalid).unwrap();
             assert!(
                 Game::restore_checkpoint(snapshot, &shared).is_none(),

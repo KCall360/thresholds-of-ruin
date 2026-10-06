@@ -20,10 +20,19 @@ and ordered effects are published. Retries resolve existing receipts; reconnect
 must not duplicate an uncertain action. Queue, cancellation, restart, rewind,
 and region-freezing semantics belong in deterministic saved state.
 
-The gameplay flow has two persistence/publication boundaries. The integration
-branch connects the simulation queue, backend admission and execution, journal
-replay, and client lifecycle tracking. AI/travel migration, paused-attack recovery
-under the original intention identity, and further stream-context work remain.
+Each increment must have clear ownership, explicit domain states and cohesive
+interfaces. Review repeated decisions and special cases at their owning boundary.
+An abstraction should make the permitted operations easier to follow and reduce
+duplicated rules. Regression tests establish behavior; architectural review and
+measurements establish maintainability and performance within their stated scope.
+
+The gameplay flow has two persistence/publication boundaries. The merged queue
+foundation connects human intentions, backend admission and execution, journal
+replay, and client lifecycle tracking. The unpublished preparation-recovery slice
+adds original-identity resume/cancel, durable interruption facts, explicit paused
+preparation, and a typed lifecycle proof shared by replay and checkpoint recovery.
+AI/travel migration and further stream-context work remain. Recovery verification,
+coordinated format versions and publication gates are still in progress.
 
 ```mermaid
 flowchart TD
@@ -291,12 +300,26 @@ acknowledgement is a different endpoint from the older synchronous completion
 acknowledgement; comparing those as a latency gain would be misleading. The
 trace does not measure attack-impact completion or peak resident memory.
 
-This integration uses protocol 23, save/archive 16, ruleset `dungeon-v18`, and
-validator `tor-scenario-7`. Scenario package version 2 and binary frame version 6
-remain current. The required queue, movement and execution-context fields and
-typed lifecycle payloads have no legacy-reader defaults. Further format changes
-will accompany their corresponding implementations and verification.
-Previous saves/builds remain preserved; no historical-format reader is introduced.
+The measurements above describe the merged queue foundation at the stated
+commits. The preparation-recovery slice advances protocol and save/archive
+versions and pins the current ruleset; see the [format registry](milestones.md).
+The authored validator schema, scenario package version 2 and binary frame
+version 6 are unchanged. Required queue, movement, execution-context and derived
+lifecycle fields have no legacy-reader defaults. Previous saves and builds remain
+preserved; unsupported versions fail explicitly. Full verification and publication
+of this recovery slice remain in progress.
+
+The current recovery implementation resumes and cancels paused attack progress
+under its original identity, records interruption facts atomically, and shares
+one actor-owned lifecycle model between replay and checkpoint validation. Actor
+and queue checkpoint pools compare full values and retain copy-on-write isolation;
+large retained-window save/reopen diagnostics and their memory limits are recorded
+in [checkpoints](checkpoints.md). Client controls and ASCII hints select queued
+work before independent preparation through one shared selector, independent of
+delivery order. Focused regressions, affected client suites and real intention
+process tests pass. Final local verification and both-platform CI remain required.
+AI/travel migration, stream context, scenario compiler work, persistence scaling
+and latency/memory investigations remain within the full refactor scope.
 
 ## Shared item and combat definitions
 
@@ -1451,3 +1474,43 @@ save p95 rose from 67.751 to 161.4 ms, while falling save p95 fell from 237.9 to
 restore regression remains unresolved. This extraction establishes a focused
 format-validation boundary, with no broad latency or allocation improvement
 claimed. Raw samples remain local and unpublished; resident memory was not measured.
+
+
+### Recovery and checkpoint pooling release diagnostics
+
+Three interleaved rounds compared the merged queue foundation (`6e328bde`) with
+the uncommitted recovery and checkpoint-pooling state on the same Windows host
+and F-drive storage. A second three-round comparison reused the identical
+binaries for the two durable cases. All 30 runs passed their report validators;
+workload versions, operation counts and machine fingerprint matched. These are
+preliminary diagnostics for the combined recovery change, not an isolated
+pooling comparison or an accepted general speedup. Raw reports remain local and
+unpublished.
+
+Timings are milliseconds, foundation to recovery. Command rows contain samples
+from all three rounds; flush/restart rows have only three samples per group.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-memory / command | 915 | 0.545 → 0.559 | 0.794 → 0.793 | 1.011 → 1.040 |
+| r64-a8-h100-durable / command | 7,500 | 0.039 → 0.039 | 2.524 → 2.499 | 4.520 → 5.573 |
+| Same case, repeat / command | 7,500 | 0.046 → 0.048 | 2.568 → 2.673 | 4.997 → 7.386 |
+| r64-a8-h100-durable / flush | 3 | 280.695 → 361.952 | 349.623 → 1,349.090 | 349.623 → 1,349.090 |
+| Same case, repeat / flush | 3 | 301.765 → 511.666 | 355.085 → 1,314.870 | 355.085 → 1,314.870 |
+| r64-a8-h100-durable / restart | 3 | 484.964 → 476.270 | 486.999 → 517.785 | 486.999 → 517.785 |
+| Same case, repeat / restart | 3 | 478.867 → 478.019 | 488.704 → 480.222 | 488.704 → 480.222 |
+| stream-r256-durable / command | 2,100 | 0.226 → 0.225 | 0.387 → 0.406 | 0.962 → 1.067 |
+| Same stream, repeat / command | 2,100 | 0.234 → 0.230 | 0.428 → 0.402 | 0.929 → 1.075 |
+| stream-r256-durable / flush | 3 | 121.092 → 135.435 | 124.037 → 752.968 | 124.037 → 752.968 |
+| Same stream, repeat / flush | 3 | 187.871 → 134.865 | 1,420.072 → 703.016 | 1,420.072 → 703.016 |
+
+The durable ordinary checkpoint encoded 673,071 versus 671,182 bytes. Its
+checkpoint encoding took 4 ms on both sides in every repeat; the flush spikes
+appear in the encompassing worker batch instead. Streaming commits had no
+checkpoint, and the foundation also exhibited a 1.42-second batch in the repeat.
+This locates the long interval within batch work but does not distinguish SQLite,
+filesystem, framing or host scheduling costs. The batch implementation is
+unchanged; record inputs grew by 67,500 bytes in the ordinary case and 18,900 bytes
+in streaming because recovery facts are persisted. Those extra bytes do not
+establish the cause of the spikes. Commit-batch tails and substantial large-save
+restore memory remain explicit performance follow-ups; neither is declared fixed.

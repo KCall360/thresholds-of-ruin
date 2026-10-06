@@ -26,6 +26,154 @@ fn snapshot(revision: u64) -> Snapshot {
 type Corrupt = fn(&mut Observation);
 
 #[test]
+fn paused_progress_can_coexist_with_independent_queued_work() {
+    let mut initial = snapshot(0);
+    initial.has_control = true;
+    initial
+        .state
+        .observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .preparation_remaining = Some(30);
+    initial.intentions = vec![
+        IntentionStatus {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            intention: IntentionId("old-progress".into()),
+            entry_id: EntryId("old-root".into()),
+            phase: IntentionPhase::Paused,
+        },
+        IntentionStatus {
+            actor: initial.actor,
+            branch: initial.branch.clone(),
+            intention: IntentionId("later-work".into()),
+            entry_id: EntryId("later-root".into()),
+            phase: IntentionPhase::Queued,
+        },
+    ];
+    let client = ClientState::from_snapshot(initial).unwrap();
+    assert_eq!(client.intentions().len(), 2);
+    assert!(client.has_pending_intention());
+    assert!(client.resume_intention_request().is_none());
+}
+
+#[test]
+fn mixed_intention_controls_are_independent_of_snapshot_order() {
+    for phase in [IntentionPhase::Queued, IntentionPhase::Suspended] {
+        for queue_first in [false, true] {
+            let mut initial = snapshot(0);
+            initial.has_control = true;
+            initial
+                .state
+                .observation
+                .combat
+                .as_mut()
+                .unwrap()
+                .preparation_remaining = Some(30);
+            let progress = IntentionStatus {
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                intention: IntentionId("paused-progress".into()),
+                entry_id: EntryId("progress-root".into()),
+                phase: IntentionPhase::Paused,
+            };
+            let queued = IntentionStatus {
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                intention: IntentionId("queued-work".into()),
+                entry_id: EntryId("queue-root".into()),
+                phase,
+            };
+            initial.intentions = if queue_first {
+                vec![queued, progress]
+            } else {
+                vec![progress, queued]
+            };
+            let client = ClientState::from_snapshot(initial).unwrap();
+            let Some(Request::Command {
+                command: Command::CancelIntention { intention, .. },
+                ..
+            }) = client.cancel_intention_request()
+            else {
+                panic!("cancel request");
+            };
+            assert_eq!(intention.0, "queued-work");
+            if phase == IntentionPhase::Queued {
+                assert!(client.resume_intention_request().is_none());
+            } else {
+                let Some(Request::Command {
+                    command: Command::ResumeIntention { intention, .. },
+                    ..
+                }) = client.resume_intention_request()
+                else {
+                    panic!("resume request");
+                };
+                assert_eq!(intention.0, "queued-work");
+            }
+            assert_eq!(client.intentions().len(), 2);
+        }
+    }
+}
+
+#[test]
+fn started_intention_can_suspend_resume_and_cancel_under_original_context() {
+    let mut initial = snapshot(0);
+    let original = IntentionStatus {
+        actor: initial.actor,
+        branch: initial.branch.clone(),
+        intention: IntentionId("original-progress".into()),
+        entry_id: EntryId("original-admission".into()),
+        phase: IntentionPhase::Started,
+    };
+    initial.intentions = vec![original.clone()];
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    for (sequence, phase) in [
+        IntentionPhase::Paused,
+        IntentionPhase::Queued,
+        IntentionPhase::Started,
+        IntentionPhase::Cancelled,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut status = original.clone();
+        status.phase = phase;
+        client
+            .apply(StreamUpdate {
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                cursor: StreamCursor {
+                    sequence: sequence as u64 + 1,
+                    tick: 0,
+                },
+                body: UpdateBody::Intention { status },
+            })
+            .unwrap();
+        if phase.active() {
+            assert_eq!(client.intentions()[0].intention, original.intention);
+            assert_eq!(client.intentions()[0].entry_id, original.entry_id);
+        } else {
+            assert!(client.intentions().is_empty());
+        }
+    }
+    let before = client.clone();
+    assert_eq!(
+        client.apply(StreamUpdate {
+            actor: initial.actor,
+            branch: initial.branch,
+            cursor: StreamCursor {
+                sequence: 5,
+                tick: 0
+            },
+            body: UpdateBody::Intention { status: original },
+        }),
+        Err(StreamError::InconsistentState)
+    );
+    assert_eq!(client, before);
+}
+
+#[test]
 fn intention_controls_require_current_control_and_never_reuse_an_abandoned_context() {
     let mut initial = snapshot(9);
     initial.has_control = true;
@@ -76,7 +224,10 @@ fn intention_controls_require_current_control_and_never_reuse_an_abandoned_conte
     replaced.intentions[0].phase = IntentionPhase::Started;
     client.replace_snapshot(replaced).unwrap();
     assert!(client.resume_intention_request().is_none());
-    assert!(client.cancel_intention_request().is_none());
+    assert!(
+        matches!(client.cancel_intention_request(), Some(Request::Command {
+        command: Command::CancelIntention { intention, .. }, .. }) if intention.0 == "new-work")
+    );
 }
 
 #[test]

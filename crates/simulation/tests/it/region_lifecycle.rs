@@ -206,6 +206,118 @@ fn frozen_wind_up_resumes_where_it_stopped() {
 }
 
 #[test]
+fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
+    for detach in [false, true] {
+        let mut records = MemoryRecords::default();
+        let (mut game, player) = corridor();
+        let attacker = game.spawn_actor(at(3, 5, 1), ticks(100)).unwrap();
+        let target = game.spawn_actor(at(3, 6, 1), ticks(100)).unwrap();
+        fighter(&mut game, attacker, "a");
+        fighter(&mut game, target, "b");
+        run(&mut game, player, &[("a", "b")]);
+        let intention = game
+            .admit_intention(
+                attacker,
+                Action::Attack { target },
+                tor_simulation::IntentionOrigin::Human,
+            )
+            .unwrap();
+        let queued = game.pending_intention(attacker).unwrap().clone();
+        let loaded = if detach { vec![1, 2] } else { vec![1, 2, 3] };
+        game.transition_regions(&sets(&[1], &loaded), &mut records)
+            .unwrap();
+        assert_eq!(
+            game.region_state(RegionId(3)),
+            Some(if detach {
+                RegionState::Detached
+            } else {
+                RegionState::Frozen
+            })
+        );
+        assert_eq!(game.pending_intention(attacker), Some(&queued));
+        assert!(game.execute_next_intention().is_none());
+        for _ in 0..2 {
+            game.act(player, Action::Wait).unwrap();
+        }
+        let restored = round_trip(&game);
+        assert_eq!(restored, game);
+        assert_eq!(restored.pending_intention(attacker), Some(&queued));
+        assert!(restored.detached_records_valid(&mut records));
+        let mut expected = None;
+        for mut candidate in [game, restored] {
+            candidate
+                .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
+                .unwrap();
+            // Equal-time ordering gives the original character its turn first.
+            assert_eq!(candidate.next_actor(), Some(player));
+            candidate.act(player, Action::Wait).unwrap();
+            let execution = candidate.execute_next_intention().unwrap();
+            assert_eq!(execution.intention.id, intention);
+            execution.outcome.unwrap();
+            let progress = candidate.preparation(attacker).unwrap();
+            assert_eq!(progress.intention, Some(intention));
+            assert_eq!(progress.target, target);
+            if let Some(expected) = &expected {
+                assert_eq!(&candidate, expected);
+            } else {
+                expected = Some(candidate);
+            }
+        }
+    }
+}
+
+#[test]
+fn paused_native_portal_attack_keeps_required_regions_active_without_losing_progress() {
+    let mut records = MemoryRecords::default();
+    let (mut game, player) = corridor();
+    let attacker = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
+    let target = game.spawn_actor(at(4, 0, 1), ticks(12)).unwrap();
+    fighter(&mut game, attacker, "a");
+    fighter(&mut game, target, "b");
+    run(&mut game, player, &[("a", "b")]);
+    game.act(player, Action::Wait).unwrap();
+    let intention = game
+        .admit_intention(
+            attacker,
+            Action::Attack { target },
+            tor_simulation::IntentionOrigin::Human,
+        )
+        .unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    game.act(target, Action::Wait).unwrap();
+    game.suspend_intention(attacker, intention).unwrap();
+    let progress = game.preparation(attacker).unwrap().clone();
+    assert!(!progress.active);
+    assert!(progress.remaining > 0 && progress.remaining < 30);
+    let before = game.clone();
+    assert_eq!(
+        game.apply_region_transition(&sets(&[1], &[1, 2]), &mut records),
+        Err(TransitionError::MustBeActive(RegionId(3)))
+    );
+    assert_eq!(game, before);
+    game.transition_regions(&sets(&[1], &[1, 2]), &mut records)
+        .unwrap();
+    for region in [3, 4] {
+        assert_eq!(
+            game.region_state(RegionId(region)),
+            Some(RegionState::Active)
+        );
+    }
+    assert_eq!(game.preparation(attacker), Some(&progress));
+    let mut restored = round_trip(&game);
+    restored.resume_intention(attacker, intention).unwrap();
+    assert_eq!(restored.preparation(attacker), Some(&progress));
+    let execution = restored.execute_next_intention().unwrap();
+    assert_eq!(execution.intention.id, intention);
+    execution.outcome.unwrap();
+    let resumed = restored.preparation(attacker).unwrap();
+    assert_eq!(resumed.intention, Some(intention));
+    assert_eq!(resumed.target, target);
+    assert!(resumed.active);
+    assert!(resumed.remaining <= progress.remaining);
+}
+
+#[test]
 fn pins_reject_transitions_without_changing_the_game() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();

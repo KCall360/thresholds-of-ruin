@@ -153,6 +153,7 @@ impl JournalEntry {
         let content = match &self.content {
             JournalContent::IntentionAdmitted { .. }
             | JournalContent::IntentionFailed { .. }
+            | JournalContent::IntentionContinuationFailed { .. }
             | JournalContent::IntentionChanged { .. } => return None,
             JournalContent::PlaceRenamed { key, name } => Content::PlaceRenamed {
                 key: key.clone(),
@@ -170,7 +171,8 @@ impl JournalEntry {
                 rewind: matches!(result, WizardResult::Rewound { .. }),
             },
             JournalContent::Action { action, event }
-            | JournalContent::IntentionStarted { action, event, .. } => Content::Action {
+            | JournalContent::IntentionStarted { action, event, .. }
+            | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
                 action: action.clone(),
                 event: match event {
                     Event::PreparationPaused => VisibleEvent::PreparationPaused,
@@ -454,6 +456,17 @@ pub enum IntentionChange {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JournalContent {
+    /// Resumed execution of existing attack progress, under its original admission.
+    IntentionContinued {
+        admission: EntryId,
+        intention: tor_simulation::IntentionId,
+        action: Action,
+        event: Event,
+    },
+    IntentionContinuationFailed {
+        admission: EntryId,
+        intention: tor_simulation::IntentionId,
+    },
     IntentionChanged {
         admission: EntryId,
         intention: tor_simulation::IntentionId,
@@ -504,9 +517,11 @@ impl JournalContent {
         match self {
             Self::IntentionAdmitted { .. }
             | Self::IntentionFailed { .. }
+            | Self::IntentionContinuationFailed { .. }
             | Self::IntentionChanged { .. }
             | Self::Annotation { .. } => false,
             Self::IntentionStarted { .. }
+            | Self::IntentionContinued { .. }
             | Self::Action { .. }
             | Self::Wizard { .. }
             | Self::Travel { .. }
@@ -532,7 +547,16 @@ pub struct IntentionEnd {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentionSuspension {
+    pub actor: ActorId,
+    pub intention: tor_simulation::IntentionId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalEntry {
+    /// Progress suspended by this action, admitted with its authoritative effects.
+    pub intention_suspensions: Vec<IntentionSuspension>,
     /// Terminal work facts admitted atomically with this record's state effects.
     pub intention_ends: Vec<IntentionEnd>,
     pub id: EntryId,
@@ -550,6 +574,7 @@ impl JournalEntry {
             self.content,
             JournalContent::IntentionAdmitted { .. }
                 | JournalContent::IntentionFailed { .. }
+                | JournalContent::IntentionContinuationFailed { .. }
                 | JournalContent::IntentionChanged { .. }
         ) && self.actor == actor
             && (self.audience == Audience::Actor

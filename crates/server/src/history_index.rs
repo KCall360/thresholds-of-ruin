@@ -44,7 +44,10 @@ impl HistoryIndex {
                 .insert((entry.branch.0.clone(), end.intention), position);
         }
         if let crate::journal::JournalContent::IntentionStarted { intention, .. }
-        | crate::journal::JournalContent::IntentionFailed { intention, .. } = entry.content
+        | crate::journal::JournalContent::IntentionFailed { intention, .. }
+        | crate::journal::JournalContent::IntentionContinued { intention, .. }
+        | crate::journal::JournalContent::IntentionContinuationFailed { intention, .. } =
+            entry.content
         {
             self.resolutions
                 .insert((entry.branch.0.clone(), intention), position);
@@ -59,6 +62,7 @@ impl HistoryIndex {
         if matches!(
             entry.content,
             crate::journal::JournalContent::IntentionFailed { .. }
+                | crate::journal::JournalContent::IntentionContinuationFailed { .. }
                 | crate::journal::JournalContent::IntentionChanged { .. }
         ) {
             return;
@@ -177,6 +181,7 @@ mod tests {
                     for branch in ["original", "rewound"] {
                         for actor in [ActorId(1), ActorId(2)] {
                             entries.push(JournalEntry {
+                                intention_suspensions: Vec::new(),
                                 intention_ends: Vec::new(),
                                 id: EntryId(format!("entry-{}", entries.len())),
                                 branch: BranchId(branch.into()),

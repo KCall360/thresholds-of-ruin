@@ -1,7 +1,7 @@
 format = 2
 id = "first-dungeon"
 version = "1.0"
-ruleset = "dungeon-v18"
+ruleset = "dungeon-v19"
 default_character = 1
 themes = ["ruined-stone", "scavengers"]
 factions = { delvers = ["ruin"], ruin = ["delvers"], neutral = [] }

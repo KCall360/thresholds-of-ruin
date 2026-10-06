@@ -25,12 +25,17 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   regression test that fails first. Write them in the same change, following
   the [testing policy](docs/testing.md). Tiers only choose which existing tests
   run; a green tier doesn't count if the tests for the change are missing.
-- Run checks through `scripts/verify.py`, and don't skip a required tier:
-  `quick` after each meaningful edit (the TDD loop), the default `push` tier
-  before **every** push, and `full` for save-format, protocol, ruleset,
-  persistence, storage, toolchain, or dependency changes, or when CI can't run.
-  CI on both platforms is required before merging. Report which tier ran, and
-  any step that failed or didn't run.
+- During development, run the failing regression first, then affected unit,
+  integration and process tests after each meaningful change. At a stable,
+  cohesive checkpoint, run `scripts/verify.py quick`; a required higher tier
+  can cover that checkpoint without a preceding duplicate quick run.
+- Before every push, pass the default `push` tier or `full`. A successful full
+  run satisfies the push gate for the same unchanged inputs, toolchain and test
+  configuration. Full remains required for save-format, protocol, ruleset,
+  persistence, storage, toolchain or dependency changes, and when CI can't run.
+  Both-platform CI on the final commit remains required before merging. Record
+  the tested state, commands and logs; report failures and checks not run.
+  See [verification evidence](docs/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and
   picks build jobs from free memory. Run other commands the same way,
   redirecting stdout and stderr to log files under `.local/` (gitignored).
@@ -135,36 +140,45 @@ and the admission/scheduler split remain open. Windows/Linux CI is still require
 before merging. The maintainer explicitly authorized pushes and PR merges on
 2026-10-04; the required verification and both-platform CI gates still apply.
 
-The maintainer explicitly authorized protocol, save, gameplay and scenario
-version changes on 2026-10-04, including the queue and stream-recovery proposal.
-The separate queue branch has simulation-owned intentions plus backend admission,
-linked start/failure records, shared action reconciliation and candidate commit,
-checkpoint/replay, rejection rollback and rewind identity tests. Wire actions now
-admit work; Session.step executes it. Protocol 23 has typed immediate/admitted
-receipts, opaque intention identities, ordered lifecycle updates and pending
-snapshots. Shared clients track occupied queue slots separately from readiness.
-Queued human work suspends durably on restart, control loss and rewind. Explicit
-resume/cancel preserves its original identity; ASCII exposes F8/F9 and headless
-provides strict input forms. Movement guards preserve region-local portal-frame
-meaning. Running attacks retain their intention identity through preparation,
-interruption and impact. Rewind retention separates selectable gameplay from
-private queue traffic, with bounded snapshots and exact private-gap replay.
-All 128 server unit tests and focused recovery/native/stream-corruption process
-tests pass. The latest quick run passed Rust/tooling and all 128 process tests,
-including the validated ASCII lifecycle-status regression. The latest full run
-completed every step: all Rust/tooling, 245 debug Python/process tests and 127
-release process tests passed. Its only debug/release failures were the native
-mouse hit check against Windows LockApp; the maintainer explicitly waived local
-native mouse verification on 2026-10-05. Keep the exception visible and retain
-ordinary CI coverage. The earlier performance-driver deadline passed unchanged
-in the latest debug/release suites, but its cause remains unexplained.
-Release comparisons and a real queued trace are recorded in the plan, including
-encoding growth and increased streaming tails. Maximum-retention resident memory
-and queue-only flood measurements remain open. Push verification, plus
-Windows/Linux CI remain required before
-publication. Paused-attack resume/cancel under the original identity, AI/travel
-migration, broader lineage/region checks and stream-context work remain open.
-This queue branch is not published. See the [refactor plan](docs/refactoring.md).
+The queue foundation merged in PR #65 on 2026-10-05 after Windows/Linux CI.
+The foundation separates human action admission from simulation execution, preserve original intention identity, suspend queued work
+on restart/control loss, and retain bounded gameplay and private audit windows.
+The three desktop launchers use a verified immutable foundation build; their
+real-client smoke checks passed. Local native mouse verification is explicitly
+waived while LockApp covers the desktop; retain ordinary CI coverage.
+
+**Preparation recovery (in progress, unpublished).** The isolated recovery
+branch resumes/cancels paused attacks under their original admission, preserves
+spent progress, publishes changed observations before lifecycle updates, and
+records combat interruption facts with the causing action. A typed lifecycle
+model shared by replay and checkpoint validation replaces overlapping flags,
+restores phases at rewind targets, and validates saved queue/preparation state
+at its actual journal boundary. Its canonical actor-owned state permits one queue
+and one preparation, distinguishes a suspended continuation from paused progress,
+and proves the exact saved queue presence. The wire phase `Paused` distinguishes
+preparation from `Suspended` queued work. Backend, shared-client and real combat/
+restart regressions pass. Baseline full verification passed debug/release Rust,
+247 Python/tooling/process tests and release process acceptance. Further lifecycle
+review and focused regressions are underway; publication gates remain open. The recovery slice uses protocol 24, save 19 and dungeon-v19; the authored
+validator schema remains unchanged. Certificates and wire samples are regenerated.
+Complete review, verification of subsequent changes and CI before publishing.
+The latest checkpoint full run completed all non-mouse checks successfully in
+28.2 minutes; debug and release native mouse checks failed because LockApp
+covered the game window. Record the explicit local waiver separately; this was
+not a successful full gate. Subsequent shared-client/ASCII selection regressions
+failed first and passed after centralizing queue-before-preparation selection;
+both affected client suites, clippy and six intention process tests passed.
+These later edits invalidate reuse of the earlier full-run inputs.
+
+The maintainer requires clean, robust, rational code. Review each increment for
+clear ownership, explicit domain states, cohesive interfaces and repeated rules.
+Consolidate overlapping special cases before publication; test success alone
+cannot establish architectural quality. Broader region/lineage coverage, AI and
+travel migration, stream context, compiler/persistence follow-up, and measured
+latency/memory work remain in the full [refactor plan](docs/refactoring.md).
+The maintainer authorized version changes, pushes and merges on 2026-10-04;
+required verification and both-platform CI still apply.
+
 Gameplay must admit intentions to simulation-owned scheduling.
 Derived topology indexes stay backend-only. Text-client fixes and scripting
 runtime selection/implementation are deferred. Advance format versions with the

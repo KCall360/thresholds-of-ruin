@@ -200,14 +200,64 @@ because the suite is complete and CI runs all of it.
 [`scripts/verify.py`](../scripts/verify.py) runs these checks in tiers. It
 writes each step's log to the gitignored local directory, checks exit codes, and prints a compact
 table showing which steps passed, failed, or didn't run, with their durations.
-Each tier has its own job, and none of them is optional:
+Use focused checks during development and broad tiers at stable checkpoints.
+The publication gates remain required; a higher tier can cover a lower tier
+without a duplicate run on unchanged inputs:
 
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
-| `quick` | While iterating, after each meaningful edit | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | The TDD loop: confirm the new test fails first, then passes, and catch regressions in affected code within minutes instead of at push time |
-| `push` (default) | **Before every push** | Every debug check CI runs, plus release Rust tests and release process tests for the affected packages | Catches regressions anywhere in the workspace and in any client, plus release-only timing and ordering problems in the changed code, before anyone else sees the branch |
-| `full` | **Required** for save-format, protocol, ruleset, persistence, or storage changes, and for toolchain or dependency updates. Also required when CI can't run, and on request | Everything CI runs on one platform, debug and release | These changes can break any layer in either profile. A local full run catches that before CI does, and substitutes for CI when CI is unavailable |
+| Focused checks | After each meaningful development change | The regression, affected unit/integration tests and relevant actual-process scenarios, run directly | Establish a failing reproduction first and give fast feedback while the change is still evolving |
+| `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
+| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Every debug check CI runs, plus release Rust tests and release process tests for the affected packages | Catches regressions anywhere in the workspace and in any client, plus release-only timing and ordering problems in the changed code, before anyone else sees the branch |
+| `full` | **Required** for save-format, protocol, ruleset, persistence, or storage changes, and for toolchain or dependency updates. Also required when CI can't run, and on request | Everything CI runs on one platform, debug and release | These changes can break any layer in either profile. A local full run covers the local publication gate; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
+
+### Development loop
+
+For the active architecture refactor, batch a cohesive change through focused
+checks and architectural review before starting a broad tier. Run the new
+regression against the failing implementation first, apply the fix, then run
+its affected unit, integration and process scenarios. Expand the focused set
+when a failure or changed boundary warrants it. Do not run quick, push and full
+back to back merely because all three commands exist. A required full run can
+be the checkpoint and publication check once the change is stable.
+
+Focused commands use the existing suite; they introduce no separate test tier
+or exclusions. For example:
+
+```sh
+cargo test -p tor-server --lib checkpoint_rejects_terminal_effects_on_expired_pause_metadata --locked
+python -m unittest -v scripts.test_intention_process
+```
+
+Set `PYTHONPATH=scripts` for targeted process-module commands that import shared
+harness modules. Keep command output and exit codes under the gitignored local
+log directory. Shared simulation, protocol or persistence changes need broader
+coverage at the stable checkpoint even if their focused regression is small.
+Do not overlap builds, suites or performance measurements on the development
+host. Keep native graphical tests serialized.
+
+### Verification evidence and reuse
+
+A successful full run covers all checks in the local push gate. It can satisfy
+that gate without an additional push-tier run only when the tested inputs,
+toolchain, build profiles and test configuration are unchanged. Record the
+checkout commit, uncommitted changes, relevant environment/configuration,
+commands, profiles, exit codes and log location. A commit that only records
+exactly the tested file contents does not invalidate the evidence.
+
+Do not infer validity from a timestamp, a previous green result or a matching
+branch name. Source, tests, fixtures, scenario packages, generated certificates,
+lockfiles, build configuration or toolchain changes invalidate affected evidence;
+run the required gate again after changes to its inputs. Failed, incomplete,
+waived or targeted runs do not count as a successful full run. Report waivers
+separately; they do not remove ordinary CI coverage.
+
+The final commit must still pass the complete Windows/Linux CI matrix, in debug
+and release. No tests are removed, ignored or permanently excluded by this
+workflow. Harness parallelism, timing changes or test selection changes require
+their own reviewed implementation and coverage; this policy does not silently
+change the runner or CI.
 
 When a feature is implemented or a bug is fixed, add its tests to the suite
 in the same change, at the layers described in

@@ -1,7 +1,9 @@
 """Saved intention admission and execution through the real server and clients."""
 import json
+import shutil
+import subprocess
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN, WIZARD_TOKEN
+from process_harness import ProcessTestCase, ROOT, SPECTATOR_TOKEN, WIZARD_TOKEN
 
 
 def lifecycle(frame, identity, phase):
@@ -13,6 +15,66 @@ def lifecycle(frame, identity, phase):
 
 
 class IntentionProcesses(ProcessTestCase):
+    def test_running_attack_restart_release_resume_and_cancel_keep_original_identity(self):
+        package = self.directory / "paused-attack"
+        shutil.copytree(ROOT / "scenarios/tests/dungeon-loop", package)
+        region = package / "regions/1.toml"
+        source = region.read_text()
+        declaration = 'controller = "ai", ai = "tactical"'
+        self.assertEqual(source.count(declaration), 1)
+        region.write_text(source.replace(declaration, 'controller = "external"')
+                          .replace("max_hp = 5", "max_hp = 100"))
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        server = self.server(scenario=package)
+        player, _ = self.client()
+        accepted = self.command(player, {"type": "act", "action": {"type": "attack", "target": 2}})
+        self.assertIsNone(accepted["error"])
+        identity = accepted["intentions"][0]["intention"]
+        started = self.frame(player, lambda frame: lifecycle(frame, identity, "started"))
+        combat = started["state"]["observation"]["combat"]
+        self.assertTrue(combat["preparation_active"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        # Stop the server while control remains connected: startup must recover
+        # saved active progress without relying on disconnect to pause it first.
+        server.stop(); player.stop()
+        server = self.server(scenario=package)
+        player, restored = self.client()
+        self.assertEqual(restored["intentions"][0]["intention"], identity)
+        self.assertEqual(restored["intentions"][0]["phase"], "paused")
+        self.assertFalse(restored["state"]["observation"]["combat"]["preparation_active"])
+        self.assertEqual(restored["state"]["observation"]["combat"]["preparation_remaining"],
+                         combat["preparation_remaining"])
+        watcher, _ = self.client(SPECTATOR_TOKEN)
+        resumed = self.command(player, {"type": "resume_intention"})
+        self.assertIsNone(resumed["error"])
+        self.assertEqual(resumed["intentions"][0]["intention"], identity)
+        self.assertEqual(resumed["intentions"][0]["phase"], "queued")
+        self.assertFalse(resumed["state"]["observation"]["combat"]["preparation_active"])
+        continued = self.frame(player, lambda frame: lifecycle(frame, identity, "started"))
+        self.assertTrue(continued["state"]["observation"]["combat"]["preparation_active"])
+        self.assertEqual(continued["state"]["observation"]["combat"]["preparation_remaining"],
+                         combat["preparation_remaining"])
+        self.request(player, {"type": "release_control"})
+        suspended = self.frame(watcher, lambda frame: lifecycle(frame, identity, "paused"))
+        self.assertFalse(suspended["state"]["observation"]["combat"]["preparation_active"])
+        acquired = self.request(player, {"type": "acquire_control"})
+        self.assertEqual(acquired["intentions"][0]["phase"], "paused")
+        cancelled = self.command(player, {"type": "cancel_intention"})
+        self.assertIsNone(cancelled["error"])
+        self.assertEqual(cancelled["intentions"], [])
+        self.assertIsNone(cancelled["state"]["observation"]["combat"]["preparation_remaining"])
+        seen = self.frame(watcher, lambda frame: lifecycle(frame, identity, "cancelled"))
+        self.assertEqual(seen["intentions"], [])
+        self.assertEqual(seen["state"], cancelled["state"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        server.stop(); player.stop(); watcher.stop()
+        self.server(scenario=package)
+        _, recovered = self.client()
+        self.assertEqual(recovered["intentions"], [])
+        self.assertEqual(recovered["state"], cancelled["state"])
+
     def test_control_loss_and_restart_require_explicit_original_intention_resume_or_cancel(self):
         server = self.server(wizard=True)
         wizard = self.wizard()

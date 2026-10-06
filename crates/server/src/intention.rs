@@ -1,5 +1,38 @@
 //! Durable execution of work selected by the simulation-owned scheduler.
 use super::*;
+
+pub(super) fn admitted_work_matches(work: tor_simulation::IntentionWork, action: &Action) -> bool {
+    let original = adapt::action(action);
+    work == tor_simulation::IntentionWork::Action(original)
+        || matches!((work, original),
+            (tor_simulation::IntentionWork::ResumeAttack { target },
+                tor_simulation::Action::Attack { target: expected }) if target == expected)
+}
+
+/// Private lifecycle work can change disclosed preparation/readiness without a turn.
+/// Use the same comparison during execution and recovery, retaining the new views.
+pub(super) fn preparation_revision_updates(
+    before: &Game,
+    after: &Game,
+    actor: ActorId,
+    revisions: &mut Revisions,
+) -> Result<BTreeMap<ActorId, Arc<RevisionView>>, Failure> {
+    if before.preparation(SimActor(actor.0)) == after.preparation(SimActor(actor.0)) {
+        return Ok(BTreeMap::new());
+    }
+    let mut observations = BTreeMap::new();
+    for (&observer, revision) in revisions.iter_mut() {
+        let old = revision_view(before, observer)?;
+        let new = revision_view(after, observer)?;
+        if new != old {
+            *revision = revision
+                .checked_add(1)
+                .ok_or_else(|| Failure::new(ErrorCode::InvalidAction, "Revision exhausted"))?;
+        }
+        observations.insert(observer, Arc::new(new));
+    }
+    Ok(observations)
+}
 use crate::journal::{IntentionChange, IntentionEnd, IntentionEndKind};
 
 pub(super) fn apply_intention_change(
@@ -16,6 +49,40 @@ pub(super) fn apply_intention_change(
             .map(|_| ()),
     }
     .map_err(|_| Failure::new(ErrorCode::InvalidAction, "Intention is unavailable"))
+}
+
+pub(super) fn derive_intention_suspensions(
+    before: &Game,
+    after: &Game,
+    entry: &JournalEntry,
+    same_branch: bool,
+) -> Vec<crate::journal::IntentionSuspension> {
+    if !same_branch {
+        return Vec::new();
+    }
+    let mut suspensions: Vec<_> = before
+        .loaded_actor_ids()
+        .filter_map(|actor| {
+            let original = before.preparation(actor)?;
+            let intention = original.intention?;
+            let current = after.preparation(actor)?;
+            if !original.active
+                || current.active
+                || current.intention != Some(intention)
+                || matches!(entry.content, JournalContent::IntentionChanged {
+                intention: changed, change: IntentionChange::Suspended, ..
+            } if changed == intention)
+            {
+                return None;
+            }
+            Some(crate::journal::IntentionSuspension {
+                actor: ActorId(actor.0),
+                intention,
+            })
+        })
+        .collect();
+    suspensions.sort_by_key(|suspension| suspension.intention);
+    suspensions
 }
 
 pub(super) fn derive_intention_ends(
@@ -35,7 +102,9 @@ pub(super) fn derive_intention_ends(
         .collect();
     let current = match &entry.content {
         JournalContent::IntentionStarted { intention, .. }
-        | JournalContent::IntentionFailed { intention, .. } => {
+        | JournalContent::IntentionFailed { intention, .. }
+        | JournalContent::IntentionContinued { intention, .. }
+        | JournalContent::IntentionContinuationFailed { intention, .. } => {
             active.insert(*intention, SimActor(entry.actor.0));
             Some(*intention)
         }
@@ -106,14 +175,25 @@ impl Engine {
             .intention_admission(queued.id)
             .ok_or_else(invalid_archive)?;
         let admission = self.archive.records[source].entry.id.clone();
+        self.suspend_intention_admission(actor, &admission, recorded_id)
+            .map(Some)
+    }
+
+    pub(super) fn suspend_intention_admission(
+        &mut self,
+        actor: ActorId,
+        admission: &EntryId,
+        recorded_id: Option<EntryId>,
+    ) -> Result<CommandResult, Failure> {
         let mut candidate = self.capture_command_candidate(None);
         let content = self.prepare_intention_change(
             &mut candidate,
             actor,
-            &admission,
+            admission,
             IntentionChange::Suspended,
         )?;
         let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
             id: recorded_id.unwrap_or_else(new_id),
             branch: candidate.branch().clone(),
@@ -126,7 +206,6 @@ impl Engine {
             content,
         };
         self.commit_candidate(candidate, entry, None, None)
-            .map(Some)
     }
 
     pub(super) fn prepare_intention_change(
@@ -142,20 +221,31 @@ impl Engine {
         let JournalContent::IntentionAdmitted { intention, action } = &admitted.content else {
             return Err(unavailable());
         };
-        if admitted.actor != actor
-            || candidate
-                .game
-                .pending_intention(SimActor(actor.0))
-                .is_none_or(|queued| {
-                    queued.id != *intention
-                        || queued.origin != tor_simulation::IntentionOrigin::Human
-                        || queued.work
-                            != tor_simulation::IntentionWork::Action(adapt::action(action))
-                })
-        {
+        let original = adapt::action(action);
+        let queued_matches = candidate
+            .game
+            .pending_intention(SimActor(actor.0))
+            .is_some_and(|queued| {
+                queued.id == *intention
+                    && queued.origin == tor_simulation::IntentionOrigin::Human
+                    && admitted_work_matches(queued.work, action)
+            });
+        let preparation_matches = candidate.game.preparation(SimActor(actor.0)).is_some_and(|p| {
+            p.intention == Some(*intention)
+                && matches!(original, tor_simulation::Action::Attack { target } if p.target == target)
+                && !candidate.game.is_ai(SimActor(actor.0))
+        });
+        if admitted.actor != actor || !(queued_matches || preparation_matches) {
             return Err(unavailable());
         }
         apply_intention_change(&mut candidate.game, actor, *intention, change)?;
+        let observations = preparation_revision_updates(
+            &self.game,
+            &candidate.game,
+            actor,
+            &mut candidate.revisions,
+        )?;
+        candidate.observations.extend(observations);
         Ok(JournalContent::IntentionChanged {
             admission: admission.clone(),
             intention: *intention,
@@ -193,15 +283,23 @@ impl Engine {
                 statuses.push(status);
             }
         }
-        if let Some(id) = self
-            .game
-            .preparation(SimActor(actor.0))
-            .and_then(|p| p.intention)
-        {
-            if let Some(status) =
-                self.status_for_intention(id, self.branch(), IntentionPhase::Started)
-            {
-                statuses.push(status);
+        if let Some(preparation) = self.game.preparation(SimActor(actor.0)) {
+            if let Some(id) = preparation.intention.filter(|id| {
+                self.game
+                    .pending_intention(SimActor(actor.0))
+                    .is_none_or(|queued| queued.id != *id)
+            }) {
+                if let Some(status) = self.status_for_intention(
+                    id,
+                    self.branch(),
+                    if preparation.active {
+                        IntentionPhase::Started
+                    } else {
+                        IntentionPhase::Paused
+                    },
+                ) {
+                    statuses.push(status);
+                }
             }
         }
         statuses
@@ -228,6 +326,19 @@ impl Engine {
                 )
             })
             .collect();
+        updates.extend(
+            result
+                .entry
+                .intention_suspensions
+                .iter()
+                .filter_map(|suspension| {
+                    self.status_for_intention(
+                        suspension.intention,
+                        &result.entry.branch,
+                        IntentionPhase::Paused,
+                    )
+                }),
+        );
         if let Some(status) = self.intention_status(result) {
             if !updates
                 .iter()
@@ -247,7 +358,17 @@ impl Engine {
                 *intention,
                 &result.entry.branch,
                 match change {
-                    IntentionChange::Suspended => IntentionPhase::Suspended,
+                    IntentionChange::Suspended => {
+                        if self
+                            .game
+                            .pending_intention(SimActor(result.entry.actor.0))
+                            .is_some_and(|queued| queued.id == *intention)
+                        {
+                            IntentionPhase::Suspended
+                        } else {
+                            IntentionPhase::Paused
+                        }
+                    }
                     IntentionChange::Resumed => IntentionPhase::Queued,
                     IntentionChange::Cancelled => IntentionPhase::Cancelled,
                 },
@@ -276,6 +397,12 @@ impl Engine {
                 intention,
                 event,
                 ..
+            }
+            | JournalContent::IntentionContinued {
+                admission,
+                intention,
+                event,
+                ..
             } => Some(IntentionStatus {
                 actor: result.entry.actor,
                 branch: result.entry.branch.clone(),
@@ -294,13 +421,16 @@ impl Engine {
                     IntentionPhase::Resolved
                 },
             }),
-            JournalContent::IntentionFailed { admission, .. } => Some(IntentionStatus {
-                actor: result.entry.actor,
-                branch: result.entry.branch.clone(),
-                intention: IntentionId(admission.0.clone()),
-                entry_id: admission.clone(),
-                phase: IntentionPhase::Failed,
-            }),
+            JournalContent::IntentionFailed { admission, .. }
+            | JournalContent::IntentionContinuationFailed { admission, .. } => {
+                Some(IntentionStatus {
+                    actor: result.entry.actor,
+                    branch: result.entry.branch.clone(),
+                    intention: IntentionId(admission.0.clone()),
+                    entry_id: admission.clone(),
+                    phase: IntentionPhase::Failed,
+                })
+            }
             _ => None,
         }
     }
@@ -333,6 +463,16 @@ impl Engine {
                 .find(|end| end.intention == intention)
                 .expect("derived conclusion index");
             Self::end_phase(end.kind)
+        } else if let Some(phase) = (self.branch() == &result.entry.branch)
+            .then(|| {
+                self.pending_intentions(result.entry.actor)
+                    .into_iter()
+                    .find(|status| status.entry_id == result.entry.id)
+                    .map(|status| status.phase)
+            })
+            .flatten()
+        {
+            phase
         } else {
             self.history_index
                 .intention_resolution(&result.entry.branch, intention)
@@ -340,9 +480,15 @@ impl Engine {
                     JournalContent::IntentionStarted {
                         event: crate::journal::Event::AttackStarted { .. },
                         ..
+                    }
+                    | JournalContent::IntentionContinued {
+                        event: crate::journal::Event::AttackStarted { .. },
+                        ..
                     } => IntentionPhase::Started,
                     JournalContent::IntentionStarted { .. } => IntentionPhase::Resolved,
-                    JournalContent::IntentionFailed { .. } => IntentionPhase::Failed,
+                    JournalContent::IntentionContinued { .. } => IntentionPhase::Resolved,
+                    JournalContent::IntentionFailed { .. }
+                    | JournalContent::IntentionContinuationFailed { .. } => IntentionPhase::Failed,
                     _ => unreachable!("resolution index contains lifecycle records"),
                 })
                 .unwrap_or_else(|| {
@@ -400,12 +546,15 @@ impl Engine {
         if admitted.actor != actor
             || *admitted_id != intention
             || execution.intention.origin != tor_simulation::IntentionOrigin::Human
-            || execution.intention.work
-                != tor_simulation::IntentionWork::Action(adapt::action(admitted_action))
+            || !admitted_work_matches(execution.intention.work, admitted_action)
         {
             return Err(invalid_archive());
         }
         let admission = admitted.id.clone();
+        let continuation = matches!(
+            execution.intention.work,
+            tor_simulation::IntentionWork::ResumeAttack { .. }
+        );
         let content = match execution.outcome {
             Ok(outcome) => {
                 let action = execution
@@ -420,19 +569,45 @@ impl Engine {
                     None,
                 )?;
                 candidate.transition(self.regions.as_mut(), None)?;
-                JournalContent::IntentionStarted {
-                    admission,
-                    intention,
-                    action,
-                    event: adapt::event(outcome.kind),
+                if continuation {
+                    JournalContent::IntentionContinued {
+                        admission,
+                        intention,
+                        action,
+                        event: adapt::event(outcome.kind),
+                    }
+                } else {
+                    JournalContent::IntentionStarted {
+                        admission,
+                        intention,
+                        action,
+                        event: adapt::event(outcome.kind),
+                    }
                 }
             }
-            Err(_) => JournalContent::IntentionFailed {
-                admission,
-                intention,
-            },
+            Err(_) => {
+                let observations = preparation_revision_updates(
+                    &self.game,
+                    &candidate.game,
+                    actor,
+                    &mut candidate.revisions,
+                )?;
+                candidate.observations.extend(observations);
+                if continuation {
+                    JournalContent::IntentionContinuationFailed {
+                        admission,
+                        intention,
+                    }
+                } else {
+                    JournalContent::IntentionFailed {
+                        admission,
+                        intention,
+                    }
+                }
+            }
         };
         let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
             id: recorded_id.unwrap_or_else(new_id),
             branch: candidate.branch().clone(),

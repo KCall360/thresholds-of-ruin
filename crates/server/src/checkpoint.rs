@@ -130,7 +130,11 @@ impl Checkpoint {
 /// Recover private queue transitions between retained gameplay states using
 /// the same simulation operations as live execution. No world effects or
 /// authority decisions are invented by the checkpoint decoder.
-fn replay_private_boundary(game: &mut Game, record: &Record) -> Result<(), Failure> {
+fn replay_private_boundary(
+    game: &mut Game,
+    revisions: &mut Revisions,
+    record: &Record,
+) -> Result<(), Failure> {
     let before = game.clone();
     if record.entry.tick != before.tick() {
         return Err(invalid_archive());
@@ -154,7 +158,8 @@ fn replay_private_boundary(game: &mut Game, record: &Record) -> Result<(), Failu
             super::intention::apply_intention_change(game, record.entry.actor, *intention, *change)
                 .map_err(|_| invalid_archive())?;
         }
-        JournalContent::IntentionFailed { intention, .. } => {
+        JournalContent::IntentionFailed { intention, .. }
+        | JournalContent::IntentionContinuationFailed { intention, .. } => {
             let execution = game.execute_next_intention().ok_or_else(invalid_archive)?;
             if execution.intention.id != *intention
                 || execution.intention.actor != SimActor(record.entry.actor.0)
@@ -165,6 +170,13 @@ fn replay_private_boundary(game: &mut Game, record: &Record) -> Result<(), Failu
         }
         JournalContent::Annotation { .. } => {}
         _ => return Err(invalid_archive()),
+    }
+    super::intention::preparation_revision_updates(&before, game, record.entry.actor, revisions)
+        .map_err(|_| invalid_archive())?;
+    if super::intention::derive_intention_suspensions(&before, game, &record.entry, true)
+        != record.entry.intention_suspensions
+    {
+        return Err(invalid_archive());
     }
     if super::intention::derive_intention_ends(&before, game, &record.entry, true)
         != record.entry.intention_ends
@@ -191,10 +203,8 @@ impl DiskCheckpoint {
         }
         let mut receipts = BTreeMap::new();
         let mut records_by_id = BTreeMap::new();
-        let mut intention_records = BTreeMap::new();
-        let mut resolutions = BTreeSet::new();
-        let mut started_intentions = BTreeSet::new();
-        let mut ended_intentions = BTreeSet::new();
+        let mut lifecycle =
+            super::intention_lifecycle::JournalLifecycle::new(archive.branch.clone());
         for (index, record) in archive.records.iter().enumerate() {
             if !record.valid_admission()
                 || Uuid::parse_str(&record.entry.id.0).is_err()
@@ -205,64 +215,7 @@ impl DiskCheckpoint {
             {
                 return Err(invalid_archive());
             }
-            if let JournalContent::IntentionAdmitted { intention, .. } = &record.entry.content {
-                if intention_records.insert(*intention, record).is_some() {
-                    return Err(invalid_archive());
-                }
-            }
-            if let Some((source, intention)) = record.resolution() {
-                let admitted = records_by_id.get(source).ok_or_else(invalid_archive)?;
-                if !record.valid_resolution(admitted)
-                    || !resolutions.insert((record.entry.branch.0.clone(), intention))
-                {
-                    return Err(invalid_archive());
-                }
-                if matches!(
-                    record.entry.content,
-                    JournalContent::IntentionStarted { .. }
-                ) {
-                    started_intentions.insert(intention);
-                }
-            }
-            if let Some((source, intention)) = record.change_source() {
-                let admitted = records_by_id.get(source).ok_or_else(invalid_archive)?;
-                if !record.valid_change(admitted)
-                    || ended_intentions.contains(&(record.entry.branch.0.clone(), intention))
-                {
-                    return Err(invalid_archive());
-                }
-            }
-            if record
-                .entry
-                .intention_ends
-                .windows(2)
-                .any(|pair| pair[0].intention >= pair[1].intention)
-            {
-                return Err(invalid_archive());
-            }
-            for end in &record.entry.intention_ends {
-                let admitted = intention_records
-                    .get(&end.intention)
-                    .ok_or_else(invalid_archive)?;
-                let direct = matches!(&record.entry.content, JournalContent::IntentionStarted { intention, .. }
-                    | JournalContent::IntentionFailed { intention, .. }
-                    | JournalContent::IntentionChanged { intention, change: crate::journal::IntentionChange::Cancelled, .. }
-                    if *intention == end.intention);
-                if end.actor != admitted.entry.actor
-                    || (!direct && !started_intentions.contains(&end.intention))
-                    || !ended_intentions.insert((record.entry.branch.0.clone(), end.intention))
-                    || !matches!(
-                        record.entry.content,
-                        JournalContent::IntentionStarted { .. }
-                            | JournalContent::IntentionChanged { .. }
-                            | JournalContent::IntentionFailed { .. }
-                            | JournalContent::Action { .. }
-                            | JournalContent::Wizard { .. }
-                    )
-                {
-                    return Err(invalid_archive());
-                }
-            }
+            lifecycle.observe(record)?;
             if let Some(receipt) = &record.receipt {
                 if !valid_label(&receipt.user)
                     || !valid_label(&receipt.frontend)
@@ -285,42 +238,11 @@ impl DiskCheckpoint {
         }
         let mut restore = RestoreContext::new(&self.shared);
         let game = restore.restore(self.game).ok_or_else(invalid_archive)?;
-        let valid_game = |game: &Game, revisions: &Revisions| {
-            revisions.valid_for(game)
-                && game.queued_intentions().all(|queued| {
-                    intention_records.get(&queued.id).is_some_and(|admitted| {
-                        admitted.entry.actor.0 == queued.actor.0
-                            && queued.origin == tor_simulation::IntentionOrigin::Human
-                            && matches!(&admitted.entry.content, JournalContent::IntentionAdmitted { action, .. }
-                                if queued.work == tor_simulation::IntentionWork::Action(adapt::action(action)))
-                    })
-                })
-                && game.loaded_actor_ids().all(|actor| {
-                    game.preparation(actor).is_none_or(|progress| {
-                        progress.intention.is_none_or(|id| {
-                            started_intentions.contains(&id)
-                                && intention_records.get(&id).is_some_and(|admitted| {
-                                    admitted.entry.actor.0 == actor.0
-                                        && matches!(admitted.entry.content, JournalContent::IntentionAdmitted {
-                                            action: Action::Attack { target }, .. } if target.0 == progress.target.0)
-                                })
-                        })
-                    })
-                })
-        };
-        if !valid_game(&game, &self.revisions) {
-            return Err(invalid_archive());
-        }
-        if game
-            .queued_intentions()
-            .any(|queued| ended_intentions.contains(&(self.current_branch.0.clone(), queued.id)))
-            || game.loaded_actor_ids().any(|actor| {
-                game.preparation(actor)
-                    .and_then(|progress| progress.intention)
-                    .is_some_and(|id| {
-                        ended_intentions.contains(&(self.current_branch.0.clone(), id))
-                    })
-            })
+        if !self.revisions.valid_for(&game)
+            || !lifecycle.valid_game(
+                &game,
+                &self.boundaries.last().ok_or_else(invalid_archive)?.id,
+            )
         {
             return Err(invalid_archive());
         }
@@ -372,7 +294,7 @@ impl DiskCheckpoint {
                 return Err(invalid_archive());
             }
             let game = restore.restore(boundary.game).ok_or_else(invalid_archive)?;
-            if !valid_game(&game, &boundary.revisions) {
+            if !boundary.revisions.valid_for(&game) || !lifecycle.valid_game(&game, &boundary.id) {
                 return Err(invalid_archive());
             }
             if let Some(record) = boundary.id.as_ref().and_then(|id| records_by_id.get(id)) {
@@ -384,18 +306,27 @@ impl DiskCheckpoint {
                     let end = record_index.ok_or_else(invalid_archive)?;
                     let recovered = if start < end {
                         let mut preceding = previous.game.clone();
+                        let mut preceding_revisions = previous.revisions.clone();
                         for hidden in &archive.records[start..end] {
-                            replay_private_boundary(&mut preceding, hidden)?;
+                            replay_private_boundary(
+                                &mut preceding,
+                                &mut preceding_revisions,
+                                hidden,
+                            )?;
                         }
-                        Some(preceding)
+                        Some((preceding, preceding_revisions))
                     } else {
                         None
                     };
-                    let preceding = recovered.as_ref().unwrap_or(&previous.game);
+                    let (preceding, preceding_revisions) = recovered
+                        .as_ref()
+                        .map(|(game, revisions)| (game, revisions))
+                        .unwrap_or((&previous.game, &previous.revisions));
                     if !record.entry.content.rewindable() {
                         let mut expected = preceding.clone();
-                        replay_private_boundary(&mut expected, record)?;
-                        if expected != game || previous.revisions != boundary.revisions {
+                        let mut expected_revisions = preceding_revisions.clone();
+                        replay_private_boundary(&mut expected, &mut expected_revisions, record)?;
+                        if expected != game || expected_revisions != boundary.revisions {
                             return Err(invalid_archive());
                         }
                     }
@@ -404,6 +335,15 @@ impl DiskCheckpoint {
                         .as_ref()
                         .and_then(|id| records_by_id.get(id))
                         .is_none_or(|before| before.entry.branch == record.entry.branch);
+                    if super::intention::derive_intention_suspensions(
+                        preceding,
+                        &game,
+                        &record.entry,
+                        same_branch,
+                    ) != record.entry.intention_suspensions
+                    {
+                        return Err(invalid_archive());
+                    }
                     if super::intention::derive_intention_ends(
                         preceding,
                         &game,

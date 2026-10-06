@@ -172,17 +172,26 @@ fn an_actor_shows_its_archetypes_asset_and_validation_checks_that_one() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     // The rat's appearance pool names a forecast asset, but the rat itself
     // shows creature.bat, which no theme names.
-    let edited = text
-        .replace(
-            "[archetypes.rat]\nasset = \"creature.rat\"",
-            "[archetypes.rat]\nasset = \"creature.bat\"\nname = \"rat\"\nappearance_pool = \"furs\"",
-        )
-        .replace(
-            "[assets]",
-            "[appearance_pools.furs]\nappearances = [\"grey fur\"]\nasset = \"creature.rat\"\n\n[assets]",
-        );
-    assert_ne!(edited, text);
-    std::fs::write(&manifest, edited).unwrap();
+    let mut declaration: toml::Value = toml::from_str(&text).unwrap();
+    let rat = declaration["archetypes"]["rat"].as_table_mut().unwrap();
+    rat.insert("asset".into(), toml::Value::String("creature.bat".into()));
+    rat.insert("name".into(), toml::Value::String("rat".into()));
+    rat.insert("appearance_pool".into(), toml::Value::String("furs".into()));
+    let mut pool = toml::map::Map::new();
+    pool.insert(
+        "appearances".into(),
+        toml::Value::Array(vec![toml::Value::String("grey fur".into())]),
+    );
+    pool.insert("asset".into(), toml::Value::String("creature.rat".into()));
+    declaration
+        .as_table_mut()
+        .unwrap()
+        .entry("appearance_pools")
+        .or_insert_with(|| toml::Value::Table(Default::default()))
+        .as_table_mut()
+        .unwrap()
+        .insert("furs".into(), toml::Value::Table(pool));
+    std::fs::write(&manifest, toml::to_string_pretty(&declaration).unwrap()).unwrap();
     let error = scenario_package::validate(temp.path()).unwrap_err();
     assert!(error.message.contains("creature.bat"), "{error}");
 }
