@@ -2,7 +2,7 @@
 format = 2
 id = "doors-arrival-hazard"
 version = "1.0"
-ruleset = "dungeon-v18"
+ruleset = "dungeon-v19"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v18";
+pub const RULESET: &str = "dungeon-v19";
 const VALIDATOR: &str = "tor-scenario-7";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
@@ -2505,7 +2505,7 @@ mod tests {
             ("2", inherited_combat, inherited_body, 73),
             ("3", override_combat, override_body, 89),
         ] {
-            let actor = &snapshot["actors"][id];
+            let actor = &shared["actors"][snapshot["actors"].as_u64().unwrap() as usize][id];
             assert_eq!(
                 actor["combat"]["spec"],
                 serde_json::to_value(combat).unwrap()
@@ -2519,7 +2519,8 @@ mod tests {
             serde_json::json!({"memory_ticks": 73, "flee_percent": 19})
         );
         assert_eq!(
-            snapshot["actors"]["3"]["motion"]["velocity"],
+            shared["actors"][snapshot["actors"].as_u64().unwrap() as usize]["3"]["motion"]
+                ["velocity"],
             serde_json::json!([1, 0, 0])
         );
         let items = &shared["items"][snapshot["items"].as_u64().unwrap() as usize];

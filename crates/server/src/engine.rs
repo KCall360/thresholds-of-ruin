@@ -16,13 +16,15 @@ use crate::journal::{
     Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 16;
+pub(crate) const ARCHIVE_VERSION: u32 = 19;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
 mod command_request;
 #[path = "intention.rs"]
 mod intention;
+#[path = "intention_lifecycle.rs"]
+mod intention_lifecycle;
 #[cfg(test)]
 #[path = "intention_tests.rs"]
 mod intention_tests;
@@ -583,6 +585,15 @@ impl Record {
             | JournalContent::IntentionFailed {
                 admission,
                 intention,
+            }
+            | JournalContent::IntentionContinued {
+                admission,
+                intention,
+                ..
+            }
+            | JournalContent::IntentionContinuationFailed {
+                admission,
+                intention,
             } => Some((admission, *intention)),
             _ => None,
         }
@@ -612,7 +623,13 @@ impl Record {
                 JournalContent::IntentionStarted {
                     action: executed, ..
                 } => executed == action,
+                JournalContent::IntentionContinued {
+                    action: executed, ..
+                } => executed == action && matches!(action, Action::Attack { .. }),
                 JournalContent::IntentionFailed { .. } => true,
+                JournalContent::IntentionContinuationFailed { .. } => {
+                    matches!(action, Action::Attack { .. })
+                }
                 _ => false,
             }
     }
@@ -1371,6 +1388,12 @@ impl Engine {
         {
             return Err(invalid_archive());
         }
+        if checkpoint.is_none() {
+            let mut lifecycle = intention_lifecycle::JournalLifecycle::new(archive.branch.clone());
+            for record in &archive.records {
+                lifecycle.observe(record)?;
+            }
+        }
         let (mut engine, records) = if let Some(checkpoint) = checkpoint {
             if checkpoint.record_count > archive.records.len() {
                 return Err(invalid_archive());
@@ -1410,11 +1433,11 @@ impl Engine {
                         .map(|result| result.entry)
                 } else {
                     engine
-                        .suspend_queued_intention_inner(
+                        .suspend_intention_admission(
                             record.entry.actor,
+                            source,
                             Some(record.entry.id.clone()),
-                        )?
-                        .ok_or_else(invalid_archive)
+                        )
                         .map(|result| result.entry)
                 }
             } else if record.resolution().is_some() {
@@ -1506,6 +1529,20 @@ impl Engine {
                 .is_none_or(|p| !p.active)
         {
             return Ok(None);
+        }
+        if let Some(intention) = self
+            .game
+            .preparation(SimActor(actor.0))
+            .and_then(|p| p.intention)
+        {
+            let source = self
+                .history_index
+                .intention_admission(intention)
+                .ok_or_else(invalid_archive)?;
+            let admission = self.archive.records[source].entry.id.clone();
+            return self
+                .suspend_intention_admission(actor, &admission, None)
+                .map(Some);
         }
         self.command(
             "scheduler",
@@ -1945,6 +1982,7 @@ impl Engine {
                 }
             }
             let entry = JournalEntry {
+                intention_suspensions: Vec::new(),
                 intention_ends: Vec::new(),
                 id: new_id(),
                 branch: self.branch().clone(),
@@ -2386,6 +2424,7 @@ impl Engine {
             }
         }
         let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
             id: entry_id,
             branch: candidate.branch().clone(),
@@ -2405,6 +2444,12 @@ impl Engine {
         receipt: Option<Receipt>,
         mut profile: Option<&mut CommandProfile>,
     ) -> Result<CommandResult, Failure> {
+        entry.intention_suspensions = intention::derive_intention_suspensions(
+            &self.game,
+            &candidate.game,
+            &entry,
+            candidate.branch() == self.branch(),
+        );
         entry.intention_ends = intention::derive_intention_ends(
             &self.game,
             &candidate.game,
@@ -2476,6 +2521,7 @@ impl Engine {
         }
         self.validate_note(actor, "", Audience::Actor, &anchor, text)?;
         let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
             intention_ends: Vec::new(),
             id: recorded_id.unwrap_or_else(new_id),
             branch: self.branch().clone(),

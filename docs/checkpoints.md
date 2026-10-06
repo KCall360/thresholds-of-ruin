@@ -90,6 +90,43 @@ linear in retained records. Suffix replay uses the same bounded transaction cand
 as ordinary actions. Disabling captures, increasing the interval, or waiting to persist a new
 capture changes the effective replay bound.
 
+Equal actor tables are encoded once in the shared checkpoint pool and referenced
+by each boundary. Equality compares the complete actor values, including body,
+combat, timing and motion; actor identity alone never permits sharing distinct
+states. Restore rebuilds the derived topology indexes and shares unchanged actor
+stores with copy-on-write isolation. Invalid pool references fail closed. The
+retained window and 64 MiB writer/reader limits are unchanged.
+
+Queue snapshots retain their identity counter and ordered references to complete
+intention values in a shared pool. Queued and suspended states, movement guards,
+origins and continuation targets participate in equality. The native identity
+only narrows lookup candidates; it never substitutes for complete-value equality.
+Restore rejects missing, repeated or unordered references and oversized queues,
+then applies the ordinary game invariants. Identical restored queues share
+copy-on-write storage. A regression exercises 256 boundaries at the full 4,096
+intention capacity; production save/reopen coverage checks both retained windows,
+original admission retries and execution/cancellation after restore.
+
+A local stress fixture with 768 admitted actors and 256 retained boundaries
+encoded 96,339,453 bytes before actor-table pooling, 39,399,690 with actor pooling,
+and 13,320,863 with both actor and intention pooling. It used ordinary admission,
+same-location wizard markers and cancellation/readmission, without advancing
+simulation time. These are absolute fixture diagnostics, not representative
+gameplay latencies or an arbitrary-world guarantee.
+
+The production writer installed a 13,303,926-byte checkpoint after the next
+marker, retaining 255 boundaries because that selectable marker also occupies
+the private window. Reopen replayed zero suffix records, preserved all 768 actor
+observations and permitted cancellation under the original admission. Sampled
+peak private memory for the complete setup, encoding, installation and reopen
+run was 759,328,768 bytes. Before intention pooling, isolated opening of the
+installed 39,280,956-byte checkpoint exceeded the diagnostic's 1 GiB guard and
+was stopped. Its partial measurement is not a successful restore or a final peak.
+Restore memory remains substantial and requires further profiling. The separate
+bootstrap-save probe writes archive records; it does not prove checkpoint
+installation. The production regression captures on a private queue change to
+exercise the full 256-boundary union, original retries and resumed execution.
+
 A snapshot exceeding the size limit fails saving rather than publishing an
 unrecoverable checkpoint. The limit bounds encoded bytes, not all in-memory
 snapshot allocations. Before navigation was pooled by region, a fully explored

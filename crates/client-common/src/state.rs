@@ -144,6 +144,19 @@ impl ClientState {
             .any(|status| status.phase.pending())
     }
 
+    /// Select queued work before independent preparation, regardless of delivery order.
+    /// Input builders and presentation share this selection even without control.
+    pub fn intention_for_input(&self) -> Option<&IntentionStatus> {
+        self.intentions()
+            .iter()
+            .find(|status| status.phase.pending())
+            .or_else(|| {
+                self.intentions()
+                    .iter()
+                    .find(|status| status.phase.active())
+            })
+    }
+
     /// Explicit fresh input references the currently disclosed queued work.
     pub fn resume_intention_request(&self) -> Option<Request> {
         self.intention_request(true)
@@ -157,18 +170,16 @@ impl ClientState {
         if !self.has_control() {
             return None;
         }
-        let intention = self
-            .intentions()
-            .iter()
-            .find(|status| {
-                if resume {
-                    status.phase == IntentionPhase::Suspended
-                } else {
-                    status.phase.pending()
-                }
-            })?
-            .intention
-            .clone();
+        let selected = self.intention_for_input()?;
+        if resume
+            && !matches!(
+                selected.phase,
+                IntentionPhase::Suspended | IntentionPhase::Paused
+            )
+        {
+            return None;
+        }
+        let intention = selected.intention.clone();
         let expected_revision = self.state().revision;
         let command = if resume {
             Command::ResumeIntention {
@@ -389,7 +400,12 @@ fn validate_intentions(
             > 1
         || intentions
             .iter()
-            .filter(|status| status.phase == IntentionPhase::Started)
+            .filter(|status| {
+                matches!(
+                    status.phase,
+                    IntentionPhase::Started | IntentionPhase::Paused
+                )
+            })
             .count()
             > 1
         || intentions.len() == 2 && intentions[0].intention == intentions[1].intention

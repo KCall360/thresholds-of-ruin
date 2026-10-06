@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":23,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":24,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -125,28 +125,36 @@ Gameplay acknowledgements report admission, before simulation execution:
 
 The simulation chooses when the actor's intention executes. Observations disclose
 its effects; ordered `intention` updates report lifecycle changes. Snapshots include
-pending `intentions`, separately from observation readiness. Clients keep the queue
-slot occupied until a lifecycle update frees it. An attack's `started` phase does
-not mean its wind-up and impacts have finished; snapshots retain its running
-identity and later effects conclude it. Immediate operations acknowledge with a required
-`receipt { type: "immediate", entry_id: ... }` instead.
+active `intentions`, separately from observation readiness. `queued` and `suspended`
+work occupy the queue slot. An attack's `started` phase retains its preparation
+identity while wind-up and impact are in progress. `paused` retains inactive
+preparation with its spent progress and original target; it can coexist with a
+separate queued action. Changed observations precede their lifecycle updates.
+Immediate operations acknowledge with a required
+`receipt { type: "immediate", entry_id: ... }`.
 
-Restart, controller loss and rewind suspend queued human intentions. Acquiring
-control leaves that work suspended. Explicit `resume_intention` and
-`cancel_intention` commands reference the original opaque identity from the
-current snapshot, using its current branch and state revision:
+Restart and controller loss suspend queued human intentions and pause running
+preparation. Rewind restores the selected work and preparation; Session then
+suspends human work until fresh input. Acquiring control preserves that state.
+Explicit `resume_intention` and `cancel_intention` commands reference the original
+opaque identity using the current branch and observation revision:
 
 ```json
 {"type":"command","branch":"<current branch>","command":{"type":"resume_intention","expected_revision":7,"intention":"<original admission identity>"}}
 ```
 
-Replace `resume_intention` with `cancel_intention` to discard the queued work.
-Both require controller authority. Resume returns the same intention to the
-simulation queue; cancellation has no gameplay effect and does not enable other
-simulation work. Their ordered lifecycle updates precede the acknowledgement.
-These controls apply to queued work. ASCII exposes F8/F9; headless exposes
+Resume returns suspended work or paused preparation to the simulation queue under
+its existing identity. Continued preparation keeps its remaining progress and
+revalidates the original target at execution. Replace `resume_intention` with
+`cancel_intention` to discard that exact work or preparation. Cancellation
+preserves any independently queued intention and does not advance simulation time.
+Both operations require controller authority. Their ordered lifecycle updates
+precede the acknowledgement. ASCII exposes F8/F9; headless exposes explicit
 `resume_intention`/`cancel_intention` inputs using the current disclosed context.
-Resuming an already-started paused attack remains part of the integration work.
+These default controls select queued work before independent preparation,
+regardless of snapshot or update delivery order. The ASCII hint uses that same
+selection; queued work must be suspended before it can be resumed. Explicit
+protocol commands can still reference either disclosed identity.
 
 Requests require unique IDs per authenticated user for accepted actions and
 annotations. Retry the exact same command and ID to recover its original receipt,

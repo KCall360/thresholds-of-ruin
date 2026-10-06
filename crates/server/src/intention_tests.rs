@@ -362,6 +362,1144 @@ mod intention_admission_tests {
     }
 
     #[test]
+    fn rejected_persistence_preserves_preparation_queue_revisions_and_receipts() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let scenario = crate::scenario_package::load(&root, 42, None, false).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let actor = ActorId(1);
+        for stage in [
+            "suspend",
+            "resume",
+            "cancel_active",
+            "cancel_suspended",
+            "continue",
+            "fail_continue",
+        ] {
+            let path = directory.path().join(format!("{stage}.db"));
+            let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+            let admitted = engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    "attack",
+                    &engine.branch().clone(),
+                    Command::AdmitIntention {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        action: Action::Attack { target: ActorId(2) },
+                    },
+                )
+                .unwrap();
+            engine.execute_next_intention().unwrap().unwrap();
+            if !matches!(stage, "suspend" | "cancel_active") {
+                engine.pause_preparation(actor).unwrap().unwrap();
+            }
+            if stage == "fail_continue" {
+                engine.enable_wizard().unwrap();
+                engine
+                    .command(
+                        "p",
+                        "test",
+                        actor,
+                        "move-target",
+                        &engine.branch().clone(),
+                        Command::Wizard {
+                            expected_revision: engine.revision(actor).unwrap(),
+                            operation: WizardOperation::Teleport {
+                                actor: ActorId(2),
+                                position: Position {
+                                    region: 1,
+                                    x: 3,
+                                    y: 1,
+                                    z: 0,
+                                },
+                            },
+                        },
+                    )
+                    .unwrap();
+            }
+            if matches!(stage, "continue" | "fail_continue") {
+                engine
+                    .command(
+                        "p",
+                        "test",
+                        actor,
+                        "resume",
+                        &engine.branch().clone(),
+                        Command::ResumeIntention {
+                            expected_revision: engine.revision(actor).unwrap(),
+                            admission: admitted.entry.id.clone(),
+                        },
+                    )
+                    .unwrap();
+            }
+            engine.flush().unwrap();
+            drop(engine);
+            let mut engine = Engine::open_with_policy(
+                &path,
+                scenario.clone(),
+                crate::SavePolicy {
+                    max_pending_bytes: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let before = engine.game.clone();
+            let revisions = engine.revisions.clone();
+            let boundaries = engine.boundaries.clone();
+            let receipt = engine.request_receipt(&admitted);
+            let record_count = engine.archive.records.len();
+            let receipt_count = engine.receipts.len();
+            let error = match stage {
+                "suspend" => engine.pause_preparation(actor).unwrap_err(),
+                "continue" | "fail_continue" => engine.execute_next_intention().unwrap_err(),
+                _ => engine
+                    .command(
+                        "p",
+                        "test",
+                        actor,
+                        "rejected",
+                        &engine.branch().clone(),
+                        if stage == "resume" {
+                            Command::ResumeIntention {
+                                expected_revision: engine.revision(actor).unwrap(),
+                                admission: admitted.entry.id.clone(),
+                            }
+                        } else {
+                            Command::CancelIntention {
+                                expected_revision: engine.revision(actor).unwrap(),
+                                admission: admitted.entry.id.clone(),
+                            }
+                        },
+                    )
+                    .unwrap_err(),
+            };
+            assert_eq!(error.code, ErrorCode::StorageFailure, "{stage}");
+            assert_eq!(engine.game, before, "{stage}");
+            assert_eq!(engine.revisions, revisions, "{stage}");
+            assert_eq!(engine.archive.records.len(), record_count, "{stage}");
+            assert_eq!(engine.receipts.len(), receipt_count, "{stage}");
+            assert_eq!(engine.request_receipt(&admitted), receipt, "{stage}");
+            assert_eq!(engine.boundaries.len(), boundaries.len());
+            assert!(engine
+                .boundaries
+                .iter()
+                .zip(&boundaries)
+                .all(|(after, before)| Arc::ptr_eq(after, before)));
+        }
+    }
+
+    #[test]
+    fn paused_attack_recovery_preserves_original_admission_through_continuation_and_cancel() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        let actor = ActorId(1);
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        let verify = |engine: &Engine| {
+            let replay = Engine::replay(engine.archive.clone(), None, None).unwrap();
+            let restored = Checkpoint::capture(engine)
+                .encode("paused-attack", 1)
+                .restore(engine.archive.clone())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "checkpoint after {:?}: {error:?}",
+                        engine.archive.records.last().unwrap().entry.content
+                    )
+                });
+            for recovered in [&replay, &restored] {
+                assert_eq!(recovered.game, engine.game);
+                assert_eq!(
+                    recovered.pending_intentions(actor),
+                    engine.pending_intentions(actor)
+                );
+                assert_eq!(
+                    recovered.request_receipt(&admitted),
+                    engine.request_receipt(&admitted)
+                );
+            }
+        };
+        let active_state = engine.state(actor).unwrap();
+        engine.pause_preparation(actor).unwrap().unwrap();
+        let suspended_state = engine.state(actor).unwrap();
+        assert!(
+            !suspended_state
+                .observation
+                .combat
+                .as_ref()
+                .unwrap()
+                .preparation_active
+        );
+        assert!(
+            suspended_state.revision > active_state.revision,
+            "changed preparation must advance its disclosed observation revision"
+        );
+        let pending = engine.pending_intentions(actor);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].entry_id, admitted.entry.id);
+        assert_eq!(pending[0].phase, IntentionPhase::Paused);
+        assert!(
+            engine.archive.records.last().unwrap().receipt.is_none(),
+            "scheduler suspension must not fabricate a client request"
+        );
+        assert!(matches!(
+            engine.request_receipt(&admitted),
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Paused,
+                ..
+            }
+        ));
+        verify(&engine);
+        let before = engine.game.clone();
+        let resume = Command::ResumeIntention {
+            expected_revision: engine.revision(actor).unwrap(),
+            admission: admitted.entry.id.clone(),
+        };
+        let resumed = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "resume-started",
+                &engine.branch().clone(),
+                resume.clone(),
+            )
+            .unwrap();
+        assert_eq!(engine.game.tick(), before.tick());
+        assert_eq!(
+            engine.game.preparation(SimActor(actor.0)),
+            before.preparation(SimActor(actor.0))
+        );
+        let pending = engine.pending_intentions(actor);
+        assert_eq!(
+            pending.len(),
+            1,
+            "queued continuation and preparation share one identity"
+        );
+        assert_eq!(pending[0].entry_id, admitted.entry.id);
+        assert_eq!(pending[0].phase, IntentionPhase::Queued);
+        verify(&engine);
+        let continued = engine.execute_next_intention().unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&continued.entry.content).unwrap()["type"],
+            serde_json::json!("intention_continued")
+        );
+        assert!(engine.archive.records.last().unwrap().receipt.is_none());
+        assert_eq!(
+            engine.pending_intentions(actor)[0].phase,
+            IntentionPhase::Started
+        );
+        verify(&engine);
+        let before_retry = engine.game.clone();
+        let retry = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "resume-started",
+                &engine.branch().clone(),
+                resume,
+            )
+            .unwrap();
+        assert_eq!(retry.entry, resumed.entry);
+        assert_eq!(engine.game, before_retry);
+        let before_cancel = engine.state(actor).unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "cancel-started",
+                &engine.branch().clone(),
+                Command::CancelIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        let after_cancel = engine.state(actor).unwrap();
+        assert!(after_cancel
+            .observation
+            .combat
+            .as_ref()
+            .unwrap()
+            .preparation_remaining
+            .is_none());
+        assert!(after_cancel.revision > before_cancel.revision);
+        assert!(engine.pending_intentions(actor).is_empty());
+        assert!(engine.game.preparation(SimActor(actor.0)).is_none());
+        assert!(matches!(
+            engine.request_receipt(&admitted),
+            RequestReceipt::Admitted {
+                phase: IntentionPhase::Cancelled,
+                ..
+            }
+        ));
+        verify(&engine);
+        assert_eq!(
+            engine
+                .archive
+                .records
+                .iter()
+                .filter(|record| matches!(
+                    record.entry.content,
+                    JournalContent::IntentionAdmitted { .. }
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn cancelling_original_preparation_preserves_independent_admission_through_recovery() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&source, 42, None, false).unwrap())
+                .unwrap();
+        let actor = ActorId(1);
+        let attack = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        engine.pause_preparation(actor).unwrap().unwrap();
+        let later = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "later",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        let queued = engine.game.pending_intention(SimActor(1)).unwrap().clone();
+        let tick = engine.game.tick();
+        let pending = engine.pending_intentions(actor);
+        assert_eq!(pending.len(), 2);
+        assert!(pending
+            .iter()
+            .any(|status| status.entry_id == attack.entry.id
+                && status.phase == IntentionPhase::Paused));
+        assert!(pending
+            .iter()
+            .any(|status| status.entry_id == later.entry.id
+                && status.phase == IntentionPhase::Queued));
+        let replay = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        let checkpoint = Checkpoint::capture(&engine)
+            .encode("independent", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        for mut recovered in [engine, replay, checkpoint] {
+            let before = recovered.game.clone();
+            let request = Command::CancelIntention {
+                expected_revision: recovered.revision(actor).unwrap(),
+                admission: attack.entry.id.clone(),
+            };
+            let cancelled = recovered
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    "cancel-original",
+                    &recovered.branch().clone(),
+                    request.clone(),
+                )
+                .unwrap();
+            assert_eq!(recovered.game.tick(), tick);
+            assert!(before.preparation(SimActor(1)).is_some());
+            assert!(recovered.game.preparation(SimActor(1)).is_none());
+            assert_eq!(recovered.game.pending_intention(SimActor(1)), Some(&queued));
+            assert_eq!(recovered.pending_intentions(actor).len(), 1);
+            assert_eq!(
+                recovered.pending_intentions(actor)[0].entry_id,
+                later.entry.id
+            );
+            assert!(matches!(
+                recovered.request_receipt(&attack),
+                RequestReceipt::Admitted {
+                    phase: IntentionPhase::Cancelled,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                recovered.request_receipt(&later),
+                RequestReceipt::Admitted {
+                    phase: IntentionPhase::Queued,
+                    ..
+                }
+            ));
+            let after = recovered.game.clone();
+            let retry = recovered
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    "cancel-original",
+                    &recovered.branch().clone(),
+                    request,
+                )
+                .unwrap();
+            assert_eq!(retry.entry, cancelled.entry);
+            assert_eq!(recovered.game, after);
+            let replay = Engine::replay(recovered.archive.clone(), None, None).unwrap();
+            let checkpoint = Checkpoint::capture(&recovered)
+                .encode("independent", 2)
+                .restore(recovered.archive.clone())
+                .unwrap();
+            assert_eq!(replay.game, recovered.game);
+            assert_eq!(checkpoint.game, recovered.game);
+            let executed = recovered.execute_next_intention().unwrap().unwrap();
+            assert!(
+                matches!(executed.entry.content, JournalContent::IntentionStarted {
+                ref admission, intention, action: Action::Wait, ..
+            } if admission == &later.entry.id && intention == queued.id)
+            );
+        }
+    }
+
+    #[test]
+    fn preparation_phase_lineage_survives_rewind_and_both_recovery_paths() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&source, 42, None, false).unwrap())
+                .unwrap();
+        let actor = ActorId(1);
+        engine.enable_wizard().unwrap();
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        let mut targets = Vec::new();
+        for (index, expected) in [
+            IntentionPhase::Started,
+            IntentionPhase::Paused,
+            IntentionPhase::Queued,
+            IntentionPhase::Started,
+            IntentionPhase::Cancelled,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            match index {
+                1 => {
+                    engine.pause_preparation(actor).unwrap().unwrap();
+                }
+                2 => {
+                    engine
+                        .command(
+                            "p",
+                            "test",
+                            actor,
+                            "resume",
+                            &engine.branch().clone(),
+                            Command::ResumeIntention {
+                                expected_revision: engine.revision(actor).unwrap(),
+                                admission: admitted.entry.id.clone(),
+                            },
+                        )
+                        .unwrap();
+                }
+                3 => {
+                    engine.execute_next_intention().unwrap().unwrap();
+                }
+                4 => {
+                    engine
+                        .command(
+                            "p",
+                            "test",
+                            actor,
+                            "cancel",
+                            &engine.branch().clone(),
+                            Command::CancelIntention {
+                                expected_revision: engine.revision(actor).unwrap(),
+                                admission: admitted.entry.id.clone(),
+                            },
+                        )
+                        .unwrap();
+                }
+                _ => {}
+            }
+            let retained = engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    &format!("phase-{index}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        operation: WizardOperation::SetPlaceHint {
+                            position: Position {
+                                region: 1,
+                                x: 1,
+                                y: 1,
+                                z: 0,
+                            },
+                            present: true,
+                        },
+                    },
+                )
+                .unwrap();
+            targets.push((retained.entry.id, engine.game.clone(), expected));
+        }
+        for (index, (target, expected_game, expected_phase)) in targets.into_iter().enumerate() {
+            let mut fork = Engine::replay(engine.archive.clone(), None, None).unwrap();
+            fork.enable_wizard().unwrap();
+            fork.command(
+                "p",
+                "test",
+                actor,
+                &format!("rewind-{index}"),
+                &fork.branch().clone(),
+                Command::Wizard {
+                    expected_revision: fork.revision(actor).unwrap(),
+                    operation: WizardOperation::Rewind {
+                        target: Some(target),
+                    },
+                },
+            )
+            .unwrap();
+            assert_eq!(fork.game, expected_game, "phase {expected_phase:?}");
+            let replay = Engine::replay(fork.archive.clone(), None, None).unwrap();
+            let checkpoint = Checkpoint::capture(&fork)
+                .encode("phase-lineage", 1)
+                .restore(fork.archive.clone())
+                .unwrap();
+            for recovered in [&fork, &replay, &checkpoint] {
+                assert_eq!(recovered.game, expected_game);
+                assert!(
+                    matches!(recovered.request_receipt(&admitted),
+                    RequestReceipt::Admitted { phase, .. } if phase == IntentionPhase::Cancelled),
+                    "the original branch receipt retains its terminal phase"
+                );
+                if expected_phase.active() {
+                    let pending = recovered.pending_intentions(actor);
+                    assert_eq!(pending.len(), 1);
+                    assert_eq!(pending[0].entry_id, admitted.entry.id);
+                    assert_eq!(pending[0].branch, *recovered.branch());
+                    assert_eq!(pending[0].phase, expected_phase);
+                } else {
+                    assert!(recovered.pending_intentions(actor).is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_requires_the_suspended_continuation_queue_present_in_saved_state() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&source, 42, None, false).unwrap())
+                .unwrap();
+        let actor = ActorId(1);
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        engine.pause_preparation(actor).unwrap().unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "resume",
+                &engine.branch().clone(),
+                Command::ResumeIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        engine.suspend_queued_intention(actor).unwrap().unwrap();
+        let boundary = Some(engine.archive.records.last().unwrap().entry.id.clone());
+        let mut lifecycle =
+            super::super::intention_lifecycle::JournalLifecycle::new(engine.archive.branch.clone());
+        for record in &engine.archive.records {
+            lifecycle.observe(record).unwrap();
+        }
+        assert!(lifecycle.valid_game(&engine.game, &boundary));
+        let mut shared = tor_simulation::checkpoint::SharedState::default();
+        let mut saved = serde_json::to_value(engine.game.checkpoint(&mut shared)).unwrap();
+        saved["intentions"]["entries"]
+            .as_array_mut()
+            .unwrap()
+            .clear();
+        let missing_queue =
+            Game::restore_checkpoint(serde_json::from_value(saved).unwrap(), &shared).unwrap();
+        assert!(missing_queue.pending_intention(SimActor(actor.0)).is_none());
+        assert_eq!(
+            missing_queue.preparation(SimActor(actor.0)),
+            engine.game.preparation(SimActor(actor.0))
+        );
+        assert!(
+            !lifecycle.valid_game(&missing_queue, &boundary),
+            "paused preparation alone cannot replace a journaled suspended continuation queue"
+        );
+    }
+
+    #[test]
+    fn lifecycle_rejects_a_second_queued_admission_for_the_same_actor() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let actor = ActorId(1);
+        let command = Command::AdmitIntention {
+            expected_revision: engine.revision(actor).unwrap(),
+            action: Action::Wait,
+        };
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "first",
+                &engine.branch().clone(),
+                command.clone(),
+            )
+            .unwrap();
+        assert!(engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "second",
+                &engine.branch().clone(),
+                command
+            )
+            .is_err());
+        let first = engine.archive.records.last().unwrap();
+        let mut forged = first.clone();
+        forged.entry.id = EntryId(Uuid::new_v4().to_string());
+        let JournalContent::IntentionAdmitted { intention, .. } = &mut forged.entry.content else {
+            unreachable!()
+        };
+        intention.0 += 1;
+        forged.receipt.as_mut().unwrap().request_id = "second".into();
+        let mut lifecycle =
+            super::super::intention_lifecycle::JournalLifecycle::new(engine.archive.branch.clone());
+        for record in &engine.archive.records {
+            lifecycle.observe(record).unwrap();
+        }
+        assert!(
+            lifecycle.observe(&forged).is_err(),
+            "journal ownership must enforce the simulation's one-queue-per-actor rule"
+        );
+    }
+
+    #[test]
+    fn lifecycle_rejects_suspension_and_terminal_facts_for_same_work() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&source, 42, None, false).unwrap())
+                .unwrap();
+        let actor = ActorId(1);
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        let mut records = engine.archive.records.clone();
+        let record = records.last_mut().unwrap();
+        let JournalContent::IntentionStarted { intention, .. } = record.entry.content else {
+            unreachable!()
+        };
+        record
+            .entry
+            .intention_suspensions
+            .push(crate::journal::IntentionSuspension { actor, intention });
+        for kind in [
+            crate::journal::IntentionEndKind::Resolved,
+            crate::journal::IntentionEndKind::Failed,
+            crate::journal::IntentionEndKind::Cancelled,
+        ] {
+            let mut conflicting = record.clone();
+            conflicting
+                .entry
+                .intention_ends
+                .push(crate::journal::IntentionEnd {
+                    actor,
+                    intention,
+                    kind,
+                });
+            let mut lifecycle = super::super::intention_lifecycle::JournalLifecycle::new(
+                engine.archive.branch.clone(),
+            );
+            for previous in &engine.archive.records[..engine.archive.records.len() - 1] {
+                lifecycle.observe(previous).unwrap();
+            }
+            assert!(
+                lifecycle.observe(&conflicting).is_err(),
+                "one boundary cannot suspend and terminate the same work: {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_rejects_terminal_effects_on_expired_pause_metadata() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&source, 42, None, false).unwrap())
+                .unwrap();
+        let actor = ActorId(1);
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        let JournalContent::IntentionAdmitted { intention, .. } = admitted.entry.content else {
+            unreachable!()
+        };
+        engine.execute_next_intention().unwrap().unwrap();
+        let paused = engine.pause_preparation(actor).unwrap().unwrap();
+        let cancelled = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "cancel",
+                &engine.branch().clone(),
+                Command::CancelIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        engine.enable_wizard().unwrap();
+        for index in 0..140 {
+            engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    &format!("retain-{index}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        operation: WizardOperation::Teleport {
+                            actor,
+                            position: Position {
+                                region: 1,
+                                x: 1,
+                                y: 1,
+                                z: 0,
+                            },
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        for id in [&paused.entry.id, &cancelled.entry.id] {
+            assert!(!engine
+                .boundaries
+                .iter()
+                .any(|boundary| boundary.id.as_ref() == Some(id)));
+        }
+        Checkpoint::capture(&engine)
+            .encode("effect-owner", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        let mut archive = engine.archive.clone();
+        archive
+            .records
+            .retain(|record| record.entry.id != cancelled.entry.id);
+        let pause = archive
+            .records
+            .iter_mut()
+            .find(|record| record.entry.id == paused.entry.id)
+            .unwrap();
+        pause
+            .entry
+            .intention_ends
+            .push(crate::journal::IntentionEnd {
+                actor,
+                intention,
+                kind: crate::journal::IntentionEndKind::Cancelled,
+            });
+        assert!(Engine::replay(archive.clone(), None, None).is_err());
+        let mut checkpoint = Checkpoint::capture(&engine).encode("effect-owner", 1);
+        checkpoint.record_count = archive.records.len();
+        assert!(
+            checkpoint.restore(archive).is_err(),
+            "pause metadata cannot replace an authoritative cancellation record"
+        );
+    }
+
+    /// A validated authored fixture where the guard interrupts spent player work.
+    /// Keep its directory alive while a saved scenario may refer to package inputs.
+    fn interruption_scenario() -> (tempfile::TempDir, Scenario) {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("regions")).unwrap();
+        let mut manifest: toml::Value =
+            toml::from_str(&std::fs::read_to_string(source.join("scenario.toml")).unwrap())
+                .unwrap();
+        manifest["characters"][0]["combat"]["attack"]["wind_up"] = 60.into();
+        let mut region: toml::Value =
+            toml::from_str(&std::fs::read_to_string(source.join("regions/1.toml")).unwrap())
+                .unwrap();
+        region["actors"][0]["combat"]["attack"]["wind_up"] = 30.into();
+        region["actors"][0]["combat"]["max_hp"] = 100.into();
+        std::fs::write(
+            directory.path().join("scenario.toml"),
+            toml::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.path().join("regions/1.toml"),
+            toml::to_string(&region).unwrap(),
+        )
+        .unwrap();
+        let scenario = crate::scenario_package::load(directory.path(), 42, None, true).unwrap();
+        (directory, scenario)
+    }
+
+    #[test]
+    fn combat_interruption_rejected_by_storage_preserves_authoritative_state() {
+        let (directory, scenario) = interruption_scenario();
+        let path = directory.path().join("interruption.db");
+        let actor = ActorId(1);
+        let mut engine = Engine::open(&path, scenario.clone()).unwrap();
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine = Engine::open_with_policy(
+            &path,
+            scenario.clone(),
+            crate::SavePolicy {
+                max_pending_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Establish that the rejected operation would actually interrupt this work.
+        let mut healthy = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        healthy.advance_ai(ActorId(2)).unwrap();
+        assert!(!healthy.game.preparation(SimActor(actor.0)).unwrap().active);
+        assert_eq!(
+            healthy
+                .archive
+                .records
+                .last()
+                .unwrap()
+                .entry
+                .intention_suspensions
+                .len(),
+            1
+        );
+        assert!(engine.game.preparation(SimActor(actor.0)).unwrap().active);
+
+        let before = engine.game.clone();
+        let revisions = engine.revisions.clone();
+        let boundaries = engine.boundaries.clone();
+        let records = engine.archive.records.len();
+        let receipts = engine.receipts.clone();
+        let receipt = engine.request_receipt(&admitted);
+        let views = [actor, ActorId(2)].map(|observer| engine.revision_view(observer).unwrap());
+        assert_eq!(
+            engine.advance_ai(ActorId(2)).unwrap_err().code,
+            ErrorCode::StorageFailure
+        );
+        assert_eq!(engine.game, before);
+        assert_eq!(engine.revisions, revisions);
+        assert_eq!(engine.archive.records.len(), records);
+        assert_eq!(engine.receipts, receipts);
+        assert_eq!(engine.request_receipt(&admitted), receipt);
+        assert_eq!(engine.boundaries.len(), boundaries.len());
+        assert!(engine
+            .boundaries
+            .iter()
+            .zip(&boundaries)
+            .all(|(after, before)| Arc::ptr_eq(after, before)));
+        for (observer, view) in [actor, ActorId(2)].into_iter().zip(views) {
+            assert!(Arc::ptr_eq(&engine.revision_view(observer).unwrap(), &view));
+        }
+        engine.flush().unwrap();
+        drop(engine);
+        let restored = Engine::open(&path, scenario).unwrap();
+        assert_eq!(restored.game, before);
+        assert_eq!(restored.request_receipt(&admitted), receipt);
+        assert_eq!(restored.archive.records.len(), records);
+    }
+
+    #[test]
+    fn combat_interruption_publishes_original_progress_suspension_and_can_resume() {
+        let (_package, scenario) = interruption_scenario();
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        let interrupted = engine.advance_ai(ActorId(2)).unwrap();
+        let preparation = engine.game.preparation(SimActor(1)).unwrap();
+        assert!(!preparation.active);
+        assert!(preparation.remaining < 60 && preparation.remaining > 0);
+        assert_eq!(
+            engine.pending_intentions(actor)[0].phase,
+            IntentionPhase::Paused
+        );
+        let facts = &engine
+            .archive
+            .records
+            .last()
+            .unwrap()
+            .entry
+            .intention_suspensions;
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].actor, actor);
+        for corruption in ["missing", "actor", "identity", "duplicate"] {
+            let mut archive = engine.archive.clone();
+            let facts = &mut archive
+                .records
+                .last_mut()
+                .unwrap()
+                .entry
+                .intention_suspensions;
+            match corruption {
+                "missing" => facts.clear(),
+                "actor" => facts[0].actor = ActorId(2),
+                "identity" => facts[0].intention = tor_simulation::IntentionId(99),
+                "duplicate" => facts.push(facts[0].clone()),
+                _ => unreachable!(),
+            }
+            assert!(
+                Engine::replay(archive.clone(), None, None).is_err(),
+                "{corruption}"
+            );
+            assert!(
+                Checkpoint::capture(&engine)
+                    .encode("interrupted", 1)
+                    .restore(archive)
+                    .is_err(),
+                "checkpoint accepted {corruption}"
+            );
+        }
+        assert!(
+            engine
+                .intention_updates(&interrupted)
+                .iter()
+                .any(|status| status.entry_id == admitted.entry.id
+                    && status.phase == IntentionPhase::Paused),
+            "the action causing interruption must publish its derived suspension"
+        );
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "resume",
+                &engine.branch().clone(),
+                Command::ResumeIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        let restored = Checkpoint::capture(&engine)
+            .encode("interrupted", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(restored.game, engine.game);
+    }
+
+    #[test]
+    fn checkpoint_rejects_missing_suspension_after_original_boundaries_expire() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/dungeon-loop");
+        let mut engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        let actor = ActorId(1);
+        let admitted = engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "attack",
+                &engine.branch().clone(),
+                Command::AdmitIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Attack { target: ActorId(2) },
+                },
+            )
+            .unwrap();
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        let suspended = engine.pause_preparation(actor).unwrap().unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "resume",
+                &engine.branch().clone(),
+                Command::ResumeIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        engine.execute_next_intention().unwrap().unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                actor,
+                "cancel",
+                &engine.branch().clone(),
+                Command::CancelIntention {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    admission: admitted.entry.id.clone(),
+                },
+            )
+            .unwrap();
+        engine.enable_wizard().unwrap();
+        for index in 0..140 {
+            engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    &format!("retain-{index}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        operation: WizardOperation::Teleport {
+                            actor,
+                            position: Position {
+                                region: 1,
+                                x: 1,
+                                y: 1,
+                                z: 0,
+                            },
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        for expired in [&started.entry.id, &suspended.entry.id] {
+            assert!(
+                !engine
+                    .boundaries
+                    .iter()
+                    .any(|boundary| boundary.id.as_ref() == Some(expired)),
+                "the corruption must precede both retained windows"
+            );
+        }
+        let healthy = Checkpoint::capture(&engine)
+            .encode("expired-progress", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        assert_eq!(healthy.game, engine.game);
+        let mut archive = engine.archive.clone();
+        archive
+            .records
+            .retain(|record| record.entry.id != suspended.entry.id);
+        assert_eq!(archive.records.len() + 1, engine.archive.records.len());
+        assert!(Engine::replay(archive.clone(), None, None).is_err());
+        let mut checkpoint = Checkpoint::capture(&engine).encode("expired-progress", 1);
+        // Match the altered count so rejection proves lifecycle validation,
+        // rather than merely detecting a stale checkpoint envelope.
+        checkpoint.record_count = archive.records.len();
+        assert!(
+            checkpoint.restore(archive).is_err(),
+            "checkpoint must reject resume without suspension in expired history"
+        );
+    }
+
+    #[test]
     fn attack_progress_snapshot_and_receipt_resolve_with_another_actors_effects() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/tests/dungeon-loop");
@@ -479,8 +1617,11 @@ mod intention_admission_tests {
         // A valid checkpoint fixture with death between admission and selection.
         // Keep damage-rule coverage in simulation; this tests Session driving.
         let mut shared = tor_simulation::checkpoint::SharedState::default();
-        let mut snapshot = serde_json::to_value(engine.game.checkpoint(&mut shared)).unwrap();
-        snapshot["actors"]["1"]["combat"]["hp"] = serde_json::json!(0);
+        let snapshot = serde_json::to_value(engine.game.checkpoint(&mut shared)).unwrap();
+        let mut encoded_shared = serde_json::to_value(shared).unwrap();
+        let actors = snapshot["actors"].as_u64().unwrap() as usize;
+        encoded_shared["actors"][actors]["1"]["combat"]["hp"] = serde_json::json!(0);
+        let shared = serde_json::from_value(encoded_shared).unwrap();
         engine.game =
             Game::restore_checkpoint(serde_json::from_value(snapshot).unwrap(), &shared).unwrap();
         assert!(!engine.alive(actor));
@@ -690,6 +1831,66 @@ mod intention_execution_tests {
                 .game,
             engine.game
         );
+    }
+
+    #[test]
+    fn checkpoint_proves_expired_terminal_effects_and_branch_lineage() {
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        admit(&mut engine, Action::Wait);
+        let started = engine.execute_next_intention().unwrap().unwrap();
+        for index in 0..140 {
+            engine
+                .command(
+                    "p",
+                    "test",
+                    ActorId(1),
+                    &format!("retain-{index}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(ActorId(1)).unwrap(),
+                        operation: WizardOperation::Teleport {
+                            actor: ActorId(1),
+                            position: Position {
+                                region: 1,
+                                x: 1,
+                                y: 1,
+                                z: 0,
+                            },
+                        },
+                    },
+                )
+                .unwrap();
+        }
+        assert!(!engine
+            .boundaries
+            .iter()
+            .any(|boundary| boundary.id.as_ref() == Some(&started.entry.id)));
+        Checkpoint::capture(&engine)
+            .encode("expired-phases", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        for corruption in ["missing_terminal", "fabricated_branch"] {
+            let mut archive = engine.archive.clone();
+            match corruption {
+                "missing_terminal" => archive.records[1].entry.intention_ends.clear(),
+                "fabricated_branch" => {
+                    archive.records[2].entry.branch = BranchId(uuid::Uuid::new_v4().to_string())
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                Engine::replay(archive.clone(), None, None).is_err(),
+                "{corruption}"
+            );
+            assert!(
+                Checkpoint::capture(&engine)
+                    .encode("expired-phases", 1)
+                    .restore(archive)
+                    .is_err(),
+                "checkpoint accepted {corruption}"
+            );
+        }
     }
 
     #[test]

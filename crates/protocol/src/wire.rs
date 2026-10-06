@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +49,8 @@ pub struct IntentionId(pub String);
 pub enum IntentionPhase {
     Queued,
     Suspended,
+    /// Existing attack preparation is paused; the queue slot remains available.
+    Paused,
     Started,
     Resolved,
     Failed,
@@ -61,7 +63,7 @@ impl IntentionPhase {
     }
 
     pub fn active(self) -> bool {
-        self.pending() || self == Self::Started
+        self.pending() || matches!(self, Self::Started | Self::Paused)
     }
 
     pub fn can_follow(self, previous: Self) -> bool {
@@ -71,9 +73,13 @@ impl IntentionPhase {
                 self,
                 Self::Suspended | Self::Queued | Self::Failed | Self::Cancelled
             ),
+            Self::Paused => matches!(
+                self,
+                Self::Paused | Self::Queued | Self::Resolved | Self::Failed | Self::Cancelled
+            ),
             Self::Started => matches!(
                 self,
-                Self::Started | Self::Resolved | Self::Failed | Self::Cancelled
+                Self::Started | Self::Paused | Self::Resolved | Self::Failed | Self::Cancelled
             ),
             Self::Resolved | Self::Failed | Self::Cancelled => false,
         }

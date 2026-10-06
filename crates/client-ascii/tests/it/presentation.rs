@@ -56,13 +56,80 @@ fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_
 }
 
 #[test]
+fn mixed_intention_hints_and_keys_select_queue_before_paused_progress() {
+    for phase in [IntentionPhase::Queued, IntentionPhase::Suspended] {
+        for queue_first in [false, true] {
+            for key in [Key::ResumeIntention, Key::CancelIntention] {
+                let mut snapshot = state().snapshot();
+                snapshot.has_control = true;
+                let progress = IntentionStatus {
+                    actor: snapshot.actor,
+                    branch: snapshot.branch.clone(),
+                    intention: IntentionId("paused-progress".into()),
+                    entry_id: EntryId("progress-root".into()),
+                    phase: IntentionPhase::Paused,
+                };
+                let queued = IntentionStatus {
+                    actor: snapshot.actor,
+                    branch: snapshot.branch.clone(),
+                    intention: IntentionId("queued-work".into()),
+                    entry_id: EntryId("queue-root".into()),
+                    phase,
+                };
+                snapshot.intentions = if queue_first {
+                    vec![queued, progress]
+                } else {
+                    vec![progress, queued]
+                };
+                let mut app = App::new();
+                app.role = AccessRole::Player;
+                app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+                app.ready();
+                let hint = app.intention_hint().unwrap();
+                assert!(
+                    hint.starts_with(if phase == IntentionPhase::Queued {
+                        "Action queued."
+                    } else {
+                        "Action suspended."
+                    }),
+                    "hint must describe the work selected by the controls: {hint}"
+                );
+                assert_eq!(
+                    hint.contains("F8 resume"),
+                    phase == IntentionPhase::Suspended
+                );
+                let effect = app.input(Input::Key { key });
+                if key == Key::ResumeIntention && phase == IntentionPhase::Queued {
+                    assert_eq!(effect, Effect::None);
+                } else {
+                    let Effect::Request(Request::Command { branch, command }) = effect else {
+                        panic!("intention request");
+                    };
+                    let intention = match command {
+                        Command::ResumeIntention { intention, .. }
+                        | Command::CancelIntention { intention, .. } => intention,
+                        _ => panic!("wrong command"),
+                    };
+                    assert_eq!(branch, snapshot.branch);
+                    assert_eq!(intention.0, "queued-work");
+                }
+                assert_eq!(app.state.as_ref().unwrap().intentions().len(), 2);
+            }
+        }
+    }
+}
+
+#[test]
 fn intention_controls_preserve_identity_context_and_read_only_access() {
     for (phase, key, allowed) in [
         (IntentionPhase::Suspended, Key::ResumeIntention, true),
         (IntentionPhase::Suspended, Key::CancelIntention, true),
         (IntentionPhase::Queued, Key::ResumeIntention, false),
         (IntentionPhase::Queued, Key::CancelIntention, true),
-        (IntentionPhase::Started, Key::CancelIntention, false),
+        (IntentionPhase::Started, Key::ResumeIntention, false),
+        (IntentionPhase::Started, Key::CancelIntention, true),
+        (IntentionPhase::Paused, Key::ResumeIntention, true),
+        (IntentionPhase::Paused, Key::CancelIntention, true),
     ] {
         for role in [AccessRole::Player, AccessRole::Spectator] {
             let mut snapshot = state().snapshot();
@@ -102,8 +169,10 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
             if role == AccessRole::Spectator {
                 assert!(app.status.contains("read-only"));
                 assert!(app.intention_hint().is_none());
-            } else if phase == IntentionPhase::Suspended {
+            } else if matches!(phase, IntentionPhase::Suspended | IntentionPhase::Paused) {
                 assert!(app.intention_hint().unwrap().contains("F8 resume"));
+            } else if phase == IntentionPhase::Started {
+                assert!(app.intention_hint().unwrap().contains("F9 cancel"));
             }
         }
     }

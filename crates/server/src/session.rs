@@ -447,7 +447,7 @@ impl Service {
                     ) {
                         self.autonomous_enabled = true;
                     }
-                    self.intention_update(&result);
+                    self.action_result_update(&revisions, &result)?;
                     self.ack_result(id, request_id, &result);
                     return Ok(());
                 };
@@ -566,10 +566,8 @@ impl Service {
         revisions: &BTreeMap<ActorId, u64>,
         result: &crate::CommandResult,
     ) -> Result<(), Failure> {
-        match result.entry.disclosed() {
-            Some(entry) => self.action_update(revisions, &entry),
-            None => Ok(()),
-        }?;
+        let entry = result.entry.disclosed();
+        self.action_update(revisions, entry.as_ref())?;
         self.intention_update(result);
         Ok(())
     }
@@ -596,12 +594,13 @@ impl Service {
     fn action_update(
         &mut self,
         revisions: &BTreeMap<ActorId, u64>,
-        entry: &HistoryEntry,
+        entry: Option<&HistoryEntry>,
     ) -> Result<(), Failure> {
         let recipients: Vec<_> = self
             .clients
             .iter()
             .filter_map(|(&id, c)| c.actor.map(|a| (id, a)))
+            .filter(|(_, actor)| self.engine.revision(*actor).ok() != revisions.get(actor).copied())
             .collect();
         // Disclosed state belongs to an actor at this boundary, not to a
         // connection. Keep stream bases and sequencing per client, but resolve
@@ -625,7 +624,9 @@ impl Service {
                     recipient,
                     UpdateBody::Observation {
                         state: Box::new(state.clone()),
-                        event: (observer == entry.actor).then(|| Box::new(entry.clone())),
+                        event: entry
+                            .filter(|entry| observer == entry.actor)
+                            .map(|entry| Box::new(entry.clone())),
                     },
                 );
             }

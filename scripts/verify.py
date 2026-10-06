@@ -2,11 +2,12 @@
 
 Tiers (see docs/testing.md#running-the-checks):
 
-  quick  while iterating: formatting, clippy and debug tests for the affected
+  quick  at stable checkpoints: formatting, clippy and debug tests for affected
          packages, the Python tool tests, and the process tests the change maps to
   push   before pushing: every debug check CI runs, plus release tests and release
          process tests for the affected packages
-  full   exactly what CI runs on one platform, debug and release
+  full   exactly what CI runs on one platform, debug and release; also covers
+         the push gate for unchanged inputs, toolchain and test configuration
 
 Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
@@ -394,7 +395,7 @@ def main(argv=None):
     if untested:
         lines.append(UNTESTED_WARNING)
     if args.tier == "quick":
-        lines.append("Run the push tier before pushing; CI on both platforms is required before merging.")
+        lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
     elif args.tier == "push":
         lines.append("Format, protocol, ruleset, persistence, storage, toolchain or dependency changes also need the full tier; "
                      "CI on both platforms is required before merging.")

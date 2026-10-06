@@ -1,5 +1,6 @@
-//! Backend-only deterministic checkpoint state. Identical worlds and navigation
-//! regions are encoded once across navigation maps and rewind boundaries. This module does not perform storage or I/O.
+//! Backend-only deterministic checkpoint state. Equal world and navigation
+//! regions, actor tables and intentions are encoded once across rewind boundaries.
+//! This module does not perform storage or I/O.
 use crate::streaming::Lifecycle;
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
@@ -16,12 +17,12 @@ pub struct Snapshot {
     navigation: BTreeMap<ActorId, usize>,
     seed: u64,
     tick: u64,
-    actors: BTreeMap<ActorId, Actor>,
+    actors: usize,
     items: usize,
     next_actor_id: u64,
     next_item_id: u64,
     next_door_id: u64,
-    intentions: Shared<crate::intention::IntentionQueue>,
+    intentions: crate::intention::checkpoint::Snapshot,
     /// Region streaming state in [`SharedState`], omitted while empty so
     /// games that never stream save exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -36,6 +37,8 @@ pub struct SharedState {
     #[serde(with = "navigation_regions")]
     navigation: Vec<Navigation>,
     items: Vec<BTreeMap<ItemId, Item>>,
+    actors: Vec<BTreeMap<ActorId, Actor>>,
+    intentions: crate::intention::checkpoint::Pool,
     /// Identical lifecycle states (with their identity directories) across
     /// rewind boundaries are encoded once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -56,6 +59,8 @@ pub struct RestoreContext<'a> {
     worlds: BTreeMap<usize, Shared<World>>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
     items: BTreeMap<usize, crate::item_store::ItemStore>,
+    actors: BTreeMap<usize, crate::actor_store::ActorStore>,
+    intentions: crate::intention::checkpoint::Restore,
     bodies: BTreeSet<Shared<crate::BodySpec>>,
     item_definitions: BTreeSet<Shared<crate::ItemSpec>>,
     combat_definitions: BTreeSet<Shared<crate::combat::CombatSpec>>,
@@ -68,6 +73,8 @@ impl<'a> RestoreContext<'a> {
             worlds: BTreeMap::new(),
             navigation: BTreeMap::new(),
             items: BTreeMap::new(),
+            actors: BTreeMap::new(),
+            intentions: crate::intention::checkpoint::Restore::default(),
             bodies: BTreeSet::new(),
             item_definitions: BTreeSet::new(),
             combat_definitions: BTreeSet::new(),
@@ -107,6 +114,17 @@ impl<'a> RestoreContext<'a> {
         let items = crate::item_store::ItemStore::from_entries(entries);
         self.items.insert(index, items.clone());
         Some(items)
+    }
+
+    fn actors(&mut self, index: usize) -> Option<crate::actor_store::ActorStore> {
+        if let Some(actors) = self.actors.get(&index) {
+            return Some(actors.clone());
+        }
+        let mut entries = self.shared.actors.get(index)?.clone();
+        self.share_actor_definitions(&mut entries);
+        let actors = crate::actor_store::ActorStore::from_entries(entries);
+        self.actors.insert(index, actors.clone());
+        Some(actors)
     }
 
     fn share_actor_definitions(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
@@ -160,7 +178,14 @@ impl Game {
                 .collect(),
             seed: self.seed,
             tick: self.tick,
-            actors: self.actors.raw_entries().clone(),
+            actors: shared
+                .actors
+                .iter()
+                .position(|actors| actors == self.actors.raw_entries())
+                .unwrap_or_else(|| {
+                    shared.actors.push(self.actors.raw_entries().clone());
+                    shared.actors.len() - 1
+                }),
             items: shared
                 .items
                 .iter()
@@ -172,7 +197,7 @@ impl Game {
             next_actor_id: self.next_actor_id,
             next_item_id: self.next_item_id,
             next_door_id: self.next_door_id,
-            intentions: self.intentions.clone(),
+            intentions: shared.intentions.capture(&self.intentions),
             lifecycle: (!self.lifecycle.is_empty()).then(|| {
                 let lifecycles = &mut shared.lifecycles;
                 lifecycles
@@ -190,11 +215,7 @@ impl Game {
         RestoreContext::new(shared).restore(snapshot)
     }
 
-    fn restore_with_context(
-        mut snapshot: Snapshot,
-        context: &mut RestoreContext<'_>,
-    ) -> Option<Self> {
-        context.share_actor_definitions(&mut snapshot.actors);
+    fn restore_with_context(snapshot: Snapshot, context: &mut RestoreContext<'_>) -> Option<Self> {
         let game = Self {
             combat: snapshot.combat,
             physics: snapshot.physics,
@@ -206,12 +227,14 @@ impl Game {
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
-            actors: crate::actor_store::ActorStore::from_entries(snapshot.actors),
+            actors: context.actors(snapshot.actors)?,
             items: context.items(snapshot.items)?,
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
-            intentions: snapshot.intentions,
+            intentions: context
+                .intentions
+                .restore(snapshot.intentions, &context.shared.intentions)?,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
                 // An empty state is always omitted, so encodings stay unique.
@@ -319,6 +342,138 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Location, Position, RegionId};
+
+    #[test]
+    fn repeated_boundaries_do_not_repeat_unchanged_actor_payloads() {
+        let mut world = World::new(vec![], vec![]).unwrap();
+        world
+            .add_region(tor_world::Region {
+                id: RegionId(1),
+                name: "retention".into(),
+                bounds: tor_world::Extent::new(66, 3, 1).unwrap(),
+            })
+            .unwrap();
+        let mut game = Game::new(world, 42);
+        for x in 1..=64 {
+            game.spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        }
+        let mut one = SharedState::default();
+        let snapshot = game.checkpoint(&mut one);
+        let single_bytes = serde_json::to_vec(&(vec![snapshot], one)).unwrap().len();
+        let mut shared = SharedState::default();
+        let snapshots: Vec<_> = (0..256)
+            .map(|_| {
+                let mut independently_owned = game.clone();
+                independently_owned.actors =
+                    crate::actor_store::ActorStore::from_entries(game.actors.raw_entries().clone());
+                independently_owned.checkpoint(&mut shared)
+            })
+            .collect();
+        assert_eq!(shared.actors.len(), 1);
+        let bytes = serde_json::to_vec(&(snapshots, shared)).unwrap();
+        assert!(
+            bytes.len() < single_bytes * 8,
+            "unchanged actors repeated at retained boundaries: {} versus {}",
+            bytes.len(),
+            single_bytes
+        );
+        let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+            serde_json::from_slice(&bytes).unwrap();
+        let mut context = RestoreContext::new(&shared);
+        let mut restored: Vec<_> = snapshots
+            .into_iter()
+            .map(|snapshot| context.restore(snapshot).unwrap())
+            .collect();
+        for boundary in &restored {
+            assert_eq!(boundary, &game);
+        }
+        assert!(std::ptr::eq(
+            &restored[0].actors[&ActorId(1)],
+            &restored[1].actors[&ActorId(1)]
+        ));
+        restored[0].actors.get_mut(&ActorId(1)).unwrap().body.mass += 1;
+        assert_eq!(restored[1], game);
+    }
+
+    #[test]
+    fn retained_queues_share_complete_intentions_at_the_supported_capacity() {
+        for count in [64, crate::intention::MAX_QUEUED_INTENTIONS] {
+            let mut world = World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(tor_world::Region {
+                    id: RegionId(1),
+                    name: "queue retention".into(),
+                    bounds: tor_world::Extent::new(count as i32 + 2, 3, 1).unwrap(),
+                })
+                .unwrap();
+            let mut queued = Game::new(world, 42);
+            for x in 1..=count as i32 {
+                let actor = queued
+                    .spawn_actor(
+                        Location {
+                            region: RegionId(1),
+                            position: Position { x, y: 1, z: 0 },
+                        },
+                        NonZeroU64::new(100).unwrap(),
+                    )
+                    .unwrap();
+                queued
+                    .admit_intention(
+                        actor,
+                        crate::Action::Wait,
+                        crate::intention::IntentionOrigin::Human,
+                    )
+                    .unwrap();
+            }
+            let id = queued.pending_intention(ActorId(1)).unwrap().id;
+            let mut suspended = queued.clone();
+            suspended.suspend_intention(ActorId(1), id).unwrap();
+            let mut single = SharedState::default();
+            let snapshot = queued.checkpoint(&mut single);
+            let single_bytes = serde_json::to_vec(&(vec![snapshot], single)).unwrap().len();
+            let mut shared = SharedState::default();
+            let snapshots: Vec<_> = (0..256)
+                .map(|index| {
+                    if index % 2 == 0 {
+                        queued.checkpoint(&mut shared)
+                    } else {
+                        suspended.checkpoint(&mut shared)
+                    }
+                })
+                .collect();
+            let bytes = serde_json::to_vec(&(snapshots, shared)).unwrap();
+            assert!(bytes.len() < single_bytes * 8,
+                "retained queues repeat complete payloads at {count} actors: {} versus {single_bytes}", bytes.len());
+            assert!(bytes.len() < 16 * 1024 * 1024);
+            let (snapshots, shared): (Vec<Snapshot>, SharedState) =
+                serde_json::from_slice(&bytes).unwrap();
+            let mut context = RestoreContext::new(&shared);
+            let mut restored: Vec<_> = snapshots
+                .into_iter()
+                .map(|s| context.restore(s).unwrap())
+                .collect();
+            for (index, game) in restored.iter().enumerate() {
+                assert_eq!(game, if index % 2 == 0 { &queued } else { &suspended });
+            }
+            restored[0].cancel_intention(ActorId(1), id).unwrap();
+            assert_eq!(restored[2], queued);
+            let next = restored[0]
+                .admit_intention(
+                    ActorId(1),
+                    crate::Action::Wait,
+                    crate::intention::IntentionOrigin::Human,
+                )
+                .unwrap();
+            assert_eq!(next.0, count as u64 + 1);
+        }
+    }
 
     #[test]
     fn decoded_restore_shares_equal_bodies_without_changing_values() {
@@ -565,12 +720,15 @@ mod tests {
             )
             .unwrap();
         let mut shared = SharedState::default();
-        let mut broken = game.checkpoint(&mut shared);
-        broken.actors.get_mut(&actor).unwrap().body.eye = [1, 0, 0];
+        let broken = game.checkpoint(&mut shared);
+        shared.actors[broken.actors]
+            .get_mut(&actor)
+            .unwrap()
+            .body
+            .eye = [1, 0, 0];
+        let valid = game.checkpoint(&mut shared);
         let mut context = RestoreContext::new(&shared);
         assert!(context.restore(broken).is_none());
-        let mut valid_shared = SharedState::default();
-        let valid = game.checkpoint(&mut valid_shared);
         assert_eq!(context.restore(valid), Some(game));
     }
 
@@ -601,6 +759,9 @@ mod tests {
         assert!(Game::restore_checkpoint(broken, &shared).is_none());
         let mut broken = game.checkpoint(&mut shared);
         broken.world = usize::MAX;
+        assert!(Game::restore_checkpoint(broken, &shared).is_none());
+        let mut broken = game.checkpoint(&mut shared);
+        broken.actors = usize::MAX;
         assert!(Game::restore_checkpoint(broken, &shared).is_none());
     }
 }

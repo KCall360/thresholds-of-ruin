@@ -25,12 +25,19 @@ Every change must be tested, and the full policy is in
 Every feature and bug fix adds its tests to the suite in the same change. The
 tiered checks run the suite faster, but they can only run tests that exist.
 
-- `python scripts/verify.py quick` while iterating: the TDD loop.
-- `python scripts/verify.py` (the `push` tier) is **required before every push**.
-- `python scripts/verify.py full` is **required** for save-format, protocol,
-  ruleset, persistence, storage, toolchain, or dependency changes, and when CI
-  can't run.
+- During the TDD loop, run the failing regression and affected unit,
+  integration and actual-process tests directly. Run `python scripts/verify.py
+  quick` at stable, cohesive checkpoints, or cover the checkpoint with a
+  required higher tier.
+- Before every push, pass `python scripts/verify.py` (the `push` tier) or
+  `python scripts/verify.py full`. A successful full run covers the push gate
+  for unchanged inputs, toolchain and test configuration; do not repeat both.
+- Full remains required for save-format, protocol, ruleset, persistence,
+  storage, toolchain or dependency changes, and when CI can't run.
 - CI's full Windows and Linux matrix is **required before every merge**.
+- Record the tested state and evidence. Follow the
+  [reuse rules](docs/testing.md#verification-evidence-and-reuse); a failed,
+  incomplete or stale run never satisfies a gate.
 
 See the [testing policy](docs/testing.md#running-the-checks) for what each tier
 runs and why. Report any check you couldn't run.
