@@ -152,6 +152,29 @@ fn replay_private_boundary(
                 return Err(invalid_archive());
             }
         }
+        JournalContent::TravelIntentionAdmitted {
+            intention,
+            action,
+            destination,
+            ..
+        } => {
+            let Action::Move { direction } = action else {
+                return Err(invalid_archive());
+            };
+            if game
+                .admit_travel_intention(
+                    SimActor(record.entry.actor.0),
+                    tor_simulation::TravelStep {
+                        direction: adapt::direction(*direction),
+                        destination: *destination,
+                    },
+                )
+                .map_err(|_| invalid_archive())?
+                != *intention
+            {
+                return Err(invalid_archive());
+            }
+        }
         JournalContent::AutonomousIntentionAdmitted { intention } => {
             if game
                 .admit_ai_intention(SimActor(record.entry.actor.0))
@@ -244,6 +267,7 @@ impl DiskCheckpoint {
                         record.entry.content,
                         JournalContent::Annotation { .. }
                             | JournalContent::AutonomousIntentionAdmitted { .. }
+                            | JournalContent::TravelIntentionAdmitted { .. }
                     ))
             {
                 return Err(invalid_archive());

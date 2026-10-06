@@ -14,6 +14,7 @@ struct Scope {
 pub(crate) struct HistoryIndex {
     entries: BTreeMap<EntryId, usize>,
     intentions: BTreeMap<tor_simulation::IntentionId, usize>,
+    travel_steps: BTreeMap<EntryId, usize>,
     resolutions: BTreeMap<(String, tor_simulation::IntentionId), usize>,
     ends: BTreeMap<(String, tor_simulation::IntentionId), usize>,
     branches: BTreeMap<String, BTreeMap<ActorId, Scope>>,
@@ -52,6 +53,11 @@ impl HistoryIndex {
             self.resolutions
                 .insert((entry.branch.0.clone(), intention), position);
         }
+        if let crate::journal::JournalContent::TravelIntentionAdmitted { journey, .. } =
+            &entry.content
+        {
+            self.travel_steps.insert(journey.clone(), position);
+        }
         if let Some((intention, _)) = entry.content.admission() {
             assert!(
                 self.intentions.insert(intention, position).is_none(),
@@ -86,6 +92,10 @@ impl HistoryIndex {
 
     pub fn find(&self, id: &EntryId) -> Option<usize> {
         self.entries.get(id).copied()
+    }
+
+    pub fn latest_travel_step(&self, journey: &EntryId) -> Option<usize> {
+        self.travel_steps.get(journey).copied()
     }
 
     pub fn intention_admission(&self, id: tor_simulation::IntentionId) -> Option<usize> {

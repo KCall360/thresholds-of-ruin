@@ -2,7 +2,7 @@
 format = 2
 id = "text-adventure-arrival-hazard"
 version = "1.0"
-ruleset = "dungeon-v20"
+ruleset = "dungeon-v21"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

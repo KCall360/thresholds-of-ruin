@@ -4,6 +4,373 @@ use super::*;
 mod intention_admission_tests {
     use super::*;
 
+    #[test]
+    fn native_travel_admission_replays_and_proves_journey_order_and_destination() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        let state = engine.state(actor).unwrap();
+        let destination = state
+            .observation
+            .visible_cells
+            .iter()
+            .find(|cell| cell.position == tor_protocol::Position { x: 3, y: 1, z: 0 })
+            .unwrap()
+            .key
+            .clone();
+        let root = engine
+            .command(
+                "player",
+                "test",
+                actor,
+                "journey",
+                &engine.branch().clone(),
+                Command::Travel {
+                    expected_revision: state.revision,
+                    destination: destination.clone(),
+                },
+            )
+            .unwrap();
+        let steps = engine.travel_route(actor, &destination).unwrap();
+        assert!(steps.len() >= 2);
+        let before = engine.game.clone();
+        assert!(engine
+            .admit_travel(actor, &root.entry.id, 2, steps[0])
+            .is_err());
+        assert_eq!(engine.game, before);
+        let revision = engine.revision(actor).unwrap();
+        let admitted = engine
+            .admit_travel(actor, &root.entry.id, 1, steps[0])
+            .unwrap();
+        assert!(admitted.entry.disclosed().is_none());
+        assert!(engine.archive.records.last().unwrap().receipt.is_none());
+        assert_eq!(engine.revision(actor).unwrap(), revision);
+        assert_eq!(engine.game.tick(), before.tick());
+        assert!(engine.pending_intentions(actor).is_empty());
+        assert!(engine
+            .admit_travel(actor, &root.entry.id, 2, steps[1])
+            .is_err());
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        let restored = Checkpoint::capture(&engine)
+            .encode("travel", 1)
+            .restore(engine.archive.clone())
+            .unwrap();
+        assert_eq!(restored.game, engine.game);
+        assert_eq!(
+            restored.history_index.latest_travel_step(&root.entry.id),
+            engine.history_index.latest_travel_step(&root.entry.id)
+        );
+        let mut cancelled = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert!(cancelled
+            .command(
+                "player",
+                "test",
+                actor,
+                "manual-native-cancel",
+                &cancelled.branch().clone(),
+                Command::CancelIntention {
+                    expected_revision: revision,
+                    admission: admitted.entry.id.clone()
+                }
+            )
+            .is_err());
+        let cancellation = cancelled.cancel_travel(actor).unwrap().unwrap();
+        assert!(cancellation
+            .entry
+            .intention_ends
+            .iter()
+            .any(|end| end.kind == crate::journal::IntentionEndKind::Cancelled));
+        assert_eq!(cancelled.game.tick(), before.tick());
+        assert!(cancelled
+            .game
+            .pending_intention(SimActor(actor.0))
+            .is_none());
+        assert!(cancelled.cancel_travel(actor).unwrap().is_none());
+        assert!(cancelled
+            .admit_travel(actor, &root.entry.id, 2, steps[1])
+            .is_err());
+        assert_eq!(
+            Engine::replay(cancelled.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            cancelled.game
+        );
+        assert_eq!(
+            Checkpoint::capture(&cancelled)
+                .encode("cancelled-travel", 1)
+                .restore(cancelled.archive.clone())
+                .unwrap()
+                .game,
+            cancelled.game
+        );
+        let position = engine.history_index.find(&admitted.entry.id).unwrap();
+        for corruption in 0..3 {
+            let mut archive = engine.archive.clone();
+            let JournalContent::TravelIntentionAdmitted {
+                journey,
+                step,
+                destination,
+                ..
+            } = &mut archive.records[position].entry.content
+            else {
+                unreachable!()
+            };
+            match corruption {
+                0 => *journey = new_id(),
+                1 => *step = 2,
+                _ => destination.region = tor_world::RegionId(99),
+            }
+            assert!(Engine::replay(archive.clone(), None, None).is_err());
+            assert!(Checkpoint::capture(&engine)
+                .encode("travel", 1)
+                .restore(archive)
+                .is_err());
+        }
+        let executed = engine.execute_next_intention().unwrap().unwrap();
+        assert!(matches!(
+            executed.entry.content,
+            JournalContent::IntentionStarted { .. }
+        ));
+        assert!(engine
+            .admit_travel(actor, &root.entry.id, 3, steps[1])
+            .is_err());
+        engine
+            .admit_travel(actor, &root.entry.id, 2, steps[1])
+            .unwrap();
+        assert_eq!(
+            Engine::replay(engine.archive.clone(), None, None)
+                .unwrap()
+                .game,
+            engine.game
+        );
+        assert_eq!(
+            Checkpoint::capture(&engine)
+                .encode("travel", 2)
+                .restore(engine.archive.clone())
+                .unwrap()
+                .game,
+            engine.game
+        );
+    }
+
+    #[test]
+    fn unloaded_travel_work_has_terminal_facts_for_cancellation() {
+        let mut before = Game::region_corridor(42, 2);
+        let actor = before
+            .spawn_actor(
+                tor_world::Location {
+                    region: tor_world::RegionId(1),
+                    position: tor_world::Position { x: 1, y: 1, z: 0 },
+                },
+                std::num::NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let intention = before
+            .admit_travel_intention(
+                actor,
+                tor_simulation::TravelStep {
+                    direction: tor_world::Direction::East,
+                    destination: tor_world::Location {
+                        region: tor_world::RegionId(1),
+                        position: tor_world::Position { x: 2, y: 1, z: 0 },
+                    },
+                },
+            )
+            .unwrap();
+        let mut records = tor_simulation::MemoryRecords::default();
+        before
+            .apply_region_transition(
+                &tor_simulation::RegionTransition {
+                    active: Default::default(),
+                    loaded: std::collections::BTreeSet::from([tor_world::RegionId(2)]),
+                },
+                &mut records,
+            )
+            .unwrap();
+        assert!(!before.loaded_actor_ids().any(|loaded| loaded == actor));
+        assert!(before.known_actor_region(actor).is_some());
+        assert_eq!(before.pending_intention(actor).unwrap().id, intention);
+        let mut after = before.clone();
+        after.cancel_intention(actor, intention).unwrap();
+        let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
+            intention_ends: Vec::new(),
+            id: new_id(),
+            branch: BranchId(uuid::Uuid::new_v4().to_string()),
+            actor: ActorId(actor.0),
+            tick: before.tick(),
+            author: Author::Backend {
+                component: "scheduler".into(),
+            },
+            audience: Audience::Actor,
+            content: JournalContent::IntentionChanged {
+                admission: new_id(),
+                intention,
+                change: crate::journal::IntentionChange::Cancelled,
+            },
+        };
+        assert_eq!(
+            super::super::intention::derive_intention_ends(&before, &after, &entry, true),
+            vec![crate::journal::IntentionEnd {
+                actor: ActorId(actor.0),
+                intention,
+                kind: crate::journal::IntentionEndKind::Cancelled
+            }]
+        );
+    }
+
+    #[test]
+    fn native_travel_storage_rejections_preserve_admission_execution_and_cancellation() {
+        for interval in [1, 4096] {
+            for operation in ["admission", "execution", "cancellation"] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("travel.db");
+                let scenario = Scenario::two_room(42);
+                let policy = crate::SavePolicy {
+                    checkpoint_interval: interval,
+                    ..Default::default()
+                };
+                let actor = ActorId(1);
+                let mut engine =
+                    Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+                let state = engine.state(actor).unwrap();
+                let destination = state
+                    .observation
+                    .visible_cells
+                    .iter()
+                    .find(|cell| cell.position == tor_protocol::Position { x: 3, y: 1, z: 0 })
+                    .unwrap()
+                    .key
+                    .clone();
+                let command = Command::Travel {
+                    expected_revision: state.revision,
+                    destination: destination.clone(),
+                };
+                let root = engine
+                    .command(
+                        "player",
+                        "test",
+                        actor,
+                        "journey",
+                        &engine.branch().clone(),
+                        command.clone(),
+                    )
+                    .unwrap();
+                let step = engine.travel_route(actor, &destination).unwrap()[0];
+                let admission = if operation == "admission" {
+                    None
+                } else {
+                    Some(
+                        engine
+                            .admit_travel(actor, &root.entry.id, 1, step)
+                            .unwrap()
+                            .entry
+                            .id,
+                    )
+                };
+                engine.flush().unwrap();
+                drop(engine);
+                let mut rejected = Engine::open_with_policy(
+                    &path,
+                    scenario.clone(),
+                    crate::SavePolicy {
+                        max_pending_bytes: 1,
+                        ..policy.clone()
+                    },
+                )
+                .unwrap();
+                let before = rejected.game.clone();
+                let revision = rejected.revision(actor).unwrap();
+                let records = rejected.archive.records.len();
+                let receipts = rejected.receipts.len();
+                let sequence = rejected.save_status().accepted_sequence;
+                let counts = rejected.profile_counts();
+                for _ in 0..2 {
+                    let error = match operation {
+                        "admission" => rejected
+                            .admit_travel(actor, &root.entry.id, 1, step)
+                            .unwrap_err(),
+                        "execution" => rejected.execute_next_intention().unwrap_err(),
+                        _ => rejected.cancel_travel(actor).unwrap_err(),
+                    };
+                    assert_eq!(
+                        error.code,
+                        ErrorCode::StorageFailure,
+                        "{operation}/{interval}"
+                    );
+                    assert_eq!(rejected.game, before);
+                    assert_eq!(rejected.revision(actor).unwrap(), revision);
+                    assert_eq!(rejected.archive.records.len(), records);
+                    assert_eq!(rejected.receipts.len(), receipts);
+                    assert_eq!(rejected.save_status().accepted_sequence, sequence);
+                    assert_eq!(rejected.profile_counts(), counts);
+                }
+                drop(rejected);
+                let mut recovered =
+                    Engine::open_with_policy(&path, scenario.clone(), policy.clone()).unwrap();
+                assert_eq!(recovered.game, before);
+                match operation {
+                    "admission" => {
+                        let mut expected = before.clone();
+                        let identity = expected
+                            .admit_travel_intention(SimActor(actor.0), step)
+                            .unwrap();
+                        let result = recovered
+                            .admit_travel(actor, &root.entry.id, 1, step)
+                            .unwrap();
+                        assert!(
+                            matches!(result.entry.content, JournalContent::TravelIntentionAdmitted { intention, .. } if intention == identity)
+                        );
+                        assert_eq!(recovered.game, expected);
+                    }
+                    "execution" => {
+                        let result = recovered.execute_next_intention().unwrap().unwrap();
+                        assert!(
+                            matches!(result.entry.content, JournalContent::IntentionStarted { admission: ref source, .. } if Some(source) == admission.as_ref())
+                        );
+                        assert_eq!(recovered.game.tick(), before.tick() + 100);
+                    }
+                    _ => {
+                        let result = recovered.cancel_travel(actor).unwrap().unwrap();
+                        assert!(
+                            matches!(result.entry.content, JournalContent::IntentionChanged { admission: ref source, change: crate::journal::IntentionChange::Cancelled, .. } if Some(source) == admission.as_ref())
+                        );
+                        assert_eq!(recovered.game.tick(), before.tick());
+                        assert!(recovered
+                            .game
+                            .pending_intention(SimActor(actor.0))
+                            .is_none());
+                    }
+                }
+                let expected = recovered.game.clone();
+                assert!(
+                    recovered
+                        .command(
+                            "player",
+                            "test",
+                            actor,
+                            "journey",
+                            &root.entry.branch,
+                            command
+                        )
+                        .unwrap()
+                        .duplicate
+                );
+                assert_eq!(recovered.game, expected);
+                recovered.flush().unwrap();
+                drop(recovered);
+                let reopened = Engine::open_with_policy(&path, scenario, policy).unwrap();
+                assert_eq!(reopened.game, expected);
+                assert_eq!(
+                    Engine::replay(reopened.archive.clone(), None, None)
+                        .unwrap()
+                        .game,
+                    expected
+                );
+            }
+        }
+    }
+
     fn autonomous_fixture() -> Engine {
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scenarios/tests/dungeon-loop");

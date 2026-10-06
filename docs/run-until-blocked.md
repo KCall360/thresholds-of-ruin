@@ -158,7 +158,9 @@ In the current protocol version:
 - `ErrorCode::ActorBusy` rejects action and travel commands during a journey.
 - `save` no longer stops an active journey.
 
-No save-format change was needed: travel status and jobs are session-local.
+Travel status and route jobs remain session-local. Admitted steps belong to the
+saved simulation queue and use private journal records. Startup settles pending
+steps before control acquisition; it never restarts a journey implicitly.
 
 ## Tests
 

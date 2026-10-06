@@ -41,7 +41,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.server()
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"],current["state"])
-        self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v20")
+        self.assertEqual(inspect_save(self.save)["ruleset"],"dungeon-v21")
 
     def test_diagonal_doors_corner_travel_and_rewind(self):
         self.server(wizard=True, scenario="diagonal-doors")

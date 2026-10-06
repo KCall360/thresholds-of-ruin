@@ -156,26 +156,23 @@ preserves copy-on-write isolation across retained boundaries. Substantial restor
 memory and persistence batch tails remain open; see [checkpoints](docs/checkpoints.md)
 and the [refactor plan](docs/refactoring.md).
 
-The published commit `e1c1081` passed unchanged-input full verification (247 debug
-Python/process tests, debug/release Rust, 129 release process tests, both local
-mouse checks), all five Windows/Linux CI checks, and 28 deployed-build smoke tests.
-The three desktop launchers use this verified immutable recovery build with matching
-scenario files. Previous builds, configuration backups and saves remain preserved.
-The earlier local mouse waiver did not need to be used for this publication run.
+**Autonomous integration (published, PR #67).** Exact head `042ddbc` passed
+unchanged-input full verification, all five Windows/Linux CI checks and 29
+immutable-build deployment checks. The three desktop launchers use this verified
+AI build with matching scenario files; previous builds and saves remain preserved.
+AI decisions use typed backend admissions and the shared executor without RPC
+receipts. Extra saved bytes, slower restart and persistence tails remain open.
 
-**Autonomous integration (in progress, separate branch).** Recovery PR #66 is
-merged at `1d22c86` after successful unchanged-input full verification and all
-five Windows/Linux CI checks. The desktop build uses its exact tested head
-`e1c1081`. The next branch admits AI decisions through
-typed backend records and executes them through the common queue path. No RPC
-receipt is fabricated. All 28 affected intention unit tests, nine performance contracts, seven
-actual-process intention tests, documentation checks and server clippy pass.
-Release comparison passes after fixing same-step suspension facts and observation
-cache invalidation. Extra saved bytes, slower restart and persistence tails remain
-open. Fresh full/CI format publication gates remain.
-Scenario certificates match the current [format registry](docs/milestones.md).
-Keep desktop deployment pinned to a verified published commit and its matching
-scenario files, never the uncommitted autonomous branch.
+**Native travel integration (under verification).** The current branch admits
+region-local journey steps and executes them through the shared simulation queue.
+Progress follows committed linked outcomes. Controller/hazard checks, native
+cancellation, startup settlement and strict journal/checkpoint linkage are
+implemented. Storage rejection/reopen and actual-process linked-journal checks
+pass. Full, performance and both-platform publication gates remain pending.
+The host mouse test is blocked by Windows lock screen under the maintainer's
+existing local mouse waiver; retain the test and report that limitation.
+Scenario certificates must match the current [format registry](docs/milestones.md).
+Keep desktop deployment pinned to the published AI build while travel is unfinished.
 
 The maintainer requires clean, robust, rational code. Review each increment for
 clear ownership, explicit domain states, cohesive interfaces and repeated rules.

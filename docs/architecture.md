@@ -160,7 +160,11 @@ applying damage. Positive HP loss interrupts, waiting preserves valid progress,
 and retrying the same attack resumes it. Movement, another action, or loss of target
 validity discards progress. Recovery time remains distinct from resumable work.
 Control-loss/restart boundaries preserve valid work but require fresh human input;
-travel keeps its no-auto-resume policy. Future timed actions can
+travel keeps its no-auto-resume policy by terminally settling restored pending
+steps before control acquisition. Travel admission links its step to the accepted
+journey without an RPC receipt. Session owns routing over disclosed knowledge,
+control and hazard policy; simulation owns the saved movement context and effects.
+Journey progress follows only committed execution. Future timed actions can
 reuse these boundaries with their own concrete partial-effect policies.
 
 ## Protocol and streaming

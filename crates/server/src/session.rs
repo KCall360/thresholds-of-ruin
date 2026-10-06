@@ -76,6 +76,23 @@ struct TravelJob {
     owner: u64,
     steps: VecDeque<tor_simulation::TravelStep>,
     hazards: BTreeSet<ActorId>,
+    pending: Option<EntryId>,
+}
+
+impl TravelJob {
+    fn hazard_in(&self, observation: &Observation) -> bool {
+        !potential_hazards(observation).is_subset(&self.hazards)
+            || self
+                .hp
+                .zip(observation.combat.as_ref().map(|combat| combat.hp))
+                .is_some_and(|(before, after)| after < before)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TravelExecution {
+    Moved,
+    Blocked,
 }
 
 /// Serialized session operations keep snapshots and streamed updates consistent.
@@ -83,6 +100,7 @@ pub struct Service {
     outbound: crate::outbound::Pool,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     pending_pauses: BTreeSet<ActorId>,
+    pending_travel_cancellations: BTreeSet<ActorId>,
     autonomous_enabled: bool,
     travels: BTreeMap<ActorId, TravelJob>,
     travel_status: BTreeMap<ActorId, TravelStatus>,
@@ -115,6 +133,11 @@ impl Service {
             ));
         }
         let mut save_warning = None;
+        // Journeys are session-owned and never resume implicitly after restart.
+        // Their admitted steps must be terminal before clients can acquire control.
+        for actor in engine.queued_travel_actors() {
+            engine.cancel_travel(actor)?;
+        }
         for actor in engine.queued_human_actors() {
             engine.suspend_queued_intention(actor)?;
         }
@@ -127,6 +150,7 @@ impl Service {
             outbound: crate::outbound::Pool::new(limits),
             diagnostics: None,
             pending_pauses: BTreeSet::new(),
+            pending_travel_cancellations: BTreeSet::new(),
             autonomous_enabled: false,
             travels: BTreeMap::new(),
             travel_status: BTreeMap::new(),
@@ -420,7 +444,8 @@ impl Service {
                     crate::journal::Command::Act { .. }
                         | crate::journal::Command::AdmitIntention { .. }
                         | crate::journal::Command::Travel { .. }
-                ) && self.travels.contains_key(&actor)
+                ) && (self.travels.contains_key(&actor)
+                    || self.pending_travel_cancellations.contains(&actor))
                 {
                     return Err(Failure::new(
                         ErrorCode::ActorBusy,
@@ -483,6 +508,7 @@ impl Service {
                                     owner: id,
                                     steps: steps.into(),
                                     hazards: potential_hazards(&observation),
+                                    pending: None,
                                 },
                             );
                         }
@@ -492,6 +518,10 @@ impl Service {
                         self.autonomous_enabled = false;
                         if rewind {
                             self.pending_pauses.clear();
+                            self.pending_travel_cancellations.clear();
+                            for actor in self.engine.queued_travel_actors() {
+                                self.cancel_travel_work(actor);
+                            }
                             for actor in self.engine.queued_human_actors() {
                                 if let Err(error) = self.engine.suspend_queued_intention(actor) {
                                     self.pending_pauses.insert(actor);
@@ -720,12 +750,25 @@ impl Service {
 
     fn stop_travel(&mut self, actor: ActorId, phase: TravelPhase) {
         self.travels.remove(&actor);
+        self.cancel_travel_work(actor);
         if let Some(status) = self.travel_status.get_mut(&actor) {
             if status.phase == TravelPhase::Active {
                 status.phase = phase;
                 if !self.broadcasting_travel {
                     self.travel_update(actor, None);
                 }
+            }
+        }
+    }
+
+    fn cancel_travel_work(&mut self, actor: ActorId) {
+        match self.engine.cancel_travel(actor) {
+            Ok(_) => {
+                self.pending_travel_cancellations.remove(&actor);
+            }
+            Err(error) => {
+                self.pending_travel_cancellations.insert(actor);
+                self.save_warning = Some(error.to_string());
             }
         }
     }
@@ -768,8 +811,11 @@ impl Service {
     /// waits for at most one action. What happens depends only on the game and
     /// the commands it received, never on wall-clock time.
     pub(crate) fn step(&mut self) -> Step {
+        for actor in std::mem::take(&mut self.pending_travel_cancellations) {
+            self.cancel_travel_work(actor);
+        }
         self.apply_pending_pauses();
-        if !self.pending_pauses.is_empty() {
+        if !self.pending_pauses.is_empty() || !self.pending_travel_cancellations.is_empty() {
             return Step::Blocked;
         }
         let full: Vec<_> = self
@@ -789,8 +835,7 @@ impl Service {
             return Step::Blocked;
         };
         if self.travels.contains_key(&next) {
-            self.travel_step(next);
-            return Step::Progress;
+            return self.travel_step(next);
         }
         // Scenario AI plays only while someone is playing: a run never
         // continues with no controlled actor left alive.
@@ -824,6 +869,27 @@ impl Service {
                         .keys()
                         .any(|&actor| self.engine.alive(actor))
             }
+            Some(tor_simulation::IntentionOrigin::Travel) => {
+                let linked = self
+                    .travels
+                    .get(&next)
+                    .and_then(|job| job.pending.as_ref())
+                    .is_some_and(|pending| {
+                        self.engine.queued_travel_admission(next) == Some(pending)
+                    });
+                if !linked {
+                    self.stop_travel(next, TravelPhase::Failed);
+                    return Step::Progress;
+                }
+                if !self.travel_ready(next) {
+                    return if self.pending_travel_cancellations.is_empty() {
+                        Step::Progress
+                    } else {
+                        Step::Blocked
+                    };
+                }
+                true
+            }
             None => false,
         };
         if !allowed {
@@ -842,8 +908,13 @@ impl Service {
                 .map(|result| (revisions, result))
         }) {
             Ok((revisions, Some(result))) => {
+                // Account committed movement before output can disconnect its owner.
+                let travel = self.commit_travel_progress(next, &result);
                 if let Err(error) = self.action_result_update(&revisions, &result) {
                     self.save_warning = Some(error.to_string());
+                }
+                if let Some(outcome) = travel {
+                    self.finish_travel_execution(next, outcome);
                 }
                 return Step::Progress;
             }
@@ -893,67 +964,63 @@ impl Service {
         while matches!(self.step(), Step::Progress) {}
     }
 
-    /// One step of a journey whose actor is next. The checks before the step
-    /// catch anything other actors did while the journey waited for its turn.
-    fn travel_step(&mut self, actor: ActorId) {
-        let Some(mut job) = self.travels.remove(&actor) else {
-            return;
-        };
+    fn travel_observation(&self, actor: ActorId) -> Result<Observation, TravelPhase> {
+        let job = self.travels.get(&actor).ok_or(TravelPhase::Failed)?;
         if self.controllers.get(&actor) != Some(&job.owner) {
-            self.stop_travel(actor, TravelPhase::ControlLost);
-            return;
+            return Err(TravelPhase::ControlLost);
         }
-        let Ok(state) = self.engine.state(actor) else {
-            self.stop_travel(actor, TravelPhase::Failed);
-            return;
-        };
-        if job
-            .hp
-            .zip(state.observation.combat.as_ref().map(|c| c.hp))
-            .is_some_and(|(before, after)| after < before)
-        {
-            self.stop_travel(actor, TravelPhase::Hazard);
-            return;
-        }
-        if !potential_hazards(&state.observation).is_subset(&job.hazards) {
-            self.stop_travel(actor, TravelPhase::Hazard);
-            return;
-        }
-        let step = job.steps.pop_front().expect("active route");
-        let direction = match step.direction {
-            tor_world::Direction::North => Direction::North,
-            tor_world::Direction::East => Direction::East,
-            tor_world::Direction::South => Direction::South,
-            tor_world::Direction::West => Direction::West,
-            tor_world::Direction::NorthEast => Direction::NorthEast,
-            tor_world::Direction::SouthEast => Direction::SouthEast,
-            tor_world::Direction::SouthWest => Direction::SouthWest,
-            tor_world::Direction::NorthWest => Direction::NorthWest,
+        self.engine
+            .observation(actor)
+            .map_err(|_| TravelPhase::Failed)
+    }
 
-            tor_world::Direction::Up => Direction::Up,
-            tor_world::Direction::Down => Direction::Down,
-            _ => unreachable!("travel directions are observer-relative"),
+    /// Revalidate session authority and disclosed hazards after each mailbox pass.
+    fn travel_ready(&mut self, actor: ActorId) -> bool {
+        let phase = match self.travel_observation(actor) {
+            Err(phase) => Some(phase),
+            Ok(observation) => self
+                .travels
+                .get(&actor)
+                .filter(|job| job.hazard_in(&observation))
+                .map(|_| TravelPhase::Hazard),
         };
-        let revisions = self
+        if let Some(phase) = phase {
+            self.stop_travel(actor, phase);
+            return false;
+        }
+        true
+    }
+
+    /// Admit only; the next scheduler boundary executes this original step.
+    fn travel_step(&mut self, actor: ActorId) -> Step {
+        if !self.travel_ready(actor) {
+            return Step::Progress;
+        }
+        let job = &self.travels[&actor];
+        let Some(step) = job.steps.front().copied() else {
+            self.stop_travel(actor, TravelPhase::Arrived);
+            return Step::Progress;
+        };
+        let status = &self.travel_status[&actor];
+        let Some(ordinal) = status.completed_steps.checked_add(1) else {
+            self.stop_travel(actor, TravelPhase::Failed);
+            return Step::Progress;
+        };
+        match self
             .engine
-            .actors()
-            .into_iter()
-            .map(|a| (a, self.engine.revision(a).expect("existing actor")))
-            .collect();
-        let client = &self.clients[&job.owner];
-        let result = self.engine.command(
-            &client.user,
-            &client.frontend,
-            actor,
-            &uuid::Uuid::new_v4().to_string(),
-            &self.engine.branch().clone(),
-            crate::journal::Command::Act {
-                expected_revision: state.revision,
-                action: Action::Move { direction },
-            },
-        );
-        let result = match result {
-            Ok(result) => result,
+            .admit_travel(actor, &status.id.clone(), ordinal, step)
+        {
+            Ok(result) => {
+                self.travels
+                    .get_mut(&actor)
+                    .expect("admitted journey")
+                    .pending = Some(result.entry.id);
+                Step::Progress
+            }
+            Err(error) if error.code == ErrorCode::StorageFailure => {
+                self.save_warning = Some(error.to_string());
+                Step::Blocked
+            }
             Err(error) => {
                 self.stop_travel(
                     actor,
@@ -963,44 +1030,73 @@ impl Service {
                         TravelPhase::Failed
                     },
                 );
+                Step::Progress
+            }
+        }
+    }
+
+    /// The route advances only when its exact admitted step has committed.
+    fn commit_travel_progress(
+        &mut self,
+        actor: ActorId,
+        result: &crate::CommandResult,
+    ) -> Option<TravelExecution> {
+        let job = self.travels.get_mut(&actor)?;
+        let (admission, outcome) = match &result.entry.content {
+            crate::journal::JournalContent::IntentionStarted { admission, .. } => {
+                (admission, TravelExecution::Moved)
+            }
+            crate::journal::JournalContent::IntentionFailed { admission, .. } => {
+                (admission, TravelExecution::Blocked)
+            }
+            _ => return None,
+        };
+        if job.pending.as_ref() != Some(admission) {
+            return None;
+        }
+        job.pending = None;
+        if matches!(outcome, TravelExecution::Moved) {
+            job.steps.pop_front().expect("admitted route step");
+            self.travel_status
+                .get_mut(&actor)
+                .expect("active journey status")
+                .completed_steps += 1;
+        }
+        Some(outcome)
+    }
+
+    fn finish_travel_execution(&mut self, actor: ActorId, outcome: TravelExecution) {
+        // Output may already have disconnected the controller and ended its job.
+        let Some(job) = self.travels.get(&actor) else {
+            return;
+        };
+        if matches!(outcome, TravelExecution::Blocked) {
+            self.stop_travel(actor, TravelPhase::Blocked);
+            return;
+        }
+        let observation = match self.travel_observation(actor) {
+            Ok(observation) => observation,
+            Err(phase) => {
+                self.stop_travel(actor, phase);
                 return;
             }
         };
-        self.travel_status
-            .get_mut(&actor)
-            .expect("active status")
-            .completed_steps += 1;
-        if self.action_result_update(&revisions, &result).is_err() {
-            self.stop_travel(actor, TravelPhase::Failed);
-            return;
-        }
-        if self.controllers.get(&actor) != Some(&job.owner) {
-            self.stop_travel(actor, TravelPhase::ControlLost);
-            return;
-        }
-        let Ok(observation) = self.engine.observation(actor) else {
-            self.stop_travel(actor, TravelPhase::Failed);
-            return;
-        };
-        let hazard = !potential_hazards(&observation).is_subset(&job.hazards)
-            || job
-                .hp
-                .zip(observation.combat.as_ref().map(|c| c.hp))
-                .is_some_and(|(before, after)| after < before);
-        if observation
+        let phase = if observation
             .motion
             .as_ref()
-            .is_some_and(|m| m.displaced || m.impacted)
+            .is_some_and(|motion| motion.displaced || motion.impacted)
         {
-            self.stop_travel(actor, TravelPhase::DecisionRequired);
+            Some(TravelPhase::DecisionRequired)
         } else if job.steps.is_empty() {
-            self.stop_travel(actor, TravelPhase::Arrived);
-        } else if hazard {
-            self.stop_travel(actor, TravelPhase::Hazard);
+            Some(TravelPhase::Arrived)
+        } else if job.hazard_in(&observation) {
+            Some(TravelPhase::Hazard)
         } else {
-            // Another actor may be next; the journey waits for its turn.
-            self.travels.insert(actor, job);
-            self.travel_update(actor, None);
+            None
+        };
+        match phase {
+            Some(phase) => self.stop_travel(actor, phase),
+            None => self.travel_update(actor, None),
         }
     }
 
