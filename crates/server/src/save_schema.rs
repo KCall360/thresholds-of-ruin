@@ -199,7 +199,7 @@ mod tests {
     use tor_protocol::{Action, ActorId, Direction};
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct Stored {
-        #[serde(with = "Action")]
+        #[serde(with = "super::Action")]
         action: Action,
     }
     #[test]
