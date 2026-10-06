@@ -1778,3 +1778,50 @@ passed 135/136. The only failure in each profile was the native mouse test
 intercepted by the Windows overlay, expressly waived by the maintainer. This is
 qualified local evidence, not an unqualified full pass. Ordinary CI coverage
 remains enabled; final-commit Windows/Linux CI is required before merging.
+
+### Nested-schema release comparison
+
+Release comparisons used the preceding merged implementation (`31fdb307`) and
+corrected schema checkpoint (`496b120e`) on the same Windows host, i7-9750H,
+15.8 GiB RAM and HDD save volume (machine fingerprint `6a1878811f37`). An initial
+three-round, three-cycle memory comparison validated all 12 reports. Its command
+p95 rose 8.5% for one actor and 3.1% for eight actors; restart p95 rose 2.1% and
+4.1%. A longer five-round, nine-cycle repeat validated all 20 reports and showed
+the following results. Memory cases time transitions and cold replay, but do not
+time journal encoding during transitions.
+
+A separate three-round, five-cycle durable comparison validated all 12 reports.
+It used checkpoint interval 256 to exercise journal encoding and checkpoint
+revision maps: 305/2,500 records serialized and 1/10 checkpoint captures per
+small/large run, respectively. The final persisted checkpoint count was one in
+each case. All operation counts, retained history, journal/checkpoint bytes and
+final save sizes matched between implementations within each comparison. There
+were no failed reports or competing build processes. Timings below are
+milliseconds, baseline to refactor; flush/restart groups have few samples.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-memory / command, repeat | 2,745 | 0.573 → 0.589 | 0.834 → 0.849 | 2.619 → 2.200 |
+| Same case / restart | 5 | 294.9 → 303.0 | 304.9 → 308.8 | 304.9 → 308.8 |
+| r64-a8-h100-memory / command, repeat | 22,505 | 0.037 → 0.036 | 2.573 → 2.643 | 8.399 → 13.649 |
+| Same case / restart | 5 | 2,771.7 → 2,869.6 | 2,826.8 → 2,926.0 | 2,826.8 → 2,926.0 |
+| r8-a1-h100-durable / command | 915 | 0.583 → 0.582 | 0.814 → 0.832 | 3.297 → 1.662 |
+| Same case / flush | 3 | 125.1 → 107.3 | 992.3 → 113.1 | 992.3 → 113.1 |
+| Same case / restart | 3 | 128.6 → 111.9 | 129.5 → 133.2 | 129.5 → 133.2 |
+| r64-a8-h100-durable / command | 7,500 | 0.041 → 0.041 | 2.528 → 2.600 | 12.957 → 8.557 |
+| Same case / flush | 3 | 363.0 → 346.4 | 374.3 → 396.7 | 374.3 → 396.7 |
+| Same case / restart | 3 | 172.9 → 178.6 | 197.0 → 180.2 | 197.0 → 180.2 |
+
+The repeat's command p95 rose 1.7%/2.7%; durable command p95 rose 2.2%/2.9%.
+No speedup is claimed. Small repeatable timing increases remain follow-up work;
+these runs do not isolate serialization from code layout or host scheduling.
+Flush tails varied, including a baseline spike, so the three-sample flush groups
+do not establish an improvement. Raw reports remain local and unpublished.
+
+The wire-integer prototype exposed a test-helper name collision: two standalone
+saved-action tests had selected the protocol Action serializer instead of the
+save-owned adapter. Explicitly qualifying the adapter corrected the tests. All
+five schema tests then passed with protocol-26 decimal-string wire encoding,
+including the already independent production nested-journal tests. The prototype
+is preserved separately; this checkpoint retains protocol 25. The corrected
+checkpoint requires renewed verification and final-head CI before merging.
