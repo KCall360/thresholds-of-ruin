@@ -420,10 +420,7 @@ impl Engine {
                     record.say("Wizard authority is required.");
                     return Ok(Flow::Stop);
                 }
-                Request::Command {
-                    branch: link.client().branch().clone(),
-                    command,
-                }
+                link.client().command_request(command)
             }
         };
         let confirmation = match &request {

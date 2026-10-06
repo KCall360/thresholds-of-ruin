@@ -13,16 +13,68 @@ pub struct Account {
     pub actors: BTreeSet<ActorId>,
 }
 
+struct DisclosedObservation {
+    branch: BranchId,
+    base: ObservationBase,
+    state: StateView,
+}
+
+/// Ownership is part of the generation even when permission vectors stay empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DisclosedReadiness {
+    has_control: bool,
+    permissions: Readiness,
+}
+
+/// Payloads prepared by a request and published after its ordered effects.
+enum RequestReply {
+    Receipt(RequestReceipt),
+    History(HistoryPage),
+    Palette(PaletteUpdate),
+}
+
+impl RequestReply {
+    fn message(self, request_id: String, context: ReplyContext) -> ServerMessage {
+        match self {
+            Self::Receipt(receipt) => ServerMessage::Ack {
+                context,
+                request_id,
+                receipt,
+            },
+            Self::History(page) => ServerMessage::History {
+                context,
+                request_id,
+                page,
+            },
+            Self::Palette(palette) => ServerMessage::Palette {
+                context,
+                request_id: Some(request_id),
+                palette,
+            },
+        }
+    }
+}
+
+enum ProcessedRequest {
+    Reply(RequestReply),
+    /// Snapshot publication owns the stream reset; no additional reply is due.
+    Published,
+    /// Persistence owns completion; poll it at the common publication boundary.
+    SaveQueued,
+}
+
 struct Client {
     role: AccessRole,
     user: String,
     frontend: String,
     allowed: BTreeSet<ActorId>,
     actor: Option<ActorId>,
+    context: Option<StreamContext>,
+    readiness: Option<DisclosedReadiness>,
     sequence: u64,
     observation_tick: u64,
     /// Last full state disclosed on this stream; the base for the next delta.
-    last_state: Option<StateView>,
+    last_observation: Option<DisclosedObservation>,
     /// The palette last sent and its revision: the base for the next delta.
     palette: Option<(u64, BTreeSet<String>)>,
     /// The region that palette was forecast from.
@@ -201,9 +253,11 @@ impl Service {
                 frontend,
                 allowed: actors.iter().copied().collect(),
                 actor: None,
+                context: None,
+                readiness: None,
                 sequence: 0,
                 observation_tick: 0,
-                last_state: None,
+                last_observation: None,
                 palette: None,
                 palette_region: None,
                 messages,
@@ -239,19 +293,40 @@ impl Service {
                 "Invalid request ID",
             ))
         };
-        if let Err(error) = result {
-            self.send(
+        if matches!(result, Ok(ProcessedRequest::SaveQueued)) {
+            self.poll_saves();
+            return;
+        }
+        // Publish causing effects and permissions before completing the request.
+        // Receipt identity comes from the original operation, never this stream.
+        self.refresh_readiness();
+        let clients = self.clients.len();
+        match result {
+            Ok(ProcessedRequest::Reply(reply)) => self.publish_reply(id, request_id, reply),
+            Ok(ProcessedRequest::Published) => {}
+            Ok(ProcessedRequest::SaveQueued) => unreachable!("handled by persistence"),
+            Err(error) => self.send(
                 id,
                 ServerMessage::Error {
+                    scope: self.error_scope(id),
                     request_id: Some(request_id),
                     code: error.code,
                     message: error.message,
                 },
-            );
+            ),
+        }
+        // Rejected output can remove a controller and change other clients' input.
+        if self.clients.len() != clients {
+            self.refresh_readiness();
         }
     }
 
-    fn process(&mut self, id: u64, request_id: &str, request: Request) -> Result<(), Failure> {
+    fn process(
+        &mut self,
+        id: u64,
+        request_id: &str,
+        request: Request,
+    ) -> Result<ProcessedRequest, Failure> {
         if matches!(
             &request,
             Request::Command {
@@ -287,18 +362,23 @@ impl Service {
                 ));
             }
             client.actor = Some(actor);
+            client.context = Some(StreamContext {
+                stream: StreamId(uuid::Uuid::new_v4().to_string()),
+                epoch: 0,
+            });
             self.snapshot(id, request_id)?;
             if let Some(message) = self.save_warning.clone() {
                 self.send(
                     id,
                     ServerMessage::Error {
+                        scope: self.error_scope(id),
                         request_id: None,
                         code: ErrorCode::StorageFailure,
                         message,
                     },
                 );
             }
-            return Ok(());
+            return Ok(ProcessedRequest::Published);
         }
         let client = &self.clients[&id];
         let actor = client
@@ -315,7 +395,10 @@ impl Service {
                     ));
                 }
                 self.autonomous_enabled = true;
-                self.ack(id, request_id, None);
+                Ok(self
+                    .session_receipt(id)
+                    .map(|receipt| ProcessedRequest::Reply(RequestReply::Receipt(receipt)))
+                    .unwrap_or(ProcessedRequest::Published))
             }
             Request::Save => {
                 if self
@@ -330,7 +413,7 @@ impl Service {
                 }
                 let target = self.engine.request_save();
                 self.pending_saves.push((id, request_id.into(), target));
-                self.poll_saves();
+                Ok(ProcessedRequest::SaveQueued)
             }
             Request::AcquireControl => {
                 self.apply_pending_pauses();
@@ -359,7 +442,10 @@ impl Service {
                         self.control_update(actor);
                     }
                 }
-                self.ack(id, request_id, None);
+                Ok(self
+                    .session_receipt(id)
+                    .map(|receipt| ProcessedRequest::Reply(RequestReply::Receipt(receipt)))
+                    .unwrap_or(ProcessedRequest::Published))
             }
             Request::ReleaseControl => {
                 if self
@@ -378,10 +464,18 @@ impl Service {
                     self.autonomous_enabled = false;
                     self.control_update(actor);
                 }
-                self.ack(id, request_id, None);
+                Ok(self
+                    .session_receipt(id)
+                    .map(|receipt| ProcessedRequest::Reply(RequestReply::Receipt(receipt)))
+                    .unwrap_or(ProcessedRequest::Published))
             }
-            Request::Snapshot => return self.snapshot(id, request_id),
-            Request::Palette => self.palette_update(id, Some(request_id), true),
+            Request::Snapshot => self
+                .snapshot(id, request_id)
+                .map(|()| ProcessedRequest::Published),
+            Request::Palette => Ok(self
+                .prepare_palette(id, true)
+                .map(|palette| ProcessedRequest::Reply(RequestReply::Palette(palette)))
+                .unwrap_or(ProcessedRequest::Published)),
             Request::HistoryBranch {
                 branch,
                 before,
@@ -394,34 +488,47 @@ impl Service {
                     before.as_ref(),
                     usize::from(limit),
                 )?;
-                self.send(
-                    id,
-                    ServerMessage::History {
-                        request_id: request_id.into(),
-                        page,
-                    },
-                );
+                Ok(ProcessedRequest::Reply(RequestReply::History(page)))
             }
             Request::History { before, limit } => {
                 let page =
                     self.engine
                         .history(actor, &user, before.as_ref(), usize::from(limit))?;
-                self.send(
-                    id,
-                    ServerMessage::History {
-                        request_id: request_id.into(),
-                        page,
-                    },
-                );
+                Ok(ProcessedRequest::Reply(RequestReply::History(page)))
             }
-            Request::Command { branch, command } => {
+            Request::Command {
+                context,
+                branch,
+                command,
+            } => {
                 let command = crate::journal::Command::from_wire(&command)?;
                 if let Some(previous) = self
                     .engine
                     .retry(&user, actor, request_id, &branch, &command)?
                 {
-                    self.ack_result(id, request_id, &previous);
-                    return Ok(());
+                    return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
+                        self.engine.request_receipt(&previous),
+                    )));
+                }
+                // Ownership and availability can change without an observation
+                // revision. Resolve receipts first, then reject fresh input built
+                // for another attachment, reset or authority generation.
+                let current = self.current_readiness(id).ok_or_else(|| {
+                    Failure::new(
+                        ErrorCode::StaleContext,
+                        "Input context exhausted; reconnect",
+                    )
+                })?;
+                let expected = self
+                    .input_context(id)
+                    .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
+                if context != expected
+                    || current.permissions.revision != expected.readiness_revision
+                {
+                    return Err(Failure::new(
+                        ErrorCode::StaleContext,
+                        "Input context changed; use the current disclosed state",
+                    ));
                 }
                 if matches!(
                     command,
@@ -438,19 +545,45 @@ impl Service {
                         "Acquire control before acting",
                     ));
                 }
-                // Only the server ends a journey; the player waits for it.
-                if matches!(
-                    command,
+                // Fresh gameplay must honor the same derived permissions that
+                // were published. Simulation still validates the action itself;
+                // session policy cannot be bypassed by a correctly stamped request.
+                match &command {
                     crate::journal::Command::Act { .. }
-                        | crate::journal::Command::AdmitIntention { .. }
-                        | crate::journal::Command::Travel { .. }
-                ) && (self.travels.contains_key(&actor)
-                    || self.pending_travel_cancellations.contains(&actor))
-                {
-                    return Err(Failure::new(
-                        ErrorCode::ActorBusy,
-                        "Your character is still travelling",
-                    ));
+                    | crate::journal::Command::AdmitIntention { .. }
+                    | crate::journal::Command::Travel { .. }
+                        if !current.permissions.admission =>
+                    {
+                        return Err(Failure::new(
+                            ErrorCode::ActorBusy,
+                            "New gameplay is unavailable in the current input state",
+                        ));
+                    }
+                    crate::journal::Command::ResumeIntention { admission, .. }
+                        if !current
+                            .permissions
+                            .resume
+                            .iter()
+                            .any(|id| id.0 == admission.0) =>
+                    {
+                        return Err(Failure::new(
+                            ErrorCode::InvalidAction,
+                            "Intention cannot be resumed in the current input state",
+                        ));
+                    }
+                    crate::journal::Command::CancelIntention { admission, .. }
+                        if !current
+                            .permissions
+                            .cancel
+                            .iter()
+                            .any(|id| id.0 == admission.0) =>
+                    {
+                        return Err(Failure::new(
+                            ErrorCode::InvalidAction,
+                            "Intention cannot be cancelled in the current input state",
+                        ));
+                    }
+                    _ => {}
                 }
                 let revisions: BTreeMap<_, _> = self
                     .engine
@@ -473,8 +606,9 @@ impl Service {
                         self.autonomous_enabled = true;
                     }
                     self.action_result_update(&revisions, &result)?;
-                    self.ack_result(id, request_id, &result);
-                    return Ok(());
+                    return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
+                        self.engine.request_receipt(&result),
+                    )));
                 };
                 if matches!(
                     visible_entry.content,
@@ -584,11 +718,12 @@ impl Service {
                         self.action_result_update(&revisions, &result)?;
                     }
                 }
-                self.ack_result(id, request_id, &result);
+                Ok(ProcessedRequest::Reply(RequestReply::Receipt(
+                    self.engine.request_receipt(&result),
+                )))
             }
             Request::Attach { .. } => unreachable!("handled before attachment lookup"),
         }
-        Ok(())
     }
 
     fn action_result_update(
@@ -660,7 +795,7 @@ impl Service {
                     },
                 );
             }
-            self.palette_update(recipient, None, false);
+            self.palette_update(recipient);
         }
         Ok(())
     }
@@ -669,23 +804,19 @@ impl Service {
     /// the first time; otherwise the changes, if any, as a delta. Nothing is
     /// acknowledged. Scenarios that name no assets send no palettes, but a
     /// palette request still gets an (empty) answer.
-    fn palette_update(&mut self, id: u64, request_id: Option<&str>, full: bool) {
-        let Some(client) = self.clients.get(&id) else {
-            return;
-        };
-        let Some(actor) = client.actor else {
-            return;
-        };
+    fn prepare_palette(&mut self, id: u64, full: bool) -> Option<PaletteUpdate> {
+        let client = self.clients.get(&id)?;
+        let actor = client.actor?;
         // A palette depends only on the actor's region: skip recomputing it
         // while that stays the same.
         let region = self.engine.palette_region(actor);
         if !full && client.palette.is_some() && client.palette_region == region {
-            return;
+            return None;
         }
         let assets = match self.engine.palette(actor) {
             Some(assets) => assets,
-            None if request_id.is_some() => BTreeSet::new(),
-            None => return,
+            None if full => BTreeSet::new(),
+            None => return None,
         };
         let client = self.clients.get_mut(&id).expect("connected client");
         if !full
@@ -695,7 +826,7 @@ impl Service {
                 .is_some_and(|(_, previous)| *previous == assets)
         {
             client.palette_region = region;
-            return;
+            return None;
         }
         let body = match &client.palette {
             Some((base, previous)) if !full => PaletteBody::Delta {
@@ -710,13 +841,22 @@ impl Service {
         let revision = client.palette.as_ref().map_or(1, |(r, _)| r + 1);
         client.palette = Some((revision, assets));
         client.palette_region = region;
-        self.send(
-            id,
-            ServerMessage::Palette {
-                request_id: request_id.map(Into::into),
-                palette: PaletteUpdate { revision, body },
-            },
-        );
+        Some(PaletteUpdate { revision, body })
+    }
+
+    fn palette_update(&mut self, id: u64) {
+        if let Some(palette) = self.prepare_palette(id, false) {
+            if let Some(context) = self.reply_context(id) {
+                self.send(
+                    id,
+                    ServerMessage::Palette {
+                        context,
+                        request_id: None,
+                        palette,
+                    },
+                );
+            }
+        }
     }
 
     fn travel_update(&mut self, actor: ActorId, entry: Option<HistoryEntry>) {
@@ -811,6 +951,12 @@ impl Service {
     /// waits for at most one action. What happens depends only on the game and
     /// the commands it received, never on wall-clock time.
     pub(crate) fn step(&mut self) -> Step {
+        let step = self.step_inner();
+        self.refresh_readiness();
+        step
+    }
+
+    fn step_inner(&mut self) -> Step {
         for actor in std::mem::take(&mut self.pending_travel_cancellations) {
             self.cancel_travel_work(actor);
         }
@@ -1118,6 +1264,7 @@ impl Service {
                     self.send(
                         client,
                         ServerMessage::Error {
+                            scope: self.error_scope(client),
                             request_id: None,
                             code: error.code,
                             message: "Autonomous action failed; simulation paused.".into(),
@@ -1133,8 +1280,30 @@ impl Service {
         let actor = client
             .actor
             .ok_or_else(|| Failure::new(ErrorCode::NotAttached, "Attach an actor first"))?;
+        let context = match client.context.as_ref().and_then(StreamContext::next_reset) {
+            Some(context) => context,
+            None => {
+                self.disconnect(id);
+                return Err(Failure::new(
+                    ErrorCode::InvalidRequest,
+                    "Stream exhausted; reconnect",
+                ));
+            }
+        };
         let state = self.engine.state(actor)?;
+        let readiness = match self.current_readiness(id) {
+            Some(readiness) => readiness,
+            None => {
+                self.disconnect(id);
+                return Err(Failure::new(
+                    ErrorCode::InvalidRequest,
+                    "Readiness exhausted; reconnect",
+                ));
+            }
+        };
         let snapshot = Snapshot {
+            context: context.clone(),
+            readiness: readiness.permissions.clone(),
             intentions: self.engine.pending_intentions(actor),
             travel: self.travel_status.get(&actor).cloned(),
             actor,
@@ -1144,14 +1313,23 @@ impl Service {
                 tick: state.observation.tick,
             },
             state,
-            has_control: self.controllers.get(&actor) == Some(&id),
+            has_control: readiness.has_control,
             history: self
                 .engine
                 .history(actor, &client.user, None, MAX_HISTORY_PAGE)?,
         };
         let client = self.clients.get_mut(&id).expect("connected client");
+        client.context = Some(context);
+        client.readiness = Some(readiness);
         client.observation_tick = snapshot.state.observation.tick;
-        client.last_state = Some(snapshot.state.clone());
+        client.last_observation = Some(DisclosedObservation {
+            branch: snapshot.branch.clone(),
+            base: ObservationBase {
+                cursor: snapshot.cursor,
+                revision: snapshot.state.revision,
+            },
+            state: snapshot.state.clone(),
+        });
         self.send(
             id,
             ServerMessage::Snapshot {
@@ -1160,7 +1338,7 @@ impl Service {
             },
         );
         // Attaching sends the whole palette; a later snapshot, what changed.
-        self.palette_update(id, None, false);
+        self.palette_update(id);
         Ok(())
     }
 
@@ -1207,6 +1385,96 @@ impl Service {
         }
     }
 
+    fn input_context(&self, id: u64) -> Option<InputContext> {
+        let client = self.clients.get(&id)?;
+        Some(InputContext {
+            stream: client.context.clone()?,
+            readiness_revision: client.readiness.as_ref()?.permissions.revision,
+        })
+    }
+
+    fn current_readiness(&self, id: u64) -> Option<DisclosedReadiness> {
+        let actor = self.clients.get(&id)?.actor?;
+        self.readiness_for_client(id, self.engine.input_readiness(actor))
+    }
+
+    fn readiness_for_client(
+        &self,
+        id: u64,
+        mut permissions: Readiness,
+    ) -> Option<DisclosedReadiness> {
+        let client = self.clients.get(&id)?;
+        let actor = client.actor?;
+        let has_control =
+            client.role != AccessRole::Spectator && self.controllers.get(&actor) == Some(&id);
+        let enabled = has_control
+            && self.pending_pauses.is_empty()
+            && self.pending_travel_cancellations.is_empty();
+        if !enabled {
+            permissions.admission = false;
+            permissions.resume.clear();
+            permissions.cancel.clear();
+        } else if self.travels.contains_key(&actor) {
+            permissions.admission = false;
+        }
+        let mut readiness = DisclosedReadiness {
+            has_control,
+            permissions,
+        };
+        if let Some(previous) = &client.readiness {
+            readiness.permissions.revision = previous.permissions.revision;
+            if &readiness != previous {
+                readiness.permissions.revision = previous.permissions.revision.checked_add(1)?;
+            }
+        }
+        Some(readiness)
+    }
+
+    /// Query each actor once per publication pass. Output rejection can remove a
+    /// controller and affect clients visited earlier; only such removals require
+    /// another pass. The client count strictly decreases on every repeated pass.
+    fn refresh_readiness(&mut self) {
+        loop {
+            let count = self.clients.len();
+            let recipients: Vec<_> = self
+                .clients
+                .iter()
+                .filter_map(|(&id, client)| {
+                    client.readiness.as_ref()?;
+                    Some((id, client.actor?))
+                })
+                .collect();
+            let mut inputs = BTreeMap::new();
+            for (id, actor) in recipients {
+                if !self.clients.contains_key(&id) {
+                    continue;
+                }
+                let input = inputs
+                    .entry(actor)
+                    .or_insert_with(|| self.engine.input_readiness(actor))
+                    .clone();
+                let Some(readiness) = self.readiness_for_client(id, input) else {
+                    self.disconnect(id);
+                    continue;
+                };
+                let client = self.clients.get_mut(&id).expect("connected recipient");
+                if client.readiness.as_ref() == Some(&readiness) {
+                    continue;
+                }
+                client.readiness = Some(readiness.clone());
+                self.update(
+                    id,
+                    UpdateBody::Readiness {
+                        readiness: readiness.permissions,
+                    },
+                );
+            }
+            if self.clients.len() == count {
+                break;
+            }
+        }
+    }
+
     fn control_update(&mut self, actor: ActorId) {
         let recipients: Vec<_> = self
             .clients
@@ -1239,13 +1507,23 @@ impl Service {
         // last disclosed tick until its new observation has been queued.
         if let UpdateBody::Observation { state, event } = body {
             client.observation_tick = state.observation.tick;
-            let delta = client
-                .last_state
-                .as_ref()
-                .and_then(|base| StateDelta::between(base, &state));
-            client.last_state = Some((*state).clone());
+            let delta = client.last_observation.as_ref().and_then(|previous| {
+                StateDelta::between(&previous.state, &state).map(|delta| (previous.base, delta))
+            });
+            client.last_observation = Some(DisclosedObservation {
+                branch: self.engine.branch().clone(),
+                base: ObservationBase {
+                    cursor: StreamCursor {
+                        sequence,
+                        tick: state.observation.tick,
+                    },
+                    revision: state.revision,
+                },
+                state: (*state).clone(),
+            });
             body = match delta {
-                Some(delta) => UpdateBody::ObservationDelta {
+                Some((base, delta)) => UpdateBody::ObservationDelta {
+                    base,
                     state: Box::new(delta),
                     event,
                 },
@@ -1253,10 +1531,12 @@ impl Service {
             };
         }
         let tick = client.observation_tick;
+        let context = client.context.clone().expect("attached stream context");
         self.send(
             id,
             ServerMessage::Update {
                 update: Box::new(StreamUpdate {
+                    context,
                     actor,
                     branch: self.engine.branch().clone(),
                     cursor: StreamCursor { sequence, tick },
@@ -1266,24 +1546,41 @@ impl Service {
         );
     }
 
-    fn ack(&mut self, id: u64, request_id: &str, entry_id: Option<EntryId>) {
-        self.send(
-            id,
-            ServerMessage::Ack {
-                request_id: request_id.into(),
-                receipt: RequestReceipt::Immediate { entry_id },
+    fn reply_context(&self, id: u64) -> Option<ReplyContext> {
+        let client = self.clients.get(&id)?;
+        let observed = client.last_observation.as_ref()?;
+        Some(ReplyContext {
+            input: self.input_context(id)?,
+            actor: client.actor?,
+            branch: observed.branch.clone(),
+            cursor: StreamCursor {
+                sequence: client.sequence,
+                tick: client.observation_tick,
             },
-        );
+            revision: observed.state.revision,
+        })
     }
 
-    fn ack_result(&mut self, id: u64, request_id: &str, result: &crate::CommandResult) {
-        self.send(
-            id,
-            ServerMessage::Ack {
-                request_id: request_id.into(),
-                receipt: self.engine.request_receipt(result),
-            },
-        );
+    fn publish_reply(&mut self, id: u64, request_id: String, reply: RequestReply) {
+        if let Some(context) = self.reply_context(id) {
+            self.send(id, reply.message(request_id, context));
+        }
+    }
+
+    fn error_scope(&self, id: u64) -> ErrorScope {
+        match self.reply_context(id) {
+            Some(context) => ErrorScope::Attached { context },
+            None => ErrorScope::Unattached {},
+        }
+    }
+
+    fn session_receipt(&self, id: u64) -> Option<RequestReceipt> {
+        let actor = self.clients.get(&id)?.actor?;
+        Some(RequestReceipt::Immediate {
+            actor,
+            branch: self.engine.branch().clone(),
+            entry_id: None,
+        })
     }
 
     fn send(&mut self, id: u64, message: ServerMessage) {
@@ -1314,6 +1611,7 @@ impl Service {
         self.send(
             id,
             ServerMessage::Error {
+                scope: self.error_scope(id),
                 request_id: None,
                 code: ErrorCode::NotAttached,
                 message: "Your actor left the loaded world; attach again once it's back in play"
@@ -1344,6 +1642,7 @@ impl Service {
     }
 
     pub(crate) fn poll_saves(&mut self) {
+        let clients_before_warnings = self.clients.len();
         let status = self.engine.save_status();
         let warning = status.error.clone().or_else(|| {
             status.overdue.then(|| {
@@ -1365,6 +1664,7 @@ impl Service {
                     self.send(
                         id,
                         ServerMessage::Error {
+                            scope: self.error_scope(id),
                             request_id: None,
                             code: ErrorCode::StorageFailure,
                             message: message.clone(),
@@ -1375,16 +1675,27 @@ impl Service {
             self.save_warning = warning;
         }
         let pending = std::mem::take(&mut self.pending_saves);
+        if pending.is_empty() {
+            if self.clients.len() != clients_before_warnings {
+                self.refresh_readiness();
+            }
+            return;
+        }
+        self.refresh_readiness();
+        let clients = self.clients.len();
         for (id, request_id, target) in pending {
             if !self.clients.contains_key(&id) {
                 continue;
             }
             if status.durable_sequence >= target {
-                self.ack(id, &request_id, None);
+                if let Some(receipt) = self.session_receipt(id) {
+                    self.publish_reply(id, request_id, RequestReply::Receipt(receipt));
+                }
             } else if let Some(message) = &status.error {
                 self.send(
                     id,
                     ServerMessage::Error {
+                        scope: self.error_scope(id),
                         request_id: Some(request_id),
                         code: ErrorCode::StorageFailure,
                         message: message.clone(),
@@ -1393,6 +1704,9 @@ impl Service {
             } else {
                 self.pending_saves.push((id, request_id, target));
             }
+        }
+        if self.clients.len() != clients {
+            self.refresh_readiness();
         }
     }
     pub(crate) fn flush_handle(&self) -> Option<crate::storage::Store> {
@@ -1410,6 +1724,574 @@ mod tests {
     use super::*;
     use crate::Scenario;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn published_disabled_admission_rejects_fresh_gameplay_without_mutation() {
+        for pause in [false, true] {
+            for command in [
+                Command::Act {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+                Command::Travel {
+                    expected_revision: 0,
+                    destination: "other-room".into(),
+                },
+            ] {
+                let actor = ActorId(1);
+                let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+                let account = Account {
+                    role: AccessRole::Player,
+                    user: "p".into(),
+                    token: "test".into(),
+                    actors: BTreeSet::from([actor]),
+                };
+                let mut client = service.connect(&account, "headless".into()).unwrap();
+                service.handle(client.id, "attach".into(), Request::Attach { actor });
+                service.handle(client.id, "control".into(), Request::AcquireControl);
+                // Another actor's unsettled host work masks gameplay globally.
+                if pause {
+                    service.pending_pauses.insert(ActorId(2));
+                } else {
+                    service.pending_travel_cancellations.insert(ActorId(2));
+                }
+                service.refresh_readiness();
+                while client.messages.try_recv().is_ok() {}
+                assert!(
+                    !service.clients[&client.id]
+                        .readiness
+                        .as_ref()
+                        .unwrap()
+                        .permissions
+                        .admission
+                );
+                let before = service.engine.state(actor).unwrap();
+                let branch = service.engine.branch().clone();
+                service.handle(
+                    client.id,
+                    "disabled".into(),
+                    Request::Command {
+                        context: service.input_context(client.id).unwrap(),
+                        branch: branch.clone(),
+                        command,
+                    },
+                );
+                let messages: Vec<_> =
+                    std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+                assert!(
+                    messages.iter().any(|message| matches!(message,
+                    ServerMessage::Error { request_id: Some(id), code: ErrorCode::ActorBusy, .. }
+                    if id == "disabled")),
+                    "disabled admission must reject: {messages:?}"
+                );
+                assert!(!messages
+                    .iter()
+                    .any(|message| matches!(message, ServerMessage::Ack { .. })));
+                assert!(!service.engine.has_pending_intention(actor));
+                assert!(!service.travels.contains_key(&actor));
+                assert_eq!(service.engine.state(actor).unwrap(), before);
+                assert_eq!(service.engine.branch(), &branch);
+            }
+        }
+    }
+
+    #[test]
+    fn published_disabled_recovery_rejects_resume_and_cancel_without_mutation() {
+        for resume in [false, true] {
+            let actor = ActorId(1);
+            let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+            let admitted = engine
+                .command(
+                    "p",
+                    "test",
+                    actor,
+                    "original",
+                    &engine.branch().clone(),
+                    crate::journal::Command::AdmitIntention {
+                        expected_revision: 0,
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+            let mut service = Service::new(engine);
+            let account = Account {
+                role: AccessRole::Player,
+                user: "p".into(),
+                token: "test".into(),
+                actors: BTreeSet::from([actor]),
+            };
+            let mut client = service.connect(&account, "headless".into()).unwrap();
+            service.handle(client.id, "attach".into(), Request::Attach { actor });
+            service.handle(client.id, "control".into(), Request::AcquireControl);
+            let intention = IntentionId(admitted.entry.id.0.clone());
+            let permissions = &service.clients[&client.id]
+                .readiness
+                .as_ref()
+                .unwrap()
+                .permissions;
+            assert!(permissions.resume.contains(&intention));
+            assert!(permissions.cancel.contains(&intention));
+            service.pending_pauses.insert(ActorId(2));
+            service.refresh_readiness();
+            while client.messages.try_recv().is_ok() {}
+            let before = service.engine.state(actor).unwrap();
+            let pending = service.engine.pending_intentions(actor);
+            let command = if resume {
+                Command::ResumeIntention {
+                    expected_revision: 0,
+                    intention,
+                }
+            } else {
+                Command::CancelIntention {
+                    expected_revision: 0,
+                    intention,
+                }
+            };
+            service.handle(
+                client.id,
+                "disabled".into(),
+                Request::Command {
+                    context: service.input_context(client.id).unwrap(),
+                    branch: service.engine.branch().clone(),
+                    command: command.clone(),
+                },
+            );
+            let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+            assert!(
+                messages.iter().any(|message| matches!(message,
+                ServerMessage::Error { request_id: Some(id), code: ErrorCode::InvalidAction, .. }
+                if id == "disabled")),
+                "disabled recovery must reject: {messages:?}"
+            );
+            assert!(!messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::Ack { .. })));
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+            assert_eq!(service.engine.pending_intentions(actor), pending);
+            // The rejection leaves the same work usable after policy settles.
+            service.pending_pauses.clear();
+            service.refresh_readiness();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(
+                client.id,
+                "enabled".into(),
+                Request::Command {
+                    context: service.input_context(client.id).unwrap(),
+                    branch: service.engine.branch().clone(),
+                    command,
+                },
+            );
+            let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+            assert!(
+                messages.iter().any(|message| matches!(message,
+                ServerMessage::Ack { request_id, .. } if request_id == "enabled")),
+                "enabled recovery must succeed: {messages:?}"
+            );
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn query_replies_follow_changed_permissions_without_running_simulation() {
+        for request in [
+            Request::History {
+                before: None,
+                limit: 8,
+            },
+            Request::Palette,
+        ] {
+            let actor = ActorId(1);
+            let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+            let account = Account {
+                role: AccessRole::Player,
+                user: "p".into(),
+                token: "test".into(),
+                actors: BTreeSet::from([actor]),
+            };
+            let mut client = service.connect(&account, "headless".into()).unwrap();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(client.id, "attach".into(), Request::Attach { actor });
+            while client.messages.try_recv().is_ok() {}
+            service.handle(client.id, "control".into(), Request::AcquireControl);
+            while client.messages.try_recv().is_ok() {}
+            let before = service.engine.state(actor).unwrap();
+            // A suspension awaiting persistence disables new input globally.
+            service.pending_pauses.insert(actor);
+            service.handle(client.id, "query".into(), request);
+            let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+            let readiness = messages
+                .iter()
+                .position(|message| {
+                    matches!(message,
+                ServerMessage::Update { update } if matches!(&update.body,
+                    UpdateBody::Readiness { readiness } if !readiness.admission))
+                })
+                .unwrap();
+            let reply = messages.iter().position(|message| matches!(message,
+                ServerMessage::History { request_id, .. } if request_id == "query") || matches!(message,
+                ServerMessage::Palette { request_id: Some(request_id), .. } if request_id == "query")).unwrap();
+            assert!(
+                readiness < reply,
+                "query completion must follow current permissions: {messages:?}"
+            );
+            let ServerMessage::Update { update } = &messages[readiness] else {
+                unreachable!()
+            };
+            let context = match &messages[reply] {
+                ServerMessage::History { context, .. } | ServerMessage::Palette { context, .. } => {
+                    context
+                }
+                _ => unreachable!(),
+            };
+            let UpdateBody::Readiness { readiness } = &update.body else {
+                unreachable!()
+            };
+            assert_eq!(context.input.stream, update.context);
+            assert_eq!(context.input.readiness_revision, readiness.revision);
+            assert_eq!(context.actor, actor);
+            assert_eq!(context.branch, update.branch);
+            assert_eq!(context.cursor, update.cursor);
+            assert_eq!(context.revision, before.revision);
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn rejected_reply_disconnection_publishes_permissions_to_surviving_controllers() {
+        let mut service =
+            Service::new(Engine::memory(Scenario::performance(42, 4, 2).unwrap()).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([ActorId(1), ActorId(2)]),
+        };
+        let mut clients = Vec::new();
+        for actor in [ActorId(1), ActorId(2)] {
+            let mut client = service.connect(&account, "headless".into()).unwrap();
+            while client.messages.try_recv().is_ok() {}
+            service.handle(client.id, "attach".into(), Request::Attach { actor });
+            while client.messages.try_recv().is_ok() {}
+            service.handle(client.id, "control".into(), Request::AcquireControl);
+            while client.messages.try_recv().is_ok() {}
+            clients.push(client);
+        }
+        let slow = clients[0].id;
+        let survivor = clients[1].id;
+        assert!(
+            service.clients[&survivor]
+                .readiness
+                .as_ref()
+                .unwrap()
+                .permissions
+                .admission
+        );
+        for _ in 0..QUEUE {
+            service.send(slow, ServerMessage::Waiting { on: Waiting::You });
+        }
+        assert!(service.clients.contains_key(&slow));
+        service.handle(slow, String::new(), Request::Continue);
+        assert!(!service.clients.contains_key(&slow));
+        let messages: Vec<_> = std::iter::from_fn(|| clients[1].messages.try_recv().ok()).collect();
+        assert!(messages.iter().any(|message| matches!(message,
+            ServerMessage::Update { update } if matches!(&update.body,
+                UpdateBody::Readiness { readiness } if !readiness.admission))),
+            "controller removal must publish disabled input before the next simulation step: {messages:?}");
+    }
+
+    #[test]
+    fn readiness_tracks_control_and_queue_lifecycle_without_changing_observation_bases() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        let snapshot = loop {
+            if let ServerMessage::Snapshot { snapshot, .. } = client.messages.try_recv().unwrap() {
+                break *snapshot;
+            }
+        };
+        assert_eq!(snapshot.readiness.revision, 0);
+        assert!(!snapshot.readiness.admission);
+        let mut model = tor_client_common::ClientState::from_snapshot(snapshot).unwrap();
+        while client.messages.try_recv().is_ok() {}
+        let initial_base = model.observation_base();
+        for (request_id, request, expected_revision, admission) in [
+            ("acquire", Request::AcquireControl, 1, true),
+            ("release", Request::ReleaseControl, 2, false),
+            ("reacquire", Request::AcquireControl, 3, true),
+        ] {
+            service.handle(client.id, request_id.into(), request);
+            let mut readiness_seen = false;
+            while let Ok(message) = client.messages.try_recv() {
+                match message {
+                    ServerMessage::Update { update } => {
+                        readiness_seen |= matches!(update.body, UpdateBody::Readiness { .. });
+                        model.apply(*update).unwrap();
+                    }
+                    ServerMessage::Ack {
+                        context,
+                        request_id: answered,
+                        ..
+                    } => {
+                        model.validate_reply_context(&context).unwrap();
+                        assert_eq!(answered, request_id);
+                        assert!(readiness_seen, "permissions must precede acknowledgement");
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(model.readiness().revision, expected_revision);
+            assert_eq!(model.readiness().admission, admission);
+            assert_eq!(model.observation_base(), initial_base);
+        }
+        service.handle(
+            client.id,
+            "act".into(),
+            Request::Command {
+                context: service.input_context(client.id).unwrap(),
+                branch: service.engine.branch().clone(),
+                command: Command::Act {
+                    expected_revision: 0,
+                    action: Action::Move {
+                        direction: Direction::East,
+                    },
+                },
+            },
+        );
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Update { update } = message {
+                model.apply(*update).unwrap();
+            }
+        }
+        assert_eq!(model.readiness().revision, 4);
+        assert!(!model.readiness().admission);
+        assert_eq!(
+            model.readiness().cancel,
+            vec![model.intentions()[0].intention.clone()]
+        );
+        assert_eq!(model.observation_base(), initial_base);
+        assert!(matches!(service.step(), Step::Progress));
+        while let Ok(message) = client.messages.try_recv() {
+            if let ServerMessage::Update { update } = message {
+                model.apply(*update).unwrap();
+            }
+        }
+        assert_eq!(model.readiness().revision, 5);
+        assert!(model.readiness().admission);
+        assert!(model.readiness().cancel.is_empty());
+        assert!(model.observation_base().cursor.sequence > initial_base.cursor.sequence);
+    }
+
+    #[test]
+    fn a_new_command_cannot_reuse_authority_from_before_control_loss_or_snapshot_reset() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        service.handle(client.id, "acquire".into(), Request::AcquireControl);
+        let before = service.engine.state(actor).unwrap();
+        let old_authority = service.input_context(client.id).unwrap();
+        service.handle(client.id, "release".into(), Request::ReleaseControl);
+        service.handle(client.id, "reacquire".into(), Request::AcquireControl);
+        let old_epoch = service.input_context(client.id).unwrap();
+        service.handle(client.id, "reset".into(), Request::Snapshot);
+        let current = service.input_context(client.id).unwrap();
+        let mut foreign_stream = current.clone();
+        foreign_stream.stream.stream = StreamId("another-attachment".into());
+        while client.messages.try_recv().is_ok() {}
+        for (index, context) in [old_authority, old_epoch, foreign_stream]
+            .into_iter()
+            .enumerate()
+        {
+            let request_id = format!("stale-{index}");
+            service.handle(
+                client.id,
+                request_id.clone(),
+                Request::Command {
+                    context,
+                    branch: service.engine.branch().clone(),
+                    command: Command::Act {
+                        expected_revision: 0,
+                        action: Action::Wait,
+                    },
+                },
+            );
+            let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+            assert!(messages.iter().any(|message| matches!(message,
+                ServerMessage::Error { request_id: Some(id), code: ErrorCode::StaleContext, .. } if id == &request_id)),
+                "stale transport authority must reject before admission: {messages:?}");
+            assert!(!messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::Ack { .. })));
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+            assert!(!service.engine.has_pending_intention(actor));
+        }
+        let request = Request::Command {
+            context: current,
+            branch: service.engine.branch().clone(),
+            command: Command::Act {
+                expected_revision: 0,
+                action: Action::Wait,
+            },
+        };
+        service.handle(client.id, "original".into(), request.clone());
+        assert!(service.engine.has_pending_intention(actor));
+        while client.messages.try_recv().is_ok() {}
+        assert!(matches!(service.step(), Step::Progress));
+        let after = service.engine.state(actor).unwrap();
+        service.handle(client.id, "release-final".into(), Request::ReleaseControl);
+        service.handle(client.id, "reset-final".into(), Request::Snapshot);
+        while client.messages.try_recv().is_ok() {}
+        service.handle(client.id, "original".into(), request);
+        let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+        assert!(messages.iter().any(|message| matches!(message,
+            ServerMessage::Ack { request_id, receipt: RequestReceipt::Admitted { phase: IntentionPhase::Resolved, .. }, .. }
+                if request_id == "original")), "original receipt must win over abandoned input context: {messages:?}");
+        assert_eq!(service.engine.state(actor).unwrap(), after);
+        assert!(!service.engine.has_pending_intention(actor));
+    }
+
+    #[test]
+    fn a_command_cannot_predict_an_unpublished_readiness_generation() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        service.handle(client.id, "acquire".into(), Request::AcquireControl);
+        while client.messages.try_recv().is_ok() {}
+        let before = service.engine.state(actor).unwrap();
+        let mut guessed = service.input_context(client.id).unwrap();
+        guessed.readiness_revision += 1;
+        // Pending host work changed permissions but has not published the new
+        // generation. Neither the old generation nor a predicted one is fresh.
+        service.pending_travel_cancellations.insert(actor);
+        service.handle(
+            client.id,
+            "predicted".into(),
+            Request::Command {
+                context: guessed,
+                branch: service.engine.branch().clone(),
+                command: Command::Act {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            },
+        );
+        let messages: Vec<_> = std::iter::from_fn(|| client.messages.try_recv().ok()).collect();
+        assert!(
+            messages.iter().any(|message| matches!(
+                message,
+                ServerMessage::Error {
+                    code: ErrorCode::StaleContext,
+                    ..
+                }
+            )),
+            "unpublished generation must reject: {messages:?}"
+        );
+        assert!(!messages
+            .iter()
+            .any(|message| matches!(message, ServerMessage::Ack { .. })));
+        assert!(!service.engine.has_pending_intention(actor));
+        assert_eq!(service.engine.state(actor).unwrap(), before);
+    }
+
+    #[test]
+    fn control_changes_invalidate_readiness_even_when_all_permissions_stay_disabled() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        while client.messages.try_recv().is_ok() {}
+        let before = service.engine.state(actor).unwrap();
+        // Unsettled cancellation prevents gameplay permission publication. Control
+        // can still transfer while the disclosed permission vectors remain empty.
+        service.pending_travel_cancellations.insert(actor);
+        for (request, revision) in [(Request::AcquireControl, 1), (Request::ReleaseControl, 2)] {
+            service.handle(client.id, format!("control-{revision}"), request);
+            let mut published = None;
+            while let Ok(message) = client.messages.try_recv() {
+                if let ServerMessage::Update { update } = message {
+                    if let UpdateBody::Readiness { readiness } = update.body {
+                        assert!(published.replace(readiness).is_none());
+                    }
+                }
+            }
+            let readiness = published.expect(
+                "ownership changes need a fresh generation even with identical permissions",
+            );
+            assert_eq!(
+                readiness,
+                Readiness {
+                    revision,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![]
+                }
+            );
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn a_snapshot_with_exhausted_readiness_disconnects_instead_of_reusing_authority() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Player,
+            user: "p".into(),
+            token: "test".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        while client.messages.try_recv().is_ok() {}
+        let previous_context = service.clients[&client.id].context.clone();
+        let readiness = service
+            .clients
+            .get_mut(&client.id)
+            .unwrap()
+            .readiness
+            .as_mut()
+            .unwrap();
+        readiness.permissions.revision = u64::MAX;
+        // A stale cache requires a fresh authority generation, which cannot wrap.
+        readiness.permissions.admission = true;
+        assert!(service.snapshot(client.id, "reset").is_err());
+        assert!(
+            !service.clients.contains_key(&client.id),
+            "exhausted authority must disconnect"
+        );
+        assert!(previous_context.is_some());
+        assert!(
+            client.messages.try_recv().is_err(),
+            "no invalid snapshot may be published"
+        );
+    }
 
     #[test]
     fn recovered_queued_gameplay_is_suspended_before_control_can_restart_it() {
@@ -1454,6 +2336,7 @@ mod tests {
             client.id,
             "cancel".into(),
             Request::Command {
+                context: service.input_context(client.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::CancelIntention {
                     expected_revision: 0,
@@ -1490,6 +2373,7 @@ mod tests {
         while client.messages.try_recv().is_ok() {}
         let before = service.engine.state(ActorId(1)).unwrap();
         let request = Request::Command {
+            context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Act {
                 expected_revision: 0,
@@ -1509,6 +2393,7 @@ mod tests {
             if let ServerMessage::Ack {
                 request_id,
                 receipt,
+                ..
             } = message
             {
                 assert_eq!(request_id, "queued");
@@ -1545,6 +2430,7 @@ mod tests {
             if let ServerMessage::Ack {
                 request_id,
                 receipt,
+                ..
             } = message
             {
                 assert_eq!(request_id, "queued");
@@ -1597,6 +2483,7 @@ mod tests {
             service.send(
                 slow.id,
                 ServerMessage::Error {
+                    scope: service.error_scope(slow.id),
                     request_id: None,
                     code: ErrorCode::InvalidRequest,
                     message: "x".repeat(1024 * 1024),
@@ -1680,7 +2567,7 @@ mod tests {
                 assert_eq!(update.branch, snapshot.branch);
                 let (state, event) = match update.body {
                     UpdateBody::Observation { state, event } => (*state, event),
-                    UpdateBody::ObservationDelta { state, event } => {
+                    UpdateBody::ObservationDelta { state, event, .. } => {
                         (state.apply(&snapshot.state).unwrap(), event)
                     }
                     _ => panic!("observation body"),
@@ -1710,8 +2597,12 @@ mod tests {
             c.messages.try_recv().unwrap();
         }
         service.handle(controller.id, "control".into(), Request::AcquireControl);
-        controller.messages.try_recv().unwrap();
-        controller.messages.try_recv().unwrap();
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Update { update } if matches!(update.body, UpdateBody::Control { has_control: true })));
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Ack { request_id, .. } if request_id == "control"));
         observer.messages.try_recv().unwrap();
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
@@ -1722,6 +2613,7 @@ mod tests {
             observer.id,
             "rewind".into(),
             Request::Command {
+                context: service.input_context(observer.id).unwrap(),
                 branch: branch.clone(),
                 command: Command::Wizard {
                     expected_revision: 0,
@@ -1766,8 +2658,12 @@ mod tests {
             client.messages.try_recv().unwrap();
         }
         service.handle(controller.id, "control".into(), Request::AcquireControl);
-        controller.messages.try_recv().unwrap();
-        controller.messages.try_recv().unwrap();
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Update { update } if matches!(update.body, UpdateBody::Control { has_control: true })));
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Update { update } if matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)));
+        assert!(matches!(controller.messages.try_recv().unwrap(),
+            ServerMessage::Ack { request_id, .. } if request_id == "control"));
         observer.messages.try_recv().unwrap();
         for i in 0..QUEUE {
             service.handle(controller.id, format!("snapshot-{i}"), Request::Snapshot);
@@ -1776,6 +2672,7 @@ mod tests {
             controller.id,
             "wait".into(),
             Request::Command {
+                context: service.input_context(controller.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
                     expected_revision: 0,
@@ -1884,6 +2781,7 @@ mod tests {
             client.id,
             "wait".into(),
             Request::Command {
+                context: service.input_context(client.id).unwrap(),
                 branch: service.engine.branch().clone(),
                 command: Command::Act {
                     expected_revision: revision,
@@ -2022,6 +2920,7 @@ mod tests {
             client: client.id,
             request_id: "rewind".into(),
             request: Request::Command {
+                context: service.input_context(client.id).unwrap(),
                 branch: branch.clone(),
                 command: Command::Wizard {
                     expected_revision: revision,

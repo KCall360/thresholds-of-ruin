@@ -94,6 +94,12 @@ async fn run() -> Result<(), Error> {
                         let Some(line) = line else { break; };
                         let line = line?;
                         if line.trim().is_empty() { ready()?; continue; }
+                        if !connection.is_synchronized() {
+                            if matches!(parse(&line, connection.state.state()), Ok(Input::Quit)) { break; }
+                            println!("Resynchronizing; input was not sent.");
+                            ready()?;
+                            continue;
+                        }
                         // `parse` stamps expected_revision from the state now in hand.
                         match parse(&line, connection.state.state()) {
                             Ok(Input::Quit) => break,
@@ -115,7 +121,7 @@ async fn run() -> Result<(), Error> {
                                 } else if matches!(command, Command::Act { .. }) && !connection.state.has_control() {
                                     println!("You are observing. Use control to request control.");
                                 } else {
-                                    let request = Request::Command { branch: connection.state.branch().clone(), command };
+                                    let request = connection.state.command_request(command);
                                     transact(&mut connection, request).await?;
                                 }
                             },
@@ -144,33 +150,37 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
         return Ok(());
     }
     let id = connection.request(request).await?;
+    let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         let mut admitted = None;
         loop {
             let message = connection.next().await?;
             present(connection, &message);
-            let complete = match &message {
-                ServerMessage::Ack { request_id, receipt } if request_id == &id => {
-                    if let RequestReceipt::Admitted { actor, branch, intention, phase: IntentionPhase::Queued, .. } = receipt {
-                        admitted = Some((*actor, branch.clone(), intention.clone()));
-                        false
-                    } else {
-                        true
-                    }
-                }
-                ServerMessage::Update { update } => match (&update.body, &admitted) {
-                    (UpdateBody::Intention { status }, Some((actor, branch, intention))) => {
-                        status.actor == *actor && status.branch == *branch
-                            && status.intention == *intention
-                            && status.phase != IntentionPhase::Queued
-                    }
-                    _ => false,
+            let recovered = connection.is_recovery_snapshot(&message);
+            let complete = match pending.observe(connection, &message) {
+                Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Receipt(
+                    RequestReceipt::Admitted { actor, branch, intention, phase: IntentionPhase::Queued, .. }
+                ))) => {
+                    admitted = Some((*actor, branch.clone(), intention.clone()));
+                    // A fresh snapshot restores presentation, not a terminal
+                    // gameplay outcome. The confirmed admission remains known.
+                    recovered
                 },
-                ServerMessage::Snapshot { request_id, .. } | ServerMessage::History { request_id, .. } => request_id == &id,
-                ServerMessage::Error { request_id, .. } => request_id.as_ref() == Some(&id),
+                Some(tor_client_common::RequestCompletion::Reply(_)) => true,
+                Some(tor_client_common::RequestCompletion::Unknown) => {
+                    println!("State resynchronized; request outcome may be unknown. Inspect history before retrying.");
+                    true
+                },
+                None => false,
+            };
+            let executed = match (&message, &admitted) {
+                (ServerMessage::Update { update }, Some((actor, branch, intention))) =>
+                    matches!(&update.body, UpdateBody::Intention { status }
+                        if status.actor == *actor && status.branch == *branch
+                            && status.intention == *intention && status.phase != IntentionPhase::Queued),
                 _ => false,
             };
-            if complete { return Ok::<(), Error>(()); }
+            if complete || executed { return Ok::<(), Error>(()); }
         }
     }).await.map_err(|_| "Server response timed out; command outcome may be unknown. Reconnect and inspect history before retrying.")??;
     Ok(())
@@ -179,7 +189,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
 fn present(connection: &Connection, message: &ServerMessage) {
     match message {
         ServerMessage::Update { update } => match &update.body {
-            UpdateBody::Travel { .. } => {}
+            UpdateBody::Readiness { .. } | UpdateBody::Travel { .. } => {}
             UpdateBody::Intention { status } => println!("Action: {:?}.", status.phase),
             UpdateBody::Observation { event, .. } | UpdateBody::ObservationDelta { event, .. } => {
                 if let Some(entry) = event {

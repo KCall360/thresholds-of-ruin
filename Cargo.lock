@@ -852,10 +852,12 @@ name = "tor-client-ascii"
 version = "0.1.0"
 dependencies = [
  "font8x8",
+ "futures-util",
  "minifb",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tor-client-common",
  "tor-protocol",
 ]

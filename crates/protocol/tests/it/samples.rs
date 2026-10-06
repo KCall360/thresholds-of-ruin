@@ -87,6 +87,7 @@ fn server_kind(message: &ServerMessage) -> &'static str {
         ServerMessage::Welcome { .. } => "welcome",
         ServerMessage::Snapshot { .. } => "snapshot",
         ServerMessage::Update { update } => match update.body {
+            UpdateBody::Readiness { .. } => "update.readiness",
             UpdateBody::Intention { .. } => "update.intention",
             UpdateBody::Travel { .. } => "update.travel",
             UpdateBody::Observation { .. } => "update.observation",
@@ -114,6 +115,7 @@ fn server_kind(message: &ServerMessage) -> &'static str {
 /// recorded game doesn't reach; `update.observation` is covered by the
 /// delta tests instead.
 const SERVER_KINDS: &[&str] = &[
+    "update.readiness",
     "update.intention",
     "welcome",
     "snapshot",

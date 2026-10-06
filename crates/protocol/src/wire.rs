@@ -1,7 +1,7 @@
-use crate::{ActorId, StreamCursor};
+use crate::{ActorId, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,6 +113,8 @@ impl IntentionStatus {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestReceipt {
     Immediate {
+        actor: ActorId,
+        branch: BranchId,
         entry_id: Option<EntryId>,
     },
     Admitted {
@@ -125,9 +127,24 @@ pub enum RequestReceipt {
 }
 
 impl RequestReceipt {
+    /// The operation's original actor, including a receipt resolved by retry.
+    pub fn actor(&self) -> ActorId {
+        match self {
+            Self::Immediate { actor, .. } | Self::Admitted { actor, .. } => *actor,
+        }
+    }
+
+    /// Committed operations retain their original branch. A session response
+    /// with no journal entry names the branch at its immediate completion.
+    pub fn branch(&self) -> &BranchId {
+        match self {
+            Self::Immediate { branch, .. } | Self::Admitted { branch, .. } => branch,
+        }
+    }
+
     pub fn entry_id(&self) -> Option<&EntryId> {
         match self {
-            Self::Immediate { entry_id } => entry_id.as_ref(),
+            Self::Immediate { entry_id, .. } => entry_id.as_ref(),
             Self::Admitted { entry_id, .. } => Some(entry_id),
         }
     }
@@ -575,6 +592,7 @@ pub enum Request {
     /// The whole current palette, as after attaching.
     Palette,
     Command {
+        context: InputContext,
         branch: BranchId,
         command: Command,
     },
@@ -584,8 +602,53 @@ pub enum Request {
     },
 }
 
+/// The disclosed attachment and authority generation used to build a command.
+/// A retry still names its original context; receipt lookup precedes freshness.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputContext {
+    pub stream: StreamContext,
+    pub readiness_revision: u64,
+}
+
+/// Disclosed attachment state when a reply was published. Receipt identity can
+/// belong to an earlier branch; it must never substitute for this current context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplyContext {
+    pub input: InputContext,
+    pub actor: ActorId,
+    pub branch: BranchId,
+    pub cursor: StreamCursor,
+    pub revision: u64,
+}
+
+/// Transport failures have no host ordering boundary. Host errors distinguish
+/// an attachment not yet established from an existing disclosed attachment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ErrorScope {
+    Transport {},
+    Unattached {},
+    Attached { context: ReplyContext },
+}
+
+/// Authoritative input permissions for one attachment. The revision is
+/// independent of observation revisions and simulation time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Readiness {
+    pub revision: u64,
+    pub admission: bool,
+    pub resume: Vec<IntentionId>,
+    pub cancel: Vec<IntentionId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    pub context: StreamContext,
+    pub readiness: Readiness,
     pub intentions: Vec<IntentionStatus>,
     pub travel: Option<TravelStatus>,
     pub actor: ActorId,
@@ -596,9 +659,27 @@ pub struct Snapshot {
     pub history: HistoryPage,
 }
 
+impl Snapshot {
+    pub fn reply_context(&self) -> ReplyContext {
+        ReplyContext {
+            input: InputContext {
+                stream: self.context.clone(),
+                readiness_revision: self.readiness.revision,
+            },
+            actor: self.actor,
+            branch: self.branch.clone(),
+            cursor: self.cursor,
+            revision: self.state.revision,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpdateBody {
+    Readiness {
+        readiness: Readiness,
+    },
     Intention {
         status: IntentionStatus,
     },
@@ -612,6 +693,7 @@ pub enum UpdateBody {
     },
     /// The next observation as changes to the previous one on this stream.
     ObservationDelta {
+        base: crate::ObservationBase,
         state: Box<crate::StateDelta>,
         event: Option<Box<HistoryEntry>>,
     },
@@ -624,7 +706,9 @@ pub enum UpdateBody {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StreamUpdate {
+    pub context: StreamContext,
     pub actor: ActorId,
     pub branch: BranchId,
     pub cursor: StreamCursor,
@@ -642,6 +726,7 @@ pub enum ErrorCode {
     ControlTaken,
     NotController,
     StaleRevision,
+    StaleContext,
     WrongBranch,
     RequestConflict,
     InvalidAnchor,
@@ -670,14 +755,17 @@ pub enum ServerMessage {
         update: Box<StreamUpdate>,
     },
     Ack {
+        context: ReplyContext,
         request_id: String,
         receipt: RequestReceipt,
     },
     History {
+        context: ReplyContext,
         request_id: String,
         page: HistoryPage,
     },
     Error {
+        scope: ErrorScope,
         request_id: Option<String>,
         code: ErrorCode,
         message: String,
@@ -685,6 +773,7 @@ pub enum ServerMessage {
     /// The assets a client may need soon, revisioned independently of
     /// observations. `request_id` answers a palette request.
     Palette {
+        context: ReplyContext,
         request_id: Option<String>,
         palette: PaletteUpdate,
     },
@@ -693,6 +782,21 @@ pub enum ServerMessage {
     Waiting {
         on: Waiting,
     },
+}
+
+impl ServerMessage {
+    pub fn reply_context(&self) -> Option<&ReplyContext> {
+        match self {
+            Self::Ack { context, .. }
+            | Self::History { context, .. }
+            | Self::Palette { context, .. }
+            | Self::Error {
+                scope: ErrorScope::Attached { context },
+                ..
+            } => Some(context),
+            _ => None,
+        }
+    }
 }
 
 /// What stopped play is waiting for, as seen by one client.

@@ -3,6 +3,7 @@ use tor_protocol::*;
 
 fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
+        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
         "actor":1,"branch":"map","cursor":{"sequence":0,"tick":revision},
         "has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
@@ -20,6 +21,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
 fn advance(client: &mut ClientState, next: Snapshot) {
     client
         .apply(StreamUpdate {
+            context: client.context().clone(),
             actor: next.actor,
             branch: next.branch,
             cursor: StreamCursor {
@@ -51,6 +53,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
     let mut next = snapshot(&[("a", 0, 0)], 2);
     assert!(client
         .apply(StreamUpdate {
+            context: client.context().clone(),
             actor: next.actor,
             branch: next.branch.clone(),
             cursor: StreamCursor {
@@ -64,10 +67,10 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
         })
         .is_err());
     assert_eq!(client, unchanged);
-    client.replace_snapshot(next.clone()).unwrap();
+    super::reset_snapshot(&mut client, next.clone()).unwrap();
     assert!(client.narration().is_empty());
     next.branch = BranchId("rewound".into());
-    client.replace_snapshot(next).unwrap();
+    super::reset_snapshot(&mut client, next).unwrap();
     assert!(client.narration().is_empty());
 }
 
@@ -124,17 +127,13 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
 fn snapshots_preserve_aligned_map_but_rewind_and_unalignable_views_reset_it() {
     let mut client =
         ClientState::from_snapshot(snapshot(&[("a", 0, 0), ("old", 1, 0)], 0)).unwrap();
-    client
-        .replace_snapshot(snapshot(&[("a", 0, 0)], 1))
-        .unwrap();
+    super::reset_snapshot(&mut client, snapshot(&[("a", 0, 0)], 1)).unwrap();
     assert_eq!(client.map_memory().count(), 2);
-    client
-        .replace_snapshot(snapshot(&[("elsewhere", 0, 0)], 2))
-        .unwrap();
+    super::reset_snapshot(&mut client, snapshot(&[("elsewhere", 0, 0)], 2)).unwrap();
     assert_eq!(client.map_memory().count(), 1);
     let mut rewind = snapshot(&[("a", 0, 0)], 0);
     rewind.branch = BranchId("new".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert_eq!(client.map_memory().count(), 1);
     assert_eq!(client.map_memory().next().unwrap().key, "a");
 }
@@ -173,6 +172,7 @@ fn map_tracks_elevation_and_rejects_bad_updates_atomically() {
     let next = snapshot(&[("anchor", 0, 0)], 2);
     assert!(client
         .apply(StreamUpdate {
+            context: client.context().clone(),
             actor: next.actor,
             branch: next.branch,
             cursor: StreamCursor {
@@ -210,6 +210,7 @@ fn cells(row: &[(String, i32, i32)]) -> Vec<(&str, i32, i32)> {
 
 fn delta_update(client: &ClientState, delta: StateDelta) -> StreamUpdate {
     StreamUpdate {
+        context: client.context().clone(),
         actor: ActorId(1),
         branch: client.branch().clone(),
         cursor: StreamCursor {
@@ -217,6 +218,7 @@ fn delta_update(client: &ClientState, delta: StateDelta) -> StreamUpdate {
             tick: delta.tick,
         },
         body: UpdateBody::ObservationDelta {
+            base: client.observation_base(),
             state: Box::new(delta),
             event: None,
         },
@@ -269,9 +271,7 @@ fn overflowing_delta_preserves_the_entire_client_model() {
             Err(tor_client_common::StreamError::InconsistentState)
         );
         assert_eq!(client, unchanged);
-        client
-            .replace_snapshot(snapshot(&[("recovered", 0, 0)], 1))
-            .unwrap();
+        super::reset_snapshot(&mut client, snapshot(&[("recovered", 0, 0)], 1)).unwrap();
         assert_eq!(client.state().revision, 1);
     }
 }

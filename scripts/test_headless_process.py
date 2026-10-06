@@ -46,7 +46,7 @@ class HeadlessProcesses(ProcessTestCase):
         accepted = self.act(player, {"type": "wait"})
         self.assertIsNone(accepted["error"])
         rejected = self.request(player, {
-            "type": "command", "branch": initial["branch"],
+            "type": "command", "context": accepted["input_context"], "branch": initial["branch"],
             "command": {"type": "act", "expected_revision": initial["state"]["revision"],
                         "action": {"type": "wait"}}})
         self.assertTrue(rejected["error"].startswith("StaleRevision:"))
@@ -143,7 +143,7 @@ class HeadlessProcesses(ProcessTestCase):
         # The initial snapshot holds at most 100 entries; leave an older page.
         for n in range(104):
             result = self.request(player, {
-                "type": "command", "branch": initial["branch"],
+                "type": "command", "context": initial["input_context"], "branch": initial["branch"],
                 "command": {"type": "annotate", "anchor": {"type": "state", "revision": 0},
                             "text": f"Note {n}", "source": "user", "category": "note",
                             "audience": "actor" if n % 9 == 0 else "private"}})

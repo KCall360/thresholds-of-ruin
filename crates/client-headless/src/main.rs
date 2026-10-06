@@ -91,6 +91,10 @@ async fn run() -> Result<(), Error> {
                         let Some(line) = line else { break; };
                         let line = line?;
                         let input = serde_json::from_str::<Input>(&line);
+                        if !connection.is_synchronized() && !matches!(input, Ok(Input::Quit | Input::Inspect)) {
+                            emit(&connection, "ready", None, Some("Resynchronizing; input was not sent"))?;
+                            continue;
+                        }
                         let result = match input {
                             Ok(Input::Quit) => break,
                             Ok(Input::Inspect) => None,
@@ -113,16 +117,13 @@ async fn run() -> Result<(), Error> {
                                     Some("Spectator access is read-only".into())
                                 } else if !connection.state.has_control() {
                                     Some("Actor control is required".into())
-                                } else if connection.state.has_pending_intention() {
-                                    Some("Actor already has a queued action".into())
+                                } else if !connection.state.can_admit_intention() {
+                                    Some("The server is not accepting another action".into())
                                 } else {
-                                    let request = Request::Command {
-                                        branch: connection.state.branch().clone(),
-                                        command: Command::Act {
-                                            expected_revision: connection.state.state().revision,
-                                            action,
-                                        },
-                                    };
+                                    let request = connection.state.command_request(Command::Act {
+                                        expected_revision: connection.state.state().revision,
+                                        action,
+                                    });
                                     transact(&mut connection, request).await?
                                 }
                             }
@@ -135,13 +136,10 @@ async fn run() -> Result<(), Error> {
                                 // at the revision the rejection disclosed.
                                 let mut result = None;
                                 for _ in 0..32 {
-                                    let request = Request::Command {
-                                        branch: connection.state.branch().clone(),
-                                        command: Command::Wizard {
-                                            expected_revision: connection.state.state().revision,
-                                            operation: command.clone(),
-                                        },
-                                    };
+                                    let request = connection.state.command_request(Command::Wizard {
+                                        expected_revision: connection.state.state().revision,
+                                        operation: command.clone(),
+                                    });
                                     result = transact(&mut connection, request).await?;
                                     if !wizard_still_unapplied(result.as_deref()) {
                                         break;
@@ -177,20 +175,18 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<Optio
         return Ok(Some("Spectator access is read-only".into()));
     }
     let id = connection.request(request).await?;
+    let mut pending = tor_client_common::PendingRequest::new(id);
     timeout(Duration::from_secs(10), async {
         loop {
             let message = connection.next().await?;
             emit(connection, "response", Some(&message), None)?;
-            match message {
-                ServerMessage::Ack { request_id, .. }
-                | ServerMessage::Snapshot { request_id, .. }
-                | ServerMessage::History { request_id, .. } if request_id == id => return Ok(None),
-                // A palette request is answered by the palette itself.
-                ServerMessage::Palette { request_id: Some(request_id), .. }
-                    if request_id == id => return Ok(None),
-                ServerMessage::Error { request_id: Some(request_id), code, message }
-                    if request_id == id => return Ok(Some(format!("{code:?}: {message}"))),
-                _ => {}
+            match pending.observe(connection, &message) {
+                Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Rejected { code, message })) =>
+                    return Ok(Some(format!("{code:?}: {message}"))),
+                Some(tor_client_common::RequestCompletion::Reply(_)) => return Ok(None),
+                Some(tor_client_common::RequestCompletion::Unknown) => return Ok(Some(
+                    "State resynchronized; request outcome may be unknown. Inspect history before retrying.".into())),
+                None => {},
             }
         }
     }).await.map_err(|_| "Server response timed out; outcome may be unknown. Inspect history after reconnecting before retrying.")?
@@ -207,11 +203,14 @@ fn emit(
     let started = timing.then(std::time::Instant::now);
     let output = serde_json::json!({
         "type": kind,
+        "synchronized": connection.is_synchronized(),
         "role": connection.role(),
         "state": connection.state.state(),
         "branch": connection.state.branch(),
         "cursor": connection.state.cursor(),
         "has_control": connection.state.has_control(),
+        "readiness": connection.state.readiness(),
+        "input_context": connection.state.input_context(),
         "history": connection.state.history(),
         "travel": connection.state.travel(),
         "intentions": connection.state.intentions(),

@@ -37,6 +37,7 @@ fn setup(service: &mut Service, client: &mut Connection, operation: &str) {
         client.id,
         uuid::Uuid::new_v4().to_string(),
         Request::Command {
+            context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Wizard {
                 expected_revision: service.engine.revision(ActorId(1)).unwrap(),
@@ -68,6 +69,7 @@ fn start(service: &mut Service, client: &mut Connection, x: i32) -> Request {
         .key
         .clone();
     let request = Request::Command {
+        context: service.input_context(client.id).unwrap(),
         branch: service.engine.branch().clone(),
         command: Command::Travel {
             expected_revision: state.revision,
@@ -335,7 +337,10 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
     let (mut service, mut client) = fixture();
     let request = start(&mut service, &mut client, 7);
     let travel_id = service.travel_status[&ActorId(1)].id.clone();
-    let Request::Command { branch, command } = request else {
+    let Request::Command {
+        branch, command, ..
+    } = request
+    else {
         unreachable!()
     };
     let Command::Travel { destination, .. } = command else {
@@ -362,6 +367,7 @@ fn commands_during_a_journey_are_busy_and_leave_it_running() {
             client.id,
             id.into(),
             Request::Command {
+                context: service.input_context(client.id).unwrap(),
                 branch: branch.clone(),
                 command,
             },
@@ -565,6 +571,7 @@ fn act(service: &mut Service, client: &mut Connection, actor: ActorId, action: A
         client.id,
         uuid::Uuid::new_v4().to_string(),
         Request::Command {
+            context: service.input_context(client.id).unwrap(),
             branch: service.engine.branch().clone(),
             command: Command::Act {
                 expected_revision: service.engine.revision(actor).unwrap(),
@@ -671,6 +678,7 @@ fn stale_unknown_and_wrong_branch_requests_are_atomic() {
             client.id,
             "invalid".into(),
             Request::Command {
+                context: service.input_context(client.id).unwrap(),
                 branch,
                 command: Command::Travel {
                     expected_revision: revision,

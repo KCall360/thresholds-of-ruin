@@ -322,7 +322,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
             if pace and actor == 1:
                 # Disclosed progress text appears in ASCII's history panel. These
                 # demo-only annotations are outside the measured action boundary.
-                progress = {"type":"command","branch":before["branch"],"command":{"type":"annotate",
+                progress = {"type":"command","context": before["input_context"], "branch":before["branch"],"command":{"type":"annotate",
                     "anchor":{"type":"state","revision":before["state"]["revision"]},
                     "text":f"Phase A | cycle {cycle+1}/{cycles} | step {index+1}: {step['label']}",
                     "source":"frontend","audience":"actor","category":"note"}}

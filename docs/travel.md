@@ -106,7 +106,7 @@ reasons are not durable history records in this slice.
 Send an ordinary branch-checked command envelope:
 
 ```json
-{"type":"command","branch":"<current branch>","command":{"type":"travel","expected_revision":12,"destination":"<known opaque cell key>"}}
+{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":4},"branch":"<current branch>","command":{"type":"travel","expected_revision":12,"destination":"<known opaque cell key>"}}
 ```
 
 The server requires control, readiness, a current revision, and a known traversable

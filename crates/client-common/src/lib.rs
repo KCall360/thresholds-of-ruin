@@ -4,16 +4,20 @@ mod connection;
 mod map_memory;
 pub mod narration;
 mod palette;
+mod pending_request;
 mod state;
 pub mod surfaces;
 pub use connection::Connection;
 pub use palette::{observation_assets, AssetTable, Palette};
+pub use pending_request::{ConfirmedReply, PendingRequest, RequestCompletion};
 pub use state::{ClientState, RememberedCell};
 
 use tor_protocol::{ActorId, StreamCursor};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamError {
+    WrongStreamContext,
+    WrongObservationBase,
     WrongActor,
     SequenceMismatch,
     TimeReversed,

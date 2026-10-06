@@ -16,6 +16,145 @@ def lifecycle(frame, identity, phase):
 
 
 class IntentionProcesses(ProcessTestCase):
+    def test_completed_action_returns_current_input_context_for_the_next_command(self):
+        self.server(scenario="two-room")
+        player, _ = self.client()
+        completed = self.act(player, {"type": "wait"})
+        self.assertIsNone(completed["error"])
+        noted = self.request(player, {
+            "type": "command", "context": completed["input_context"], "branch": completed["branch"],
+            "command": {"type": "annotate", "anchor": {"type": "state", "revision": completed["state"]["revision"]},
+                        "text": "Current input after execution"}})
+        self.assertIsNone(noted["error"])
+        self.assertEqual(noted["state"], completed["state"])
+
+    def test_stale_command_context_rejects_without_admission_and_restart_keeps_the_valid_effect(self):
+        server = self.server(scenario="two-room")
+        player, initial = self.client()
+        released = self.request(player, {"type": "release_control"})
+        reacquired = self.request(player, {"type": "acquire_control"})
+        reset = self.request(player, {"type": "snapshot"})
+        self.assertEqual(reset["state"], initial["state"])
+        self.assertEqual(reset["branch"], initial["branch"])
+        observer, watched = self.client(SPECTATOR_TOKEN)
+        for source in [initial, released, reacquired, watched]:
+            denied = self.request(player, {
+                "type": "command", "context": source["input_context"], "branch": reset["branch"],
+                "command": {"type": "act", "expected_revision": reset["state"]["revision"],
+                            "action": {"type": "wait"}}})
+            self.assertTrue(denied["error"].startswith("StaleContext:"), denied["error"])
+            self.assertEqual(denied["state"], initial["state"])
+            self.assertEqual(denied["history"], initial["history"])
+            self.assertEqual(denied["intentions"], [])
+        self.assertIsNone(self.act(player, {"type": "wait"})["error"])
+        boundary = self.request(player, {"type": "snapshot"})
+        self.assertEqual(boundary["state"]["revision"], initial["state"]["revision"] + 1)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop(); observer.stop(); server.stop()
+        self.server(scenario="two-room")
+        _, restored = self.client()
+        self.assertEqual(restored["state"], boundary["state"])
+        self.assertEqual(restored["history"], boundary["history"])
+
+    def test_readiness_is_authoritative_across_control_changes_and_simulation_execution(self):
+        self.server(scenario="two-room")
+        player, initial = self.client()
+        observer, watched = self.client(SPECTATOR_TOKEN)
+        self.assertTrue(initial["readiness"]["admission"])
+        spectator_readiness = {"revision": 0, "admission": False, "resume": [], "cancel": []}
+        self.assertEqual(watched["readiness"], spectator_readiness)
+        revision = initial["readiness"]["revision"]
+        released = self.request(player, {"type": "release_control"})
+        self.assertEqual(released["readiness"], {
+            "revision": revision + 1, "admission": False, "resume": [], "cancel": []})
+        reacquired = self.request(player, {"type": "acquire_control"})
+        self.assertTrue(reacquired["readiness"]["admission"])
+        self.assertEqual(reacquired["readiness"]["revision"], revision + 2)
+        self.assertEqual(reacquired["state"], initial["state"])
+        self.assertEqual(reacquired["branch"], initial["branch"])
+        start = len(player.transcript)
+        finished = self.act(player, {"type": "move", "direction": "east"})
+        self.assertIsNone(finished["error"])
+        self.assertTrue(finished["readiness"]["admission"])
+        self.assertEqual(finished["readiness"]["revision"], revision + 4)
+        permissions = []
+        for line in player.transcript[start:]:
+            if line.startswith("{"):
+                message = json.loads(line).get("message") or {}
+                body = (message.get("update") or {}).get("body") or {}
+                if body.get("type") == "readiness":
+                    permissions.append(body["readiness"])
+        self.assertEqual(len(permissions), 2)
+        self.assertFalse(permissions[0]["admission"])
+        self.assertEqual(len(permissions[0]["cancel"]), 1)
+        self.assertEqual(permissions[1]["cancel"], [])
+        reset = self.request(player, {"type": "snapshot"})
+        self.assertEqual(reset["readiness"], finished["readiness"])
+        watched = self.request(observer, {"type": "snapshot"})
+        self.assertEqual(watched["readiness"], spectator_readiness)
+
+    def test_stream_context_and_exact_delta_bases_survive_reset_and_reconnect(self):
+        server = self.server(scenario="two-room")
+        player, _ = self.client()
+        observer, _ = self.client(SPECTATOR_TOKEN)
+
+        def snapshot(client):
+            client.write(json.dumps({"type": "request", "request": {"type": "snapshot"}}))
+            response = self.frame(client, lambda frame:
+                (frame.get("message") or {}).get("type") == "snapshot")
+            self.frame(client, lambda frame: frame["type"] == "ready")
+            return response["message"]["snapshot"]
+
+        def deltas(client, start, base):
+            updates = []
+            for line in client.transcript[start:]:
+                if not line.startswith("{"):
+                    continue
+                message = json.loads(line).get("message") or {}
+                update = message.get("update") or {}
+                if (update.get("body") or {}).get("type") == "observation_delta":
+                    updates.append(update)
+            self.assertTrue(updates, "real process must receive an observation delta")
+            expected = {"cursor": base["cursor"], "revision": base["state"]["revision"]}
+            for update in updates:
+                self.assertEqual(update["context"], base["context"])
+                self.assertEqual(update["body"]["base"], expected)
+                expected = {"cursor": update["cursor"],
+                            "revision": update["body"]["state"]["revision"]}
+
+        first = snapshot(player)
+        watched = snapshot(observer)
+        self.assertNotEqual(first["context"]["stream"], watched["context"]["stream"])
+        for _ in range(2):
+            player_start, observer_start = len(player.transcript), len(observer.transcript)
+            result = self.act(player, {"type": "wait"})
+            self.assertIsNone(result["error"])
+            self.frame(observer, lambda frame:
+                frame["state"]["revision"] == result["state"]["revision"]
+                and not frame["intentions"])
+            deltas(player, player_start, first)
+            deltas(observer, observer_start, watched)
+            reset = snapshot(player)
+            self.assertEqual(reset["context"]["stream"], first["context"]["stream"])
+            self.assertEqual(reset["context"]["epoch"], first["context"]["epoch"] + 1)
+            self.assertEqual(reset["state"], result["state"])
+            first = reset
+            watched = snapshot(observer)
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            frames = db.execute("SELECT frame FROM journal UNION ALL SELECT frame FROM history").fetchall()
+        for stream in [first["context"]["stream"], watched["context"]["stream"]]:
+            self.assertFalse(any(stream.encode() in frame for (frame,) in frames))
+        player.stop()
+        observer.stop()
+        server.stop()
+        self.server(scenario="two-room")
+        resumed, _ = self.client()
+        recovered = snapshot(resumed)
+        self.assertNotEqual(recovered["context"]["stream"], first["context"]["stream"])
+        self.assertEqual(recovered["state"], first["state"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
     def test_autonomous_journal_uses_private_admission_and_backend_execution_without_rpc(self):
         server = self.server(scenario="dungeon-loop")
         player, _ = self.client()
@@ -145,7 +284,7 @@ class IntentionProcesses(ProcessTestCase):
         self.assertEqual(restored["intentions"][0]["phase"], "suspended")
         self.assertEqual(restored["state"], accepted["state"])
         def change(client, frame, operation, target=identity):
-            return self.request(client, {"type": "command", "branch": frame["branch"],
+            return self.request(client, {"type": "command", "context": frame["input_context"], "branch": frame["branch"],
                 "command": {"type": operation, "expected_revision": frame["state"]["revision"],
                             "intention": target}})
         observer, seen = self.client(WIZARD_TOKEN, observe=True, actor=2)

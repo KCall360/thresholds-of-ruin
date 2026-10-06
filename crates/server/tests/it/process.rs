@@ -1,3 +1,4 @@
+use crate::wire_client::WireClient;
 use futures_util::{SinkExt, StreamExt};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -67,14 +68,163 @@ fn launch(path: &Path) -> (ChildGuard, String) {
 }
 
 #[tokio::test]
+async fn actual_server_connection_remains_usable_after_local_request_byte_rejection() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, address) = launch(&dir.path().join("game.json"));
+    let address = address.strip_prefix("ws://").unwrap().parse().unwrap();
+    let mut client = tor_client_common::Connection::connect(
+        address,
+        "process-test-token-not-a-real-secret".into(),
+        ActorId(1),
+        "bounded-wire-test",
+    )
+    .await
+    .unwrap();
+    let before = client.state.state().clone();
+    let request = client.state.command_request(Command::Annotate {
+        anchor: Anchor::State {
+            revision: before.revision,
+        },
+        text: "\\".repeat(MAX_REQUEST_BYTES),
+        source: ClientSource::User,
+        audience: Audience::Actor,
+        category: AnnotationCategory::Note,
+    });
+    assert!(client.request(request).await.is_err());
+    assert!(client.is_synchronized());
+    let id = client.request(Request::Save).await.unwrap();
+    loop {
+        match client.next().await.unwrap() {
+            ServerMessage::Ack { request_id, .. } if request_id == id => break,
+            ServerMessage::Error { code, message, .. } => {
+                panic!("connection must remain usable: {code:?}: {message}")
+            }
+            _ => {}
+        }
+    }
+    let id = client.request(Request::Snapshot).await.unwrap();
+    loop {
+        if let ServerMessage::Snapshot { request_id, .. } = client.next().await.unwrap() {
+            if request_id == id {
+                break;
+            }
+        }
+    }
+    assert_eq!(client.state.state(), &before);
+    assert!(client.state.history().is_empty());
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("game.json");
+    {
+        let mut engine =
+            tor_server::Engine::open(&path, tor_server::Scenario::two_room(42)).unwrap();
+        engine
+            .command(
+                "p",
+                "test",
+                ActorId(1),
+                "original",
+                &engine.branch().clone(),
+                tor_server::journal::Command::AdmitIntention {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        engine.flush().unwrap();
+    }
+    let (_child, address) = launch(&path);
+    let (socket, _) = connect_async(&address).await.unwrap();
+    let mut client = WireClient::new(socket);
+    client
+        .send(Message::Text(
+            serde_json::to_string(&ClientMessage::Hello {
+                protocol: PROTOCOL_VERSION,
+                token: "process-test-token-not-a-real-secret".into(),
+                frontend: "raw-admission-test".into(),
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        client.receive().await,
+        Some(ServerMessage::Welcome { .. })
+    ));
+    client
+        .request("attach", Request::Attach { actor: ActorId(1) })
+        .await;
+    let before = loop {
+        if let ServerMessage::Snapshot { snapshot, .. } = client.receive().await.unwrap() {
+            break snapshot;
+        }
+    };
+    client.acquire_control("control").await;
+    client.request("snapshot", Request::Snapshot).await;
+    let controlled = loop {
+        if let ServerMessage::Snapshot { snapshot, .. } = client.receive().await.unwrap() {
+            break snapshot;
+        }
+    };
+    assert!(!controlled.readiness.admission);
+    assert_eq!(controlled.intentions.len(), 1);
+    assert_eq!(controlled.intentions[0].phase, IntentionPhase::Suspended);
+    client
+        .request(
+            "disabled",
+            Request::Command {
+                context: client.input_context(),
+                branch: controlled.branch.clone(),
+                command: Command::Act {
+                    expected_revision: controlled.state.revision,
+                    action: Action::Wait,
+                },
+            },
+        )
+        .await;
+    loop {
+        match client.receive().await.unwrap() {
+            ServerMessage::Error {
+                request_id: Some(id),
+                code,
+                ..
+            } if id == "disabled" => {
+                assert_eq!(code, ErrorCode::ActorBusy);
+                break;
+            }
+            ServerMessage::Ack { request_id, .. } if request_id == "disabled" => {
+                panic!("disabled action accepted")
+            }
+            _ => {}
+        }
+    }
+    client.request("after", Request::Snapshot).await;
+    let after = loop {
+        if let ServerMessage::Snapshot { snapshot, .. } = client.receive().await.unwrap() {
+            break snapshot;
+        }
+    };
+    assert_eq!(after.state, before.state);
+    assert_eq!(after.intentions, controlled.intentions);
+    assert_eq!(after.cursor.tick, controlled.cursor.tick);
+    assert_eq!(after.branch, controlled.branch);
+}
+
+#[tokio::test]
 async fn actual_server_process_persists_an_action_and_annotation_across_restart() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("game.json");
     let (child, address) = launch(&path);
-    let (mut socket, _) = timeout(Duration::from_secs(5), connect_async(&address))
+    let (socket, _) = timeout(Duration::from_secs(5), connect_async(&address))
         .await
         .unwrap()
         .unwrap();
+    let mut socket = WireClient::new(socket);
     let hello = ClientMessage::Hello {
         protocol: PROTOCOL_VERSION,
         token: "process-test-token-not-a-real-secret".into(),
@@ -105,34 +255,49 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     };
     let branch = snapshot.branch;
     let commands = [
-        ("acquire", Request::AcquireControl),
+        ("acquire", None),
         (
             "wait",
-            Request::Command {
-                branch: branch.clone(),
-                command: Command::Act {
-                    expected_revision: 0,
-                    action: Action::Wait,
-                },
-            },
+            Some(Command::Act {
+                expected_revision: 0,
+                action: Action::Wait,
+            }),
         ),
         (
             "note",
-            Request::Command {
-                branch: branch.clone(),
-                command: Command::Annotate {
-                    anchor: Anchor::State { revision: 1 },
-                    text: "Remember this after restarting.".into(),
-                    source: ClientSource::User,
-                    audience: Audience::Private,
-                    category: AnnotationCategory::Note,
-                },
-            },
+            Some(Command::Annotate {
+                anchor: Anchor::State { revision: 1 },
+                text: "Remember this after restarting.".into(),
+                source: ClientSource::User,
+                audience: Audience::Private,
+                category: AnnotationCategory::Note,
+            }),
         ),
-        ("save", Request::Save),
+        ("save", None),
     ];
+    let mut wait_context = None;
+    let mut note_context = None;
     let mut wait_admission = None;
-    for (id, request) in commands {
+    let mut note_receipt = None;
+    for (id, command) in commands {
+        let request = if let Some(command) = command {
+            let context = socket.input_context();
+            if id == "wait" {
+                wait_context = Some(context.clone());
+            }
+            if id == "note" {
+                note_context = Some(context.clone());
+            }
+            Request::Command {
+                context,
+                branch: branch.clone(),
+                command,
+            }
+        } else if id == "acquire" {
+            Request::AcquireControl
+        } else {
+            Request::Save
+        };
         let request = ClientMessage::Request {
             request_id: id.into(),
             request,
@@ -148,7 +313,13 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                 ServerMessage::Ack {
                     request_id,
                     receipt,
+                    ..
                 } if request_id == id => {
+                    assert_eq!(receipt.actor(), ActorId(1));
+                    assert_eq!(receipt.branch(), &branch);
+                    if id == "note" {
+                        note_receipt = Some(receipt.clone());
+                    }
                     if id == "wait" {
                         let RequestReceipt::Admitted {
                             intention,
@@ -178,14 +349,23 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
                 other => panic!("{other:?}"),
             }
         }
+        if id == "wait" {
+            let ServerMessage::Update { update } = next_message(&mut socket).await else {
+                panic!("readiness follows resolution")
+            };
+            assert!(
+                matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission)
+            );
+        }
     }
     drop(socket);
     drop(child); // Kill after the explicit durable save acknowledgement.
     let (_resumed, address) = launch(&path);
-    let (mut socket, _) = timeout(Duration::from_secs(5), connect_async(&address))
+    let (socket, _) = timeout(Duration::from_secs(5), connect_async(&address))
         .await
         .unwrap()
         .unwrap();
+    let mut socket = WireClient::new(socket);
     socket
         .send(Message::Text(serde_json::to_string(&hello).unwrap().into()))
         .await
@@ -218,6 +398,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     let retry = ClientMessage::Request {
         request_id: "wait".into(),
         request: Request::Command {
+            context: wait_context.unwrap(),
             branch,
             command: Command::Act {
                 expected_revision: 0,
@@ -235,6 +416,7 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
     assert_eq!(
         message,
         ServerMessage::Ack {
+            context: snapshot.reply_context(),
             request_id: "wait".into(),
             receipt: RequestReceipt::Admitted {
                 actor: ActorId(1),
@@ -245,22 +427,221 @@ async fn actual_server_process_persists_an_action_and_annotation_across_restart(
             },
         }
     );
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ClientMessage::Request {
+                request_id: "note".into(),
+                request: Request::Command {
+                    context: note_context.unwrap(),
+                    branch: snapshot.branch.clone(),
+                    command: Command::Annotate {
+                        anchor: Anchor::State { revision: 1 },
+                        text: "Remember this after restarting.".into(),
+                        source: ClientSource::User,
+                        audience: Audience::Private,
+                        category: AnnotationCategory::Note,
+                    },
+                },
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        next_message(&mut socket).await,
+        ServerMessage::Ack {
+            context: snapshot.reply_context(),
+            request_id: "note".into(),
+            receipt: note_receipt.expect("original immediate receipt"),
+        }
+    );
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ClientMessage::Request {
+                request_id: "after-retry".into(),
+                request: Request::Snapshot,
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let ServerMessage::Snapshot {
+        snapshot: after, ..
+    } = next_message(&mut socket).await
+    else {
+        panic!("snapshot required")
+    };
+    assert_eq!(after.state, snapshot.state);
+    assert_eq!(after.history, snapshot.history);
+    assert_eq!(after.cursor, snapshot.cursor);
 }
 
 /// The next message, past `waiting` signals, which these tests don't watch.
-async fn next_message<S>(socket: &mut S) -> ServerMessage
-where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
+async fn next_message(socket: &mut WireClient) -> ServerMessage {
     loop {
-        let frame = timeout(Duration::from_secs(5), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        match serde_json::from_str(frame.to_text().unwrap()).unwrap() {
+        match socket.receive().await.expect("connected actual server") {
             ServerMessage::Waiting { .. } => continue,
             message => return message,
         }
     }
+}
+
+#[tokio::test]
+async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("recovered-gap.db");
+    let (child, upstream_address) = launch(&path);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let proxy = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut downstream = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (mut upstream, _) = connect_async(upstream_address).await.unwrap();
+        let mut dropped_readiness = false;
+        let mut actions = 0;
+        let mut resets = 0;
+        loop {
+            tokio::select! {
+                frame = downstream.next() => {
+                    let Some(Ok(frame)) = frame else { break; };
+                    if let Message::Text(text) = &frame {
+                        let message: ClientMessage = serde_json::from_str(text).unwrap();
+                        if let ClientMessage::Request { request, .. } = message {
+                            match request {
+                                Request::Command { command: Command::Act { .. }, .. } => actions += 1,
+                                Request::Snapshot => resets += 1,
+                                _ => {},
+                            }
+                        }
+                    }
+                    if upstream.send(frame).await.is_err() { break; }
+                },
+                frame = upstream.next() => {
+                    let Some(Ok(frame)) = frame else { break; };
+                    if let Message::Text(text) = &frame {
+                        let message: ServerMessage = serde_json::from_str(text).unwrap();
+                        if !dropped_readiness && matches!(message, ServerMessage::Update { update }
+                            if matches!(&update.body, UpdateBody::Readiness { readiness } if !readiness.admission)) {
+                            dropped_readiness = true;
+                            continue;
+                        }
+                    }
+                    if downstream.send(frame).await.is_err() { break; }
+                },
+            }
+        }
+        assert!(dropped_readiness);
+        assert_eq!(
+            actions, 1,
+            "accepted gameplay is never replayed during recovery"
+        );
+        assert_eq!(resets, 1, "one recovery owns one snapshot request");
+    });
+    let mut client = tor_client_common::Connection::connect(
+        address,
+        "process-test-token-not-a-real-secret".into(),
+        ActorId(1),
+        "test-recovery",
+    )
+    .await
+    .unwrap();
+    let original_context = client.state.context().clone();
+    let control = client.request(Request::AcquireControl).await.unwrap();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if matches!(client.next().await.unwrap(), ServerMessage::Ack { request_id, .. } if request_id == control) { break; }
+        }
+    }).await.unwrap();
+    // Submit once under confirmed control. Dropping the admission's readiness
+    // update creates a gap while its original acknowledgement remains in flight.
+    let action = client
+        .request(Request::Command {
+            context: client.state.input_context(),
+            branch: client.state.branch().clone(),
+            command: Command::Act {
+                expected_revision: client.state.state().revision,
+                action: Action::Wait,
+            },
+        })
+        .await
+        .unwrap();
+    let mut pending = tor_client_common::PendingRequest::new(action);
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let message = client.next().await.unwrap();
+            let completion = pending.observe(&client, &message);
+            if matches!(
+                &message,
+                ServerMessage::Ack {
+                    receipt: RequestReceipt::Admitted { .. },
+                    ..
+                }
+            ) {
+                assert!(
+                    !client.is_synchronized(),
+                    "the acknowledgement itself must detect the missing permission update"
+                );
+                assert!(
+                    completion.is_none(),
+                    "admission cannot complete input while its context is missing"
+                );
+            }
+            if client.is_recovery_snapshot(&message) {
+                assert!(
+                    matches!(
+                        completion,
+                        Some(tor_client_common::RequestCompletion::Reply(
+                            tor_client_common::ConfirmedReply::Receipt(RequestReceipt::Admitted {
+                                actor: ActorId(1),
+                                ..
+                            })
+                        ))
+                    ),
+                    "original admission acknowledgement must survive stream repair"
+                );
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(client.is_synchronized());
+    assert_eq!(client.state.context().stream, original_context.stream);
+    assert_eq!(client.state.context().epoch, original_context.epoch + 1);
+    assert!(client.state.has_control());
+    assert_eq!(client.state.state().observation.tick, 100);
+    assert!(client.state.intentions().is_empty());
+    let expected = client.state.state().clone();
+    client.close().await.unwrap();
+    timeout(Duration::from_secs(5), proxy)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(child);
+    let (restored_server, restored_address) = launch(&path);
+    let mut restored = tor_client_common::Connection::connect(
+        restored_address
+            .trim_start_matches("ws://")
+            .parse()
+            .unwrap(),
+        "process-test-token-not-a-real-secret".into(),
+        ActorId(1),
+        "test-recovery",
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.state.state(), &expected);
+    assert_eq!(
+        restored
+            .state
+            .history()
+            .iter()
+            .filter(|entry| matches!(entry.content, HistoryContent::Action { .. }))
+            .count(),
+        1
+    );
+    restored.close().await.unwrap();
+    drop(restored_server);
 }

@@ -40,14 +40,16 @@ Send one input object per line, waiting for `ready` before the next command:
 {"type":"request","request":{"type":"acquire_control"}}
 ```
 
-Use an item ID from the received observation. `act` supplies the current branch
-and revision and requires control. `wizard` sends a developer command, in the
+Use an item ID from the received observation. `act` supplies the current input
+context, branch and revision and requires control. `wizard` sends a developer command, in the
 same form as the text client's `wizard` command, and likewise supplies the
 current branch and revision; the server decides whether the account may use it.
-`resume_intention` and `cancel_intention` reference the current disclosed queued
-work, supplying its original opaque identity, branch and revision. They require
-control. Resume is available only for suspended queued work; cancellation is
-available for queued or suspended work. They do not accept actor/identity overrides.
+`resume_intention` and `cancel_intention` reference current disclosed work,
+supplying its original opaque identity, input context, branch and revision. They
+require control. Suspended queued work reuses its queue entry; paused preparation
+needs capacity to re-enter while retaining its identity and spent progress.
+Cancellation supports pending work and running or paused preparation. They do not
+accept actor/identity overrides; the backend validates current availability.
 `request` accepts any structured protocol request. This makes the headless
 client suitable for driving privileged scenario setup directly, without
 launching the text client. Server validation
@@ -61,6 +63,9 @@ Every stdout line is a JSON frame containing:
   or `response` for messages received while a request is pending.
 - `state`: the current validated disclosed state; `branch`, `cursor`, `role`,
   and `has_control` describe this attachment.
+- `readiness`: authoritative admission and disclosed resume/cancel permissions.
+- `input_context`: the current stream/epoch and readiness generation. Explicit
+  protocol commands must include it as `context`, captured when input is built.
 - `history`: up to 100 recent entries disclosed to this identity.
 - `intentions`: current disclosed queued, suspended and running work.
 - `memory`: local last-seen cell contents, described below.
@@ -82,8 +87,8 @@ state without time or network effects. Output can contain the authenticated
 user's private notes, according to the server's normal audience rules.
 
 For gameplay, `ready` acknowledges admission into the simulation queue. Wait for
-the matching intention lifecycle update before asserting effects or submitting
-another action for that actor. A queued or suspended intention occupies the
+the matching intention lifecycle update before asserting effects. Consume its
+following readiness update before capturing context for the next command. A queued or suspended intention occupies the
 actor's queue slot. An immediate request such as `save` or `snapshot` still
 finishes at its matching response.
 

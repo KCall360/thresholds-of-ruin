@@ -1,18 +1,30 @@
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
 use std::collections::BTreeSet;
-use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::time::timeout;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
 use tor_server::{serve, Account, Engine, Scenario, Service, Simulation, SimulationHandle};
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use crate::wire_client::WireClient as Client;
 
-/// The next message, past `waiting` signals, which only some tests watch for
-/// (see [`receive_any`]).
+/// Gameplay-focused tests skip permission metadata. Model/ordering tests use
+/// `receive_metadata` and apply every ordered update.
 async fn receive(client: &mut Client) -> ServerMessage {
+    loop {
+        match receive_metadata(client).await {
+            ServerMessage::Update { update }
+                if matches!(update.body, UpdateBody::Readiness { .. }) =>
+            {
+                continue
+            }
+            message => return message,
+        }
+    }
+}
+
+/// The next message past unordered waiting signals, retaining all stream updates.
+async fn receive_metadata(client: &mut Client) -> ServerMessage {
     loop {
         match receive_any(client).await {
             ServerMessage::Waiting { .. } => continue,
@@ -21,25 +33,14 @@ async fn receive(client: &mut Client) -> ServerMessage {
     }
 }
 async fn receive_any(client: &mut Client) -> ServerMessage {
-    let frame = timeout(Duration::from_secs(5), client.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    serde_json::from_str(frame.to_text().unwrap()).unwrap()
-}
-async fn request(client: &mut Client, id: &str, request: Request) {
-    let msg = ClientMessage::Request {
-        request_id: id.into(),
-        request,
-    };
     client
-        .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
+        .receive()
         .await
-        .unwrap();
+        .expect("connected protocol test client")
 }
 async fn connect(address: &str, token: &str, frontend: &str) -> Client {
-    let (mut client, _) = connect_async(address).await.unwrap();
+    let (socket, _) = connect_async(address).await.unwrap();
+    let mut client = Client::new(socket);
     let hello = ClientMessage::Hello {
         protocol: PROTOCOL_VERSION,
         token: token.into(),
@@ -64,13 +65,15 @@ async fn connect(address: &str, token: &str, frontend: &str) -> Client {
 fn observation(body: UpdateBody, base: &StateView) -> (StateView, Option<Box<HistoryEntry>>) {
     match body {
         UpdateBody::Observation { state, event } => (*state, event),
-        UpdateBody::ObservationDelta { state, event } => (state.apply(base).unwrap(), event),
+        UpdateBody::ObservationDelta { state, event, .. } => (state.apply(base).unwrap(), event),
         other => panic!("{other:?}"),
     }
 }
 
 async fn attach(client: &mut Client) -> Snapshot {
-    request(client, "attach", Request::Attach { actor: ActorId(1) }).await;
+    client
+        .request("attach", Request::Attach { actor: ActorId(1) })
+        .await;
     match receive(client).await {
         ServerMessage::Snapshot { snapshot, .. } => *snapshot,
         other => panic!("{other:?}"),
@@ -89,10 +92,15 @@ async fn completed_action(player: &mut Client, observer: &mut Client, id: &str) 
     let ServerMessage::Update { update: watched } = receive(observer).await else {
         panic!("observer queued lifecycle required")
     };
-    assert_eq!(watched, queued);
+    assert_ne!(watched.context.stream, queued.context.stream);
+    assert_eq!(watched.actor, queued.actor);
+    assert_eq!(watched.branch, queued.branch);
+    assert_eq!(watched.cursor.tick, queued.cursor.tick);
+    assert_eq!(watched.body, queued.body);
     let ServerMessage::Ack {
         request_id,
         receipt,
+        ..
     } = receive(player).await
     else {
         panic!("admission receipt required before effect")
@@ -112,8 +120,32 @@ async fn completed_action(player: &mut Client, observer: &mut Client, id: &str) 
     let ServerMessage::Update { update: watched } = receive(observer).await else {
         panic!("observer effect required")
     };
-    assert_eq!(watched, effect);
-    for client in [player, observer] {
+    assert_ne!(watched.context.stream, effect.context.stream);
+    assert_eq!(watched.actor, effect.actor);
+    assert_eq!(watched.branch, effect.branch);
+    // Permission updates are controller-specific, so stream sequences and delta
+    // base cursors differ while disclosed observations and events remain equal.
+    assert_eq!(watched.cursor.tick, effect.cursor.tick);
+    match (&watched.body, &effect.body) {
+        (
+            UpdateBody::ObservationDelta {
+                base: watched_base,
+                state: watched_state,
+                event: watched_event,
+            },
+            UpdateBody::ObservationDelta { base, state, event },
+        ) => {
+            assert_eq!(watched_base.revision, base.revision);
+            assert_eq!(watched_base.cursor.tick, base.cursor.tick);
+            assert_eq!(watched_state, state);
+            assert_eq!(watched_event, event);
+        }
+        _ => assert_eq!(watched.body, effect.body),
+    }
+    for (client, effect_cursor) in [
+        (&mut *player, effect.cursor),
+        (&mut *observer, watched.cursor),
+    ] {
         let ServerMessage::Update { update } = receive(client).await else {
             panic!("resolution required")
         };
@@ -123,8 +155,12 @@ async fn completed_action(player: &mut Client, observer: &mut Client, id: &str) 
         assert_eq!(resolved.phase, IntentionPhase::Resolved);
         assert_eq!(resolved.intention, status.intention);
         assert_eq!(resolved.entry_id, status.entry_id);
-        assert_eq!(update.cursor.sequence, effect.cursor.sequence + 1);
+        assert_eq!(update.cursor.sequence, effect_cursor.sequence + 1);
     }
+    let ServerMessage::Update { update } = receive_metadata(player).await else {
+        panic!("post-resolution readiness required")
+    };
+    assert!(matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission));
     *effect
 }
 async fn launch() -> (
@@ -173,7 +209,7 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
     let initial = attach(&mut text).await;
     let mut ascii = connect(&address, "alice-test-token", "ascii").await;
     attach(&mut ascii).await;
-    request(&mut text, "acquire", Request::AcquireControl).await;
+    text.request("acquire", Request::AcquireControl).await;
     assert!(matches!(
         receive(&mut text).await,
         ServerMessage::Update { .. }
@@ -186,7 +222,7 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
         receive(&mut ascii).await,
         ServerMessage::Update { .. }
     ));
-    request(&mut ascii, "denied", Request::AcquireControl).await;
+    ascii.request("denied", Request::AcquireControl).await;
     assert!(matches!(
         receive(&mut ascii).await,
         ServerMessage::Error {
@@ -194,10 +230,10 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
             ..
         }
     ));
-    request(
-        &mut text,
+    text.request(
         "take",
         Request::Command {
+            context: text.input_context(),
             branch: initial.branch.clone(),
             command: Command::Act {
                 expected_revision: 0,
@@ -215,26 +251,27 @@ async fn clients_receive_updates_without_polling_and_can_transfer_control() {
     assert_eq!(state.observation.tick, 50);
     assert_eq!(state.revision, 1);
     assert!(event.is_some());
-    request(&mut text, "release", Request::ReleaseControl).await;
+    text.request("release", Request::ReleaseControl).await;
     receive(&mut text).await;
     receive(&mut text).await;
     receive(&mut ascii).await;
-    request(&mut ascii, "acquire", Request::AcquireControl).await;
+    ascii.request("acquire", Request::AcquireControl).await;
     receive(&mut text).await;
     receive(&mut ascii).await;
     receive(&mut ascii).await;
-    request(
-        &mut ascii,
-        "stale",
-        Request::Command {
-            branch: initial.branch,
-            command: Command::Act {
-                expected_revision: 0,
-                action: Action::Wait,
+    ascii
+        .request(
+            "stale",
+            Request::Command {
+                context: ascii.input_context(),
+                branch: initial.branch,
+                command: Command::Act {
+                    expected_revision: 0,
+                    action: Action::Wait,
+                },
             },
-        },
-    )
-    .await;
+        )
+        .await;
     assert!(matches!(
         receive(&mut ascii).await,
         ServerMessage::Error {
@@ -255,10 +292,10 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
     attach(&mut ascii).await;
     let mut bob = connect(&address, "bob-test-token", "ascii").await;
     attach(&mut bob).await;
-    request(
-        &mut text,
+    text.request(
         "note",
         Request::Command {
+            context: text.input_context(),
             branch: initial.branch.clone(),
             command: Command::Annotate {
                 anchor: Anchor::State { revision: 0 },
@@ -285,7 +322,7 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
         ServerMessage::Ack { .. }
     ));
     // Request a snapshot as a deterministic barrier: no private update may precede it.
-    request(&mut bob, "barrier", Request::Snapshot).await;
+    bob.request("barrier", Request::Snapshot).await;
     match receive(&mut bob).await {
         ServerMessage::Snapshot { snapshot, .. } => {
             assert_eq!(snapshot.cursor.sequence, 0);
@@ -333,7 +370,8 @@ async fn authentication_version_and_actor_permissions_are_checked_before_disclos
         (999, "alice-test-token", ErrorCode::VersionMismatch),
         (1, "alice-test-token", ErrorCode::VersionMismatch),
     ] {
-        let (mut socket, _) = connect_async(&address).await.unwrap();
+        let (socket, _) = connect_async(&address).await.unwrap();
+        let mut socket = Client::new(socket);
         let hello = ClientMessage::Hello {
             protocol,
             token: token.into(),
@@ -344,21 +382,22 @@ async fn authentication_version_and_actor_permissions_are_checked_before_disclos
             .await
             .unwrap();
         assert!(
-            matches!(receive(&mut socket).await, ServerMessage::Error { code, .. } if code == expected)
+            matches!(receive(&mut socket).await, ServerMessage::Error { scope: ErrorScope::Transport {}, code, .. } if code == expected)
         );
     }
     let mut client = connect(&address, "alice-test-token", "text").await;
-    request(
-        &mut client,
-        "unauthorized",
-        Request::Attach {
-            actor: ActorId(999),
-        },
-    )
-    .await;
+    client
+        .request(
+            "unauthorized",
+            Request::Attach {
+                actor: ActorId(999),
+            },
+        )
+        .await;
     assert!(matches!(
         receive(&mut client).await,
         ServerMessage::Error {
+            scope: ErrorScope::Unattached {},
             code: ErrorCode::Unauthorized,
             ..
         }
@@ -373,6 +412,7 @@ async fn reconnect_recovers_history_and_duplicate_receipts_without_rebroadcast()
     let mut first = connect(&address, "alice-test-token", "text").await;
     let snapshot = attach(&mut first).await;
     let command = Request::Command {
+        context: first.input_context(),
         branch: snapshot.branch,
         command: Command::Annotate {
             anchor: Anchor::State { revision: 0 },
@@ -382,7 +422,7 @@ async fn reconnect_recovers_history_and_duplicate_receipts_without_rebroadcast()
             category: AnnotationCategory::Note,
         },
     };
-    request(&mut first, "same-request", command.clone()).await;
+    first.request("same-request", command.clone()).await;
     receive(&mut first).await;
     let original = receive(&mut first).await;
     first.close(None).await.unwrap();
@@ -397,9 +437,31 @@ async fn reconnect_recovers_history_and_duplicate_receipts_without_rebroadcast()
             component: "text".into()
         }
     );
-    request(&mut second, "same-request", command).await;
-    assert_eq!(receive(&mut second).await, original);
-    request(&mut second, "barrier", Request::Snapshot).await;
+    second.request("same-request", command).await;
+    let ServerMessage::Ack {
+        context: original_context,
+        receipt: original_receipt,
+        ..
+    } = original
+    else {
+        panic!("original receipt required")
+    };
+    let ServerMessage::Ack {
+        context,
+        request_id,
+        receipt,
+    } = receive(&mut second).await
+    else {
+        panic!("retried receipt required")
+    };
+    assert_eq!(request_id, "same-request");
+    assert_eq!(receipt, original_receipt);
+    assert_eq!(context, resumed.reply_context());
+    assert_ne!(
+        context.input.stream.stream,
+        original_context.input.stream.stream
+    );
+    second.request("barrier", Request::Snapshot).await;
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut second).await else {
         panic!("No duplicate update expected")
     };
@@ -415,6 +477,7 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
     let mut player = connect(&address, "alice-test-token", "text").await;
     let initial = attach(&mut player).await;
     let note = Request::Command {
+        context: player.input_context(),
         branch: initial.branch.clone(),
         command: Command::Annotate {
             anchor: Anchor::State { revision: 0 },
@@ -424,12 +487,14 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
             category: AnnotationCategory::Note,
         },
     };
-    request(&mut player, "original", note.clone()).await;
+    player.request("original", note.clone()).await;
     receive(&mut player).await;
     receive(&mut player).await;
     // Spoofing the frontend name cannot confer player authority.
     let mut spectator = connect(&address, "spectator-test-token", "text").await;
-    request(&mut spectator, "before-attach", Request::AcquireControl).await;
+    spectator
+        .request("before-attach", Request::AcquireControl)
+        .await;
     assert!(matches!(
         receive(&mut spectator).await,
         ServerMessage::Error {
@@ -437,14 +502,14 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
             ..
         }
     ));
-    request(
-        &mut spectator,
-        "wrong-actor",
-        Request::Attach {
-            actor: ActorId(999),
-        },
-    )
-    .await;
+    spectator
+        .request(
+            "wrong-actor",
+            Request::Attach {
+                actor: ActorId(999),
+            },
+        )
+        .await;
     assert!(matches!(
         receive(&mut spectator).await,
         ServerMessage::Error {
@@ -461,6 +526,7 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
         (
             "door",
             Request::Command {
+                context: spectator.input_context(),
                 branch: initial.branch.clone(),
                 command: Command::Act {
                     expected_revision: 0,
@@ -476,6 +542,7 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
         (
             "act",
             Request::Command {
+                context: spectator.input_context(),
                 branch: initial.branch,
                 command: Command::Act {
                     expected_revision: 0,
@@ -484,7 +551,7 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
             },
         ),
     ] {
-        request(&mut spectator, id, mutation).await;
+        spectator.request(id, mutation).await;
         assert!(matches!(
             receive(&mut spectator).await,
             ServerMessage::Error {
@@ -493,26 +560,30 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
             }
         ));
     }
-    request(&mut spectator, "snapshot", Request::Snapshot).await;
+    spectator.request("snapshot", Request::Snapshot).await;
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut spectator).await else {
         panic!()
     };
-    assert_eq!(*snapshot, before);
-    request(
-        &mut spectator,
-        "history",
-        Request::History {
-            before: None,
-            limit: 1,
-        },
-    )
-    .await;
+    assert_eq!(snapshot.context.stream, before.context.stream);
+    assert_eq!(snapshot.context.epoch, before.context.epoch + 1);
+    let mut expected = before.clone();
+    expected.context = snapshot.context.clone();
+    assert_eq!(*snapshot, expected);
+    spectator
+        .request(
+            "history",
+            Request::History {
+                before: None,
+                limit: 1,
+            },
+        )
+        .await;
     let ServerMessage::History { page, .. } = receive(&mut spectator).await else {
         panic!()
     };
     assert_eq!(page, before.history);
     // Denied acquisition/release must not change the player's ability to control.
-    request(&mut player, "control", Request::AcquireControl).await;
+    player.request("control", Request::AcquireControl).await;
     receive(&mut player).await;
     assert!(matches!(
         receive(&mut player).await,
@@ -537,7 +608,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     assert!(!serde_json::to_string(&seen)
         .unwrap()
         .contains("known_places"));
-    request(&mut player, "control", Request::AcquireControl).await;
+    player.request("control", Request::AcquireControl).await;
     receive(&mut player).await;
     receive(&mut player).await;
     receive(&mut spectator).await;
@@ -556,13 +627,14 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     for (revision, action) in actions.into_iter().enumerate() {
         let id = format!("action-{revision}");
         let command = Request::Command {
+            context: player.input_context(),
             branch: initial.branch.clone(),
             command: Command::Act {
                 expected_revision: revision as u64,
                 action: action.clone(),
             },
         };
-        request(&mut player, &id, command.clone()).await;
+        player.request(&id, command.clone()).await;
         let watched = completed_action(&mut player, &mut spectator, &id).await;
         let event;
         (state, event) = observation(watched.body, &state);
@@ -572,13 +644,15 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             matches!(&entry.content, HistoryContent::Action { action: recorded, .. } if recorded == &action)
         );
         entries.push(entry);
-        request(&mut player, &id, command).await;
+        player.request(&id, command).await;
         assert!(matches!(
             receive(&mut player).await,
             ServerMessage::Ack { .. }
         ));
     }
-    request(&mut spectator, "release-other", Request::ReleaseControl).await;
+    spectator
+        .request("release-other", Request::ReleaseControl)
+        .await;
     assert!(matches!(
         receive(&mut spectator).await,
         ServerMessage::Error {
@@ -586,20 +660,21 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             ..
         }
     ));
-    request(
-        &mut player,
-        "invalid",
-        Request::Command {
-            branch: initial.branch.clone(),
-            command: Command::Act {
-                expected_revision: 3,
-                action: Action::Move {
-                    direction: Direction::Up,
+    player
+        .request(
+            "invalid",
+            Request::Command {
+                context: player.input_context(),
+                branch: initial.branch.clone(),
+                command: Command::Act {
+                    expected_revision: 3,
+                    action: Action::Move {
+                        direction: Direction::Up,
+                    },
                 },
             },
-        },
-    )
-    .await;
+        )
+        .await;
     assert!(matches!(
         receive(&mut player).await,
         ServerMessage::Error {
@@ -607,7 +682,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
             ..
         }
     ));
-    request(&mut spectator, "barrier", Request::Snapshot).await;
+    spectator.request("barrier", Request::Snapshot).await;
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut spectator).await else {
         panic!("No duplicate or rejected action updates")
     };
@@ -619,15 +694,15 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
     let snapshot = attach(&mut resumed).await;
     assert_eq!(snapshot.cursor.sequence, 0);
     assert_eq!(snapshot.history.entries, entries);
-    request(
-        &mut resumed,
-        "older",
-        Request::History {
-            before: Some(entries[2].id.clone()),
-            limit: 1,
-        },
-    )
-    .await;
+    resumed
+        .request(
+            "older",
+            Request::History {
+                before: Some(entries[2].id.clone()),
+                limit: 1,
+            },
+        )
+        .await;
     let ServerMessage::History { page, .. } = receive(&mut resumed).await else {
         panic!()
     };
@@ -656,9 +731,151 @@ async fn each_client_is_told_whose_move_it_is_when_play_stops() {
     let mut watcher = connect(&address, "bob-test-token", "text").await;
     attach(&mut watcher).await;
     assert_eq!(waiting(&mut watcher).await, Waiting::Unclaimed);
-    request(&mut player, "acquire", Request::AcquireControl).await;
+    player.request("acquire", Request::AcquireControl).await;
     assert_eq!(waiting(&mut player).await, Waiting::You);
     assert_eq!(waiting(&mut watcher).await, Waiting::Others);
     stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn attachment_contexts_are_distinct_and_snapshot_resets_do_not_change_game_state() {
+    let (address, _, stop, server) = launch().await;
+    let mut first = connect(&address, "alice-test-token", "headless").await;
+    let initial = attach(&mut first).await;
+    let mut second = connect(&address, "spectator-test-token", "headless").await;
+    let watched = attach(&mut second).await;
+    assert_ne!(initial.context.stream, watched.context.stream);
+    assert_eq!(initial.context.epoch, 1);
+    assert_eq!(watched.context.epoch, 1);
+    let mut model = tor_client_common::ClientState::from_snapshot(initial.clone()).unwrap();
+    first.request("reset", Request::Snapshot).await;
+    let ServerMessage::Snapshot { snapshot, .. } = receive_metadata(&mut first).await else {
+        panic!("reset snapshot required")
+    };
+    assert_eq!(snapshot.context.stream, initial.context.stream);
+    assert_eq!(snapshot.context.epoch, 2);
+    assert_eq!(snapshot.state, initial.state);
+    assert_eq!(snapshot.cursor, initial.cursor);
+    assert_eq!(snapshot.history, initial.history);
+    model.replace_snapshot(*snapshot).unwrap();
+    first.request("acquire", Request::AcquireControl).await;
+    let ServerMessage::Update { update } = receive_metadata(&mut first).await else {
+        panic!("control update required")
+    };
+    assert_eq!(update.context, *model.context());
+    model.apply(*update).unwrap();
+    assert!(model.has_control());
+    let ServerMessage::Update { update } = receive_metadata(&mut first).await else {
+        panic!("readiness required before acknowledgement")
+    };
+    assert!(matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission));
+    model.apply(*update).unwrap();
+    assert!(matches!(
+        receive_metadata(&mut first).await,
+        ServerMessage::Ack { .. }
+    ));
+    let ServerMessage::Update { update } = receive_metadata(&mut second).await else {
+        panic!("observer control update required")
+    };
+    assert_eq!(update.context, watched.context);
+    assert!(matches!(
+        update.body,
+        UpdateBody::Control { has_control: false }
+    ));
+    first.close(None).await.unwrap();
+    second.close(None).await.unwrap();
+    let _ = stop.send(());
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn deltas_follow_each_attachments_last_observation_across_control_and_reset() {
+    let (address, _, stop, server) = launch().await;
+    let mut player = connect(&address, "alice-test-token", "headless").await;
+    let mut player_state =
+        tor_client_common::ClientState::from_snapshot(attach(&mut player).await).unwrap();
+    let mut observer = connect(&address, "spectator-test-token", "headless").await;
+    let mut observer_state =
+        tor_client_common::ClientState::from_snapshot(attach(&mut observer).await).unwrap();
+    player.request("control", Request::AcquireControl).await;
+    let ServerMessage::Update { update } = receive_metadata(&mut player).await else {
+        panic!("control required")
+    };
+    player_state.apply(*update).unwrap();
+    let ServerMessage::Update { update } = receive_metadata(&mut player).await else {
+        panic!("readiness required before acknowledgement")
+    };
+    assert!(matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission));
+    player_state.apply(*update).unwrap();
+    assert!(matches!(
+        receive_metadata(&mut player).await,
+        ServerMessage::Ack { .. }
+    ));
+    let ServerMessage::Update { update } = receive_metadata(&mut observer).await else {
+        panic!("control required")
+    };
+    observer_state.apply(*update).unwrap();
+    for round in 0..2 {
+        player
+            .request(
+                &format!("wait-{round}"),
+                Request::Command {
+                    context: player_state.input_context(),
+                    branch: player_state.branch().clone(),
+                    command: Command::Act {
+                        expected_revision: player_state.state().revision,
+                        action: Action::Wait,
+                    },
+                },
+            )
+            .await;
+        for model_and_client in [
+            (&mut player_state, &mut player),
+            (&mut observer_state, &mut observer),
+        ] {
+            let (model, client) = model_and_client;
+            let mut saw_delta = false;
+            loop {
+                match receive_metadata(client).await {
+                    ServerMessage::Ack { .. } => continue,
+                    ServerMessage::Update { update } => {
+                        if let UpdateBody::ObservationDelta { base, .. } = &update.body {
+                            assert_eq!(*base, model.observation_base());
+                            saw_delta = true;
+                        }
+                        let resolved = matches!(&update.body, UpdateBody::Intention { status } if status.phase == IntentionPhase::Resolved);
+                        model.apply(*update).unwrap();
+                        if resolved {
+                            break;
+                        }
+                    }
+                    message => panic!("unexpected message: {message:?}"),
+                }
+            }
+            assert!(saw_delta);
+        }
+        let ServerMessage::Update { update } = receive_metadata(&mut player).await else {
+            panic!("readiness follows resolved lifecycle")
+        };
+        assert!(matches!(&update.body, UpdateBody::Readiness { readiness } if readiness.admission));
+        player_state.apply(*update).unwrap();
+        assert_eq!(player_state.state(), observer_state.state());
+        if round == 0 {
+            player.request("reset", Request::Snapshot).await;
+            let ServerMessage::Snapshot { snapshot, .. } = receive_metadata(&mut player).await
+            else {
+                panic!("reset required")
+            };
+            player_state.replace_snapshot(*snapshot).unwrap();
+            assert_ne!(
+                player_state.observation_base(),
+                observer_state.observation_base()
+            );
+        }
+    }
+    player.close(None).await.unwrap();
+    observer.close(None).await.unwrap();
+    let _ = stop.send(());
     server.await.unwrap().unwrap();
 }

@@ -62,6 +62,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.role = tor_protocol::AccessRole::Player;
             app.set_state(
                 tor_client_common::ClientState::from_snapshot(tor_protocol::Snapshot {
+                    readiness: tor_protocol::Readiness {
+                        revision: 0,
+                        admission: false,
+                        resume: vec![],
+                        cancel: vec![],
+                    },
+                    context: fixture_context(),
                     intentions: Vec::new(),
                     travel: None,
                     actor,
@@ -114,6 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 transfer_ms.push(start.elapsed().as_secs_f64() * 1000.);
                 let state = engine.state(actor)?;
                 let update = tor_protocol::StreamUpdate {
+                    context: fixture_context(),
                     actor,
                     branch: branch.clone(),
                     cursor: tor_protocol::StreamCursor {
@@ -186,4 +194,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
+    }
 }

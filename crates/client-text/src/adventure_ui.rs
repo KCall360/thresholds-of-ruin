@@ -76,6 +76,11 @@ pub async fn run(mut connection: Connection, observe: bool) -> Result<(), Error>
                     }
                     tor_client_common::FirstReady::Local(line) => {
                         let Some(line) = line else { break; };
+                        if !connection.is_synchronized() {
+                            show("Resynchronizing; input was not sent.");
+                            prompt()?;
+                            continue;
+                        }
                         let outcome = engine.play(&mut connection, &line?).await?;
                         shown = connection.state.state().clone();
                         match outcome {

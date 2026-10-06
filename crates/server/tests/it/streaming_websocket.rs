@@ -1,45 +1,23 @@
 //! Region streaming over real WebSocket connections: clients attached to an
 //! actor whose region leaves the loaded world. See docs/region-streaming.md.
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::time::timeout;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
 use tor_server::{scenario_package, serve, Account, Engine, Service, Simulation, Streaming};
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use crate::wire_client::WireClient as Client;
 
 async fn receive(client: &mut Client) -> Option<ServerMessage> {
-    let frame = timeout(Duration::from_secs(5), client.next())
-        .await
-        .ok()??
-        .ok()?;
-    match frame {
-        Message::Text(text) => serde_json::from_str(&text).ok(),
-        _ => None,
-    }
+    client.receive().await
 }
-
-async fn send(client: &mut Client, id: &str, request: Request) {
-    let message = ClientMessage::Request {
-        request_id: id.into(),
-        request,
-    };
-    client
-        .send(Message::Text(
-            serde_json::to_string(&message).unwrap().into(),
-        ))
-        .await
-        .unwrap();
-}
-
 async fn connect(address: &str, token: &str) -> Client {
-    let (mut client, _) = connect_async(address).await.unwrap();
+    let (socket, _) = connect_async(address).await.unwrap();
+    let mut client = Client::new(socket);
     let hello = ClientMessage::Hello {
         protocol: PROTOCOL_VERSION,
         token: token.into(),
@@ -70,13 +48,14 @@ impl Player {
         self.step += 1;
         let id = format!("step-{}", self.step);
         let request = Request::Command {
+            context: self.client.input_context(),
             branch: self.branch.clone(),
             command: Command::Act {
                 expected_revision: self.state.revision,
                 action: Action::Move { direction },
             },
         };
-        send(&mut self.client, &id, request).await;
+        self.client.request(&id, request).await;
         let mut admitted = None;
         loop {
             match receive(&mut self.client)
@@ -93,8 +72,12 @@ impl Player {
                             if admitted.as_ref() == Some(&status.intention) =>
                         {
                             match status.phase {
-                                IntentionPhase::Resolved => return None,
+                                IntentionPhase::Resolved => {
+                                    self.client.resolution_readiness().await;
+                                    return None;
+                                }
                                 IntentionPhase::Failed => {
+                                    self.client.resolution_readiness().await;
                                     return Some((
                                         ErrorCode::InvalidAction,
                                         "Queued move failed".into(),
@@ -109,6 +92,7 @@ impl Player {
                 ServerMessage::Ack {
                     request_id,
                     receipt,
+                    ..
                 } if request_id == id => {
                     let RequestReceipt::Admitted { intention, .. } = receipt else {
                         panic!("gameplay admission receipt required")
@@ -119,6 +103,7 @@ impl Player {
                     request_id: Some(request_id),
                     code,
                     message,
+                    ..
                 } if request_id == id => return Some((code, message)),
                 _ => {}
             }
@@ -162,11 +147,13 @@ async fn a_spectator_whose_actor_leaves_the_loaded_world_is_detached_not_the_pla
     }));
 
     let mut client = connect(&address, "alice-test-token").await;
-    send(&mut client, "attach", Request::Attach { actor: ActorId(1) }).await;
+    client
+        .request("attach", Request::Attach { actor: ActorId(1) })
+        .await;
     let Some(ServerMessage::Snapshot { snapshot, .. }) = receive(&mut client).await else {
         panic!("expected a snapshot")
     };
-    send(&mut client, "control", Request::AcquireControl).await;
+    client.acquire_control("control").await;
     let mut player = Player {
         client,
         state: snapshot.state,
@@ -179,12 +166,9 @@ async fn a_spectator_whose_actor_leaves_the_loaded_world_is_detached_not_the_pla
 
     // The guard's hall is loaded now, so a spectator can watch the guard.
     let mut spectator = connect(&address, "bob-test-token").await;
-    send(
-        &mut spectator,
-        "attach",
-        Request::Attach { actor: ActorId(2) },
-    )
-    .await;
+    spectator
+        .request("attach", Request::Attach { actor: ActorId(2) })
+        .await;
     assert!(matches!(
         receive(&mut spectator).await,
         Some(ServerMessage::Snapshot { .. })

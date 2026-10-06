@@ -1,4 +1,4 @@
-"""Real clients: delayed delivery, gap/invalid-state rejection, and relaunch."""
+"""Real clients: delayed delivery, atomic gap/invalid-state repair, and relaunch."""
 import unittest
 from stream_relay import StreamRelay
 
@@ -46,19 +46,24 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertEqual(caught_up['narration'], ['Time passes.'])
         else:
             # The four waits arrive together and are told as one passage.
-            slow.until(lambda line: 'Time passes.' in line)
+            passage = slow.until(lambda line: line == '> ')
+            self.assertIn('Time passes.', passage)
 
+        relay.repair_gate.clear()
         relay.drop_observation.set()
         self.act(player, {'type': 'wait'})
         self.assertTrue(relay.dropped.wait(5))
+        self.assertTrue(relay.repair_held.wait(5), 'Client did not request a repair snapshot')
+        self.assert_frozen(kind, slow, initial=caught_up if kind == 'ascii' else None)
+        # Continue authoritative play while the single repair frame is held.
         final = self.act(player, {'type': 'wait'})
-        if kind == 'ascii':
-            failed = self.ascii_frame(slow, lambda f: not f['connected'])
-            self.assertIn('SequenceMismatch', failed['status'])
-            self.assertEqual(failed['state']['observation']['tick'], 400)
-        else:
-            slow.until(lambda line: 'SequenceMismatch' in line)
-        self.assertNotEqual(slow.child.wait(timeout=15), 0)
+        self.assertIsNone(final['error'])
+        self.assertEqual(final['state']['observation']['tick'], 600)
+        relay.repair_gate.set()
+        self.assert_recovered(kind, slow, final)
+        self.assertEqual(relay.attachments, 1)
+        self.assertEqual(relay.repairs, 1)
+        slow.stop()
 
         replacement, initial = self.playable(kind, self.address)
         if kind == 'ascii':
@@ -75,6 +80,31 @@ class StreamRecoveryProcesses(ProcessTestCase):
             self.assertIn('Spectator access is read-only', initial)
         self.assertIsNone(self.act(player, {'type': 'wait'})['error'])
 
+    def assert_frozen(self, kind, client, *, initial):
+        self.assertIsNone(client.child.poll(), 'Recoverable stream error killed the client')
+        if kind == 'ascii':
+            # A local presentation event makes a frame without sending gameplay.
+            client.child.stdin.write('{"type":"key","key":"places"}\n')
+            client.child.stdin.flush()
+            held = self.ascii_frame(client, lambda f: f['input_done'] == 'places')
+            self.assertTrue(held['connected'])
+            self.assertEqual(held['state'], initial['state'])
+            self.assertEqual(held['history'], initial['history'])
+
+    def assert_recovered(self, kind, client, final):
+        if kind == 'ascii':
+            recovered = self.ascii_frame(client, lambda f:
+                f['connected'] and f['state'] == final['state'] and f['history'] == final['history'])
+            self.assertFalse(recovered['has_control'])
+        else:
+            client.until(lambda line: line == '> ')
+            client.child.stdin.write('history\n')
+            client.child.stdin.flush()
+            history = client.until(lambda line: line == '> ')
+            for entry in final['history']:
+                self.assertIn(entry['id'], history)
+        self.assertIsNone(client.child.poll(), 'Repair must retain the original client process')
+
     def test_ascii_delayed_delivery_gap_and_relaunch(self):
         self.exercise('ascii')
 
@@ -87,18 +117,28 @@ class StreamRecoveryProcesses(ProcessTestCase):
         relay = StreamRelay(self.address)
         self.addCleanup(relay.close)
         spectator, initial = self.playable(kind, relay.address)
+        relay.repair_gate.clear()
         getattr(relay, corruption).set()
         final = self.act(player, {'type': 'wait'})
         self.assertIsNone(final['error'])
         self.assertTrue(relay.corrupted.wait(5), 'No actual delta was corrupted')
+        self.assertTrue(relay.repair_held.wait(5), 'Client did not request a repair snapshot')
+        self.assert_frozen(kind, spectator, initial=initial)
+        relay.repair_gate.set()
+        self.assert_recovered(kind, spectator, final)
+        # Subsequent authoritative updates must work on the same attachment.
+        final = self.act(player, {'type': 'wait'})
+        self.assertIsNone(final['error'])
         if kind == 'ascii':
-            failed = self.ascii_frame(spectator, lambda f: not f['connected'])
-            self.assertIn('InconsistentState', failed['status'])
-            self.assertEqual(failed['state'], initial['state'])
-            self.assertEqual(failed['history'], initial['history'])
+            continued = self.ascii_frame(spectator, lambda f: f['state'] == final['state'])
+            self.assertEqual(continued['history'], final['history'])
+            self.assertTrue(continued['connected'])
         else:
-            spectator.until(lambda line: 'InconsistentState' in line)
-        self.assertNotEqual(spectator.child.wait(timeout=15), 0)
+            passage = spectator.until(lambda line: line == '> ')
+            self.assertIn('Time passes.', passage)
+        self.assertEqual(relay.attachments, 1)
+        self.assertEqual(relay.repairs, 1)
+        spectator.stop()
         replacement, recovered = self.playable(kind, self.address)
         if kind == 'ascii':
             self.assertEqual(recovered['state'], final['state'])

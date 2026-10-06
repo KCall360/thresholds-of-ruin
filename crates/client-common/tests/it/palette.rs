@@ -58,8 +58,26 @@ async fn palette_request(server: &mut Server) -> String {
     }
 }
 
-fn palette(request_id: Option<String>, revision: u64, body: PaletteBody) -> ServerMessage {
+fn palette(
+    disclosed: u64,
+    request_id: Option<String>,
+    revision: u64,
+    body: PaletteBody,
+) -> ServerMessage {
     ServerMessage::Palette {
+        context: ReplyContext {
+            input: InputContext {
+                stream: super::stream_context(0),
+                readiness_revision: 0,
+            },
+            actor: ActorId(1),
+            branch: BranchId("branch-1".into()),
+            cursor: StreamCursor {
+                sequence: disclosed,
+                tick: disclosed,
+            },
+            revision: disclosed,
+        },
         request_id,
         palette: PaletteUpdate { revision, body },
     }
@@ -74,6 +92,7 @@ fn full(names: &[&str]) -> PaletteBody {
 fn update(sequence: u64, names: &[&str]) -> ServerMessage {
     ServerMessage::Update {
         update: Box::new(StreamUpdate {
+            context: super::stream_context(0),
             actor: ActorId(1),
             branch: BranchId("branch-1".into()),
             cursor: StreamCursor {
@@ -114,6 +133,13 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
             Some(ClientMessage::Request { .. })
         ));
         let snapshot = Snapshot {
+            readiness: tor_protocol::Readiness {
+                revision: 0,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            },
+            context: super::stream_context(0),
             intentions: Vec::new(),
             actor: ActorId(1),
             branch: BranchId("branch-1".into()),
@@ -138,10 +164,15 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
         )
         .await;
         // The attach palette, then a delta that follows it.
-        send(&mut server, palette(None, 1, full(&["terrain.floor.cave"]))).await;
+        send(
+            &mut server,
+            palette(0, None, 1, full(&["terrain.floor.cave"])),
+        )
+        .await;
         send(
             &mut server,
             palette(
+                0,
                 None,
                 2,
                 PaletteBody::Delta {
@@ -156,6 +187,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
         send(
             &mut server,
             palette(
+                0,
                 None,
                 4,
                 PaletteBody::Delta {
@@ -169,7 +201,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
         let id = palette_request(&mut server).await;
         send(
             &mut server,
-            palette(Some(id), 5, full(&["terrain.floor.cave", "item.coin"])),
+            palette(0, Some(id), 5, full(&["terrain.floor.cave", "item.coin"])),
         )
         .await;
         // An asset the palette lacks: one request, even when it's still
@@ -178,7 +210,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
         let id = palette_request(&mut server).await;
         send(
             &mut server,
-            palette(Some(id), 6, full(&["terrain.floor.cave"])),
+            palette(1, Some(id), 6, full(&["terrain.floor.cave"])),
         )
         .await;
         send(&mut server, update(2, &["creature.rat"])).await;

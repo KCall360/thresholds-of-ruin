@@ -3,6 +3,7 @@ use tor_protocol::*;
 
 fn snapshot() -> Snapshot {
     serde_json::from_str(r#"{
+        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},"context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":0},
         "actor":1,"branch":"branch-1","cursor":{"sequence":0,"tick":0},"has_control":false, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":0,"observation":{
@@ -15,6 +16,7 @@ fn snapshot() -> Snapshot {
 
 fn note(sequence: u64) -> StreamUpdate {
     StreamUpdate {
+        context: super::stream_context(0),
         actor: ActorId(1),
         branch: BranchId("branch-1".into()),
         cursor: StreamCursor { sequence, tick: 0 },
@@ -48,6 +50,7 @@ fn notes_advance_stream_order_but_not_action_revision_or_observation() {
     assert_eq!(model.history().len(), 1);
     model
         .apply(StreamUpdate {
+            context: model.context().clone(),
             actor: ActorId(1),
             branch: initial.branch,
             cursor: StreamCursor {

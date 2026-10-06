@@ -9,8 +9,8 @@ pub mod ai;
 pub mod combat;
 mod intention;
 pub use intention::{
-    IntentionExecution, IntentionId, IntentionOrigin, IntentionState, IntentionWork,
-    MovementContext, QueuedIntention,
+    IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
+    IntentionOrigin, IntentionState, IntentionWork, MovementContext, QueuedIntention,
 };
 mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};

@@ -145,9 +145,9 @@ async fn connection(
 ) {
     let config = WebSocketConfig::default()
         .write_buffer_size(0)
-        .max_write_buffer_size(16 * 1024 * 1024 + 64 * 1024)
-        .max_message_size(Some(16 * 1024))
-        .max_frame_size(Some(16 * 1024));
+        .max_write_buffer_size(MAX_RESPONSE_BYTES + 64 * 1024)
+        .max_message_size(Some(MAX_REQUEST_BYTES))
+        .max_frame_size(Some(MAX_REQUEST_BYTES));
     let upgrade = accept_hdr_async_with_config(socket, native_origin, Some(config));
     let Ok(Ok(mut socket)) = timeout(IO_TIMEOUT, upgrade).await else {
         return;
@@ -274,6 +274,7 @@ async fn send_error(
     message: &str,
 ) {
     let response = ServerMessage::Error {
+        scope: tor_protocol::ErrorScope::Transport {},
         request_id: None,
         code,
         message: message.into(),
@@ -347,8 +348,17 @@ mod tests {
         Arc<tokio::sync::Notify>,
     ) {
         let message = ServerMessage::Ack {
+            context: serde_json::from_value(serde_json::json!({
+                "input":{"stream":{"stream":"transport-test","epoch":0},"readiness_revision":0},
+                "actor":1,"branch":"transport-test","cursor":{"sequence":0,"tick":0},"revision":0
+            }))
+            .unwrap(),
             request_id: "inflight".into(),
-            receipt: tor_protocol::RequestReceipt::Immediate { entry_id: None },
+            receipt: tor_protocol::RequestReceipt::Immediate {
+                actor: tor_protocol::ActorId(1),
+                branch: tor_protocol::BranchId("transport-test".into()),
+                entry_id: None,
+            },
         };
         let bytes = serde_json::to_vec(&message).unwrap().len();
         let pool = Arc::new(crate::outbound::Pool::new(crate::OutboundLimits {

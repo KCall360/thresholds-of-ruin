@@ -163,16 +163,79 @@ AI build with matching scenario files; previous builds and saves remain preserve
 AI decisions use typed backend admissions and the shared executor without RPC
 receipts. Extra saved bytes, slower restart and persistence tails remain open.
 
-**Native travel integration (under verification).** The current branch admits
-region-local journey steps and executes them through the shared simulation queue.
-Progress follows committed linked outcomes. Controller/hazard checks, native
-cancellation, startup settlement and strict journal/checkpoint linkage are
-implemented. Storage rejection/reopen and actual-process linked-journal checks
-pass. Full, performance and both-platform publication gates remain pending.
-The host mouse test is blocked by Windows lock screen under the maintainer's
-existing local mouse waiver; retain the test and report that limitation.
+**Native travel integration (merged, PR #68).** Journey steps admit private
+region-local work and execute through the shared simulation queue; progress follows
+committed linked outcomes. Required Windows/Linux CI passed on the final commit.
+The three desktop launchers now use the verified immutable native travel build.
+Local verification retains the reported LockApp mouse limitation under the
+maintainer's waiver; ordinary CI coverage passed. Persistence and restore timing
+tails remain open, and no broad performance improvement is claimed.
+
+**Stream recovery (in progress).** Protocol contexts and exact observation bases
+and bounded shared transport resynchronization are implemented with failing-first,
+shared-client, WebSocket, native network-worker and actual-process coverage.
+Immediate receipts now retain their journal actor/branch across rewind and restart;
+shared request tracking preserves confirmed replies through recovery. Simulation
+queue/recovery availability now shares the actual resume/cancel validators and
+feeds lifecycle disclosure. Required snapshot readiness and ordered permission
+updates now combine that availability with session authority and travel policy;
+focused control/queue, shared-client, wire and actual-process coverage passed.
+Mandatory originating command contexts now reject stale ownership/reset/stream
+and unpublished generations after authorized receipt lookup. Actor readiness
+queries are shared per publication pass; only client removals repeat it.
+Native/headless admission and native resume/cancel controls honor disclosed
+permissions; queued native commands also reject stale authority generations before
+sending. Shared pending requests retain typed receipts/errors instead of copying
+query payloads; client and actual-process recovery regressions passed.
+Request processing returns typed receipts to a common permission-before-reply
+publication boundary. Output disconnects trigger a conditional follow-up pass;
+history/palette replies share that boundary, and deferred save acknowledgements
+share a batch pass without a nested request refresh. Failing-first query-order
+and output-pressure
+regression and session/integration coverage passed.
+Successful Ack/history/palette messages now require current reply context built
+from cached disclosure, independently of original receipt identity. Schema, client,
+real wire recording, session, WebSocket and actual-process checks passed. Shared
+transport validation now repairs mismatched boundaries, preserves original
+receipts and quarantines query payloads; foreign actor/attachment identities fail
+even during repair. Failing-first transport and actual-process checks passed.
+Errors now require explicit transport/unattached/attached scope. Host errors
+capture cached disclosure; the shared connection validates scoped rejections and
+retains them through repair. Schema/client, all server library, WebSocket and
+actual-process checks passed.
+Fresh gameplay now enforces the same published admission/resume/cancel permissions,
+after original receipt resolution and context validation. Failing-first disabled
+admission/recovery regressions, server library, WebSocket and actual-process checks
+passed; denied recovery preserves the original work for later permitted control.
+Shared client requests now use the same bounded JSON encoder as server output.
+Protocol request/response byte ceilings also bound fragmented response assembly.
+Focused codec, shared-client and output-lease regressions passed; full remains
+required before publication. Text-client input and pacing changes remain deferred.
+Its existing gameplay completion now consumes the permission boundary before
+chaining input, retaining known failures on delayed permission delivery. Failing-first
+and original adventure/door/dungeon process assertions passed. The completed full run passed all 824 Rust tests in each profile and every
+application check except the expressly waived native mouse test blocked by the
+Windows overlay: debug Python passed 252 of 253 tests and release applications
+passed 134 of 135. Recovery process checks prove bounded same-connection repair,
+unchanged pre-repair state/history, continued delivery and independent relaunch
+coverage. Three interleaved release comparison rounds validated all eighteen runs;
+operation and retained-byte counts matched. Their timing limits are recorded in
+[the refactor plan](docs/refactoring.md#stream-context-release-comparison).
+Subsequent real-socket cancellation regressions exposed lost observation delivery
+under automatic palette query backpressure. Shared stored send phases now retain
+that delivery exactly once and keep playback active; shared-client, application
+recovery and palette checks passed. Refreshed full verification includes that
+correction: all Rust tests and application checks passed except the expressly
+waived native mouse check in each profile. A second eighteen-run comparison
+validated on the corrected code, with identical counts; both timing sets and
+adverse save results are recorded in the plan. This full is qualified local
+evidence, not an
+unqualified full pass; ordinary complete
+Windows/Linux CI remains required before merging.
+Recovery hardening and the other
+[work sequences](docs/refactoring.md#work-sequence) stay in scope.
+Full protocol verification and final-commit CI remain required before publication.
 Scenario certificates must match the current [format registry](docs/milestones.md).
-Keep desktop deployment pinned to the published AI build while travel is unfinished.
 
 The maintainer requires clean, robust, rational code. Review each increment for
 clear ownership, explicit domain states, cohesive interfaces and repeated rules.

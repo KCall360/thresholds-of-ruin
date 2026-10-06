@@ -5,6 +5,62 @@ mod intention_admission_tests {
     use super::*;
 
     #[test]
+    fn immediate_receipt_retry_retains_its_original_actor_and_branch_after_rewind() {
+        let actor = ActorId(1);
+        let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
+        engine.enable_wizard().unwrap();
+        let branch = engine.branch().clone();
+        let command = Command::Annotate {
+            anchor: Anchor::State {
+                revision: engine.revision(actor).unwrap(),
+            },
+            text: "Original timeline note".into(),
+            source: tor_protocol::ClientSource::User,
+            audience: tor_protocol::Audience::Private,
+            category: tor_protocol::AnnotationCategory::Note,
+        };
+        let original = engine
+            .command(
+                "player",
+                "test",
+                actor,
+                "original-note",
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        engine
+            .command(
+                "wizard",
+                "test",
+                actor,
+                "rewind",
+                &branch,
+                Command::Wizard {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    operation: WizardOperation::Rewind { target: None },
+                },
+            )
+            .unwrap();
+        assert_ne!(engine.branch(), &branch);
+        let before = engine.state(actor).unwrap();
+        let retried = engine
+            .retry("player", actor, "original-note", &branch, &command)
+            .unwrap()
+            .unwrap();
+        assert!(retried.duplicate);
+        let wire = serde_json::to_value(engine.request_receipt(&retried)).unwrap();
+        assert_eq!(wire["type"], "immediate");
+        assert_eq!(
+            wire["entry_id"],
+            serde_json::to_value(&original.entry.id).unwrap()
+        );
+        assert_eq!(wire["actor"], serde_json::to_value(actor).unwrap());
+        assert_eq!(wire["branch"], serde_json::to_value(branch).unwrap());
+        assert_eq!(engine.state(actor).unwrap(), before);
+    }
+
+    #[test]
     fn native_travel_admission_replays_and_proves_journey_order_and_destination() {
         let actor = ActorId(1);
         let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();

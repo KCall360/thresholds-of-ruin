@@ -4,7 +4,7 @@ use tor_protocol::*;
 
 fn snapshot(hidden: bool) -> Snapshot {
     serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"map","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":if hidden {1} else {0}},"actor":1,"branch":"map","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":if hidden {1} else {0},"observation":{
             "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},

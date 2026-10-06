@@ -85,7 +85,7 @@ Restarting requires supplying the desired credentials again.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":24,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":25,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -111,6 +111,7 @@ An action uses the branch and revision from the latest observation:
   "request_id":"move-1",
   "request":{
     "type":"command",
+    "context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":1},
     "branch":"<branch from snapshot>",
     "command":{"type":"act","expected_revision":0,"action":{"type":"move","direction":"east"}}
   }
@@ -120,7 +121,7 @@ An action uses the branch and revision from the latest observation:
 Gameplay acknowledgements report admission, before simulation execution:
 
 ```json
-{"type":"ack","request_id":"move-1","receipt":{"type":"admitted","actor":1,"branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
+{"type":"ack","context":{"input":{"stream":{"stream":"<attachment>","epoch":1},"readiness_revision":2},"actor":1,"branch":"<current branch>","cursor":{"sequence":3,"tick":0},"revision":0},"request_id":"move-1","receipt":{"type":"admitted","actor":1,"branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
 ```
 
 The simulation chooses when the actor's intention executes. Observations disclose
@@ -131,7 +132,13 @@ identity while wind-up and impact are in progress. `paused` retains inactive
 preparation with its spent progress and original target; it can coexist with a
 separate queued action. Changed observations precede their lifecycle updates.
 Immediate operations acknowledge with a required
-`receipt { type: "immediate", entry_id: ... }`.
+`receipt { type: "immediate", actor: ..., branch: ..., entry_id: ... }`.
+Both receipt variants identify the original actor and branch. A committed
+command's immediate receipt takes that identity from its journal entry; retrying
+it after rewind or restart returns the same receipt, even when the live branch
+has changed. Session operations without journal entries use the attached actor
+and branch at completion and have a null `entry_id`. Receipt identity does not
+claim that the client is currently synchronized or ready to act.
 
 Restart and controller loss suspend queued human intentions and pause running
 preparation. Rewind restores the selected work and preparation; Session then
@@ -140,7 +147,7 @@ Explicit `resume_intention` and `cancel_intention` commands reference the origin
 opaque identity using the current branch and observation revision:
 
 ```json
-{"type":"command","branch":"<current branch>","command":{"type":"resume_intention","expected_revision":7,"intention":"<original admission identity>"}}
+{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":4},"branch":"<current branch>","command":{"type":"resume_intention","expected_revision":7,"intention":"<original admission identity>"}}
 ```
 
 Resume returns suspended work or paused preparation to the simulation queue under
@@ -177,6 +184,7 @@ Clients receive `update` messages without polling:
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
 | `control` | This connection gained or lost control |
+| `readiness` | Authoritative admission and opaque resume/cancel permissions; its counter advances independently of observation revisions |
 | `intention` | An opaque intention's lifecycle in this actor/branch context; no authoritative topology or queued action targets |
 
 When play stops for input, the server sends `waiting { on }` after the updates
@@ -193,6 +201,14 @@ for every delivered update; the action revision increments only when that actor'
 disclosed observation changes. A private note neither advances another user's
 sequence nor invalidates anyone's pending action revision.
 
+Snapshots and updates require `context { stream, epoch }`. The host creates an
+opaque `stream` for each attachment outside simulation randomness and saved
+state. Each snapshot reset advances its checked `epoch` while retaining that
+attachment identity. Clients reject updates outside their current context and
+reject replacement snapshots from another attachment or an equal/older epoch
+before changing presentation state. A new connection establishes a fresh model.
+An exhausted reset counter closes the attachment rather than wrapping.
+
 ### View deltas
 
 Most observation updates are `observation_delta`s. A delta carries every
@@ -205,12 +221,89 @@ observation field in full except `visible_cells`, which it replaces with
 - `changed` lists complete cells that entered view or differ from the shifted
   cell at the same position.
 
-A delta names the revision of its base in `base_revision` and applies only to
-the state most recently disclosed on the same stream, whether by a snapshot or
-by an update. Applying it yields a full observation with cells sorted by
-position. `tor-client-common` applies deltas and treats one that does not fit
-its base as an invalid stream, like a sequence gap: the client rebuilds from a
-new snapshot. The server sends a full `observation` instead when a delta would
+An `observation_delta` body requires `base { cursor, revision }`, identifying
+the last observation within its enclosing context and branch. Its embedded
+state delta also names that state's `base_revision`. Both must match: matching
+a revision alone does not establish the correct base. Control, annotation,
+travel and intention messages consume stream sequence numbers without changing
+this observation base. A snapshot reset establishes a new base at its own cursor.
+
+Applying a valid delta yields a full observation with cells sorted by position.
+`tor-client-common` validates the context, ordering, exact base and reconstructed
+state before publishing changes; rejection leaves state, memory and cursors
+unchanged. The shared connection requests one fresh snapshot after an invalid
+update or snapshot. It retains that request across canceled waits, discards
+old stream updates until the matching reset arrives, and blocks new requests
+while unsynchronized. Its ten-second deadline includes sending, flushing and
+waiting. A rejected or invalid matching recovery reply fails the connection.
+
+Replies to previously sent requests retain their original identities. A recovery
+snapshot without a correlated reply leaves the outcome uncertain, so clients
+stop the affected input chain and direct the user to history; they never replay
+gameplay automatically.
+Normal authoritative resets remain distinct from internally requested recovery.
+Queued native input carries its originating snapshot context and is refused after
+a reset. Confirmed receipts and rejections are retained while recovery waits for
+its snapshot. History and palette contents are discarded while the stream is
+uncertain, including messages whose headers still match the old state.
+A known acceptance or rejection remains known after repair; a reset alone does
+not prove request acceptance or gameplay completion. Clients distinguish an
+unknown request outcome only when no correlated reply was received.
+Snapshots include required `readiness { revision, admission, resume, cancel }`.
+`admission` describes available queue capacity for new gameplay work under current
+control and run state; target validation and simulation timing still apply.
+`resume` and `cancel` contain only disclosed opaque intention IDs. The simulation
+owns their availability checks; the session applies authority and travel policy.
+Permission changes arrive as ordered `readiness` updates after their causing
+observation, control or lifecycle changes, and before the request acknowledgement.
+Each update advances the readiness counter by exactly one without advancing the
+observation base or simulation time. Counter exhaustion disconnects the client.
+Clients validate permission structure and disclosed identities atomically.
+An observation or terminal journey status can arrive before its following permission
+update. Gameplay completion must consume that boundary before building a subsequent
+command; an observation's `ready` flag alone does not authorize fresh input.
+A known execution failure remains rejected if later permission delivery times out.
+
+Every `command` requires `context { stream: { stream, epoch }, readiness_revision }`.
+Build it from the current disclosed attachment and readiness generation. The host
+checks authenticated role/actor access and resolves an existing receipt before
+freshness validation. Fresh commands must match both the last published generation
+and current permissions; old streams, reset epochs, ownership generations and
+unpublished predicted generations receive `StaleContext` before admission.
+A current generation does not authorize disabled gameplay: new action/travel
+requests require `admission`, and resume/cancel requests require the intention ID
+in the corresponding permission list. The host rejects disabled admission with
+`ActorBusy` and unavailable recovery with `InvalidAction`, before any mutation.
+Simulation still validates targets, revisions and execution independently.
+Control changes advance this generation even if all permission vectors stay empty.
+Capture context when constructing input; never restamp queued or retried requests.
+An authorized retry returns its original receipt even after context abandonment.
+
+Acknowledgements, history replies and palette messages require a current reply
+`context { input, actor, branch, cursor, revision }`. `input` has the same stream,
+epoch and readiness-generation shape as command input. This context names the
+client's last disclosed boundary at publication, after ordered permission changes;
+it does not advance the stream. The receipt still names the original operation,
+so a retry after rewind or reconnect can have a different branch or attachment in
+its current context. Context is not persisted with the receipt.
+
+Every error requires `scope`. `{"type":"transport"}` marks a transport failure
+with no host ordering boundary, including handshake failures and malformed wire
+input. `{"type":"unattached"}` marks a host error before a snapshot establishes
+an attachment. `{"type":"attached","context":...}` carries the same disclosed
+reply context as successful responses. Scope fields are strict and have no
+implicit defaults. An attached client treats transport failures as connection
+errors and rejects an unattached host scope; neither can confirm a pending host
+operation. Scoped host rejections remain known through bounded stream repair.
+
+The shared connection validates successful reply contexts against its exact
+currently disclosed boundary. A mismatch within this attachment starts one
+bounded snapshot repair. The reply does not install missing state or permissions;
+receipts remain known while repair runs, and query payloads are quarantined.
+Another attachment or actor is a connection error even during recovery.
+Disconnect still requires a new attachment. Broader pressure/reconnect coverage
+and protocol closeout remain refactor work. The server sends a full
+`observation` instead when a delta would
 not be smaller, for example after a teleport. Snapshots are always complete, and
 reconnects and rewinds always start from one, so a delta never skips a state.
 
@@ -233,7 +326,13 @@ old transport sequence is not implemented. Durable history IDs remain unchanged.
 Each connection has a 64-message output queue. A client that cannot keep up is
 disconnected and releases control instead of silently missing updates. It must
 reconnect and rebuild from a snapshot. Handshakes and socket writes have deadlines;
-incoming messages are capped at 16 KiB, and there are at most 128 connections.
+client messages are capped at 16 KiB and server messages at 16 MiB, including
+JSON envelopes, UTF-8 bytes and escaping. Both limits apply to complete messages
+assembled from WebSocket fragments. Shared clients bound request encoding before
+sending and reject oversized responses before JSON decoding. A locally oversized
+request leaves the connection usable; oversized inbound traffic ends the transport
+without starting snapshot repair. Host output limits may be lower than the protocol
+ceiling. There are at most 128 connections.
 
 A client whose attached actor leaves the loaded world (see
 [region streaming](region-streaming.md#engine-streaming); a spectator watching
@@ -326,6 +425,7 @@ this slice does not generate automatic commentary.
   "request_id":"note-1",
   "request":{
     "type":"command",
+    "context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":1},
     "branch":"<branch from snapshot>",
     "command":{
       "type":"annotate",

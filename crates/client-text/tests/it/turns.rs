@@ -12,6 +12,7 @@ use tor_protocol::*;
 enum Frame {
     Ack,
     Admitted,
+    Readiness(Readiness),
     Intention(IntentionPhase),
     Reject(ErrorCode),
     /// The next observation, with the action event it follows.
@@ -61,6 +62,13 @@ impl Scripted {
         respond: impl FnMut(&Request, &StateView) -> Vec<Frame> + 'static,
     ) -> Self {
         let snapshot = Snapshot {
+            readiness: tor_protocol::Readiness {
+                revision: 0,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            },
+            context: fixture_context(),
             intentions: Vec::new(),
             travel: None,
             actor: ActorId(1),
@@ -92,6 +100,7 @@ impl Scripted {
         self.sequence += 1;
         ServerMessage::Update {
             update: Box::new(StreamUpdate {
+                context: fixture_context(),
                 actor: ActorId(1),
                 branch: branch(),
                 cursor: StreamCursor {
@@ -101,6 +110,16 @@ impl Scripted {
                 body,
             }),
         }
+    }
+
+    fn reply_context(&self) -> ReplyContext {
+        let mut projected = self.client.clone();
+        for message in &self.queue {
+            if let ServerMessage::Update { update } = message {
+                projected.apply(*update.clone()).unwrap();
+            }
+        }
+        projected.reply_context()
     }
 
     /// The tick and revision the queued messages will have reached.
@@ -121,6 +140,9 @@ impl Scripted {
 }
 
 impl Link for Scripted {
+    fn is_synchronized(&self) -> bool {
+        true
+    }
     fn client(&self) -> &ClientState {
         &self.client
     }
@@ -150,7 +172,12 @@ impl Link for Scripted {
         };
         for frame in frames {
             let message = match frame {
+                Frame::Readiness(readiness) => {
+                    let (tick, _) = self.last();
+                    self.update(tick, UpdateBody::Readiness { readiness })
+                }
                 Frame::Admitted => ServerMessage::Ack {
+                    context: self.reply_context(),
                     request_id: id.clone(),
                     receipt: RequestReceipt::Admitted {
                         actor: ActorId(1),
@@ -176,14 +203,20 @@ impl Link for Scripted {
                     )
                 }
                 Frame::Ack => ServerMessage::Ack {
+                    context: self.reply_context(),
                     request_id: id.clone(),
                     receipt: RequestReceipt::Immediate {
+                        actor: ActorId(1),
+                        branch: branch(),
                         entry_id: destination
                             .as_ref()
                             .map(|_| EntryId(format!("journey-{id}"))),
                     },
                 },
                 Frame::Reject(code) => ServerMessage::Error {
+                    scope: ErrorScope::Attached {
+                        context: self.reply_context(),
+                    },
                     request_id: Some(id.clone()),
                     code,
                     message: String::new(),
@@ -694,6 +727,164 @@ async fn a_refusal_stops_the_chain_and_says_why() {
         "You can't pick that up from here."
     );
     assert_eq!(link.sent.len(), 1);
+}
+
+#[tokio::test]
+async fn gameplay_chains_wait_for_disclosed_permissions_after_action_and_travel() {
+    for travel in [false, true] {
+        let mut first = true;
+        let mut link = Scripted::new(state(), move |request, now| {
+            if !first {
+                let Request::Command { context, .. } = request else {
+                    panic!("gameplay command required")
+                };
+                assert_eq!(
+                    context.readiness_revision, 2,
+                    "next command must wait for the permission boundary after the first effect"
+                );
+                return obliging(request, now);
+            }
+            first = false;
+            let disabled = Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: if travel {
+                    vec![]
+                } else {
+                    vec![IntentionId("intent-r1".into())]
+                },
+            });
+            let enabled = Frame::Readiness(Readiness {
+                revision: 2,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            });
+            if travel {
+                assert!(is_travel(request));
+                vec![
+                    Frame::Journey(TravelPhase::Active),
+                    disabled,
+                    Frame::Ack,
+                    Frame::View(
+                        east(now.clone(), 6),
+                        Some(Event::Moved {
+                            direction: Direction::East,
+                        }),
+                    ),
+                    Frame::Journey(TravelPhase::Arrived),
+                    enabled,
+                ]
+            } else {
+                assert!(matches!(
+                    request,
+                    Request::Command {
+                        command: Command::Act {
+                            action: Action::Take { item: 1, .. },
+                            ..
+                        },
+                        ..
+                    }
+                ));
+                vec![
+                    Frame::Intention(IntentionPhase::Queued),
+                    disabled,
+                    Frame::Admitted,
+                    Frame::View(
+                        take(now.clone(), 1),
+                        Some(Event::Taken {
+                            item: 1,
+                            result: 1,
+                            quantity: 1,
+                        }),
+                    ),
+                    Frame::Intention(IntentionPhase::Resolved),
+                    enabled,
+                ]
+            }
+        });
+        let mut engine = Engine::default();
+        play(
+            &mut link,
+            &mut engine,
+            if travel {
+                "get tablet"
+            } else {
+                "take token, then drop token"
+            },
+        )
+        .await;
+        assert_eq!(link.sent.len(), 2);
+        assert_eq!(link.client.readiness().revision, 2);
+    }
+}
+
+#[tokio::test]
+async fn failed_action_waits_for_permission_boundary_before_returning_control() {
+    let mut link = Scripted::new(state(), |request, _| {
+        assert!(matches!(
+            request,
+            Request::Command {
+                command: Command::Act { .. },
+                ..
+            }
+        ));
+        vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![IntentionId("intent-r1".into())],
+            }),
+            Frame::Admitted,
+            Frame::Intention(IntentionPhase::Failed),
+            Frame::Readiness(Readiness {
+                revision: 2,
+                admission: true,
+                resume: vec![],
+                cancel: vec![],
+            }),
+        ]
+    });
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "take token, then drop token").await;
+    assert_eq!(
+        link.sent.len(),
+        1,
+        "execution failure still stops the chain"
+    );
+    assert_eq!(
+        link.client.readiness().revision,
+        2,
+        "returning control must consume the permission update after failure"
+    );
+    assert!(!link.client.has_pending_intention());
+}
+
+#[tokio::test]
+async fn known_execution_failure_is_not_success_when_permission_delivery_times_out() {
+    let mut first = true;
+    let mut link = Scripted::new(state(), move |_, _| {
+        assert!(first, "a known failed action must stop the command chain");
+        first = false;
+        vec![
+            Frame::Intention(IntentionPhase::Queued),
+            Frame::Readiness(Readiness {
+                revision: 1,
+                admission: false,
+                resume: vec![],
+                cancel: vec![IntentionId("intent-r1".into())],
+            }),
+            Frame::Admitted,
+            Frame::Intention(IntentionPhase::Failed),
+        ]
+    });
+    let mut engine = Engine::default();
+    play(&mut link, &mut engine, "take token, then wait").await;
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(link.client.state(), &state());
 }
 
 #[tokio::test]
@@ -1273,4 +1464,12 @@ async fn a_look_before_a_move_still_leaves_the_arrival_told() {
     engine.welcome(&link);
     let text = play(&mut link, &mut engine, "look. go east").await;
     assert_eq!(text.matches("You are in").count(), 2, "{text}");
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
+    }
 }
