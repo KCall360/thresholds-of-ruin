@@ -25,8 +25,10 @@ pub struct CellChanges {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
     /// Revision of the state this delta applies to.
+    #[serde(with = "crate::integers::unsigned")]
     pub base_revision: u64,
     pub wizard_game: bool,
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub combat: Option<CombatView>,
@@ -34,6 +36,7 @@ pub struct StateDelta {
     pub motion: Option<MotionView>,
     pub places: Vec<PlaceView>,
     pub actor: ActorId,
+    #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
     pub cells: CellChanges,

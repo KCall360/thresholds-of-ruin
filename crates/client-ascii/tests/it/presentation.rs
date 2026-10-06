@@ -415,7 +415,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     canvas.draw(&app);
     let normal = canvas.pixels.clone();
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"new-branch","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -429,13 +429,13 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
 
 fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":3,"observation":{
-            "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
+        "state":{"wizard_game":false,"revision":"3","observation":{
+            "actor":"1","tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":3,"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"3","name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -557,7 +557,7 @@ fn losing_control_or_disconnect_prevents_actions() {
 #[test]
 fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     let mut snapshot: Snapshot = serde_json::from_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -856,7 +856,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
 #[test]
 fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -864,7 +864,7 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
         .as_array_mut()
         .unwrap();
     for (index, id) in [(7, 11), (5, 12)] {
-        cells[index]["door"] = serde_json::json!({"id":id,"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
+        cells[index]["door"] = serde_json::json!({"id":id.to_string(),"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
     }
     let state = ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap();
     assert_eq!(glyph_at(&state.state().observation, 2, 1), '+');
@@ -990,7 +990,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             dead: false,
             terminal: false,
         });
-        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},"state":view})).unwrap();
+        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},"state":view})).unwrap();
         let mut app = App::new();
         app.role = AccessRole::Player;
         app.bump_attacks = mode;

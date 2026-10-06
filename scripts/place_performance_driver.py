@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 import uuid
-from performance_driver import JsonProcess, stop_all
+from performance_driver import JsonProcess, ROOT, stop_all
 from client_performance_report import validate_presentation_profile
 from place_performance_report import SPEC, validate_client
 
@@ -27,7 +27,8 @@ def run(binary_dir, output, rooms, fresh_player=False):
         return process
 
     try:
-        server = launch("tor-server", ["--listen", "127.0.0.1:0", "--seed", SPEC["seed"], "--wizard", "--save", output / "game.db"], "server")
+        server = launch("tor-server", ["--listen", "127.0.0.1:0", "--scenario", ROOT / "scenarios/two-room",
+                                      "--seed", SPEC["seed"], "--wizard", "--save", output / "game.db"], "server")
         ready, _ = server.until(lambda f: "address" in f)
         player = launch("tor-client-headless", ["--connect", ready["address"]], "player", env["TOR_WIZARD_TOKEN"])
         state, _ = player.until(lambda f: f.get("type") == "ready")
@@ -64,13 +65,13 @@ def run(binary_dir, output, rooms, fresh_player=False):
         native.child.stdin.flush()
         native.until(lambda f: f.get("places_open") is True)
         for i in range(SPEC["samples"]):
-            tick = state["state"]["observation"]["tick"]
+            tick = int(state["state"]["observation"]["tick"])
             if i % 2 == 0:
                 start, ack, received = command(dict(type="rename_place", key=places[-1]["key"], name=f"Reverie {i}"))
-                assert state["state"]["observation"]["tick"] == tick
+                assert int(state["state"]["observation"]["tick"]) == tick
             else:
                 start, ack, received = command(dict(type="act", action=dict(type="wait")))
-                assert state["state"]["observation"]["tick"] == tick + 100
+                assert int(state["state"]["observation"]["tick"]) == tick + 100
             assert ack is not None
             frame, shown = native.until(lambda f: f.get("state") == state["state"])
             assert frame["places_open"] and frame["role"] == "spectator" and not frame["has_control"]

@@ -3,22 +3,22 @@ use tor_protocol::*;
 
 pub(super) fn snapshot(revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
-        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},
-        "context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":0},
-        "actor":1,"branch":"validation","cursor":{"sequence":0,"tick":revision},
+        "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},
+        "context":{"stream":"3b7523b8-893a-4ea9-8b09-0a3887a7e6a1","epoch":"0"},
+        "actor":"1","branch":"validation","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":false,"intentions":[],"history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":revision,"observation":{
-            "actor":1,"tick":revision,"position":{"x":0,"y":0,"z":0},
+        "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
+            "actor":"1","tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[{"key":"here","name":"Here","origin":"authored"}],
             "visible_cells":[
                 {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},
                 {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}
             ],
-            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":8,"quantity":1,"name":"stone","appearance":"stone","identified":true}}],
-            "inventory":[{"id":7,"quantity":1,"name":"stone","appearance":"stone","identified":true}],
-            "visible_actors":[{"id":2,"position":{"x":1,"y":0,"z":0}}],
-            "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":0,"actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
-            "motion":{"velocity":[0,0,0],"units_per_cell":65536,"displaced":false,"impacted":false},
+            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":"8","quantity":"1","name":"stone","appearance":"stone","identified":true}}],
+            "inventory":[{"id":"7","quantity":"1","name":"stone","appearance":"stone","identified":true}],
+            "visible_actors":[{"id":"2","position":{"x":1,"y":0,"z":0}}],
+            "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
+            "motion":{"velocity":["0","0","0"],"units_per_cell":65536,"displaced":false,"impacted":false},
             "ready":true
         }}
     }))
@@ -174,9 +174,9 @@ fn readiness_is_ordered_independently_of_observation_revision_and_rejects_atomic
     let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
     let wire = serde_json::json!({
         "context": initial.context, "actor": initial.actor, "branch": initial.branch,
-        "cursor": {"sequence":1,"tick":0},
+        "cursor": {"sequence":"1","tick":"0"},
         "body": {"type":"readiness", "readiness":{
-            "revision":1,"admission":false,"resume":[],"cancel":[]
+            "revision":"1","admission":false,"resume":[],"cancel":[]
         }}
     });
     let update: StreamUpdate = serde_json::from_value(wire.clone()).unwrap();
@@ -185,17 +185,17 @@ fn readiness_is_ordered_independently_of_observation_revision_and_rejects_atomic
     assert_eq!(client.observation_base().cursor.sequence, 0);
     assert_eq!(
         serde_json::to_value(client.snapshot()).unwrap()["readiness"]["revision"],
-        1
+        "1"
     );
     let before = client.clone();
     for invalid in [
-        serde_json::json!({"revision":1,"admission":false,"resume":[],"cancel":[]}),
-        serde_json::json!({"revision":3,"admission":false,"resume":[],"cancel":[]}),
-        serde_json::json!({"revision":2,"admission":true,"resume":[],"cancel":[]}),
-        serde_json::json!({"revision":2,"admission":false,"resume":["unknown"],"cancel":[]}),
+        serde_json::json!({"revision":"1","admission":false,"resume":[],"cancel":[]}),
+        serde_json::json!({"revision":"3","admission":false,"resume":[],"cancel":[]}),
+        serde_json::json!({"revision":"2","admission":true,"resume":[],"cancel":[]}),
+        serde_json::json!({"revision":"2","admission":false,"resume":["unknown"],"cancel":[]}),
     ] {
         let mut malformed = wire.clone();
-        malformed["cursor"]["sequence"] = serde_json::json!(2);
+        malformed["cursor"]["sequence"] = serde_json::json!("2");
         malformed["body"]["readiness"] = invalid;
         let update: StreamUpdate = serde_json::from_value(malformed).unwrap();
         assert!(client.apply(update).is_err());
@@ -692,14 +692,14 @@ fn repeated_portal_entities_at_distinct_offsets_remain_valid() {
 
 fn stream_context_snapshot(stream: &str, epoch: u64) -> Snapshot {
     let mut wire = serde_json::to_value(snapshot(0)).unwrap();
-    wire["context"] = serde_json::json!({"stream":stream,"epoch":epoch});
+    wire["context"] = serde_json::json!({"stream":stream,"epoch":epoch.to_string()});
     serde_json::from_value(wire).unwrap()
 }
 
 fn stream_context_control(stream: &str, epoch: u64) -> StreamUpdate {
     serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"validation","cursor":{"sequence":1,"tick":0},
-        "context":{"stream":stream,"epoch":epoch},
+        "actor":"1","branch":"validation","cursor":{"sequence":"1","tick":"0"},
+        "context":{"stream":stream,"epoch":epoch.to_string()},
         "body":{"type":"control","has_control":true}
     }))
     .unwrap()
@@ -791,10 +791,10 @@ fn delta_base_names_the_last_observation_not_an_intervening_control_message() {
     client.apply(control).unwrap();
     let delta = StateDelta::between(client.state(), &snapshot(1).state).unwrap();
     let wire = serde_json::json!({
-        "context":client.context(), "actor":1,"branch":"validation",
-        "cursor":{"sequence":2,"tick":1},
+        "context":client.context(), "actor":"1","branch":"validation",
+        "cursor":{"sequence":"2","tick":"1"},
         "body":{"type":"observation_delta","state":delta,"event":null,
-            "base":{"cursor":{"sequence":1,"tick":0},"revision":0}}
+            "base":{"cursor":{"sequence":"1","tick":"0"},"revision":"0"}}
     });
     let before = client.clone();
     assert!(
@@ -805,7 +805,7 @@ fn delta_base_names_the_last_observation_not_an_intervening_control_message() {
     );
     assert_eq!(client, before);
     let mut correct = wire;
-    correct["body"]["base"]["cursor"]["sequence"] = serde_json::json!(0);
+    correct["body"]["base"]["cursor"]["sequence"] = serde_json::json!("0");
     client
         .apply(serde_json::from_value(correct).unwrap())
         .unwrap();

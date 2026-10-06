@@ -39,7 +39,7 @@ class AsciiProcesses(ProcessTestCase):
         actions = ["take token", "wait", "east", "east", "east", "east", "east"]
         for revision, action in enumerate(actions, 1):
             player.command(action)
-            watched = self.ascii_frame(spectator, lambda f: f["state"]["revision"] == revision)
+            watched = self.ascii_frame(spectator, lambda f: int(f["state"]["revision"]) == revision)
             entries = [e for e in watched["history"] if e["content"]["type"] == "action"]
             self.assertEqual(len(entries), revision)
             self.assertIn("event", entries[-1]["content"])
@@ -80,7 +80,7 @@ class AsciiProcesses(ProcessTestCase):
         self.assertIn("stone tablet", str(initial))
         self.assertFalse(initial["has_control"])
         text.command("take token")
-        self.ascii_frame(ascii_client, lambda f: f["state"]["revision"] == 1)
+        self.ascii_frame(ascii_client, lambda f: f["state"]["revision"] == '1')
         text.command("note Return through the entry.")
         self.ascii_frame(ascii_client, lambda f: "Return through the entry." in str(f["history"]))
         denied = self.key(ascii_client, "control")
@@ -90,7 +90,7 @@ class AsciiProcesses(ProcessTestCase):
         for _ in range(5):
             moved = self.key(ascii_client, "right")
         self.assertEqual(next(i["position"] for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"] == "stone tablet"), {"x":2,"y":0,"z":0})
-        self.assertEqual(moved["state"]["observation"]["tick"], 550)
+        self.assertEqual(moved["state"]["observation"]["tick"], '550')
         self.assertIn("stone tablet", str(moved))
         self.assertIn("token", str(moved["state"]["observation"]["inventory"]))
         # Sync is a protocol barrier after all pushes to the observing text client.
@@ -117,14 +117,14 @@ class AsciiProcesses(ProcessTestCase):
     def test_graphical_pickup_notes_invalid_move_and_disconnect(self):
         client, _ = self.ascii(observe=False)
         taken = self.key(client, "pickup")
-        self.assertEqual(taken["state"]["revision"], 1)
+        self.assertEqual(taken["state"]["revision"], '1')
         self.assertIn("token", str(taken["state"]["observation"]["inventory"]))
         self.key(client, "note")
         client.child.stdin.write(json.dumps({"type":"text", "text":"A graphical note"}) + "\n")
         client.child.stdin.flush()
         noted = self.key(client, "enter")
         self.assertIn("A graphical note", str(noted["history"]))
-        self.assertEqual(noted["state"]["revision"], 1)
+        self.assertEqual(noted["state"]["revision"], '1')
         invalid = self.key(client, "ascend")
         self.assertIn("InvalidAction", invalid["status"])
         self.assertEqual(invalid["state"], noted["state"])
@@ -145,7 +145,7 @@ class AsciiProcesses(ProcessTestCase):
         self.ascii_frame(client, lambda f: f["has_control"] and not f["busy"])
         key_event = self.native_keys(client)
         key_event("g", True)
-        picked = self.ascii_frame(client, lambda f: f["state"]["revision"] == 1 and not f["busy"])
+        picked = self.ascii_frame(client, lambda f: f["state"]["revision"] == '1' and not f["busy"])
         key_event("g", False)
         self.assertIn("token", str(picked["state"]["observation"]["inventory"]))
         key_event("Escape", True)

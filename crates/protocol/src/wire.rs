@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,11 +168,29 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
-    Attack { target: ActorId },
-    SetDoor { door: u64, open: bool },
-    Move { direction: Direction },
-    Take { item: u64, quantity: Option<u64> },
-    Drop { item: u64, quantity: Option<u64> },
+    Attack {
+        target: ActorId,
+    },
+    SetDoor {
+        #[serde(with = "crate::integers::unsigned")]
+        door: u64,
+        open: bool,
+    },
+    Move {
+        direction: Direction,
+    },
+    Take {
+        #[serde(with = "crate::integers::unsigned")]
+        item: u64,
+        #[serde(default, with = "crate::integers::optional_unsigned")]
+        quantity: Option<u64>,
+    },
+    Drop {
+        #[serde(with = "crate::integers::unsigned")]
+        item: u64,
+        #[serde(default, with = "crate::integers::optional_unsigned")]
+        quantity: Option<u64>,
+    },
     Wait,
 }
 
@@ -186,12 +204,14 @@ pub struct Position {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemView {
+    #[serde(with = "crate::integers::unsigned")]
     pub quantity: u64,
     pub appearance: String,
     pub identified: bool,
     /// Perceived appearance only; never hidden properties.
     #[serde(default)]
     pub description: String,
+    #[serde(with = "crate::integers::unsigned")]
     pub id: u64,
     pub name: String,
     /// The asset a client draws it with, from its palette. Absent when the
@@ -248,6 +268,7 @@ pub enum PlaceNameOrigin {
 /// Own-body sensations only; never includes hidden field geometry or other bodies.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MotionView {
+    #[serde(with = "crate::integers::signed_triple")]
     pub velocity: [i64; 3],
     pub units_per_cell: u32,
     pub displaced: bool,
@@ -262,6 +283,7 @@ pub struct Observation {
     pub motion: Option<MotionView>,
     pub places: Vec<PlaceView>,
     pub actor: ActorId,
+    #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
     pub visible_cells: Vec<CellView>,
@@ -275,8 +297,10 @@ pub struct Observation {
 pub struct CombatView {
     pub hp: u32,
     pub max_hp: u32,
+    #[serde(default, with = "crate::integers::optional_unsigned")]
     pub preparation_remaining: Option<u64>,
     pub preparation_active: bool,
+    #[serde(with = "crate::integers::unsigned")]
     pub recovery_remaining: u64,
     pub actors: Vec<CombatActorView>,
     /// What the action this view follows did, as far as the observer knows.
@@ -368,6 +392,7 @@ pub struct CellView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DoorView {
+    #[serde(with = "crate::integers::unsigned")]
     pub id: u64,
     pub name: String,
     pub description: String,
@@ -385,6 +410,7 @@ pub struct DoorView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateView {
     pub wizard_game: bool,
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
     pub observation: Observation,
 }
@@ -427,7 +453,10 @@ pub enum Author {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Anchor {
     /// A disclosed observation/decision state on this entry's branch.
-    State { revision: u64 },
+    State {
+        #[serde(with = "crate::integers::unsigned")]
+        revision: u64,
+    },
     /// An accessible action/event pair or an earlier annotation.
     Entry { id: EntryId },
 }
@@ -436,27 +465,33 @@ pub enum Anchor {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     ResumeIntention {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         intention: IntentionId,
     },
     CancelIntention {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         intention: IntentionId,
     },
     RenamePlace {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         key: String,
         name: String,
     },
     Travel {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         destination: String,
     },
     Wizard {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         operation: String,
     },
     Act {
+        #[serde(with = "crate::integers::unsigned")]
         expected_revision: u64,
         action: Action,
     },
@@ -480,6 +515,7 @@ pub enum Event {
         target: ActorId,
     },
     DoorChanged {
+        #[serde(with = "crate::integers::unsigned")]
         door: u64,
         open: bool,
     },
@@ -487,13 +523,19 @@ pub enum Event {
         direction: Direction,
     },
     Taken {
+        #[serde(with = "crate::integers::unsigned")]
         item: u64,
+        #[serde(with = "crate::integers::unsigned")]
         result: u64,
+        #[serde(with = "crate::integers::unsigned")]
         quantity: u64,
     },
     Dropped {
+        #[serde(with = "crate::integers::unsigned")]
         item: u64,
+        #[serde(with = "crate::integers::unsigned")]
         result: u64,
+        #[serde(with = "crate::integers::unsigned")]
         quantity: u64,
     },
     Waited,
@@ -531,6 +573,7 @@ pub struct HistoryEntry {
     pub id: EntryId,
     pub branch: BranchId,
     pub actor: ActorId,
+    #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub author: Author,
     pub audience: Audience,
@@ -608,6 +651,7 @@ pub enum Request {
 #[serde(deny_unknown_fields)]
 pub struct InputContext {
     pub stream: StreamContext,
+    #[serde(with = "crate::integers::unsigned")]
     pub readiness_revision: u64,
 }
 
@@ -620,6 +664,7 @@ pub struct ReplyContext {
     pub actor: ActorId,
     pub branch: BranchId,
     pub cursor: StreamCursor,
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
 }
 
@@ -638,6 +683,7 @@ pub enum ErrorScope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Readiness {
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
     pub admission: bool,
     pub resume: Vec<IntentionId>,
@@ -822,6 +868,7 @@ pub enum Waiting {
 /// recomputed after a restart rather than saved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaletteUpdate {
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
     pub body: PaletteBody,
 }
@@ -834,6 +881,7 @@ pub enum PaletteBody {
     },
     /// Changes from revision `base`.
     Delta {
+        #[serde(with = "crate::integers::unsigned")]
         base: u64,
         added: std::collections::BTreeSet<String>,
         removed: std::collections::BTreeSet<String>,
@@ -845,6 +893,7 @@ pub enum PaletteBody {
 pub struct TravelStatus {
     pub id: EntryId,
     pub destination: String,
+    #[serde(with = "crate::integers::unsigned")]
     pub completed_steps: u64,
     pub phase: TravelPhase,
 }

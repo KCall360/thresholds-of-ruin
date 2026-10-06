@@ -190,6 +190,13 @@ class JsonProcess:
                         and status.get("phase") in
                             ("started", "resolved", "failed", "cancelled", "suspended"))
             frame, received = self.until(executed)
+            phase = frame["message"]["update"]["body"]["status"]["phase"]
+            if phase != "started":
+                # Simulation publishes lifecycle effects before the resulting
+                # permission update. Return a current context for the next command.
+                revision = int(frame["readiness"]["revision"])
+                frame, received = self.until(
+                    lambda value: int(value["readiness"]["revision"]) > revision)
         return frame, started, acknowledgement, received
 
     def snapshot(self):
@@ -301,7 +308,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
             spectator_token,"ascii",visible=True)
         initial, _ = spectator.until(lambda f:f.get("state") is not None and not f.get("busy"))
         assert initial["role"] == "spectator" and not initial["has_control"]
-        result.update(spectator_role=initial["role"],initial_revision=initial["state"]["revision"])
+        result.update(spectator_role=initial["role"],initial_revision=int(initial["state"]["revision"]))
         # Presented spectator frame is confirmed before creating the player driver.
         for actor in range(1,actors+1):
             client = launch("tor-client-headless",["--connect",address,"--actor",actor],player,f"actor-{actor}")
@@ -345,7 +352,7 @@ def run_demo(bin_dir, output, *, regions=256, actors=1, cycles=3, pace=0.25, sta
                     if "profile" in frame:
                         validate_presentation_profile(frame["profile"])
                         sample["presentation_profile"] = frame["profile"]
-                    result["presented_revision"] = frame["state"]["revision"]
+                    result["presented_revision"] = int(frame["state"]["revision"])
             if correlate:
                 sample["request_id"] = clients[actor].ack_request_id
                 sample["input_unix_ns"] = input_unix_ns

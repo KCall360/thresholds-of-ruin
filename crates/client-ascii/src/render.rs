@@ -790,13 +790,13 @@ mod index_tests {
     #[test]
     fn index_matches_vector_oracle_including_overlaps_and_precedence() {
         let view: tor_protocol::Observation = serde_json::from_value(serde_json::json!({
-            "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},"ready":true,
+            "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":(0..128).map(|i|serde_json::json!({
                 "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
                 "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":[{"item":{"quantity":1,"appearance":"item","identified":true,"id":1,"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
-            "visible_actors":[{"id":2,"position":{"x":3,"y":0,"z":0}}],"inventory":[]
+            "ground_items":[{"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
+            "visible_actors":[{"id":"2","position":{"x":3,"y":0,"z":0}}],"inventory":[]
         })).unwrap();
         let index = super::indexed_glyphs(&view);
         for z in -1..5 {

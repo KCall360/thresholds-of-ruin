@@ -31,7 +31,7 @@ class ShadowcastingProcesses(ProcessTestCase):
         self.key(window,"close_door")
         closed=self.key(window,"right")
         self.assertEqual(closed["state"]["observation"]["ground_items"],view["ground_items"])
-        self.assertEqual(closed["state"]["observation"]["tick"],view["tick"]+200)
+        self.assertEqual(int(closed["state"]["observation"]["tick"]),int(view["tick"])+200)
         watched=self.request(observer,{"type":"snapshot"})
         self.assertEqual(watched["state"],closed["state"])
         # Hidden objects remain only in explicitly stale client memory.

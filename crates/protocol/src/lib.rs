@@ -2,6 +2,7 @@
 
 mod codec;
 mod delta;
+mod integers;
 mod validation;
 mod wire;
 pub use codec::*;
@@ -13,7 +14,7 @@ pub use wire::*;
 /// Actor identity is explicit even in single-player sessions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ActorId(pub u64);
+pub struct ActorId(#[serde(with = "crate::integers::unsigned")] pub u64);
 
 /// Opaque host-owned attachment identity. It reveals no world topology.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -25,6 +26,7 @@ pub struct StreamId(pub String);
 #[serde(deny_unknown_fields)]
 pub struct StreamContext {
     pub stream: StreamId,
+    #[serde(with = "crate::integers::unsigned")]
     pub epoch: u64,
 }
 
@@ -50,6 +52,7 @@ impl StreamContext {
 #[serde(deny_unknown_fields)]
 pub struct ObservationBase {
     pub cursor: StreamCursor,
+    #[serde(with = "crate::integers::unsigned")]
     pub revision: u64,
 }
 
@@ -60,6 +63,8 @@ pub struct ObservationBase {
 /// new stream boundary; old-attachment messages must not enter that stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamCursor {
+    #[serde(with = "crate::integers::unsigned")]
     pub sequence: u64,
+    #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
 }

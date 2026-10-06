@@ -114,13 +114,13 @@ fn movement_queries_and_control_have_distinct_intents() {
 
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
-        "wizard_game":false,"revision": 7, "observation": {
-            "actor": 1, "tick": 100, "position": {"x":1,"y":1,"z":0},
+        "wizard_game":false,"revision": "7", "observation": {
+            "actor": "1", "tick": "100", "position": {"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
-                {"reachable":true,"item":{"quantity":1,"appearance":"item","identified":true,"id":10,"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
-                {"reachable":false,"item":{"quantity":1,"appearance":"item","identified":true,"id":11,"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
+                {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"10","name":"copper token"},"position":{"x":1,"y":1,"z":0}},
+                {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"11","name":"silver token"},"position":{"x":2,"y":1,"z":0}}
             ], "inventory":[], "visible_actors":[], "exits":[],  "ready":true
         }
     }))

@@ -453,13 +453,13 @@ impl Connection {
         }
     }
 
-    // Explicitly opt-in host diagnostics; no protocol or simulation-state fields.
+    // Opt-in host diagnostics own their numeric scalar schema independently of wire encoding.
     fn timing_event(&mut self, event: &str, request_id: &str, duration_ms: Option<f64>) {
         let started = std::time::Instant::now();
         eprintln!(
             "{}",
             serde_json::json!({"timing_version":1,"event":event,
-            "request_id":request_id,"actor":self.state.state().observation.actor,
+            "request_id":request_id,"actor":self.state.state().observation.actor.0,
             "revision":self.state.state().revision,"duration_ms":duration_ms,
             "previous_timing_write_ms":self.previous_timing_write_ms,
             "unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()})

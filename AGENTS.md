@@ -375,28 +375,22 @@ in the dungeon acceptance test. It passed in isolation and in both later full
 runs; no cause was found. The test now keeps server diagnostics when a save
 barrier fails. If it recurs, investigate it using those diagnostics.
 
-**Save schema boundaries (in development).** Save-owned typed Serde adapters
-separate persisted actor/action/annotation encodings and checkpoint revision maps
-from wire serializers without changing current saved shapes. Five boundary tests passed, including all stored metadata variants and numeric
-extremes. The prior server library run passed 172 tests, and the expanded focused
-process/documentation run passed 23, including the new journal-shape/restart test.
-Full verification passed all 829 Rust tests in each profile, fmt, clippy,
-architecture and rustdoc. Debug Python passed 253/254; release applications
-passed 135/136. The sole failure in each profile is the explicitly waived local
-native mouse test; ordinary CI remains enabled and final-commit Windows/Linux
-CI is still required before merge. This is qualified local evidence, not an
-unqualified full pass. Further save DTO independence and JavaScript-safe wire
-encoding remain in scope.
+**Persisted schemas and journal ownership (merged, PR #70).** Exact head
+`2f6a741` passed the full local gate and all five final-head Windows/Linux CI
+checks. Save-owned serializers retain numeric stored schemas independently of
+wire encodings. A storage-owned lease explicitly unlocks at its final owner
+boundary while preserving worker ownership and shutdown joining. Deterministic
+ownership/checkpoint regressions and real restart tests passed. All three desktop
+launchers use the verified immutable build; prior builds and saves remain retained.
+Further save DTO independence and persistence/restore tails remain open.
 
-**Journal lease ownership (in development, PR #70).** The schema head `e3b5cb90`
-passed the full local Windows gate and Windows CI; Linux failed an immediate
-checkpoint reopen with a held journal lock. A deterministic failing-first
-regression demonstrates that a copied descriptor can outlive the final Rust
-owner. One storage-owned guard now explicitly unlocks at that owner boundary,
-while retaining the worker's lease and shutdown join. Ownership and checkpoint
-regressions passed debug/release; all eight background-save process tests passed.
-The three-round durable comparison validated all twelve reports with equal
-counts/save sizes and no speedup claim. A renewed full gate and final-head CI
-remain required. See the
-[refactor plan](docs/refactoring.md#explicit-journal-lease-ownership-in-development).
-The decimal-string wire work is preserved separately and remains incomplete.
+**Lossless wire integers (in development).** Protocol 26 uses canonical decimal
+strings for 64-bit identifiers, counters, quantities, durations and motion
+velocities. Typed Rust values and persisted numeric schemas remain unchanged.
+Callers preserve received strings and use exact arithmetic at counter boundaries;
+diagnostics and benchmark metadata keep their independent numeric schemas.
+All 834 Rust workspace tests passed, plus affected actual-client gameplay,
+scheduling, recovery, native presentation and restart tests. Full verification,
+release comparisons and final-head Windows/Linux CI remain required before push
+and merge. No text product behavior or scripting runtime is added. The remaining
+architecture scope in the [refactor plan](docs/refactoring.md) stays active.

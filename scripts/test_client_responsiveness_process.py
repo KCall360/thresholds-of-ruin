@@ -16,14 +16,14 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         self.saving_server(interval)
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames"])
         initial = self.ascii_frame(window, lambda f: f["has_control"] and not f["busy"])
-        tick = initial["state"]["observation"]["tick"]
+        tick = int(initial["state"]["observation"]["tick"])
         with sqlite3.connect(self.save) as db:
             sequence = db.execute("SELECT max(sequence) FROM (SELECT sequence FROM journal UNION ALL SELECT sequence FROM history)").fetchone()[0]
         key = self.native_keys(window)
         with sqlite3.connect(self.save) as db:
             db.execute("BEGIN EXCLUSIVE")
             key("period", True)
-            acted = self.ascii_frame(window, lambda f: f["state"]["observation"]["tick"] == tick + 100 and not f["busy"])
+            acted = self.ascii_frame(window, lambda f: int(f["state"]["observation"]["tick"]) == tick + 100 and not f["busy"])
             key("period", False)
             # Force the real worker to remain in its save transaction while a
             # native local modal opens. The SQLite timeout is two seconds.
@@ -91,16 +91,16 @@ class ClientResponsivenessProcesses(ProcessTestCase):
             self.assertIsNone(final["error"])
         # The last ready frame acknowledges admission; effects follow on the
         # ordered simulation stream. Compare both frontends at that completion.
-        if final["state"]["observation"]["tick"] != 16000:
+        if final["state"]["observation"]["tick"] != '16000':
             pending = next(s for s in final["intentions"] if s["phase"] == "queued")
             final = self.frame(player, lambda f: (
                 (f.get("message") or {}).get("type") == "update"
                 and f["message"]["update"]["body"]["type"] == "intention"
                 and f["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
                 and f["message"]["update"]["body"]["status"]["phase"] == "resolved"))
-        self.assertEqual(final["state"]["observation"]["tick"], 16000)
-        presented = opened if opened["state"]["observation"]["tick"] == 16000 else self.ascii_frame(
-            window, lambda f: f["state"]["observation"]["tick"] == 16000)
+        self.assertEqual(final["state"]["observation"]["tick"], '16000')
+        presented = opened if opened["state"]["observation"]["tick"] == '16000' else self.ascii_frame(
+            window, lambda f: f["state"]["observation"]["tick"] == '16000')
         self.assertEqual(presented["state"], final["state"])
         self.assertEqual(presented["history"], final["history"])
         self.assertEqual(len(presented["history"]), 100)

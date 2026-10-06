@@ -32,20 +32,20 @@ class PhysicsProcesses(ProcessTestCase):
         player = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
         initial = self.ascii_frame(player, lambda f: f['state'] is not None and not f['busy'])
         view = initial['state']['observation']
-        self.assertTrue(any(a['id'] == 1 and a['position']['z'] == 1 for a in view['visible_actors']))
+        self.assertTrue(any(a['id'] == '1' and a['position']['z'] == 1 for a in view['visible_actors']))
         browsed=self.key(player,'map_lower')
-        self.assertEqual(browsed['state']['observation']['tick'],0)
+        self.assertEqual(browsed['state']['observation']['tick'],'0')
         self.assertIn('Viewing height -1',browsed['status'])
         self.key(player,'map_higher')
         falling = self.key(player, 'wait')['state']['observation']
         self.assertTrue(falling['motion']['displaced'])
-        self.assertLess(falling['motion']['velocity'][2], 0)
+        self.assertLess(int(falling['motion']['velocity'][2]), 0)
         impacted = False
         for _ in range(5):
             current = self.key(player, 'wait')
             impacted |= current['state']['observation']['motion']['impacted']
         self.assertTrue(impacted)
-        self.assertEqual(current['state']['observation']['motion']['velocity'], [0, 0, 0])
+        self.assertEqual(current['state']['observation']['motion']['velocity'], ['0', '0', '0'])
         self.assertTrue(current['window_open'])
 
     def test_ascii_sideways_portal_preserves_observer_axes(self):
@@ -56,9 +56,9 @@ class PhysicsProcesses(ProcessTestCase):
         self.ascii_frame(player,lambda f:f['state'] is not None and not f['busy'])
         crossed=self.key(player,'wait')['state']['observation']
         self.assertTrue(crossed['motion']['displaced'])
-        self.assertGreater(crossed['motion']['velocity'][0],4096)
-        self.assertEqual(crossed['motion']['velocity'][2],0)
-        self.assertTrue(any(a['id']==1 and a['position']['z']==1 for a in crossed['visible_actors']))
+        self.assertGreater(int(crossed['motion']['velocity'][0]),4096)
+        self.assertEqual(crossed['motion']['velocity'][2],'0')
+        self.assertTrue(any(a['id']=='1' and a['position']['z']==1 for a in crossed['visible_actors']))
         self.assertNotIn('region',json.dumps(crossed))
 
 

@@ -13,10 +13,10 @@ use tor_protocol::*;
 fn sample_state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game": false,
-        "revision": 1,
+        "revision": "1",
         "observation": {
-            "actor": 1,
-            "tick": 10,
+            "actor": "1",
+            "tick": "10",
             "position": {"x": 0, "y": 0, "z": 0},
             "ready": true,
             "places": [],
@@ -40,7 +40,7 @@ fn sample_state() -> StateView {
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {
-                        "id": 101,
+                        "id": "101",
                         "name": "oak door",
                         "description": "A heavy wooden door with iron hinges.",
                         "open": false,
@@ -57,7 +57,7 @@ fn sample_state() -> StateView {
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {
-                        "id": 102,
+                        "id": "102",
                         "name": "iron gate",
                         "description": "A barred iron portcullis.",
                         "open": true,
@@ -71,10 +71,10 @@ fn sample_state() -> StateView {
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {
-                        "id": 1,
+                        "id": "1",
                         "name": "copper token",
                         "description": "A worn copper disc.",
-                        "quantity": 1,
+                        "quantity": "1",
                         "appearance": "token",
                         "identified": true
                     }
@@ -83,10 +83,10 @@ fn sample_state() -> StateView {
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {
-                        "id": 2,
+                        "id": "2",
                         "name": "silver token",
                         "description": "A polished silver disc.",
-                        "quantity": 1,
+                        "quantity": "1",
                         "appearance": "token",
                         "identified": true
                     }
@@ -95,10 +95,10 @@ fn sample_state() -> StateView {
                     "reachable": false,
                     "position": {"x": 1, "y": 0, "z": 0},
                     "item": {
-                        "id": 3,
+                        "id": "3",
                         "name": "stone tablet",
                         "description": "An inscribed slab of granite.",
-                        "quantity": 1,
+                        "quantity": "1",
                         "appearance": "tablet",
                         "identified": true
                     }
@@ -106,25 +106,25 @@ fn sample_state() -> StateView {
             ],
             "inventory": [
                 {
-                    "id": 10,
+                    "id": "10",
                     "name": "iron sword",
                     "description": "A sharp iron shortsword.",
-                    "quantity": 1,
+                    "quantity": "1",
                     "appearance": "sword",
                     "identified": true
                 },
                 {
-                    "id": 11,
+                    "id": "11",
                     "name": "brass key",
                     "description": "An ornate brass key.",
-                    "quantity": 1,
+                    "quantity": "1",
                     "appearance": "key",
                     "identified": true
                 }
             ],
             "visible_actors": [
                 {
-                    "id": 2,
+                    "id": "2",
                     "name": "goblin scout",
                     "description": "A snarling creature clad in scavenged leather.",
                     "position": {"x": 1, "y": 0, "z": 0}

@@ -114,7 +114,7 @@ def correlate_native(directory, result):
             previous_frame = frame['frame']
             frame_times[frame['frame']] = frame.get('presented_unix_ns')
             if frame.get('input_done') in ('up','down','left','right','ascend','descend') and not frame['busy']:
-                action_frames[frame['state']['revision']-1] = frame['frame']
+                action_frames[int(frame['state']['revision'])-1] = frame['frame']
     output = []
     for sample in result['samples']:
         # The complete single-actor traversal advances exactly one revision per

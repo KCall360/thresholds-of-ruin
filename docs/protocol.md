@@ -80,12 +80,29 @@ must upgrade. Only the current save format and ruleset are accepted. See [geomet
 Roles and credentials are startup/session configuration, never journaled.
 Restarting requires supplying the desired credentials again.
 
+## Integer representation
+
+All 64-bit wire values use canonical decimal strings: actor, item and door
+identities, quantities, ticks, revisions, epochs, stream sequences, durations
+and completed travel steps. Unsigned values range from `"0"` through
+`"18446744073709551615"`. Signed motion velocity components range from
+`"-9223372036854775808"` through `"9223372036854775807"`. Numeric JSON tokens,
+leading zeros, plus signs, negative zero, whitespace and exponent notation are
+rejected for these fields. Optional quantities retain missing/null semantics.
+
+Protocol versions, bounded collection counts, and 32-bit observer-relative
+position components remain JSON numbers. Keep wire strings intact when returning
+identities or contexts in requests; use exact integer arithmetic for comparisons
+or calculations. This preserves values above JavaScript's exact Number range.
+Persistence owns its numeric schemas independently; this wire change does not
+change the current save format or ruleset.
+
 ## Connection and control
 
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":25,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":26,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -94,7 +111,7 @@ It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 
 ```json
-{"type":"request","request_id":"attach-1","request":{"type":"attach","actor":1}}
+{"type":"request","request_id":"attach-1","request":{"type":"attach","actor":"1"}}
 ```
 
 The response is a snapshot containing the actor's observation, action revision,
@@ -111,9 +128,9 @@ An action uses the branch and revision from the latest observation:
   "request_id":"move-1",
   "request":{
     "type":"command",
-    "context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":1},
+    "context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"1"},
     "branch":"<branch from snapshot>",
-    "command":{"type":"act","expected_revision":0,"action":{"type":"move","direction":"east"}}
+    "command":{"type":"act","expected_revision":"0","action":{"type":"move","direction":"east"}}
   }
 }
 ```
@@ -121,7 +138,7 @@ An action uses the branch and revision from the latest observation:
 Gameplay acknowledgements report admission, before simulation execution:
 
 ```json
-{"type":"ack","context":{"input":{"stream":{"stream":"<attachment>","epoch":1},"readiness_revision":2},"actor":1,"branch":"<current branch>","cursor":{"sequence":3,"tick":0},"revision":0},"request_id":"move-1","receipt":{"type":"admitted","actor":1,"branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
+{"type":"ack","context":{"input":{"stream":{"stream":"<attachment>","epoch":"1"},"readiness_revision":"2"},"actor":"1","branch":"<current branch>","cursor":{"sequence":"3","tick":"0"},"revision":"0"},"request_id":"move-1","receipt":{"type":"admitted","actor":"1","branch":"<request branch>","intention":"<opaque intention>","entry_id":"<admission record>","phase":"queued"}}
 ```
 
 The simulation chooses when the actor's intention executes. Observations disclose
@@ -147,7 +164,7 @@ Explicit `resume_intention` and `cancel_intention` commands reference the origin
 opaque identity using the current branch and observation revision:
 
 ```json
-{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":4},"branch":"<current branch>","command":{"type":"resume_intention","expected_revision":7,"intention":"<original admission identity>"}}
+{"type":"command","context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"4"},"branch":"<current branch>","command":{"type":"resume_intention","expected_revision":"7","intention":"<original admission identity>"}}
 ```
 
 Resume returns suspended work or paused preparation to the simulation queue under
@@ -360,7 +377,7 @@ things then reach clients:
   signal what the next one holds.
 
 Palettes have their own revisions and are separate from the observation
-stream: `{"type":"palette","request_id":null,"palette":{"revision":1,"body":{"type":"full","assets":[...]}}}`.
+stream: `{"type":"palette","request_id":null,"palette":{"revision":"1","body":{"type":"full","assets":[...]}}}`.
 
 - Attaching (so also reconnecting) sends the whole palette, unasked.
 - When a client's palette changes, it gets
@@ -425,11 +442,11 @@ this slice does not generate automatic commentary.
   "request_id":"note-1",
   "request":{
     "type":"command",
-    "context":{"stream":{"stream":"<attachment stream>","epoch":1},"readiness_revision":1},
+    "context":{"stream":{"stream":"<attachment stream>","epoch":"1"},"readiness_revision":"1"},
     "branch":"<branch from snapshot>",
     "command":{
       "type":"annotate",
-      "anchor":{"type":"state","revision":0},
+      "anchor":{"type":"state","revision":"0"},
       "text":"Return here after exploring the gallery.",
       "source":"user",
       "category":"bookmark",
@@ -542,7 +559,7 @@ Spectators can also use `history_branch` to read permitted abandoned history.
 Example payload inside a branch-checked `command` request:
 
 ```json
-{"type":"wizard","expected_revision":0,"operation":"teleport 1 2 1 1 0"}
+{"type":"wizard","expected_revision":"0","operation":"teleport 1 2 1 1 0"}
 ```
 
 `operation` is opaque developer text: only the server parses geometry commands.

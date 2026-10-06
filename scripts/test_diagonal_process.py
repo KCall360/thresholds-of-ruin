@@ -15,12 +15,12 @@ class DiagonalProcesses(ProcessTestCase):
         current = self.frame(window, lambda f: f.get("state") and not f["busy"])
         key = self.native_keys(window)
         for name, direction in [("y","north_west"),("n","south_east"),("u","north_east"),("b","south_west")]:
-            revision = current["state"]["revision"]
-            tick = current["state"]["observation"]["tick"]
+            revision = int(current["state"]["revision"])
+            tick = int(current["state"]["observation"]["tick"])
             key(name, True)
-            current = self.frame(window, lambda f: f.get("state",{}).get("revision",0) > revision and not f["busy"])
+            current = self.frame(window, lambda f: int(f.get("state",{}).get("revision","0")) > revision and not f["busy"])
             key(name, False)
-            self.assertEqual(current["state"]["observation"]["tick"], tick + 142)
+            self.assertEqual(int(current["state"]["observation"]["tick"]), tick + 142)
             self.assertEqual(current["history"][-1]["content"]["event"]["direction"], direction)
             self.assertIsNone(current["note"])
         key("F4", True)
@@ -50,10 +50,10 @@ class DiagonalProcesses(ProcessTestCase):
         player, _ = self.adventure()
         self.assertEqual(self.say(player,"open door"),"You open the wooden door.\n> ")
         opened = self.request(observer,{"type":"snapshot"})
-        self.assertEqual(opened["state"]["observation"]["tick"],100)
+        self.assertEqual(opened["state"]["observation"]["tick"],"100")
         self.assertIn("You walk northeast.",self.say(player,"ne"))
         arrived = self.request(observer,{"type":"snapshot"})
-        self.assertEqual(arrived["state"]["observation"]["tick"],384)
+        self.assertEqual(arrived["state"]["observation"]["tick"],"384")
         self.say(player,"step sw")
         self.say(player,"step southwest")
         self.assertEqual(self.say(player,"close door"),"You close the wooden door.\n> ")
@@ -65,7 +65,7 @@ class DiagonalProcesses(ProcessTestCase):
         self.frame(window,lambda f:f.get("door_direction") is True)
         key("o",False)
         key("u",True)
-        reopened = self.frame(window,lambda f:f.get("state",{}).get("observation",{}).get("tick")==868 and not f["busy"])
+        reopened = self.frame(window,lambda f:f.get("state",{}).get("observation",{}).get("tick")=="868" and not f["busy"])
         key("u",False)
         self.assertTrue(door(reopened)["open"])
         window.stop()
@@ -77,20 +77,20 @@ class DiagonalProcesses(ProcessTestCase):
         self.wizard_command(wizard, "rewind initial")
         rewound = self.request(observer,{"type":"snapshot"})
         self.assertNotEqual(rewound["branch"],initial["branch"])
-        self.assertEqual(rewound["state"]["observation"]["tick"],0)
+        self.assertEqual(rewound["state"]["observation"]["tick"],"0")
 
     def test_rotated_crossing_keeps_observer_axes(self):
         self.server(scenario="diagonal-rotated")
         player, _ = self.client()
         moved = self.act(player,{"type":"move","direction":"north_east"})
         self.assertIsNone(moved["error"])
-        self.assertEqual(moved["state"]["observation"]["tick"],142)
+        self.assertEqual(moved["state"]["observation"]["tick"],"142")
         # Observer east is local south after the rotated crossing.
         moved = self.act(player,{"type":"move","direction":"east"})
         self.assertIsNone(moved["error"])
         tablet = next(i for i in moved["state"]["observation"]["ground_items"] if i["item"]["name"]=="stone tablet")
         self.assertTrue(tablet["reachable"])
-        self.assertEqual(moved["state"]["observation"]["tick"],242)
+        self.assertEqual(moved["state"]["observation"]["tick"],"242")
 
     def test_native_stair_bindings_do_not_also_wait(self):
         self.server(scenario="diagonal-stairs")
@@ -101,12 +101,12 @@ class DiagonalProcesses(ProcessTestCase):
         for name, direction, tick in [("comma","up",100),("period","down",200)]:
             key("Shift_L",True)
             key(name,True)
-            current = self.frame(window,lambda f:f.get("state",{}).get("observation",{}).get("tick")==tick and not f["busy"])
+            current = self.frame(window,lambda f:f.get("state",{}).get("observation",{}).get("tick")==str(tick) and not f["busy"])
             key(name,False)
             key("Shift_L",False)
             self.assertEqual(current["history"][-1]["content"]["event"]["direction"],direction)
         watched = self.request(observer,{"type":"snapshot"})
-        self.assertEqual(watched["state"]["observation"]["tick"],200)
+        self.assertEqual(watched["state"]["observation"]["tick"],"200")
         self.assertFalse(any(h["content"].get("event",{}).get("type")=="waited" for h in watched["history"]))
 
 

@@ -16,8 +16,8 @@ class DungeonProcesses(ProcessTestCase):
         return player, initial
 
     def settled(self, player, tick, current=None):
-        if current and (current["state"]["observation"]["combat"]["terminal"] or (current["state"]["observation"]["tick"] > tick and current["state"]["observation"]["ready"])): return current
-        return self.ascii_frame(player, lambda f:f['state'] is not None and (f['state']['observation']['combat']['terminal'] or (f['state']['observation']['tick'] > tick and f['state']['observation']['ready'])))
+        if current and (current["state"]["observation"]["combat"]["terminal"] or (int(current["state"]["observation"]["tick"]) > int(tick) and current["state"]["observation"]["ready"])): return current
+        return self.ascii_frame(player, lambda f:f['state'] is not None and (f['state']['observation']['combat']['terminal'] or (int(f['state']['observation']['tick']) > int(tick) and f['state']['observation']['ready'])))
 
     def test_text_wins_by_going_to_the_exit(self):
         self.start()
@@ -51,7 +51,7 @@ class DungeonProcesses(ProcessTestCase):
         self.assertEqual(initial['state']['observation']['combat']['hp'],20)
         self.say(player,'attack ruin guard')
         after = self.settled(observer,0)
-        self.assertFalse(any(a['id']==2 for a in after['state']['observation']['visible_actors']))
+        self.assertFalse(any(a['id']=='2' for a in after['state']['observation']['visible_actors']))
         for command in ['step east','step east','step east','get dawn seal','step west','step west','step west']:
             tick = after['state']['observation']['tick']
             self.say(player,command)
@@ -80,11 +80,11 @@ class DungeonProcesses(ProcessTestCase):
             view=current['state']['observation']
             self.assertFalse(view['combat']['dead'])
             if view['combat']['victory']: return
-            nearby=next((a for a in view['visible_actors'] if a['id']!=1 and a['position']['z']==0 and (a['position']['x'],a['position']['y']) in directions),None)
+            nearby=next((a for a in view['visible_actors'] if a['id']!='1' and a['position']['z']==0 and (a['position']['x'],a['position']['y']) in directions),None)
             if nearby:
                 key=directions[(nearby['position']['x'],nearby['position']['y'])]
-            elif any(i['item']['id']==100 and i['reachable'] for i in view['ground_items']): key='pickup'
-            else: key='left' if any(i['id']==100 for i in view['inventory']) else 'right'
+            elif any(i['item']['id']=='100' and i['reachable'] for i in view['ground_items']): key='pickup'
+            else: key='left' if any(i['id']=='100' for i in view['inventory']) else 'right'
             result=self.key(player,key)
             if result['state']['observation']['ready'] and result['state']['revision']==current['state']['revision']:
                 result=self.key(player,'wait')

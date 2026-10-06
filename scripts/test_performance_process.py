@@ -22,6 +22,7 @@ class PerformanceProcesses(ProcessTestCase):
                 'stream-r16-durable', '--cycles', '1', '--checkpoint-interval', '64'],
                 cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=120)
         rows = [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
+        self.assertTrue(all(type(row['actor']) is int for row in rows if row['kind'] == 'sample'))
         metadata, samples, _ = validate(rows, selected_case='stream-r16-durable')
         self.assertEqual(metadata['stream-r16-durable']['region_acquisition_version'], 1)
         profiles = [sample['profile'] for sample in samples['stream-r16-durable']]
@@ -57,6 +58,38 @@ class PerformanceProcesses(ProcessTestCase):
         result = run_demo(self.bin, self.directory/"multi", regions=8, actors=8, cycles=1, pace=0)
         self.assertEqual({s["actor"] for s in result["samples"]}, set(range(1,9)))
         self.assertIn("multi_actor_visibility_change", {s["label"] for s in result["samples"]})
+
+
+
+class NativeWorkloadProcesses(ProcessTestCase):
+    graphical = True
+
+    def test_place_workload_uses_its_two_room_baseline_and_completes_simulated_waits(self):
+        from place_performance_driver import run
+        from place_performance_report import SPEC, validate_client
+        for fresh in (False, True):
+            with self.subTest(fresh_player=fresh):
+                output = self.directory / ("fresh" if fresh else "places")
+                run(self.bin, output, rooms=0, fresh_player=fresh)
+                result = json.loads((output / "result.json").read_text(encoding="utf-8"))
+                validate_client(result)
+                self.assertEqual(len(result["final_places"]), 2)
+                self.assertEqual(len(result["samples"]), SPEC["samples"])
+                player_log = "fresh-player.stdout.jsonl" if fresh else "player.stdout.jsonl"
+                rows = [json.loads(line) for line in (output / player_log).read_text(encoding="utf-8").splitlines()]
+                ready = [row for row in rows if row.get("type") == "ready"]
+                self.assertTrue(ready)
+                self.assertEqual(int(ready[-1]["state"]["observation"]["tick"]), SPEC["samples"] // 2 * 100)
+
+    def test_saved_exploration_continues_after_durable_restart_with_exact_revisions(self):
+        from saved_exploration_driver import run_saved_exploration, validate
+        output = self.directory / "exploration"
+        result = run_saved_exploration(self.bin, output, regions=8, interval=64, correlate=True, defer_logs=True)
+        validate(result)
+        self.assertTrue(result["restart_equal"])
+        self.assertTrue(result["continued_after_restart"])
+        self.assertIs(type(result["checkpoint_sequence"]), int)
+        self.assertIs(type(result["journal_records"]), int)
 
 
 if __name__ == "__main__":
