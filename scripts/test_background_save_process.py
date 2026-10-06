@@ -11,6 +11,24 @@ from process_harness import ProcessTestCase
 
 
 class BackgroundSaveProcesses(ProcessTestCase):
+    def test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts(self):
+        server = self.server("--checkpoint-interval", 1, scenario="two-room")
+        player, _ = self.client()
+        for _ in range(3):
+            completed = self.act(player, {"type": "wait"})
+            self.assertIsNone(completed["error"])
+            self.assertIsNone(self.request(player, {"type": "save"})["error"])
+            with sqlite3.connect(self.save) as db:
+                checkpoint = db.execute("SELECT sequence FROM checkpoint").fetchone()
+                self.assertIsNotNone(checkpoint)
+                self.assertGreater(checkpoint[0], 0)
+            player.stop()
+            server.stop()
+            server = self.server("--checkpoint-interval", 1, scenario="two-room")
+            player, restored = self.client()
+            self.assertEqual(restored["state"], completed["state"])
+            self.assertEqual(restored["history"], completed["history"])
+
     def saving_server(self, target=3600000, maximum=7200000, idle=750):
         """A server with explicit background-save timing (milliseconds)."""
         return self.server("--save-target-ms", target, "--save-max-ms", maximum, "--save-idle-ms", idle,

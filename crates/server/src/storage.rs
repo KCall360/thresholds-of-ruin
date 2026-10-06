@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 #[path = "save_codec.rs"]
 mod codec;
+#[path = "journal_lock.rs"]
+mod journal_lock;
+pub(crate) use journal_lock::JournalLock;
 #[path = "save_schema.rs"]
 pub(crate) mod schema;
 pub(crate) use codec::frame;
@@ -759,7 +762,7 @@ impl Store {
         path: &Path,
         initial: impl FnOnce() -> Result<(Archive, Vec<(u64, Arc<str>)>), Failure>,
         policy: SavePolicy,
-        lock: Arc<std::fs::File>,
+        lock: Arc<JournalLock>,
     ) -> Result<(Self, Archive, Option<DiskCheckpoint>, BTreeSet<u64>), Failure> {
         policy.validate()?;
         let (conn, archive, save_id, sequence, checkpoint, saved) = if path.exists() {

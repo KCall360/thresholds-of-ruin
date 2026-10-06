@@ -387,3 +387,14 @@ native mouse test; ordinary CI remains enabled and final-commit Windows/Linux
 CI is still required before merge. This is qualified local evidence, not an
 unqualified full pass. Further save DTO independence and JavaScript-safe wire
 encoding remain in scope.
+
+**Journal lease ownership (in development, PR #70).** The schema head `e3b5cb90`
+passed the full local Windows gate and Windows CI; Linux failed an immediate
+checkpoint reopen with a held journal lock. A deterministic failing-first
+regression demonstrates that a copied descriptor can outlive the final Rust
+owner. One storage-owned guard now explicitly unlocks at that owner boundary,
+while retaining the worker's lease and shutdown join. Debug ownership, checkpoint
+and three-restart process regressions passed. Release checks, measurements, a
+renewed full gate and final-head CI remain required. See the
+[refactor plan](docs/refactoring.md#explicit-journal-lease-ownership-in-development).
+The decimal-string wire work is preserved separately and remains incomplete.

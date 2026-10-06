@@ -1825,3 +1825,26 @@ five schema tests then passed with protocol-26 decimal-string wire encoding,
 including the already independent production nested-journal tests. The prototype
 is preserved separately; this checkpoint retains protocol 25. The corrected
 checkpoint requires renewed verification and final-head CI before merging.
+
+### Explicit journal lease ownership (in development)
+
+The corrected schema head (`e3b5cb90`) passed the complete local Windows gate,
+including native mouse verification in both profiles. Its final-head CI passed
+Windows and dependency checks, but Linux failed the retained-intention checkpoint
+test when reopening a dropped engine: the journal was still locked.
+
+A deterministic failing-first regression reproduced the lock-lifetime defect
+with a copied descriptor. Closing the final Rust file owner alone did not release
+the lock while that copy survived. One storage-owned guard now explicitly unlocks
+at its final owner boundary. The engine and worker share this guard, and shutdown
+still joins the worker. No delay, retry, or format change is introduced. The test
+also checks exclusion while a real owner survives and verifies that closing the
+old descriptor cannot release a replacement owner's lock. Descriptor inheritance
+during concurrent process spawning is a possible explanation for the Linux
+failure; it was not directly observed in that CI run.
+
+The deterministic ownership regression, retained-intention checkpoint test, and
+a real-server test with three checkpointed immediate restarts passed in debug.
+Release verification, before/after measurements, renewed full verification and
+final-head Windows/Linux CI remain required before publication. The previous
+desktop build stays active until those gates pass.
