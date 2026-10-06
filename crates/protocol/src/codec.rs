@@ -1,5 +1,5 @@
-//! Shared wire byte limits and bounded JSON encoding. No filesystem, network or host policy.
-use serde::Serialize;
+//! Shared wire byte/depth limits, typed decoding and bounded JSON encoding. No filesystem, network or host policy.
+use serde::{de::DeserializeOwned, Serialize};
 use std::io::{self, Write};
 
 /// Maximum UTF-8 bytes in one complete client message, including its envelope.
@@ -37,6 +37,86 @@ impl Write for Limited {
     }
 }
 
+/// Maximum object/array nesting in a complete wire message. The root container
+/// counts as one; delimiters in JSON strings do not contribute to nesting.
+pub const MAX_JSON_DEPTH: usize = 64;
+
+/// A resource-policy rejection or a typed JSON decoding failure.
+#[derive(Debug)]
+pub enum DecodeError {
+    TooLarge { limit: usize },
+    TooDeep { limit: usize },
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge { limit } => write!(formatter, "wire message exceeds {limit} bytes"),
+            Self::TooDeep { limit } => {
+                write!(formatter, "wire message exceeds {limit} nesting levels")
+            }
+            Self::Json(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+fn decode<T: DeserializeOwned>(text: &str, limit: usize) -> Result<T, DecodeError> {
+    if text.len() > limit {
+        return Err(DecodeError::TooLarge { limit });
+    }
+    // This allocation-free scan enforces resource depth, including ignored fields.
+    // Serde remains responsible for syntax, escaping, schema and trailing content.
+    let (mut depth, mut string, mut escaped) = (0usize, false, false);
+    for byte in text.bytes() {
+        if string {
+            if escaped {
+                escaped = false;
+            } else {
+                match byte {
+                    b'\\' => escaped = true,
+                    b'"' => string = false,
+                    _ => {}
+                }
+            }
+        } else {
+            match byte {
+                b'"' => string = true,
+                b'{' | b'[' => {
+                    depth += 1;
+                    if depth > MAX_JSON_DEPTH {
+                        return Err(DecodeError::TooDeep {
+                            limit: MAX_JSON_DEPTH,
+                        });
+                    }
+                }
+                b'}' | b']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+    serde_json::from_str(text).map_err(DecodeError::Json)
+}
+
+/// Decode a complete client envelope after byte and nesting checks.
+pub fn decode_request(text: &str) -> Result<crate::ClientMessage, DecodeError> {
+    decode(text, MAX_REQUEST_BYTES)
+}
+
+/// Decode a complete server envelope after byte and nesting checks.
+pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> {
+    decode(text, MAX_RESPONSE_BYTES)
+}
+
 /// Serialize JSON while bounding allocation and encoded UTF-8 bytes.
 /// Escaping counts toward the limit; failure returns no partial message.
 pub fn encode_bounded_json(
@@ -55,6 +135,170 @@ pub fn encode_bounded_json(
 mod tests {
     use super::*;
     #[test]
+    fn response_decode_rejects_overdeep_ignored_fields() {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+        let mut snapshot = samples["server"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["type"] == "snapshot")
+            .unwrap()
+            .clone();
+        let mut ignored = serde_json::Value::Null;
+        for _ in 0..MAX_JSON_DEPTH + 1 {
+            ignored = serde_json::Value::Array(vec![ignored]);
+        }
+        snapshot["snapshot"]["state"]["observation"]["ignored"] = ignored;
+        let text = serde_json::to_string(&snapshot).unwrap();
+        assert!(text.len() < MAX_RESPONSE_BYTES);
+        assert!(
+            matches!(
+                decode_response(&text),
+                Err(DecodeError::TooDeep {
+                    limit: MAX_JSON_DEPTH
+                })
+            ),
+            "ignored fields must obey the declared nesting ceiling"
+        );
+    }
+
+    #[test]
+    fn resource_limits_reject_before_entering_typed_deserialization() {
+        struct NeverDeserialize;
+        impl<'de> serde::Deserialize<'de> for NeverDeserialize {
+            fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+                panic!("resource limits must reject before typed construction");
+            }
+        }
+        assert!(matches!(
+            decode::<NeverDeserialize>("é", 1),
+            Err(DecodeError::TooLarge { limit: 1 })
+        ));
+        let nested = format!(
+            "{}null{}",
+            "[".repeat(MAX_JSON_DEPTH + 1),
+            "]".repeat(MAX_JSON_DEPTH + 1)
+        );
+        assert!(matches!(
+            decode::<NeverDeserialize>(&nested, nested.len()),
+            Err(DecodeError::TooDeep {
+                limit: MAX_JSON_DEPTH
+            })
+        ));
+    }
+
+    #[test]
+    fn nesting_scan_counts_containers_and_honors_string_escaping() {
+        let nested = format!(
+            "{}null{}",
+            "[".repeat(MAX_JSON_DEPTH),
+            "]".repeat(MAX_JSON_DEPTH)
+        );
+        assert!(decode::<serde_json::Value>(&nested, nested.len()).is_ok());
+        let strings = [
+            "{[]}".repeat(100),
+            "\\\"[{}]".repeat(100),
+            "é\n\\[\"}".to_owned(),
+        ];
+        for value in strings {
+            let json = serde_json::to_string(&value).unwrap();
+            assert_eq!(decode::<String>(&json, json.len()).unwrap(), value);
+        }
+        for malformed in ["{} {}", "[}", "\"unterminated", "\"\\q\"", "]"] {
+            assert!(
+                matches!(
+                    decode::<serde_json::Value>(malformed, malformed.len()),
+                    Err(DecodeError::Json(_))
+                ),
+                "{malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_byte_ceiling_accepts_exactly_and_rejects_valid_json_one_byte_over() {
+        let make = |message| crate::ServerMessage::Error {
+            scope: crate::ErrorScope::Transport {},
+            request_id: None,
+            code: crate::ErrorCode::InvalidRequest,
+            message,
+        };
+        let overhead = serde_json::to_string(&make(String::new())).unwrap().len();
+        let message = make("x".repeat(MAX_RESPONSE_BYTES - overhead));
+        let mut text = encode_bounded_json(&message, MAX_RESPONSE_BYTES).unwrap();
+        assert_eq!(text.len(), MAX_RESPONSE_BYTES);
+        assert_eq!(decode_response(&text).unwrap(), message);
+        text.push(' '); // Still valid JSON, including the complete trailing whitespace.
+        assert!(matches!(
+            decode_response(&text),
+            Err(DecodeError::TooLarge {
+                limit: MAX_RESPONSE_BYTES
+            })
+        ));
+    }
+
+    #[test]
+    fn request_depth_preflight_does_not_relax_strict_schema_or_syntax() {
+        let hello = crate::ClientMessage::Hello {
+            protocol: crate::PROTOCOL_VERSION,
+            token: "test".into(),
+            frontend: "test".into(),
+        };
+        let text = serde_json::to_string(&hello).unwrap();
+        for malformed in [
+            format!("{text} {{}}"),
+            text[..text.len() - 1].to_owned(),
+            text.replace(
+                "\"token\":\"test\"",
+                "\"token\":\"test\",\"token\":\"duplicate\"",
+            ),
+        ] {
+            assert!(matches!(
+                decode_request(&malformed),
+                Err(DecodeError::Json(_))
+            ));
+        }
+        let mut wire = serde_json::to_value(&hello).unwrap();
+        wire["unknown"] = serde_json::Value::Null;
+        assert!(matches!(
+            decode_request(&serde_json::to_string(&wire).unwrap()),
+            Err(DecodeError::Json(_))
+        ));
+        let mut nested = serde_json::Value::Null;
+        for _ in 0..MAX_JSON_DEPTH + 1 {
+            nested = serde_json::Value::Array(vec![nested]);
+        }
+        wire["unknown"] = nested;
+        assert!(matches!(
+            decode_request(&serde_json::to_string(&wire).unwrap()),
+            Err(DecodeError::TooDeep {
+                limit: MAX_JSON_DEPTH
+            })
+        ));
+    }
+
+    #[test]
+    fn typed_decoders_preserve_all_recorded_message_kinds() {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+        for sample in samples["client"].as_array().unwrap() {
+            let text = serde_json::to_string(sample).unwrap();
+            assert_eq!(
+                decode_request(&text).unwrap(),
+                serde_json::from_str::<crate::ClientMessage>(&text).unwrap()
+            );
+        }
+        for sample in samples["server"].as_array().unwrap() {
+            let text = serde_json::to_string(sample).unwrap();
+            assert_eq!(
+                decode_response(&text).unwrap(),
+                serde_json::from_str::<crate::ServerMessage>(&text).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn client_envelope_fits_exactly_at_the_byte_limit_and_rejects_one_byte_over() {
         use crate::{ClientMessage, PROTOCOL_VERSION};
         let make = |token| ClientMessage::Hello {
@@ -66,10 +310,15 @@ mod tests {
         let exact = make("x".repeat(MAX_REQUEST_BYTES - overhead));
         let encoded = encode_bounded_json(&exact, MAX_REQUEST_BYTES).unwrap();
         assert_eq!(encoded.len(), MAX_REQUEST_BYTES);
-        assert_eq!(
-            serde_json::from_str::<ClientMessage>(&encoded).unwrap(),
-            exact
-        );
+        assert_eq!(decode_request(&encoded).unwrap(), exact);
+        let oversized =
+            serde_json::to_string(&make("x".repeat(MAX_REQUEST_BYTES - overhead + 1))).unwrap();
+        assert!(matches!(
+            decode_request(&oversized),
+            Err(DecodeError::TooLarge {
+                limit: MAX_REQUEST_BYTES
+            })
+        ));
         assert!(encode_bounded_json(
             &make("x".repeat(MAX_REQUEST_BYTES - overhead + 1)),
             MAX_REQUEST_BYTES

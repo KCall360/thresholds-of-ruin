@@ -747,3 +747,106 @@ async fn oversized_fragmented_response_fails_before_deserialization_or_stream_re
     drop(client);
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair() {
+    use tokio_tungstenite::tungstenite::protocol::frame::{
+        coding::{Data, OpCode},
+        Frame,
+    };
+    fn depth(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Object(fields) => 1 + fields.values().map(depth).max().unwrap_or(0),
+            serde_json::Value::Array(values) => 1 + values.iter().map(depth).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+    for excessive in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut server = accept_async(stream).await.unwrap();
+            let initial = super::validation::snapshot(0);
+            attach_scripted(&mut server, &initial).await;
+            let mut state = initial.state.clone();
+            state.revision = 1;
+            state.observation.tick = 1;
+            let update = ServerMessage::Update {
+                update: Box::new(StreamUpdate {
+                    context: initial.context.clone(),
+                    actor: initial.actor,
+                    branch: initial.branch.clone(),
+                    cursor: StreamCursor {
+                        sequence: 1,
+                        tick: 1,
+                    },
+                    body: UpdateBody::Observation {
+                        state: Box::new(state),
+                        event: None,
+                    },
+                }),
+            };
+            let mut wire = serde_json::to_value(update).unwrap();
+            let mut ignored = serde_json::Value::Null;
+            // Five surrounding containers: message/update/body/state/observation.
+            for _ in 0..MAX_JSON_DEPTH - 5 + usize::from(excessive) {
+                ignored = serde_json::Value::Array(vec![ignored]);
+            }
+            wire["update"]["body"]["state"]["observation"]["ignored"] = ignored;
+            wire["update"]["body"]["state"]["observation"]["ignored_text"] =
+                serde_json::Value::String("é\\\"[{".repeat(MAX_JSON_DEPTH + 1));
+            assert_eq!(depth(&wire), MAX_JSON_DEPTH + usize::from(excessive));
+            let text = serde_json::to_vec(&wire).unwrap();
+            assert!(text.len() < MAX_RESPONSE_BYTES);
+            // Split a multibyte character across continuation frames as well.
+            let split = text.iter().position(|&byte| byte == 0xc3).unwrap() + 1;
+            for (bytes, opcode, finished) in [
+                (&text[..split], OpCode::Data(Data::Text), false),
+                (&text[split..], OpCode::Data(Data::Continue), true),
+            ] {
+                server
+                    .send(Message::Frame(Frame::message(
+                        bytes.to_vec(),
+                        opcode,
+                        finished,
+                    )))
+                    .await
+                    .unwrap();
+            }
+            while let Some(Ok(message)) = server.next().await {
+                assert!(
+                    !matches!(message, Message::Text(_)),
+                    "resource rejection must not send a repair or gameplay request"
+                );
+                if matches!(message, Message::Close(_)) {
+                    break;
+                }
+            }
+        });
+        let mut client = Connection::connect(address, "token".into(), ActorId(1), "test")
+            .await
+            .unwrap();
+        let before = client.state.clone();
+        let result = timeout(Duration::from_secs(2), client.next())
+            .await
+            .unwrap();
+        if excessive {
+            assert!(
+                result.is_err(),
+                "overdeep ignored fields must reject before publication"
+            );
+            assert_eq!(client.state, before);
+        } else {
+            assert!(matches!(result.unwrap(), ServerMessage::Update { .. }));
+            assert_eq!(client.state.state().revision, 1);
+            assert_eq!(client.state.state().observation.tick, 1);
+        }
+        assert!(client.is_synchronized());
+        drop(client);
+        timeout(Duration::from_secs(2), peer)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}

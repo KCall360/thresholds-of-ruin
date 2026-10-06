@@ -155,7 +155,7 @@ async fn connection(
     let Ok(Some(Ok(Message::Text(text)))) = timeout(IO_TIMEOUT, socket.next()).await else {
         return;
     };
-    let hello = serde_json::from_str::<ClientMessage>(&text);
+    let hello = decode_request(&text);
     let authenticated = match hello {
         Ok(ClientMessage::Hello {
             protocol,
@@ -223,7 +223,7 @@ async fn connection(
             }
             incoming = output.socket.next() => {
                 match incoming {
-                    Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
+                    Some(Ok(Message::Text(text))) => match decode_request(&text) {
                         Ok(ClientMessage::Request { request_id, request }) => {
                             let timing = timing.as_ref().map(|diagnostics| crate::diagnostics::RequestTiming {
                                 started: std::time::Instant::now(), diagnostics: diagnostics.clone(),

@@ -21,7 +21,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
-| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are in development |
+| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is in development |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
 | Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations |
@@ -46,10 +46,13 @@ paused-preparation recovery and checkpoint pooling are implemented. Autonomous
 decisions use the published common queue path. Native travel integration is published.
 Stream contexts, observation bases, bounded recovery, readiness publication and
 mandatory originating command contexts, native/headless permission controls,
-current reply contexts and explicit error scopes have focused verification.
-Text transport compatibility, recovery hardening and protocol closeout remain. Scenario compiler
-follow-up, history scaling and
-measured latency/memory work remain; see the refactor plan for the full scope.
+current reply contexts and explicit error scopes are published. Lossless wire
+integers and independent numeric persistence schemas are published too. Shared
+typed decoding now has byte/depth preflight and failing-first fragmented-peer and
+actual-client acceptance coverage. Release measurements validated with matching
+engine counts and disclosed decode cost; full closeout remains in progress. Collection deltas, complete encoded selection, output fairness,
+scenario compiler follow-up, history scaling and measured latency/memory work
+remain; see the refactor plan for the full scope.
 Text-client fixes and scripting runtime selection remain deferred.
 
 ## Completed milestones

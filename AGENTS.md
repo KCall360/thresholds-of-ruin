@@ -384,15 +384,25 @@ ownership/checkpoint regressions and real restart tests passed. All three deskto
 launchers use the verified immutable build; prior builds and saves remain retained.
 Further save DTO independence and persistence/restore tails remain open.
 
-**Lossless wire integers (in development).** Protocol 26 uses canonical decimal
-strings for 64-bit identifiers, counters, quantities, durations and motion
-velocities. Typed Rust values and persisted numeric schemas remain unchanged.
-Callers preserve received strings and use exact arithmetic at counter boundaries;
-diagnostics and benchmark metadata keep their independent numeric schemas.
-All 834 Rust workspace tests passed, plus affected actual-client gameplay,
-scheduling, recovery, native presentation and restart tests. The release
-comparison validated all 24 reports with matching counts and save sizes; a six-report repeat retained the original unresolved command tail.
-The first full gate failed only its stale documentation version reference;
-a renewed successful full gate and final-head Windows/Linux CI remain required
-before push and merge. No text product behavior or scripting runtime is added.
-The remaining architecture scope in the [refactor plan](docs/refactoring.md) stays active.
+**Lossless wire integers (merged, PR #71).** The current protocol uses canonical
+strings for all 64-bit wire values. Typed Rust and independent numeric stored
+schemas are unchanged. Exact tested contents passed the full local gate and all
+five final-head CI jobs; the three desktop launchers use its verified immutable
+build. The release comparison retained matching counts/saves and an unresolved
+command tail, with StreamUpdate bytes up about 0.8%/1.6%. No broad speedup is
+claimed. Prior builds, saves and helper backups remain retained.
+
+**Bounded typed decoding (in development).** Shared request/response decoding
+checks complete UTF-8 bytes and a 64-container nesting ceiling before typed
+construction. The scan includes ignored fields and respects string escaping;
+Serde owns syntax/schema checks. Failing-first unit, fragmented-peer and actual
+headless-process regressions passed; healthy-player continuation, reconnect and
+save/reopen rejection checks passed. The direct release diagnostic validated
+2,000 samples and measured added scan cost (4,096-cell median 7.06 → 7.99 ms).
+All 24 engine reports and six focused repeat reports validated with matching
+counts; command and persistence timing tails remain unresolved. Full final
+verification remains required before publication. The same-build diagnostic
+compares identical typed payloads and excludes network/UI/semantic validation;
+ordinary engine benchmarks do not measure native JSON decoding. Text-client
+product fixes and scripting runtime implementation remain deferred. All six
+architecture sequences in the [refactor plan](docs/refactoring.md) remain active.

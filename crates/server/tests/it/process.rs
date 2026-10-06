@@ -645,3 +645,144 @@ async fn actual_server_recovers_a_client_gap_without_repeating_an_admitted_actio
     restored.close().await.unwrap();
     drop(restored_server);
 }
+
+#[tokio::test]
+async fn actual_server_malformed_requests_do_not_publish_or_persist_actions() {
+    use tokio_tungstenite::tungstenite::protocol::frame::{
+        coding::{Data, OpCode},
+        Frame,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("malformed-request.db");
+    let (child, address) = launch(&path);
+    let mut healthy = tor_client_common::Connection::connect(
+        address.strip_prefix("ws://").unwrap().parse().unwrap(),
+        "process-test-token-not-a-real-secret".into(),
+        ActorId(1),
+        "healthy-decoder-peer",
+    )
+    .await
+    .unwrap();
+    let before = healthy.state.state().clone();
+    assert!(healthy.state.history().is_empty());
+    for case in [
+        "deep_hello",
+        "deep_request",
+        "trailing_request",
+        "fragmented_oversize",
+    ] {
+        let (socket, _) = connect_async(&address).await.unwrap();
+        let mut bad = WireClient::new(socket);
+        let hello = ClientMessage::Hello {
+            protocol: PROTOCOL_VERSION,
+            token: "process-test-token-not-a-real-secret".into(),
+            frontend: "malformed-request-peer".into(),
+        };
+        let mut ignored = serde_json::Value::Null;
+        for _ in 0..MAX_JSON_DEPTH + 1 {
+            ignored = serde_json::Value::Array(vec![ignored]);
+        }
+        let text = if case == "deep_hello" {
+            let mut wire = serde_json::to_value(hello).unwrap();
+            wire["ignored"] = ignored;
+            serde_json::to_string(&wire).unwrap()
+        } else {
+            bad.send(Message::Text(serde_json::to_string(&hello).unwrap().into()))
+                .await
+                .unwrap();
+            assert!(matches!(
+                bad.receive().await,
+                Some(ServerMessage::Welcome { .. })
+            ));
+            bad.request("attach", Request::Attach { actor: ActorId(1) })
+                .await;
+            loop {
+                if matches!(
+                    bad.receive().await.expect("attached peer"),
+                    ServerMessage::Snapshot { .. }
+                ) {
+                    break;
+                }
+            }
+            let mut request = serde_json::to_value(ClientMessage::Request {
+                request_id: "rejected-input".into(),
+                request: Request::Snapshot,
+            })
+            .unwrap();
+            match case {
+                "deep_request" => request["ignored"] = ignored,
+                "fragmented_oversize" => request["ignored"] = "x".repeat(MAX_REQUEST_BYTES).into(),
+                "trailing_request" => {}
+                _ => unreachable!(),
+            }
+            let mut text = serde_json::to_string(&request).unwrap();
+            if case == "trailing_request" {
+                text.push_str(" {}");
+            }
+            text
+        };
+        if case == "fragmented_oversize" {
+            assert!(text.len() > MAX_REQUEST_BYTES);
+            let split = text.len() / 2;
+            assert!(split < MAX_REQUEST_BYTES && text.len() - split < MAX_REQUEST_BYTES);
+            for (bytes, opcode, finished) in [
+                (&text.as_bytes()[..split], OpCode::Data(Data::Text), false),
+                (
+                    &text.as_bytes()[split..],
+                    OpCode::Data(Data::Continue),
+                    true,
+                ),
+            ] {
+                bad.send(Message::Frame(Frame::message(
+                    bytes.to_vec(),
+                    opcode,
+                    finished,
+                )))
+                .await
+                .unwrap();
+            }
+        } else {
+            assert!(text.len() < MAX_REQUEST_BYTES);
+            bad.send(Message::Text(text.into())).await.unwrap();
+        }
+        loop {
+            match bad.receive().await {
+                Some(ServerMessage::Waiting { .. }) => {}
+                Some(ServerMessage::Error {
+                    scope: ErrorScope::Transport {},
+                    code: ErrorCode::InvalidRequest,
+                    request_id: None,
+                    ..
+                }) => break,
+                None if case == "fragmented_oversize" => break,
+                other => {
+                    panic!("malformed input must not publish an action/result: {case}: {other:?}")
+                }
+            }
+        }
+        drop(bad);
+        let id = healthy.request(Request::Snapshot).await.unwrap();
+        loop {
+            if let ServerMessage::Snapshot { request_id, .. } = healthy.next().await.unwrap() {
+                if request_id == id {
+                    break;
+                }
+            }
+        }
+        assert_eq!(healthy.state.state(), &before, "{case}");
+        assert!(healthy.state.history().is_empty(), "{case}");
+        assert!(healthy.is_synchronized());
+    }
+    let id = healthy.request(Request::Save).await.unwrap();
+    loop {
+        if let ServerMessage::Ack { request_id, .. } = healthy.next().await.unwrap() {
+            if request_id == id {
+                break;
+            }
+        }
+    }
+    healthy.close().await.unwrap();
+    drop(child);
+    let reopened = tor_server::Engine::open(&path, tor_server::Scenario::two_room(42)).unwrap();
+    assert_eq!(reopened.state(ActorId(1)).unwrap(), before);
+}
