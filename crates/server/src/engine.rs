@@ -496,7 +496,9 @@ pub(crate) struct Receipt {
     user: String,
     frontend: String,
     request_id: String,
+    #[serde(with = "crate::storage::schema::ActorId")]
     actor: ActorId,
+    #[serde(with = "crate::storage::schema::BranchId")]
     branch: BranchId,
     command: Command,
 }
@@ -717,6 +719,7 @@ pub(crate) struct Archive {
     pub(crate) version: u32,
     pub(crate) ruleset: String,
     pub(crate) scenario: Scenario,
+    #[serde(with = "crate::storage::schema::BranchId")]
     pub(crate) branch: BranchId,
     pub(crate) records: Vec<Record>,
 }
@@ -840,7 +843,9 @@ impl CommandProfile {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Revisions {
+    #[serde(with = "crate::storage::schema::revisions")]
     loaded: BTreeMap<ActorId, u64>,
+    #[serde(with = "crate::storage::schema::shared_revisions")]
     parked: tor_world::Shared<BTreeMap<ActorId, u64>>,
 }
 

@@ -387,7 +387,7 @@ private admission, receipt-free linked execution, observer disclosure and durabl
 state/history. Full, performance and publication gates remain pending. Text-client
 fixes and scripting runtime implementation remain deferred.
 
-## Stream context and exact observation bases (in progress)
+## Stream context and exact observation bases (merged, PR #69)
 
 Snapshots and updates require an opaque attachment identity and reset epoch.
 The host allocates identities outside simulation randomness and saved state;
@@ -406,9 +406,11 @@ retain original journal actor and branch identity through rewind and restart.
 
 Readiness combines one simulation-owned queue/control query with session
 ownership, role, actor validity, run and travel policy. Resume/cancel availability
-uses the validators that select the actual mutation. Existing work preserves its
-identity; capacity is required only for new admissions. Queue capacity does not
-grant authority or validate targets and timing. Required snapshot readiness and
+uses the validators that select the actual mutation. Suspended queue entries
+reuse their capacity and identity. Resuming paused preparation needs capacity to
+insert its continuation while preserving its identity and spent progress. New
+actions need capacity and a fresh identity. Queue capacity does not grant
+authority or validate targets and timing. Required snapshot readiness and
 ordered updates use a generation independent of observation revisions, including
 ownership changes when permissions remain empty. Publication queries each actor
 once per pass and repeats only when output rejection removes clients.
@@ -451,8 +453,11 @@ lint, architecture and rustdoc. Debug Python passed 252 of 253 cases; release
 applications passed 134 of 135. The only failure in each profile was the native
 mouse test intercepted by the Windows overlay, expressly waived by the maintainer.
 Tests remain enabled in ordinary CI. This is qualified local evidence, not an
-unqualified full pass. Complete final-commit Windows/Linux CI remains required
-before merging. All other refactor work sequences remain in scope.
+unqualified full pass. Exact head `c114373` subsequently passed all five required
+Windows/Linux CI checks and merged in PR #69. Its immutable candidate passed 43
+process checks; the three desktop launchers now use the hash-verified build and
+matching scenario files. Earlier builds and saves remain retained. All other
+refactor work sequences remain in scope.
 
 Subsequent cancellation review exposed a lost presentation boundary: when TCP
 output blocked an automatic palette query, cancellation after applying an
@@ -463,7 +468,7 @@ send deadlines. Applied observations remain pending until query output completes
 they are presented exactly once without being reapplied. Pending presentation
 also keeps playback active. Focused shared-client, real application recovery and
 palette checks pass. The refreshed full run above includes this correction;
-final-commit Windows/Linux CI remains required before merging.
+the final-commit Windows/Linux CI also passed.
 
 ### Stream context release comparison
 
@@ -1749,3 +1754,27 @@ removed the extra scene/body work and reduced the command p95 increase to the
 2.2% shown above. That intermediate comparison's save p95 fell 21.9%, while
 restart p95 remained higher; both comparisons are retained rather than selecting
 only favorable timings. Raw samples remain local and unpublished.
+
+## Save-owned nested schemas (in development)
+
+The journal owns its command enum, but nested protocol values previously invoked
+wire serializers directly. Save-owned typed Serde adapters now specify persisted
+actor and journal identifiers, actions, directions, authorship and annotation
+metadata. Checkpoint revision maps keep numeric keys independently of wire
+encoding. Current stored
+shapes remain unchanged, and the existing strict save decoder remains the single
+validation path. This avoids changing saved numeric fields when future wire
+integers become decimal strings. Further separation of simulation state from save
+DTOs and JavaScript-safe wire encoding remain in scope.
+
+A failing-first action-shape test and five schema tests cover numeric extremes,
+nested journal receipts, annotation metadata, intention facts, revision maps and
+all direction variants. The prior server library run passed 172 tests. All 23
+focused process/documentation tests passed, including a new real-client test
+that inspects stored journal shapes and checks state and history after restart.
+The full run passed all 829 Rust tests in each profile, formatting, clippy,
+architecture and rustdoc. Debug Python passed 253/254 and release applications
+passed 135/136. The only failure in each profile was the native mouse test
+intercepted by the Windows overlay, expressly waived by the maintainer. This is
+qualified local evidence, not an unqualified full pass. Ordinary CI coverage
+remains enabled; final-commit Windows/Linux CI is required before merging.

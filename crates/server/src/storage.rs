@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 #[path = "save_codec.rs"]
 mod codec;
+#[path = "save_schema.rs"]
+pub(crate) mod schema;
 pub(crate) use codec::frame;
 pub use codec::MAX_PAYLOAD;
 use codec::{crc32c, decode, decode_region, region_frame, strict};

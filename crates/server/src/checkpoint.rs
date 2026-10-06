@@ -23,6 +23,7 @@ pub(crate) struct Checkpoint {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SavedBoundary {
+    #[serde(with = "crate::storage::schema::optional_entry")]
     id: Option<EntryId>,
     game: Snapshot,
     revisions: Revisions,
@@ -36,6 +37,7 @@ pub(crate) struct DiskCheckpoint {
     pub record_count: usize,
     version: u32,
     ruleset: String,
+    #[serde(with = "crate::storage::schema::BranchId")]
     current_branch: BranchId,
     wizard_game: bool,
     shared: SharedState,

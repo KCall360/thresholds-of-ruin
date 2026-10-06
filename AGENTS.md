@@ -171,7 +171,12 @@ Local verification retains the reported LockApp mouse limitation under the
 maintainer's waiver; ordinary CI coverage passed. Persistence and restore timing
 tails remain open, and no broad performance improvement is claimed.
 
-**Stream recovery (in progress).** Protocol contexts and exact observation bases
+**Stream recovery (merged, PR #69).** Exact head `c114373` passed all five required
+Windows/Linux CI checks. All three desktop launchers now use its immutable
+verified build; 43 candidate process checks passed, and active binaries/helpers
+were hash-verified after activation. Previous builds and saves remain retained.
+The local mouse limitation remains narrowly waived; ordinary CI passed it.
+ Protocol contexts and exact observation bases
 and bounded shared transport resynchronization are implemented with failing-first,
 shared-client, WebSocket, native network-worker and actual-process coverage.
 Immediate receipts now retain their journal actor/branch across rewind and restart;
@@ -369,3 +374,16 @@ timing-tail investigation.
 in the dungeon acceptance test. It passed in isolation and in both later full
 runs; no cause was found. The test now keeps server diagnostics when a save
 barrier fails. If it recurs, investigate it using those diagnostics.
+
+**Save schema boundaries (in development).** Save-owned typed Serde adapters
+separate persisted actor/action/annotation encodings and checkpoint revision maps
+from wire serializers without changing current saved shapes. Five boundary tests passed, including all stored metadata variants and numeric
+extremes. The prior server library run passed 172 tests, and the expanded focused
+process/documentation run passed 23, including the new journal-shape/restart test.
+Full verification passed all 829 Rust tests in each profile, fmt, clippy,
+architecture and rustdoc. Debug Python passed 253/254; release applications
+passed 135/136. The sole failure in each profile is the explicitly waived local
+native mouse test; ordinary CI remains enabled and final-commit Windows/Linux
+CI is still required before merge. This is qualified local evidence, not an
+unqualified full pass. Further save DTO independence and JavaScript-safe wire
+encoding remain in scope.
