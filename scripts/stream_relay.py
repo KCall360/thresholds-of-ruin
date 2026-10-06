@@ -1,7 +1,7 @@
 """Test-only loopback relay: pause, omit an observation, or corrupt a delta.
 
 The real server and clients keep their normal protocol, queue sizes and clocks.
-Only one server frame is held; no unbounded test queue hides backpressure.
+Only one server frame is held, including a separately gated repair snapshot; no unbounded test queue hides backpressure.
 """
 import json
 import socket
@@ -30,6 +30,11 @@ class StreamRelay:
         self.gate = threading.Event()
         self.gate.set()
         self.held = threading.Event()
+        self.repair_gate = threading.Event()
+        self.repair_gate.set()
+        self.repair_held = threading.Event()
+        self.attachments = 0
+        self.repairs = 0
         self.drop_observation = threading.Event()
         self.dropped = threading.Event()
         self.overflow_delta = threading.Event()
@@ -81,14 +86,13 @@ class StreamRelay:
                 if not self.gate.is_set():
                     self.held.set()
                 self.gate.wait()
-                if prefix[0] == 0x81 and self.drop_observation.is_set():
-                    message = json.loads(payload)
+                message = json.loads(payload) if prefix[0] == 0x81 else None
+                if message is not None and self.drop_observation.is_set():
                     if message.get('type') == 'update' and message['update']['body']['type'] in ('observation', 'observation_delta'):
                         self.drop_observation.clear()
                         self.dropped.set()
                         continue
-                if prefix[0] == 0x81 and (self.overflow_delta.is_set() or self.invalid_inventory.is_set()):
-                    message = json.loads(payload)
+                if message is not None and (self.overflow_delta.is_set() or self.invalid_inventory.is_set()):
                     if message.get('type') == 'update' and message['update']['body']['type'] == 'observation_delta':
                         # Keep the envelope and sequence valid to isolate
                         # rejection of arithmetic or reconstructed state.
@@ -108,6 +112,15 @@ class StreamRelay:
                         self.overflow_delta.clear()
                         self.invalid_inventory.clear()
                         self.corrupted.set()
+                if message is not None:
+                    if message.get('type') == 'snapshot':
+                        if message['request_id'] == 'attach':
+                            self.attachments += 1
+                        else:
+                            self.repairs += 1
+                            if not self.repair_gate.is_set():
+                                self.repair_held.set()
+                            self.repair_gate.wait()
                 downstream.sendall(prefix + extra + payload)
         except (EOFError, OSError):
             pass
@@ -135,6 +148,7 @@ class StreamRelay:
 
     def close(self):
         self.gate.set()
+        self.repair_gate.set()
         self.close_sockets()
         self.thread.join(timeout=10)
         if self.thread.is_alive():

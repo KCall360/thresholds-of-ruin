@@ -6,12 +6,75 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{net::TcpStream, time::timeout};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async_with_config,
+    tungstenite::{protocol::WebSocketConfig, Message},
+    MaybeTlsStream, WebSocketStream,
+};
 use tor_protocol::*;
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub type ConnectionError = Box<dyn Error + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QueryPhase {
+    Queue,
+    Flush,
+    AwaitReply,
+}
+
+/// Stored across canceled `next` calls. A queued request is flushed again,
+/// never queued again; uncertainty never causes gameplay input to be replayed.
+struct PendingQuery {
+    request_id: String,
+    deadline: tokio::time::Instant,
+    phase: QueryPhase,
+}
+
+impl PendingQuery {
+    fn new() -> Self {
+        Self {
+            request_id: uuid::Uuid::new_v4().to_string(),
+            deadline: tokio::time::Instant::now() + DEADLINE,
+            phase: QueryPhase::Queue,
+        }
+    }
+
+    /// Stored phases ensure cancellation never loses or duplicates a query.
+    async fn send(
+        &mut self,
+        socket: &mut Socket,
+        request: Request,
+        expired: &'static str,
+    ) -> Result<(), ConnectionError> {
+        if tokio::time::Instant::now() >= self.deadline {
+            return Err(expired.into());
+        }
+        if self.phase == QueryPhase::Queue {
+            let message = ClientMessage::Request {
+                request_id: self.request_id.clone(),
+                request,
+            };
+            tokio::time::timeout_at(
+                self.deadline,
+                socket.feed(Message::Text(
+                    encode_bounded_json(&message, MAX_REQUEST_BYTES)?.into(),
+                )),
+            )
+            .await
+            .map_err(|_| expired)??;
+            self.phase = QueryPhase::Flush;
+        }
+        if self.phase == QueryPhase::Flush {
+            tokio::time::timeout_at(self.deadline, socket.flush())
+                .await
+                .map_err(|_| expired)??;
+            self.phase = QueryPhase::AwaitReply;
+        }
+        Ok(())
+    }
+}
 
 /// Loopback transport for one attached actor. Disconnects are surfaced; uncertain
 /// commands are never retried with a new identity. Reconnect with a fresh snapshot.
@@ -28,6 +91,11 @@ pub struct Connection {
     held: Option<ServerMessage>,
     last_shown: Option<Instant>,
     skipping: bool,
+    recovery: Option<PendingQuery>,
+    last_recovery_snapshot: Option<String>,
+    /// Applied exactly once, retained until its automatic query is flushed.
+    pending_presentation: Option<ServerMessage>,
+    palette_request: Option<PendingQuery>,
 }
 
 /// Whether a message shows the player a new moment of play. Only these are
@@ -52,7 +120,14 @@ impl Connection {
         if !address.ip().is_loopback() {
             return Err("Only loopback connections are supported".into());
         }
-        let (mut socket, _) = timeout(DEADLINE, connect_async(format!("ws://{address}"))).await??;
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_RESPONSE_BYTES))
+            .max_frame_size(Some(MAX_RESPONSE_BYTES));
+        let (mut socket, _) = timeout(
+            DEADLINE,
+            connect_async_with_config(format!("ws://{address}"), Some(config), false),
+        )
+        .await??;
         send(
             &mut socket,
             ClientMessage::Hello {
@@ -102,6 +177,10 @@ impl Connection {
             held: None,
             last_shown: None,
             skipping: false,
+            recovery: None,
+            last_recovery_snapshot: None,
+            pending_presentation: None,
+            palette_request: None,
         })
     }
 
@@ -128,11 +207,61 @@ impl Connection {
 
     /// Whether an update is waiting for its turn on screen.
     pub fn playing(&self) -> bool {
-        self.held.is_some()
+        self.held.is_some() || self.pending_presentation.is_some()
+    }
+
+    /// Whether requests may use the current disclosed state. The last valid
+    /// model remains available for display during recovery, never for commands.
+    pub fn is_synchronized(&self) -> bool {
+        self.recovery.is_none()
+    }
+
+    /// Classify a snapshot using this connection's own recovery request identity.
+    /// An ordinary authoritative reset may precede a successful command receipt.
+    pub fn is_recovery_snapshot(&self, message: &ServerMessage) -> bool {
+        matches!(message, ServerMessage::Snapshot { request_id, .. }
+            if self.last_recovery_snapshot.as_ref() == Some(request_id))
+    }
+
+    fn require_snapshot(&mut self) {
+        if self.recovery.is_none() {
+            self.recovery = Some(PendingQuery::new());
+        }
+    }
+
+    async fn progress_recovery(&mut self) -> Result<(), ConnectionError> {
+        if let Some(query) = &mut self.recovery {
+            query
+                .send(
+                    &mut self.socket,
+                    Request::Snapshot,
+                    "Stream resynchronization timed out",
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn progress_palette_request(&mut self) -> Result<(), ConnectionError> {
+        if let Some(query) = &mut self.palette_request {
+            query
+                .send(
+                    &mut self.socket,
+                    Request::Palette,
+                    "Asset palette request timed out",
+                )
+                .await?;
+            self.palette_request = None;
+        }
+        Ok(())
     }
 
     /// Send a request; any skipping ends, so what follows is paced again.
     pub async fn request(&mut self, request: Request) -> Result<String, ConnectionError> {
+        if !self.is_synchronized() {
+            return Err("Resynchronizing; request was not sent".into());
+        }
+        self.progress_palette_request().await?;
         self.skipping = false;
         self.send_request(request).await
     }
@@ -168,60 +297,160 @@ impl Connection {
     /// after the previous one. Waiting is safe to cancel when terminal input
     /// becomes available: a held update is kept for the next call.
     pub async fn next(&mut self) -> Result<ServerMessage, ConnectionError> {
-        let mut message = match self.held.take() {
-            Some(message) => message,
-            None => receive(&mut self.socket).await?,
-        };
-        if shown(&message) {
-            let due = self
-                .last_shown
-                .map(|shown| shown + self.pace)
-                .filter(|due| !self.skipping && *due > Instant::now());
-            if let Some(due) = due {
-                self.held = Some(message);
-                tokio::time::sleep_until(due.into()).await;
-                message = self.held.take().expect("held update");
+        loop {
+            self.progress_recovery().await?;
+            self.progress_palette_request().await?;
+            if let Some(message) = self.pending_presentation.take() {
+                return Ok(message);
             }
-            self.last_shown = Some(Instant::now());
-        }
-        if self.timing {
-            if let ServerMessage::Ack { request_id, .. } = &message {
-                self.timing_event("client_ack", request_id, None);
-            }
-        }
-        match &message {
-            ServerMessage::Update { update } => self
-                .state
-                .apply(*update.clone())
-                .map_err(|e| format!("Invalid stream: {e:?}"))?,
-            ServerMessage::Snapshot { snapshot, .. } => {
-                if snapshot.actor != self.state.state().observation.actor {
-                    return Err("Snapshot changed attached actor".into());
+            let mut message = match self.held.take() {
+                Some(message) => message,
+                None => match &self.recovery {
+                    Some(recovery) => {
+                        tokio::time::timeout_at(recovery.deadline, receive(&mut self.socket))
+                            .await
+                            .map_err(|_| "Stream resynchronization timed out")??
+                    }
+                    None => receive(&mut self.socket).await?,
+                },
+            };
+            if self.is_synchronized() && shown(&message) {
+                let due = self
+                    .last_shown
+                    .map(|shown| shown + self.pace)
+                    .filter(|due| !self.skipping && *due > Instant::now());
+                if let Some(due) = due {
+                    self.held = Some(message);
+                    tokio::time::sleep_until(due.into()).await;
+                    message = self.held.take().expect("held update");
                 }
-                self.state
-                    .replace_snapshot(*snapshot.clone())
-                    .map_err(|e| format!("Invalid snapshot: {e:?}"))?;
+                self.last_shown = Some(Instant::now());
             }
-            _ => {}
-        }
-        let ask = match &message {
-            ServerMessage::Update { .. } | ServerMessage::Snapshot { .. } => self
-                .palette
-                .notice(observation_assets(&self.state.state().observation)),
-            // A full palette may still lack what's already in view.
-            ServerMessage::Palette { palette, .. } => {
-                let gap = self.palette.apply(palette);
-                let missing = self
+            if self.timing {
+                if let ServerMessage::Ack { request_id, .. } = &message {
+                    self.timing_event("client_ack", request_id, None);
+                }
+            }
+            if let ServerMessage::Ack { receipt, .. } = &message {
+                if receipt.actor() != self.state.state().observation.actor {
+                    return Err("Receipt belongs to another actor".into());
+                }
+            }
+            match &message {
+                ServerMessage::Error {
+                    scope: ErrorScope::Transport {},
+                    code,
+                    message,
+                    ..
+                } => {
+                    return Err(format!("Transport error: {code:?}: {message}").into());
+                }
+                ServerMessage::Error {
+                    scope: ErrorScope::Unattached {},
+                    ..
+                } => {
+                    return Err("Host error has no current attachment".into());
+                }
+                _ => {}
+            }
+            let reply_context = message.reply_context();
+            if let Some(context) = reply_context {
+                // Even during repair, another attachment/actor cannot confirm
+                // this request. Missing ordered state within this attachment
+                // requires repair; a reply never installs that state itself.
+                if context.input.stream.stream != self.state.context().stream {
+                    return Err("Reply belongs to another attachment".into());
+                }
+                if context.actor != self.state.state().observation.actor {
+                    return Err("Reply belongs to another actor".into());
+                }
+                if self.is_synchronized() && self.state.validate_reply_context(context).is_err() {
+                    self.require_snapshot();
+                }
+                if !self.is_synchronized()
+                    && matches!(
+                        message,
+                        ServerMessage::History { .. } | ServerMessage::Palette { .. }
+                    )
+                {
+                    // A receipt survives independently of the stream. Query
+                    // contents cannot be presented or applied while uncertain.
+                    continue;
+                }
+            }
+            match &message {
+                ServerMessage::Update { update } => {
+                    if !self.is_synchronized() {
+                        continue;
+                    }
+                    if self.state.apply(*update.clone()).is_err() {
+                        self.require_snapshot();
+                        continue;
+                    }
+                }
+                ServerMessage::Snapshot {
+                    request_id,
+                    snapshot,
+                } => {
+                    let recovering = self.recovery.is_some();
+                    if let Some(recovery) = &self.recovery {
+                        if request_id != &recovery.request_id {
+                            continue;
+                        }
+                    }
+                    match self.state.replace_snapshot(*snapshot.clone()) {
+                        Ok(()) => {
+                            if recovering {
+                                self.last_recovery_snapshot = Some(request_id.clone());
+                            }
+                            self.recovery = None;
+                            self.last_shown = None;
+                        }
+                        Err(error) if recovering => {
+                            return Err(
+                                format!("Invalid resynchronization snapshot: {error:?}").into()
+                            );
+                        }
+                        Err(_) => {
+                            self.require_snapshot();
+                            continue;
+                        }
+                    }
+                }
+                ServerMessage::Error {
+                    request_id: Some(request_id),
+                    message,
+                    ..
+                } if self
+                    .recovery
+                    .as_ref()
+                    .is_some_and(|recovery| &recovery.request_id == request_id) =>
+                {
+                    return Err(format!("Stream resynchronization rejected: {message}").into());
+                }
+                _ => {}
+            }
+            let ask = match &message {
+                ServerMessage::Update { .. } | ServerMessage::Snapshot { .. } => self
                     .palette
-                    .notice(observation_assets(&self.state.state().observation));
-                gap || missing
+                    .notice(observation_assets(&self.state.state().observation)),
+                // A full palette may still lack what's already in view.
+                ServerMessage::Palette { palette, .. } => {
+                    let gap = self.palette.apply(palette);
+                    let missing = self
+                        .palette
+                        .notice(observation_assets(&self.state.state().observation));
+                    gap || missing
+                }
+                _ => false,
+            };
+            if ask {
+                self.pending_presentation = Some(message);
+                self.palette_request = Some(PendingQuery::new());
+                continue;
             }
-            _ => false,
-        };
-        if ask {
-            self.send_request(Request::Palette).await?;
+            return Ok(message);
         }
-        Ok(message)
     }
 
     // Explicitly opt-in host diagnostics; no protocol or simulation-state fields.
@@ -268,7 +497,9 @@ impl Connection {
 async fn send(socket: &mut Socket, message: ClientMessage) -> Result<(), ConnectionError> {
     timeout(
         DEADLINE,
-        socket.send(Message::Text(serde_json::to_string(&message)?.into())),
+        socket.send(Message::Text(
+            encode_bounded_json(&message, MAX_REQUEST_BYTES)?.into(),
+        )),
     )
     .await??;
     Ok(())
@@ -284,3 +515,7 @@ async fn receive(socket: &mut Socket) -> Result<ServerMessage, ConnectionError> 
         }
     }
 }
+
+#[cfg(test)]
+#[path = "connection_tests.rs"]
+mod tests;

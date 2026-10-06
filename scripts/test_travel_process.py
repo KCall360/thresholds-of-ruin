@@ -21,7 +21,7 @@ class TravelJournalProcesses(ProcessTestCase):
         watcher, _ = self.client(SPECTATOR_TOKEN)
         destination = next(cell["key"] for cell in initial["state"]["observation"]["visible_cells"]
                            if cell["position"] == {"x": 5, "y": 0, "z": 0})
-        accepted = self.request(player, {"type": "command", "branch": initial["branch"],
+        accepted = self.request(player, {"type": "command", "context": initial["input_context"], "branch": initial["branch"],
             "command": {"type": "travel", "expected_revision": initial["state"]["revision"],
                         "destination": destination}})
         self.assertIsNone(accepted["error"])
@@ -124,7 +124,7 @@ class TravelProcesses(ProcessTestCase):
         self.flush_save()
         before = self.save.read_bytes()
         destination = synced["state"]["observation"]["visible_cells"][0]["key"]
-        denied = self.request(spectator, {"type":"command", "branch":synced["branch"], "command":{"type":"travel", "expected_revision":synced["state"]["revision"], "destination":destination}})
+        denied = self.request(spectator, {"type":"command", "context": synced["input_context"], "branch":synced["branch"], "command":{"type":"travel", "expected_revision":synced["state"]["revision"], "destination":destination}})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(self.save.read_bytes(), before)
         for client in (ascii_client, spectator): client.stop()
@@ -144,7 +144,7 @@ class TravelProcesses(ProcessTestCase):
         self.server()
         player, initial = self.client()
         destination = next(c["key"] for c in initial["state"]["observation"]["visible_cells"] if c["position"] == {"x":-1,"y":0,"z":0})
-        accepted = self.request(player, {"type":"command", "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
+        accepted = self.request(player, {"type":"command", "context": initial["input_context"], "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
         self.assertIsNone(accepted["error"])
         arrived = self.terminal(player)
         self.assertEqual(arrived["travel"]["phase"], "arrived")
@@ -256,7 +256,7 @@ class TravelProcesses(ProcessTestCase):
         ascii_client = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"], token=SPECTATOR_TOKEN)
         self.ascii_frame(ascii_client, lambda f: f["state"] is not None and not f["busy"])
         destination = next(c["key"] for c in initial["state"]["observation"]["visible_cells"] if c["position"] == {"x":7,"y":0,"z":0})
-        self.request(player, {"type":"command", "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
+        self.request(player, {"type":"command", "context": initial["input_context"], "branch":initial["branch"], "command":{"type":"travel", "expected_revision":initial["state"]["revision"], "destination":destination}})
         stopped = self.terminal(player)
         shown = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
         self.assertEqual(shown["travel"], stopped["travel"])

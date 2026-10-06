@@ -84,6 +84,13 @@ impl Runner {
     fn new(engine: Engine, case: String) -> Self {
         let state = engine.state(ActorId(1)).unwrap();
         let snapshot = Snapshot {
+            readiness: tor_protocol::Readiness {
+                revision: 0,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            },
+            context: fixture_context(),
             intentions: Vec::new(),
             actor: ActorId(1),
             branch: engine.branch().clone(),
@@ -215,6 +222,7 @@ impl Runner {
             let full_bytes = serde_json::to_vec(&state).unwrap().len();
             let body = match delta {
                 Some(delta) => UpdateBody::ObservationDelta {
+                    base: self.app.state.as_ref().unwrap().observation_base(),
                     state: Box::new(delta),
                     event,
                 },
@@ -224,6 +232,7 @@ impl Runner {
                 },
             };
             let update = StreamUpdate {
+                context: fixture_context(),
                 actor: ActorId(1),
                 branch: self.engine.branch().clone(),
                 cursor: StreamCursor {
@@ -612,5 +621,13 @@ fn main() {
         );
         summarize_wire(&case, std::mem::take(&mut runner.wire_bytes));
         summarize(&case, runner.distributions);
+    }
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
     }
 }

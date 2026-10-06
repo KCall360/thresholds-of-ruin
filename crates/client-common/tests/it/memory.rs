@@ -3,6 +3,7 @@ use tor_protocol::*;
 
 fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
     serde_json::from_value(serde_json::json!({
+        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
         "actor":1,"branch":"first","cursor":{"sequence":0,"tick":tick},
         "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision,"observation":{
@@ -14,8 +15,9 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
     .unwrap()
 }
 
-fn update(next: Snapshot, sequence: u64) -> StreamUpdate {
+fn update(client: &ClientState, next: Snapshot, sequence: u64) -> StreamUpdate {
     StreamUpdate {
+        context: client.context().clone(),
         actor: next.actor,
         branch: next.branch,
         cursor: StreamCursor {
@@ -38,7 +40,7 @@ fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
         name: "Quiet Reverie".into(),
         origin: PlaceNameOrigin::Authored,
     });
-    let mut change = update(next.clone(), 1);
+    let mut change = update(&client, next.clone(), 1);
     if let UpdateBody::Observation { event, .. } = &mut change.body {
         *event = Some(Box::new(HistoryEntry {
             id: EntryId("rename".into()),
@@ -71,7 +73,7 @@ fn free_rename_updates_and_authoritative_place_snapshots_survive_reconnect() {
     );
     let mut rewind = snapshot(1, 0, 0);
     rewind.branch = BranchId("rewound".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert!(client.state().observation.places.is_empty());
 }
 
@@ -83,17 +85,19 @@ fn solid_cell_memory_is_stale_until_refreshed_and_clears_on_rewind() {
     ceiling.wall = true;
     ceiling.material = "granite".into();
     let mut client = ClientState::from_snapshot(first).unwrap();
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
     let remembered = client.memory().find(|c| c.key == "1").unwrap();
     assert!(remembered.wall);
     assert_eq!(remembered.material, "granite");
-    client.replace_snapshot(snapshot(1, 100, 1)).unwrap();
+    super::reset_snapshot(&mut client, snapshot(1, 100, 1)).unwrap();
     let refreshed = client.memory().find(|c| c.key == "1").unwrap();
     assert!(!refreshed.wall);
     assert_ne!(refreshed.material, "granite");
     let mut rewind = snapshot(2, 0, 0);
     rewind.branch = BranchId("rewound".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert!(client.memory().all(|c| c.key != "1"));
 }
 
@@ -102,7 +106,9 @@ fn place_hints_stay_stale_until_seen_again_and_do_not_survive_rewind() {
     let mut first = snapshot(1, 0, 0);
     first.state.observation.visible_cells[0].place_hint = true;
     let mut client = ClientState::from_snapshot(first).unwrap();
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
     assert!(
         client
             .memory()
@@ -110,7 +116,7 @@ fn place_hints_stay_stale_until_seen_again_and_do_not_survive_rewind() {
             .unwrap()
             .place_hint
     );
-    client.replace_snapshot(snapshot(2, 100, 1)).unwrap();
+    super::reset_snapshot(&mut client, snapshot(2, 100, 1)).unwrap();
     assert!(
         client
             .memory()
@@ -118,7 +124,9 @@ fn place_hints_stay_stale_until_seen_again_and_do_not_survive_rewind() {
             .unwrap()
             .place_hint
     );
-    client.apply(update(snapshot(1, 200, 2), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(1, 200, 2), 1))
+        .unwrap();
     assert!(
         !client
             .memory()
@@ -128,10 +136,10 @@ fn place_hints_stay_stale_until_seen_again_and_do_not_survive_rewind() {
     );
     let mut marked = snapshot(1, 300, 3);
     marked.state.observation.visible_cells[0].place_hint = true;
-    client.apply(update(marked, 2)).unwrap();
+    client.apply(update(&client, marked, 2)).unwrap();
     let mut rewind = snapshot(2, 0, 0);
     rewind.branch = BranchId("new".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert!(client.memory().all(|cell| !cell.place_hint));
 }
 
@@ -153,14 +161,18 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     });
     let mut client = ClientState::from_snapshot(first).unwrap();
     assert_eq!(client.memory().count(), 1);
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
     assert_eq!(client.state().observation.visible_cells[0].key, "2");
     assert!(client.state().observation.ground_items.is_empty());
     let remembered = client.memory().find(|view| view.key == "1").unwrap();
     assert_eq!(remembered.ground_items[0].item.id, 7);
     assert_eq!(remembered.last_seen_tick, 0);
     assert_eq!(remembered.last_seen_revision, 0);
-    client.apply(update(snapshot(1, 200, 2), 2)).unwrap();
+    client
+        .apply(update(&client, snapshot(1, 200, 2), 2))
+        .unwrap();
     assert_eq!(client.memory().count(), 2);
     assert!(client
         .memory()
@@ -173,12 +185,14 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
 #[test]
 fn snapshots_preserve_same_branch_memory_but_clear_abandoned_futures() {
     let mut client = ClientState::from_snapshot(snapshot(1, 0, 0)).unwrap();
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
-    client.replace_snapshot(snapshot(2, 100, 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
+    super::reset_snapshot(&mut client, snapshot(2, 100, 1)).unwrap();
     assert_eq!(client.memory().count(), 2);
     let mut rewind = snapshot(1, 0, 0);
     rewind.branch = BranchId("rewound".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert_eq!(client.memory().count(), 1);
     assert_eq!(client.memory().next().unwrap().key, "1");
     // A fresh connection has no access to the old client's memories.
@@ -192,7 +206,7 @@ fn elevation_views_are_separate_and_invalid_inputs_leave_memory_unchanged() {
     let mut upstairs = snapshot(2, 100, 1);
     upstairs.state.observation.position.z = 1;
     upstairs.state.observation.visible_cells[0].position.z = 1;
-    client.apply(update(upstairs, 1)).unwrap();
+    client.apply(update(&client, upstairs, 1)).unwrap();
     assert_eq!(
         client
             .memory()
@@ -201,14 +215,16 @@ fn elevation_views_are_separate_and_invalid_inputs_leave_memory_unchanged() {
         vec![0, 1]
     );
     let before = client.clone();
-    assert!(client.apply(update(snapshot(3, 200, 2), 3)).is_err());
+    assert!(client
+        .apply(update(&client, snapshot(3, 200, 2), 3))
+        .is_err());
     let mut wrong_actor = snapshot(3, 200, 2);
     wrong_actor.actor = ActorId(2);
     wrong_actor.state.observation.actor = ActorId(2);
-    assert!(client.replace_snapshot(wrong_actor).is_err());
+    assert!(super::reset_snapshot(&mut client, wrong_actor).is_err());
     let mut invalid = snapshot(3, 200, 2);
     invalid.cursor.tick = 0;
-    assert!(client.replace_snapshot(invalid).is_err());
+    assert!(super::reset_snapshot(&mut client, invalid).is_err());
     assert_eq!(client, before);
 }
 
@@ -241,7 +257,9 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         position: distant,
     });
     let mut client = ClientState::from_snapshot(first).unwrap();
-    client.apply(update(snapshot(1, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(1, 100, 1), 1))
+        .unwrap();
     let memory = client
         .memory()
         .find(|cell| cell.position == distant)
@@ -260,7 +278,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         wall: false,
         place_hint: false,
     });
-    client.apply(update(revisit, 2)).unwrap();
+    client.apply(update(&client, revisit, 2)).unwrap();
     let memory = client
         .memory()
         .find(|cell| cell.position == distant)
@@ -282,7 +300,9 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
         approaches: vec![],
     });
     let mut client = ClientState::from_snapshot(first.clone()).unwrap();
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
     assert!(
         client
             .memory()
@@ -298,7 +318,7 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
         .as_mut()
         .unwrap()
         .open = false;
-    client.replace_snapshot(first).unwrap();
+    super::reset_snapshot(&mut client, first).unwrap();
     assert!(
         !client
             .memory()
@@ -311,7 +331,7 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
     );
     let mut rewind = snapshot(2, 0, 0);
     rewind.branch = BranchId("new".into());
-    client.replace_snapshot(rewind).unwrap();
+    super::reset_snapshot(&mut client, rewind).unwrap();
     assert!(client.memory().all(|c| c.door.is_none()));
 }
 
@@ -319,18 +339,20 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
 fn updates_and_same_branch_snapshots_retain_unseen_allocations() {
     let mut client = ClientState::from_snapshot(snapshot(1, 0, 0)).unwrap();
     let address = client.memory().next().unwrap().key.as_ptr();
-    client.apply(update(snapshot(2, 100, 1), 1)).unwrap();
+    client
+        .apply(update(&client, snapshot(2, 100, 1), 1))
+        .unwrap();
     assert_eq!(
         client.memory().find(|c| c.key == "1").unwrap().key.as_ptr(),
         address
     );
-    client.replace_snapshot(snapshot(2, 100, 1)).unwrap();
+    super::reset_snapshot(&mut client, snapshot(2, 100, 1)).unwrap();
     assert_eq!(
         client.memory().find(|c| c.key == "1").unwrap().key.as_ptr(),
         address
     );
     let before = client.clone();
-    let mut invalid = update(snapshot(3, 200, 2), 1);
+    let mut invalid = update(&client, snapshot(3, 200, 2), 1);
     if let UpdateBody::Observation { state, .. } = &mut invalid.body {
         state.observation.actor = ActorId(2);
     }

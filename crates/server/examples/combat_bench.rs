@@ -46,6 +46,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut ai_times = Vec::new();
                 let mut app = tor_client_ascii::App::new();
                 let snapshot = tor_protocol::Snapshot {
+                    readiness: tor_protocol::Readiness {
+                        revision: 0,
+                        admission: false,
+                        resume: vec![],
+                        cancel: vec![],
+                    },
+                    context: fixture_context(),
                     intentions: Vec::new(),
                     travel: None,
                     actor: player,
@@ -130,6 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     sequence += 1;
                     let update = tor_protocol::StreamUpdate {
+                        context: fixture_context(),
                         actor: player,
                         branch: engine.branch().clone(),
                         cursor: tor_protocol::StreamCursor {
@@ -177,4 +185,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+/// Context for one synthetic attachment used by this workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
+    }
 }

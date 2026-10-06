@@ -88,7 +88,7 @@ class DoorProcesses(ProcessTestCase):
         self.assertIn("stone tablet", json.dumps(hidden["memory"]))
         self.say(player, "release")
         controller, current = self.client()
-        blocked = self.request(controller, {"type":"command", "branch":current["branch"], "command":{"type":"travel", "expected_revision":current["state"]["revision"], "destination":tablet_cell["key"]}})
+        blocked = self.request(controller, {"type":"command", "context": current["input_context"], "branch":current["branch"], "command":{"type":"travel", "expected_revision":current["state"]["revision"], "destination":tablet_cell["key"]}})
         self.assertIsNotNone(blocked["error"])
         self.assertEqual(blocked["state"], current["state"])
         controller.stop()

@@ -6,7 +6,7 @@ use tor_protocol::*;
 
 fn snapshot(count: usize) -> Snapshot {
     serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"client-bench","cursor":{"sequence":0,"tick":0},
+        "readiness":{"revision":0,"admission":false,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"client-bench","cursor":{"sequence":0,"tick":0},
         "has_control":true,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":0,"observation":{
             "actor":1,"tick":0,"position":{"x":0,"y":0,"z":0},
@@ -66,6 +66,7 @@ fn main() {
                     }
                     client
                         .apply(StreamUpdate {
+                            context: fixture_context(),
                             actor: ActorId(1),
                             branch: client.branch().clone(),
                             cursor: StreamCursor {
@@ -95,5 +96,13 @@ fn main() {
                 println!("{result}");
             }
         }
+    }
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
     }
 }

@@ -36,7 +36,7 @@ def run(binary_dir, output, rooms, fresh_player=False):
             nonlocal state
             value["expected_revision"] = state["state"]["revision"]
             state, start, ack, received = player.send({"type": "request", "request": {
-                "type": "command", "branch": state["branch"], "command": value}})
+                "type": "command", "context": state["input_context"], "branch": state["branch"], "command": value}})
             assert state["error"] is None, state["error"]
             return start, ack, received
 

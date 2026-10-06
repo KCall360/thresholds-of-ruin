@@ -1,16 +1,12 @@
-use futures_util::{SinkExt, StreamExt};
-use std::{collections::BTreeSet, time::Duration};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::oneshot,
-    time::timeout,
-};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use futures_util::SinkExt;
+use std::collections::BTreeSet;
+use tokio::{net::TcpListener, sync::oneshot};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
 use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOperation};
 use tor_server::{serve, Account, Engine, Scenario, Service, Simulation};
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use crate::wire_client::WireClient as Client;
 /// The next message, past `waiting` signals, which only some tests watch for
 /// (see [`receive_any`]).
 async fn receive(client: &mut Client) -> ServerMessage {
@@ -22,27 +18,14 @@ async fn receive(client: &mut Client) -> ServerMessage {
     }
 }
 async fn receive_any(client: &mut Client) -> ServerMessage {
-    let message = timeout(Duration::from_secs(5), client.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    serde_json::from_str(message.to_text().unwrap()).unwrap()
-}
-async fn request(client: &mut Client, id: &str, request: Request) {
-    let message = ClientMessage::Request {
-        request_id: id.into(),
-        request,
-    };
     client
-        .send(Message::Text(
-            serde_json::to_string(&message).unwrap().into(),
-        ))
+        .receive()
         .await
-        .unwrap();
+        .expect("connected protocol test client")
 }
 async fn connect(address: &str, role: AccessRole) -> (Client, Snapshot) {
-    let (mut client, _) = connect_async(address).await.unwrap();
+    let (socket, _) = connect_async(address).await.unwrap();
+    let mut client = Client::new(socket);
     let hello = ClientMessage::Hello {
         protocol: PROTOCOL_VERSION,
         token: format!("test-{role:?}"),
@@ -55,7 +38,9 @@ async fn connect(address: &str, role: AccessRole) -> (Client, Snapshot) {
     assert!(
         matches!(receive(&mut client).await, ServerMessage::Welcome { role: r, .. } if r == role)
     );
-    request(&mut client, "attach", Request::Attach { actor: ActorId(1) }).await;
+    client
+        .request("attach", Request::Attach { actor: ActorId(1) })
+        .await;
     let ServerMessage::Snapshot { snapshot, .. } = receive(&mut client).await else {
         panic!("snapshot")
     };
@@ -235,11 +220,13 @@ fn operations() -> Vec<WizardOperation> {
 }
 
 fn wizard_request(
+    context: InputContext,
     branch: &BranchId,
     expected_revision: u64,
     operation: WizardOperation,
 ) -> Request {
     Request::Command {
+        context,
         branch: branch.clone(),
         command: Command::Wizard {
             expected_revision,
@@ -273,9 +260,16 @@ async fn players_and_spectators_are_refused_every_wizard_operation() {
     for wizard_mode in [false, true] {
         let mut game = Game::start(wizard_mode).await;
         for (index, operation) in operations().into_iter().enumerate() {
-            let command = wizard_request(&game.initial.branch, 0, operation);
+            let command = wizard_request(
+                game.wizard.input_context(),
+                &game.initial.branch,
+                0,
+                operation,
+            );
             for client in [&mut game.player, &mut game.spectator] {
-                request(client, &format!("denied-{index}"), command.clone()).await;
+                client
+                    .request(&format!("denied-{index}"), command.clone())
+                    .await;
                 assert_error(client, ErrorCode::Unauthorized).await;
             }
         }
@@ -287,8 +281,15 @@ async fn players_and_spectators_are_refused_every_wizard_operation() {
 async fn without_wizard_mode_the_wizard_is_refused_too() {
     let mut game = Game::start(false).await;
     for (index, operation) in operations().into_iter().enumerate() {
-        let command = wizard_request(&game.initial.branch, 0, operation);
-        request(&mut game.wizard, &format!("disabled-{index}"), command).await;
+        let command = wizard_request(
+            game.wizard.input_context(),
+            &game.initial.branch,
+            0,
+            operation,
+        );
+        game.wizard
+            .request(&format!("disabled-{index}"), command)
+            .await;
         assert_error(&mut game.wizard, ErrorCode::Unauthorized).await;
     }
     game.finish().await;
@@ -297,8 +298,13 @@ async fn without_wizard_mode_the_wizard_is_refused_too() {
 #[tokio::test]
 async fn an_accepted_wizard_command_reaches_every_client_and_its_retry_is_acknowledged() {
     let mut game = Game::start(true).await;
-    let command = wizard_request(&game.initial.branch, 0, teleport());
-    request(&mut game.wizard, "accepted", command.clone()).await;
+    let command = wizard_request(
+        game.wizard.input_context(),
+        &game.initial.branch,
+        0,
+        teleport(),
+    );
+    game.wizard.request("accepted", command.clone()).await;
     for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
         let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
             panic!("new snapshot")
@@ -318,10 +324,10 @@ async fn an_accepted_wizard_command_reaches_every_client_and_its_retry_is_acknow
     ));
     // The same user's receipt doesn't let another role replay the command.
     for client in [&mut game.player, &mut game.spectator] {
-        request(client, "accepted", command.clone()).await;
+        client.request("accepted", command.clone()).await;
         assert_error(client, ErrorCode::Unauthorized).await;
     }
-    request(&mut game.wizard, "accepted", command).await;
+    game.wizard.request("accepted", command).await;
     assert!(matches!(
         receive(&mut game.wizard).await,
         ServerMessage::Ack { .. }
@@ -333,12 +339,12 @@ async fn an_accepted_wizard_command_reaches_every_client_and_its_retry_is_acknow
 async fn a_wizard_rewind_forks_every_client_and_the_old_branch_is_refused() {
     let mut game = Game::start(true).await;
     let branch = game.initial.branch.clone();
-    request(
-        &mut game.wizard,
-        "teleport",
-        wizard_request(&branch, 0, teleport()),
-    )
-    .await;
+    game.wizard
+        .request(
+            "teleport",
+            wizard_request(game.wizard.input_context(), &branch, 0, teleport()),
+        )
+        .await;
     for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
         assert!(matches!(
             receive(client).await,
@@ -350,12 +356,12 @@ async fn a_wizard_rewind_forks_every_client_and_the_old_branch_is_refused() {
         ServerMessage::Ack { .. }
     ));
     let rewind = WizardOperation::Rewind { target: None };
-    request(
-        &mut game.wizard,
-        "rewind",
-        wizard_request(&branch, 1, rewind.clone()),
-    )
-    .await;
+    game.wizard
+        .request(
+            "rewind",
+            wizard_request(game.wizard.input_context(), &branch, 1, rewind.clone()),
+        )
+        .await;
     for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
         let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
             panic!("rewind snapshot")
@@ -373,12 +379,93 @@ async fn a_wizard_rewind_forks_every_client_and_the_old_branch_is_refused() {
         receive(&mut game.wizard).await,
         ServerMessage::Ack { .. }
     ));
-    request(
-        &mut game.wizard,
-        "stale",
-        wizard_request(&branch, 0, rewind),
-    )
-    .await;
+    game.wizard
+        .request(
+            "stale",
+            wizard_request(game.wizard.input_context(), &branch, 0, rewind),
+        )
+        .await;
     assert_error(&mut game.wizard, ErrorCode::WrongBranch).await;
+    game.finish().await;
+}
+
+#[tokio::test]
+async fn immediate_note_receipt_retry_after_rewind_keeps_the_original_branch() {
+    let mut game = Game::start(true).await;
+    let branch = game.initial.branch.clone();
+    let note = Request::Command {
+        context: game.wizard.input_context(),
+        branch: branch.clone(),
+        command: tor_protocol::Command::Annotate {
+            anchor: Anchor::State { revision: 0 },
+            text: "Original branch note".into(),
+            source: ClientSource::User,
+            audience: Audience::Private,
+            category: AnnotationCategory::Note,
+        },
+    };
+    game.wizard.request("note-receipt", note.clone()).await;
+    for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
+        assert!(
+            matches!(receive(client).await, ServerMessage::Update { update }
+            if matches!(update.body, UpdateBody::Annotation { .. }))
+        );
+    }
+    let ServerMessage::Ack {
+        receipt: original, ..
+    } = receive(&mut game.wizard).await
+    else {
+        panic!("receipt required")
+    };
+    assert!(matches!(
+        &original,
+        RequestReceipt::Immediate {
+            entry_id: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(original.actor(), ActorId(1));
+    assert_eq!(original.branch(), &branch);
+    game.wizard
+        .request(
+            "rewind",
+            wizard_request(
+                game.wizard.input_context(),
+                &branch,
+                0,
+                WizardOperation::Rewind { target: None },
+            ),
+        )
+        .await;
+    let mut current_branch = None;
+    for client in [&mut game.wizard, &mut game.player, &mut game.spectator] {
+        let ServerMessage::Snapshot { snapshot, .. } = receive(client).await else {
+            panic!("rewind snapshot required")
+        };
+        assert_ne!(snapshot.branch, branch);
+        current_branch = Some(snapshot.branch.clone());
+    }
+    assert!(matches!(
+        receive(&mut game.wizard).await,
+        ServerMessage::Ack { .. }
+    ));
+    game.wizard.request("note-receipt", note).await;
+    let ServerMessage::Ack {
+        context,
+        receipt: retried,
+        ..
+    } = receive(&mut game.wizard).await
+    else {
+        panic!("retry receipt required")
+    };
+    assert_eq!(retried, original);
+    assert_eq!(Some(context.branch.clone()), current_branch);
+    assert_ne!(&context.branch, retried.branch());
+    game.wizard.request("after-retry", Request::Snapshot).await;
+    let ServerMessage::Snapshot { snapshot, .. } = receive(&mut game.wizard).await else {
+        panic!("snapshot required")
+    };
+    assert_eq!(Some(snapshot.branch), current_branch);
+    assert_eq!(snapshot.state.observation.tick, 0);
     game.finish().await;
 }

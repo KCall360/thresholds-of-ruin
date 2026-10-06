@@ -98,6 +98,50 @@ pub struct IntentionExecution {
     pub outcome: Result<ActionOutcome, GameError>,
 }
 
+/// Derived queue capacity and existing-work controls. Backend-only identities
+/// and availability are never authority to act: attachment, actor validity,
+/// targets and timing must still be checked at the appropriate boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntentionInput {
+    pub slot_available: bool,
+    controls: [Option<IntentionControl>; 2],
+}
+
+impl IntentionInput {
+    /// Queue first, then independent preparation. No intermediate list allocates.
+    pub fn controls(&self) -> impl Iterator<Item = IntentionControl> + '_ {
+        self.controls.iter().flatten().copied()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntentionControlState {
+    Queued,
+    Suspended,
+    Started,
+    Paused,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntentionControl {
+    pub intention: IntentionId,
+    pub state: IntentionControlState,
+    pub can_resume: bool,
+    pub can_cancel: bool,
+}
+
+/// The validated resume operation determines its mutation without rechecking
+/// a second policy. Existing queue work never allocates another identity.
+enum ResumeIntention {
+    Queue,
+    Preparation { target: ActorId },
+}
+
+enum CancelIntention {
+    Queue,
+    Preparation,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct IntentionQueue {
@@ -187,6 +231,56 @@ impl Game {
             next,
             None,
         ))
+    }
+
+    /// Observe input-related queue state without preparing an action, observing
+    /// the world, allocating an identity, changing time or consuming randomness.
+    /// Slot availability is the shared capacity/identity check, not a claim that
+    /// any particular actor, action or target is valid.
+    pub fn intention_input(&self, actor: ActorId) -> IntentionInput {
+        let queued = self.pending_intention(actor);
+        let queue_control = queued.map(|queued| {
+            self.intention_control(
+                actor,
+                queued.id,
+                match queued.state {
+                    IntentionState::Queued => IntentionControlState::Queued,
+                    IntentionState::Suspended => IntentionControlState::Suspended,
+                },
+            )
+        });
+        let preparation_control = self.preparation(actor).and_then(|preparation| {
+            let id = preparation
+                .intention
+                .filter(|id| queued.is_none_or(|queued| queued.id != *id))?;
+            Some(self.intention_control(
+                actor,
+                id,
+                if preparation.active {
+                    IntentionControlState::Started
+                } else {
+                    IntentionControlState::Paused
+                },
+            ))
+        });
+        IntentionInput {
+            slot_available: self.check_intention_slot(actor).is_ok(),
+            controls: [queue_control, preparation_control],
+        }
+    }
+
+    fn intention_control(
+        &self,
+        actor: ActorId,
+        intention: IntentionId,
+        state: IntentionControlState,
+    ) -> IntentionControl {
+        IntentionControl {
+            intention,
+            state,
+            can_resume: self.validate_resume_intention(actor, intention).is_ok(),
+            can_cancel: self.validate_cancel_intention(actor, intention).is_ok(),
+        }
     }
 
     fn check_intention_slot(&self, actor: ActorId) -> Result<u64, GameError> {
@@ -342,20 +436,35 @@ impl Game {
         })
     }
 
-    pub fn cancel_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
+    fn validate_cancel_intention(
+        &self,
+        actor: ActorId,
+        id: IntentionId,
+    ) -> Result<CancelIntention, GameError> {
         if self
             .pending_intention(actor)
             .is_some_and(|queued| queued.id == id)
         {
-            self.intentions.entries.remove(&actor);
-            self.discard_intention_preparation(actor, id);
-            return Ok(());
-        }
-        if self.discard_intention_preparation(actor, id) {
-            Ok(())
+            Ok(CancelIntention::Queue)
+        } else if self
+            .preparation(actor)
+            .is_some_and(|preparation| preparation.intention == Some(id))
+        {
+            Ok(CancelIntention::Preparation)
         } else {
             Err(GameError::InvalidIntention)
         }
+    }
+
+    pub fn cancel_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
+        match self.validate_cancel_intention(actor, id)? {
+            CancelIntention::Queue => {
+                self.intentions.entries.remove(&actor);
+            }
+            CancelIntention::Preparation => {}
+        }
+        self.discard_intention_preparation(actor, id);
+        Ok(())
     }
 
     fn discard_intention_preparation(&mut self, actor: ActorId, id: IntentionId) -> bool {
@@ -413,41 +522,55 @@ impl Game {
         Ok(())
     }
 
-    pub fn resume_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
-        if self.pending_intention(actor).is_none() {
-            let preparation = self.preparation(actor).ok_or(GameError::InvalidIntention)?;
-            if preparation.intention != Some(id) || preparation.active || self.is_ai(actor) {
-                return Err(GameError::InvalidIntention);
+    fn validate_resume_intention(
+        &self,
+        actor: ActorId,
+        id: IntentionId,
+    ) -> Result<ResumeIntention, GameError> {
+        if let Some(queued) = self.pending_intention(actor) {
+            if queued.id == id
+                && queued.origin == IntentionOrigin::Human
+                && queued.state == IntentionState::Suspended
+            {
+                return Ok(ResumeIntention::Queue);
             }
-            if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
-                return Err(GameError::QueueFull);
-            }
-            let target = preparation.target;
-            self.intentions.entries.insert(
-                actor,
-                QueuedIntention {
-                    id,
-                    actor,
-                    work: IntentionWork::ResumeAttack { target },
-                    origin: IntentionOrigin::Human,
-                    state: IntentionState::Queued,
-                    movement_context: None,
-                },
-            );
-            return Ok(());
-        }
-        if self.pending_intention(actor).is_none_or(|entry| {
-            entry.id != id
-                || entry.origin != IntentionOrigin::Human
-                || entry.state != IntentionState::Suspended
-        }) {
             return Err(GameError::InvalidIntention);
         }
-        self.intentions
-            .entries
-            .get_mut(&actor)
-            .expect("checked intention")
-            .state = IntentionState::Queued;
+        let preparation = self.preparation(actor).ok_or(GameError::InvalidIntention)?;
+        if preparation.intention != Some(id) || preparation.active || self.is_ai(actor) {
+            return Err(GameError::InvalidIntention);
+        }
+        if self.intentions.entries.len() >= MAX_QUEUED_INTENTIONS {
+            return Err(GameError::QueueFull);
+        }
+        Ok(ResumeIntention::Preparation {
+            target: preparation.target,
+        })
+    }
+
+    pub fn resume_intention(&mut self, actor: ActorId, id: IntentionId) -> Result<(), GameError> {
+        match self.validate_resume_intention(actor, id)? {
+            ResumeIntention::Queue => {
+                self.intentions
+                    .entries
+                    .get_mut(&actor)
+                    .expect("checked intention")
+                    .state = IntentionState::Queued;
+            }
+            ResumeIntention::Preparation { target } => {
+                self.intentions.entries.insert(
+                    actor,
+                    QueuedIntention {
+                        id,
+                        actor,
+                        work: IntentionWork::ResumeAttack { target },
+                        origin: IntentionOrigin::Human,
+                        state: IntentionState::Queued,
+                        movement_context: None,
+                    },
+                );
+            }
+        }
         Ok(())
     }
 
@@ -546,6 +669,75 @@ mod tests {
             )
             .unwrap();
         (game, actor)
+    }
+
+    #[test]
+    fn input_controls_match_queue_and_preparation_operations_without_mutating_state() {
+        let (mut game, actor, _, original) = paused_attack_fixture();
+        let paused = game.clone();
+        let input = game.intention_input(actor);
+        let controls: Vec<_> = input.controls().collect();
+        assert!(input.slot_available);
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].intention, original);
+        assert_eq!(controls[0].state, IntentionControlState::Paused);
+        assert!(controls[0].can_resume);
+        assert!(controls[0].can_cancel);
+        assert_eq!(
+            game, paused,
+            "query preserves time, RNG, preparation and identities"
+        );
+
+        let independent = game
+            .admit_intention(actor, Action::Wait, IntentionOrigin::Human)
+            .unwrap();
+        let before = game.clone();
+        let input = game.intention_input(actor);
+        let controls: Vec<_> = input.controls().collect();
+        assert!(!input.slot_available);
+        assert_eq!(controls.len(), 2);
+        assert_eq!(controls[0].intention, independent);
+        assert_eq!(controls[0].state, IntentionControlState::Queued);
+        assert!(!controls[0].can_resume);
+        assert!(controls[0].can_cancel);
+        assert_eq!(controls[1].intention, original);
+        assert!(!controls[1].can_resume);
+        assert!(controls[1].can_cancel);
+        assert_eq!(game, before);
+        for control in controls {
+            let mut resumed = game.clone();
+            assert_eq!(
+                resumed.resume_intention(actor, control.intention).is_ok(),
+                control.can_resume
+            );
+            if !control.can_resume {
+                assert_eq!(resumed, before);
+            }
+            let mut cancelled = game.clone();
+            assert_eq!(
+                cancelled.cancel_intention(actor, control.intention).is_ok(),
+                control.can_cancel
+            );
+        }
+        game.suspend_intention(actor, independent).unwrap();
+        let input = game.intention_input(actor);
+        let controls: Vec<_> = input.controls().collect();
+        assert_eq!(controls[0].state, IntentionControlState::Suspended);
+        assert!(controls[0].can_resume);
+        game.resume_intention(actor, independent).unwrap();
+        game.cancel_intention(actor, independent).unwrap();
+        assert_eq!(game.intention_input(actor).controls().count(), 1);
+        game.resume_intention(actor, original).unwrap();
+        let input = game.intention_input(actor);
+        let controls: Vec<_> = input.controls().collect();
+        assert_eq!(
+            controls.len(),
+            1,
+            "queued continuation and preparation share one identity"
+        );
+        assert_eq!(controls[0].state, IntentionControlState::Queued);
+        assert!(!controls[0].can_resume);
+        assert!(controls[0].can_cancel);
     }
 
     #[test]
@@ -1270,8 +1462,7 @@ mod tests {
         assert_eq!(boundary.pending_intention(actor).unwrap().id, next);
     }
 
-    #[test]
-    fn capacity_and_busy_rejections_preserve_state_and_identity_allocation() {
+    fn capacity_fixture() -> (Game, Vec<ActorId>) {
         let mut world = tor_world::World::new(vec![], vec![]).unwrap();
         world
             .add_region(tor_world::Region {
@@ -1298,11 +1489,24 @@ mod tests {
                 .unwrap(),
             );
         }
+        (game, actors)
+    }
+
+    #[test]
+    fn capacity_and_busy_rejections_preserve_state_and_identity_allocation() {
+        let (mut game, actors) = capacity_fixture();
         for &actor in &actors[..MAX_QUEUED_INTENTIONS] {
             game.admit_intention(actor, Action::Wait, IntentionOrigin::Human)
                 .unwrap();
         }
         let full = game.clone();
+        assert!(!game.intention_input(actors[0]).slot_available);
+        assert!(
+            !game
+                .intention_input(actors[MAX_QUEUED_INTENTIONS])
+                .slot_available
+        );
+        assert_eq!(game, full);
         assert_eq!(
             game.admit_intention(actors[0], Action::Wait, IntentionOrigin::Human),
             Err(GameError::ActorBusy)
@@ -1318,6 +1522,10 @@ mod tests {
         assert_eq!(game, full);
         game.cancel_intention(actors[0], game.pending_intention(actors[0]).unwrap().id)
             .unwrap();
+        assert!(
+            game.intention_input(actors[MAX_QUEUED_INTENTIONS])
+                .slot_available
+        );
         let id = game
             .admit_intention(
                 actors[MAX_QUEUED_INTENTIONS],
@@ -1326,6 +1534,72 @@ mod tests {
             )
             .unwrap();
         assert_eq!(id.0, MAX_QUEUED_INTENTIONS as u64 + 1);
+    }
+
+    #[test]
+    fn recovery_availability_distinguishes_capacity_from_new_identity_exhaustion() {
+        let (mut game, actors) = capacity_fixture();
+        let actor = actors[0];
+        let target = actors[1];
+        for id in [actor, target] {
+            game.configure_combat(id, crate::combat::CombatSpec::default())
+                .unwrap();
+        }
+        game.actors.get_mut(&target).unwrap().ready_at = 50;
+        let original = game
+            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        game.pause_preparation(actor).unwrap();
+        for &other in &actors[1..] {
+            game.admit_intention(other, Action::Wait, IntentionOrigin::Human)
+                .unwrap();
+        }
+        // Exhausted fresh identities do not prohibit reusing existing identities.
+        game.intentions.next_id = u64::MAX;
+        let before = game.clone();
+        let input = game.intention_input(actor);
+        assert!(!input.slot_available);
+        let control = input.controls().next().unwrap();
+        assert_eq!(control.intention, original);
+        assert!(
+            !control.can_resume,
+            "paused preparation needs one free queue slot"
+        );
+        assert!(control.can_cancel);
+        assert_eq!(game, before);
+        assert_eq!(
+            game.resume_intention(actor, original),
+            Err(GameError::QueueFull)
+        );
+        assert_eq!(game, before);
+
+        // Existing suspended work occupies a slot already, so it can resume
+        // even when both queue capacity and fresh identity allocation are full.
+        let existing = game.pending_intention(target).unwrap().id;
+        game.suspend_intention(target, existing).unwrap();
+        let full = game.clone();
+        let control = game.intention_input(target).controls().next().unwrap();
+        assert_eq!(control.state, IntentionControlState::Suspended);
+        assert!(control.can_resume);
+        assert_eq!(game, full);
+        game.resume_intention(target, existing).unwrap();
+        assert_eq!(game.intentions.next_id, u64::MAX);
+        game.cancel_intention(target, existing).unwrap();
+
+        let input = game.intention_input(actor);
+        assert!(
+            !input.slot_available,
+            "fresh admission still needs a new identity"
+        );
+        assert!(input.controls().next().unwrap().can_resume);
+        let mut shared = crate::checkpoint::SharedState::default();
+        let checkpoint = game.checkpoint(&mut shared);
+        let mut restored = Game::restore_checkpoint(checkpoint, &shared).unwrap();
+        assert_eq!(restored.intention_input(actor), input);
+        restored.resume_intention(actor, original).unwrap();
+        assert_eq!(restored.pending_intention(actor).unwrap().id, original);
+        assert_eq!(restored.intentions.next_id, u64::MAX);
     }
 
     #[test]

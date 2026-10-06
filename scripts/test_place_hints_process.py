@@ -26,7 +26,7 @@ class PlaceHintProcesses(ProcessTestCase):
         self.assertEqual(renamed["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
         self.assertEqual(renamed["state"]["observation"]["places"][0]["name"], "Hearth of Echoes")
         self.assertEqual(renamed["state"]["observation"]["places"][0]["origin"], "player")
-        denied = self.request(observer, {"type": "command", "branch": renamed["branch"], "command": {
+        denied = self.request(observer, {"type": "command", "context": renamed["input_context"], "branch": renamed["branch"], "command": {
             "type": "rename_place", "expected_revision": renamed["state"]["revision"], "key": places[0]["key"], "name": "Forbidden"}})
         self.assertIsNotNone(denied["error"])
         self.say(player, "release")
@@ -94,7 +94,7 @@ class PlaceHintProcesses(ProcessTestCase):
             self.assertNotIn(forbidden, json.dumps(visited))
         self.flush_save()
         before = self.save.read_bytes()
-        denied = self.request(observer, {"type": "command", "branch": visited["branch"], "command": {
+        denied = self.request(observer, {"type": "command", "context": visited["input_context"], "branch": visited["branch"], "command": {
             "type": "wizard", "expected_revision": visited["state"]["revision"], "operation": "place 3 2 1 0 off"}})
         self.assertIsNotNone(denied["error"])
         self.assertEqual(self.save.read_bytes(), before)

@@ -3,6 +3,55 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn suspended_work_does_not_advertise_or_send_undisclosed_controls() {
+    let mut snapshot = state().snapshot();
+    snapshot.readiness.admission = false;
+    snapshot.intentions = vec![IntentionStatus {
+        actor: snapshot.actor,
+        branch: snapshot.branch.clone(),
+        intention: IntentionId("suspended".into()),
+        entry_id: EntryId("root".into()),
+        phase: IntentionPhase::Suspended,
+    }];
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    let hint = app.intention_hint().unwrap();
+    assert!(hint.starts_with("Action suspended."));
+    assert!(!hint.contains("F8 resume"));
+    assert!(!hint.contains("F9 cancel"));
+    for key in [Key::ResumeIntention, Key::CancelIntention] {
+        assert_eq!(app.input(Input::Key { key }), Effect::None);
+    }
+}
+
+#[test]
+fn action_admission_uses_disclosed_capacity_independently_of_simulation_turn() {
+    for (due, admission) in [(true, false), (false, true)] {
+        let mut snapshot = state().snapshot();
+        snapshot.state.observation.ready = due;
+        snapshot.readiness.admission = admission;
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        let effect = app.input(Input::Key { key: Key::Right });
+        assert_eq!(
+            matches!(
+                effect,
+                Effect::Request(Request::Command {
+                    command: Command::Act { .. },
+                    ..
+                })
+            ),
+            admission,
+            "turn readiness must not substitute for admission permission"
+        );
+    }
+}
+
+#[test]
 fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_status() {
     for role in [AccessRole::Player, AccessRole::Spectator] {
         let initial = state().snapshot();
@@ -16,6 +65,7 @@ fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_
             banner.into()
         };
         let update = |sequence, phase, actor| StreamUpdate {
+            context: fixture_context(),
             actor: initial.actor,
             branch: initial.branch.clone(),
             cursor: StreamCursor {
@@ -76,6 +126,16 @@ fn mixed_intention_hints_and_keys_select_queue_before_paused_progress() {
                     entry_id: EntryId("queue-root".into()),
                     phase,
                 };
+                snapshot.readiness.admission = false;
+                snapshot.readiness.cancel = vec![
+                    IntentionId("queued-work".into()),
+                    IntentionId("paused-progress".into()),
+                ];
+                snapshot.readiness.resume = if phase == IntentionPhase::Suspended {
+                    vec![IntentionId("queued-work".into())]
+                } else {
+                    vec![]
+                };
                 snapshot.intentions = if queue_first {
                     vec![queued, progress]
                 } else {
@@ -102,7 +162,10 @@ fn mixed_intention_hints_and_keys_select_queue_before_paused_progress() {
                 if key == Key::ResumeIntention && phase == IntentionPhase::Queued {
                     assert_eq!(effect, Effect::None);
                 } else {
-                    let Effect::Request(Request::Command { branch, command }) = effect else {
+                    let Effect::Request(Request::Command {
+                        branch, command, ..
+                    }) = effect
+                    else {
                         panic!("intention request");
                     };
                     let intention = match command {
@@ -133,6 +196,14 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
     ] {
         for role in [AccessRole::Player, AccessRole::Spectator] {
             let mut snapshot = state().snapshot();
+            snapshot.readiness.admission = false;
+            snapshot.readiness.cancel = vec![IntentionId("original".into())];
+            snapshot.readiness.resume =
+                if matches!(phase, IntentionPhase::Suspended | IntentionPhase::Paused) {
+                    vec![IntentionId("original".into())]
+                } else {
+                    vec![]
+                };
             snapshot.intentions = vec![IntentionStatus {
                 actor: snapshot.actor,
                 branch: snapshot.branch.clone(),
@@ -146,7 +217,10 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
             app.ready();
             let effect = app.input(Input::Key { key });
             if allowed && role == AccessRole::Player {
-                let Effect::Request(Request::Command { branch, command }) = effect else {
+                let Effect::Request(Request::Command {
+                    branch, command, ..
+                }) = effect
+                else {
                     panic!("intention request");
                 };
                 assert_eq!(branch, snapshot.branch);
@@ -181,6 +255,7 @@ fn intention_controls_preserve_identity_context_and_read_only_access() {
 #[test]
 fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_ready() {
     let mut snapshot = state().snapshot();
+    snapshot.readiness.admission = false;
     snapshot.intentions = vec![IntentionStatus {
         actor: snapshot.actor,
         branch: snapshot.branch.clone(),
@@ -194,7 +269,7 @@ fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_r
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
-    assert!(app.status.contains("queued"));
+    assert!(app.status.contains("not accepting"));
 }
 
 #[test]
@@ -265,6 +340,7 @@ fn travel_selection_is_free_and_submits_an_opaque_cell_key() {
     assert_eq!(
         app.input(Input::Key { key: Key::Enter }),
         Effect::Request(Request::Command {
+            context: state().input_context(),
             branch: BranchId("test".into()),
             command: Command::Travel {
                 expected_revision: 3,
@@ -339,7 +415,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     canvas.draw(&app);
     let normal = canvas.pixels.clone();
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"new-branch","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -353,7 +429,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
 
 fn state() -> ClientState {
     ClientState::from_snapshot(serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":3,"observation":{
             "actor":1,"tick":0,"position":{"x":1,"y":1,"z":0},
@@ -375,6 +451,7 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
     assert_eq!(
         app.input(Input::Key { key: Key::Right }),
         Effect::Request(Request::Command {
+            context: state().input_context(),
             branch: BranchId("test".into()),
             command: Command::Act {
                 expected_revision: 3,
@@ -458,6 +535,7 @@ fn losing_control_or_disconnect_prevents_actions() {
     let mut state = state();
     state
         .apply(StreamUpdate {
+            context: fixture_context(),
             actor: ActorId(1),
             branch: BranchId("test".into()),
             cursor: StreamCursor {
@@ -479,7 +557,7 @@ fn losing_control_or_disconnect_prevents_actions() {
 #[test]
 fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     let mut snapshot: Snapshot = serde_json::from_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -598,6 +676,13 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
     view.observation.position.y = i32::MAX - 1;
     app.set_state(
         ClientState::from_snapshot(Snapshot {
+            readiness: tor_protocol::Readiness {
+                revision: 0,
+                admission: false,
+                resume: vec![],
+                cancel: vec![],
+            },
+            context: fixture_context(),
             intentions: Vec::new(),
             travel: None,
             actor: ActorId(1),
@@ -701,6 +786,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
     let mut current = state();
     current
         .apply(StreamUpdate {
+            context: fixture_context(),
             actor: ActorId(1),
             branch: BranchId("test".into()),
             cursor: StreamCursor {
@@ -724,6 +810,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
     assert!(app.travel_cursor.is_none());
     current
         .apply(StreamUpdate {
+            context: fixture_context(),
             actor: ActorId(1),
             branch: BranchId("test".into()),
             cursor: StreamCursor {
@@ -769,7 +856,7 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
 #[test]
 fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
     let mut snapshot = serde_json::to_value(serde_json::json!({
-        "actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
+        "readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
@@ -832,6 +919,7 @@ fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() 
         view.observation.tick += sequence;
         view.observation.visible_cells[0].key = format!("intermediate-{sequence}");
         app.update(StreamUpdate {
+            context: fixture_context(),
             actor: initial.actor,
             branch: initial.branch.clone(),
             cursor: StreamCursor {
@@ -856,6 +944,7 @@ fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() 
     assert!(app.note.is_some());
     let mut rewind = initial;
     rewind.branch = BranchId("rewound".into());
+    rewind.context.epoch += 1;
     app.replace_snapshot(rewind).unwrap();
     assert!(app.note.is_none());
     assert!(!app
@@ -901,7 +990,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             dead: false,
             terminal: false,
         });
-        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},"state":view})).unwrap();
+        let snapshot: Snapshot=serde_json::from_value(serde_json::json!({"readiness":{"revision":0,"admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":0},"actor":1,"branch":"test","cursor":{"sequence":0,"tick":0},"has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},"state":view})).unwrap();
         let mut app = App::new();
         app.role = AccessRole::Player;
         app.bump_attacks = mode;
@@ -942,4 +1031,12 @@ fn prose_dashes_render_as_supported_bitmap_glyphs() {
     app.status = "HP 20/20 - Victory!".into();
     canvas.draw(&app);
     assert_eq!(canvas.pixels, prose);
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
+    }
 }

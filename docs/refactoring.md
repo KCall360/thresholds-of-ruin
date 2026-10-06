@@ -32,7 +32,7 @@ replay, and client lifecycle tracking. Published preparation recovery adds
 original-identity resume/cancel, durable interruption facts, explicit paused
 preparation, and a typed lifecycle proof shared by replay and checkpoint recovery.
 Autonomous decisions use the published common queue path. Native travel integration
-is under verification; further stream context and the remaining work sequences
+is published; further stream context and the remaining work sequences
 stay in scope.
 
 ```mermaid
@@ -386,6 +386,141 @@ journal modes, and startup rejection/retry. Actual server/headless tests verify
 private admission, receipt-free linked execution, observer disclosure and durable
 state/history. Full, performance and publication gates remain pending. Text-client
 fixes and scripting runtime implementation remain deferred.
+
+## Stream context and exact observation bases (in progress)
+
+Snapshots and updates require an opaque attachment identity and reset epoch.
+The host allocates identities outside simulation randomness and saved state;
+reset counters use checked arithmetic. Shared validation atomically rejects
+foreign or obsolete contexts. Deltas name the exact previous observation cursor
+and revision, independently of intervening control, annotation, travel and
+intention messages. Snapshot resets establish a fresh observation base.
+
+Shared transport requests one matching repair snapshot with a bounded deadline.
+Stored queue, flush and reply phases survive cancellation. Old updates and query
+payloads are quarantined during repair. Foreign actors and attachments remain
+fatal. Shared pending requests retain typed confirmed receipts or rejections;
+an unanswered request remains unknown after repair. No gameplay is automatically
+replayed, and admission never claims simulation completion. Immediate receipts
+retain original journal actor and branch identity through rewind and restart.
+
+Readiness combines one simulation-owned queue/control query with session
+ownership, role, actor validity, run and travel policy. Resume/cancel availability
+uses the validators that select the actual mutation. Existing work preserves its
+identity; capacity is required only for new admissions. Queue capacity does not
+grant authority or validate targets and timing. Required snapshot readiness and
+ordered updates use a generation independent of observation revisions, including
+ownership changes when permissions remain empty. Publication queries each actor
+once per pass and repeats only when output rejection removes clients.
+
+Commands name their originating stream, epoch and readiness generation.
+Authenticated role/actor checks and authorized original receipt lookup precede
+freshness. New input must match both published and current generations and the
+published admission/resume/cancel permissions. Predicted unpublished generations
+and stale ownership, reset or stream contexts reject without mutation. Native
+queued input retains its captured context rather than restamping at send time.
+Native/headless admission and native work controls honor disclosed permissions
+independently of turn scheduling. Gameplay remains simulation-owned queued work.
+
+Typed receipts, history and palette replies share a permission-before-reply
+publication boundary. Deferred save acknowledgements publish as a batch; output
+disconnects trigger a conditional follow-up permission pass. Successful replies
+require current cached disclosure context, independently of original receipt
+identity. Errors explicitly distinguish transport, unattached host and attached
+host scope. Shared transport validates contextual rejections, retains outcomes
+through repair and withholds query contents until synchronized.
+
+Shared requests and server output use one bounded JSON encoder. Common request
+and response ceilings also bound WebSocket frame and fragmented-message assembly.
+The existing single-encoding server output leases cover queued/in-flight bytes,
+write failures and cancellation. Collection deltas, encoded full/delta selection,
+numeric encoding, typed capabilities and fair aggregate output pressure remain
+open work rather than implied completion of the protocol recommendations.
+
+Failing-first schema, model, transport, session, native worker and actual-process
+regressions cover these contracts. Existing text gameplay completion consumes the
+permission boundary before chaining input and retains known failures if permission
+delivery times out; parser, prose and pacing improvements remain deferred.
+Actual-client recovery holds one repair snapshot to prove unchanged native state
+and history, exactly one repair, same-process continuation, independent relaunch,
+and continued authoritative progress. Gap, overflowing-delta and invalid-inventory
+cases remain in both debug and release application suites.
+
+The refreshed local full run passed all 824 Rust tests in each profile, formatting,
+lint, architecture and rustdoc. Debug Python passed 252 of 253 cases; release
+applications passed 134 of 135. The only failure in each profile was the native
+mouse test intercepted by the Windows overlay, expressly waived by the maintainer.
+Tests remain enabled in ordinary CI. This is qualified local evidence, not an
+unqualified full pass. Complete final-commit Windows/Linux CI remains required
+before merging. All other refactor work sequences remain in scope.
+
+Subsequent cancellation review exposed a lost presentation boundary: when TCP
+output blocked an automatic palette query, cancellation after applying an
+observation discarded the observation before the frontend received it. A real
+socket regression proved both the lost delivery and the missing playback guard.
+Snapshot and palette queries now share stored queue/flush phases with bounded
+send deadlines. Applied observations remain pending until query output completes;
+they are presented exactly once without being reapplied. Pending presentation
+also keeps playback active. Focused shared-client, real application recovery and
+palette checks pass. The refreshed full run above includes this correction;
+final-commit Windows/Linux CI remains required before merging.
+
+### Stream context release comparison
+
+Three interleaved rounds compared this implementation with the preceding travel
+checkpoint on the same Windows host and HDD save volume. All eighteen runs
+validated, with no competing builds. Cases used eight actors, 8 and 256 regions
+with 100 initial history entries, and the combat group with 1,000 history entries.
+Timings are milliseconds, baseline to refactor.
+
+| Metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| Authoritative transition, 8 regions | 4,509 | 0.0245 → 0.0244 | 2.281 → 2.304 | 4.158 → 4.779 |
+| Authoritative transition, 256 regions | 4,509 | 0.0340 → 0.0336 | 2.628 → 2.655 | 6.780 → 6.662 |
+| Combat command | 576 | 0.574 → 0.569 | 3.308 → 3.250 | 3.684 → 5.189 |
+| Combat client application | 495 | 0.289 → 0.287 | 0.317 → 0.333 | 0.494 → 0.713 |
+| Combat client draw | 495 | 0.674 → 0.670 | 0.739 → 0.752 | 1.018 → 1.146 |
+| Combat restart | 9 | 250.5 → 249.7 | 259.7 → 262.5 | 259.7 → 262.5 |
+| Combat explicit save | 9 | 285.5 → 324.7 | 359.2 → 351.0 | 359.2 → 351.0 |
+
+All operation and retained-byte counts match across sides and rounds. Combat
+retained 365,055 body-cell visits, 59,748 scene calls, 36 navigation refreshes,
+130,431 disclosed state bytes and 11,415,552 saved bytes. Authoritative transition
+p95 increased about 1% at both world sizes; combat command p95 decreased 1.8%,
+while its maximum increased. Client application p95 increased 4.9%; save p50
+increased 13.7%. Restart/save groups contain only nine samples, so their tails
+remain weak evidence. No broad latency or memory improvement is claimed.
+
+These benchmarks exercise engine transitions and disclosed-state application;
+they bypass session admission, WebSocket transport and automatic repair. Equal
+state-byte counts do not establish equal protocol envelope sizes or wire costs.
+These measurements preceded the cancellation correction. Actual-process
+acceptance covers transport behavior; comparative host and repair
+latency measurements remain open. Raw samples remain local; no release assets
+or performance ledger entries were published.
+
+A repeat on the cancellation-corrected code used the same baseline, cases,
+three interleaved rounds and storage volume. All eighteen runs validated, with
+identical operation and retained-byte counts and no competing builds. Both sets
+are retained rather than selecting the favorable comparison.
+
+| Metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| Authoritative transition, 8 regions | 4,509 | 0.0243 → 0.0244 | 2.283 → 2.319 | 6.172 → 3.887 |
+| Authoritative transition, 256 regions | 4,509 | 0.0346 → 0.0334 | 2.650 → 2.631 | 4.389 → 6.396 |
+| Combat command | 576 | 0.5788 → 0.5815 | 3.368 → 3.283 | 6.181 → 3.706 |
+| Combat client application | 495 | 0.2908 → 0.2914 | 0.566 → 0.332 | 0.787 → 0.533 |
+| Combat client draw | 495 | 0.6830 → 0.6753 | 0.992 → 0.769 | 1.397 → 3.507 |
+| Combat restart | 9 | 253.4978 → 252.5717 | 308.283 → 254.535 | 308.283 → 254.535 |
+| Combat explicit save | 9 | 282.9195 → 330.2182 | 1238.367 → 1224.887 | 1238.367 → 1224.887 |
+
+In this repeat, transition p95 rose 1.6% at 8 regions and fell 0.7% at 256;
+combat command p95 fell 2.5%. Save median rose 16.7%, and both sides had save
+tails above 1.2 seconds. Client application/draw p95 fell, while maximum draw
+time increased. The small persistence sample and baseline variability prevent
+attributing these changes to the refactor. These engine/model benchmarks still
+do not measure session, WebSocket or repair latency, and establish no broad
+latency or resident-memory improvement. Raw results remain local and unpublished.
 
 ## Shared item and combat definitions
 

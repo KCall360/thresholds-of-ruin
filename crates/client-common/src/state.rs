@@ -28,6 +28,7 @@ pub struct RememberedCell {
 pub struct ClientState {
     snapshot: Snapshot,
     stream: ObservationStream,
+    observation_base: ObservationBase,
     memory: BTreeMap<String, RememberedCell>,
     map_memory: crate::map_memory::MapMemory,
     narration: Vec<String>,
@@ -35,6 +36,9 @@ pub struct ClientState {
 
 impl ClientState {
     pub fn from_snapshot(snapshot: Snapshot) -> Result<Self, StreamError> {
+        if !snapshot.context.is_valid() {
+            return Err(StreamError::WrongStreamContext);
+        }
         validate_intentions(&snapshot.intentions, snapshot.actor, &snapshot.branch)?;
         snapshot
             .state
@@ -53,8 +57,13 @@ impl ClientState {
                 snapshot.cursor.tick,
             )?;
         }
+        validate_readiness(&snapshot.readiness, &snapshot)?;
         let mut client = Self {
             stream: ObservationStream::from_snapshot(snapshot.actor, snapshot.cursor),
+            observation_base: ObservationBase {
+                cursor: snapshot.cursor,
+                revision: snapshot.state.revision,
+            },
             snapshot,
             memory: BTreeMap::new(),
             map_memory: Default::default(),
@@ -80,6 +89,11 @@ impl ClientState {
     pub fn replace_snapshot(&mut self, snapshot: Snapshot) -> Result<(), StreamError> {
         if snapshot.actor != self.snapshot.actor {
             return Err(StreamError::WrongActor);
+        }
+        if snapshot.context.stream != self.snapshot.context.stream
+            || snapshot.context.epoch <= self.snapshot.context.epoch
+        {
+            return Err(StreamError::WrongStreamContext);
         }
         let mut candidate = Self::from_snapshot(snapshot)?;
         if candidate.branch() == self.branch() {
@@ -144,6 +158,12 @@ impl ClientState {
             .any(|status| status.phase.pending())
     }
 
+    /// Published permissions can briefly lag their causing lifecycle/control
+    /// updates. Block input during that boundary instead of inferring availability.
+    pub fn can_admit_intention(&self) -> bool {
+        self.readiness().admission && validate_readiness(self.readiness(), &self.snapshot).is_ok()
+    }
+
     /// Select queued work before independent preparation, regardless of delivery order.
     /// Input builders and presentation share this selection even without control.
     pub fn intention_for_input(&self) -> Option<&IntentionStatus> {
@@ -166,20 +186,32 @@ impl ClientState {
         self.intention_request(false)
     }
 
-    fn intention_request(&self, resume: bool) -> Option<Request> {
-        if !self.has_control() {
+    pub fn can_resume_intention(&self) -> bool {
+        self.permitted_intention(true).is_some()
+    }
+
+    pub fn can_cancel_intention(&self) -> bool {
+        self.permitted_intention(false).is_some()
+    }
+
+    fn permitted_intention(&self, resume: bool) -> Option<&IntentionStatus> {
+        if validate_readiness(self.readiness(), &self.snapshot).is_err() {
             return None;
         }
         let selected = self.intention_for_input()?;
-        if resume
-            && !matches!(
-                selected.phase,
-                IntentionPhase::Suspended | IntentionPhase::Paused
-            )
-        {
+        let permitted = if resume {
+            &self.readiness().resume
+        } else {
+            &self.readiness().cancel
+        };
+        if !permitted.contains(&selected.intention) {
             return None;
         }
-        let intention = selected.intention.clone();
+        Some(selected)
+    }
+
+    fn intention_request(&self, resume: bool) -> Option<Request> {
+        let intention = self.permitted_intention(resume)?.intention.clone();
         let expected_revision = self.state().revision;
         let command = if resume {
             Command::ResumeIntention {
@@ -192,10 +224,7 @@ impl ClientState {
                 intention,
             }
         };
-        Some(Request::Command {
-            branch: self.branch().clone(),
-            command,
-        })
+        Some(self.command_request(command))
     }
 
     pub fn state(&self) -> &StateView {
@@ -211,17 +240,77 @@ impl ClientState {
     pub fn older_before(&self) -> Option<&EntryId> {
         self.snapshot.history.older_before.as_ref()
     }
+    /// Capture at input construction, never restamp queued or retried commands.
+    pub fn input_context(&self) -> InputContext {
+        InputContext {
+            stream: self.context().clone(),
+            readiness_revision: self.readiness().revision,
+        }
+    }
+
+    /// Capture the disclosed state at a reply boundary without modifying it.
+    /// A receipt's original branch or actor is a separate operation identity.
+    pub fn reply_context(&self) -> ReplyContext {
+        self.snapshot.reply_context()
+    }
+
+    /// Replies name the complete currently disclosed boundary. Validation never
+    /// installs permissions or observations from a reply in place of stream updates.
+    pub fn validate_reply_context(&self, context: &ReplyContext) -> Result<(), StreamError> {
+        if &context.input.stream != self.context() {
+            return Err(StreamError::WrongStreamContext);
+        }
+        if context.actor != self.snapshot.actor {
+            return Err(StreamError::WrongActor);
+        }
+        if &context.branch != self.branch() {
+            return Err(StreamError::WrongBranch);
+        }
+        if context.cursor != self.snapshot.cursor {
+            return Err(StreamError::SequenceMismatch);
+        }
+        if context.revision != self.state().revision
+            || context.input.readiness_revision != self.readiness().revision
+        {
+            return Err(StreamError::InconsistentState);
+        }
+        Ok(())
+    }
+
+    pub fn command_request(&self, command: Command) -> Request {
+        Request::Command {
+            context: self.input_context(),
+            branch: self.branch().clone(),
+            command,
+        }
+    }
+
+    pub fn readiness(&self) -> &Readiness {
+        &self.snapshot.readiness
+    }
+
     pub fn has_control(&self) -> bool {
         self.snapshot.has_control
     }
+    pub fn context(&self) -> &StreamContext {
+        &self.snapshot.context
+    }
+
     pub fn branch(&self) -> &BranchId {
         &self.snapshot.branch
     }
+    pub fn observation_base(&self) -> ObservationBase {
+        self.observation_base
+    }
+
     pub fn cursor(&self) -> StreamCursor {
         self.stream.cursor()
     }
 
     pub fn apply(&mut self, update: StreamUpdate) -> Result<(), StreamError> {
+        if update.context != self.snapshot.context {
+            return Err(StreamError::WrongStreamContext);
+        }
         if update.branch != self.snapshot.branch {
             return Err(StreamError::WrongBranch);
         }
@@ -230,17 +319,31 @@ impl ClientState {
         let mut stream = self.stream.clone();
         stream.accept(update.actor, update.cursor)?;
         let body = match update.body {
-            UpdateBody::ObservationDelta { state, event } => UpdateBody::Observation {
-                state: Box::new(
-                    state
-                        .apply(&self.snapshot.state)
-                        .map_err(|_| StreamError::InconsistentState)?,
-                ),
-                event,
-            },
+            UpdateBody::ObservationDelta { base, state, event } => {
+                if base != self.observation_base {
+                    return Err(StreamError::WrongObservationBase);
+                }
+                UpdateBody::Observation {
+                    state: Box::new(
+                        state
+                            .apply(&self.snapshot.state)
+                            .map_err(|_| StreamError::InconsistentState)?,
+                    ),
+                    event,
+                }
+            }
             body => body,
         };
         match body {
+            UpdateBody::Readiness { readiness } => {
+                if update.cursor.tick != self.snapshot.state.observation.tick
+                    || self.snapshot.readiness.revision.checked_add(1) != Some(readiness.revision)
+                {
+                    return Err(StreamError::InconsistentState);
+                }
+                validate_readiness(&readiness, &self.snapshot)?;
+                self.snapshot.readiness = readiness;
+            }
             UpdateBody::Intention { status } => {
                 if update.cursor.tick != self.snapshot.state.observation.tick
                     || !status.valid_context(update.actor, &update.branch)
@@ -331,6 +434,10 @@ impl ClientState {
                     &state.observation,
                     own_action.as_ref(),
                 );
+                self.observation_base = ObservationBase {
+                    cursor: update.cursor,
+                    revision: state.revision,
+                };
                 self.snapshot.state = *state;
                 self.remember_view();
             }
@@ -423,6 +530,51 @@ fn validate_entry(
 ) -> Result<(), StreamError> {
     if entry.actor != actor || &entry.branch != branch || entry.tick > tick {
         return Err(StreamError::InconsistentState);
+    }
+    Ok(())
+}
+
+fn validate_readiness(readiness: &Readiness, snapshot: &Snapshot) -> Result<(), StreamError> {
+    if (!snapshot.has_control
+        && (readiness.admission || !readiness.resume.is_empty() || !readiness.cancel.is_empty()))
+        || readiness.resume.len() > 2
+        || readiness.cancel.len() > 2
+        || (readiness.admission
+            && (snapshot
+                .intentions
+                .iter()
+                .any(|status| status.phase.pending())
+                || snapshot
+                    .travel
+                    .as_ref()
+                    .is_some_and(|travel| travel.phase == TravelPhase::Active)
+                || snapshot
+                    .state
+                    .observation
+                    .combat
+                    .as_ref()
+                    .is_some_and(|combat| combat.dead || combat.terminal)))
+    {
+        return Err(StreamError::InconsistentState);
+    }
+    for (ids, resume) in [(&readiness.resume, true), (&readiness.cancel, false)] {
+        for (index, id) in ids.iter().enumerate() {
+            if ids[..index].contains(id)
+                || !snapshot.intentions.iter().any(|status| {
+                    &status.intention == id
+                        && if resume {
+                            matches!(
+                                status.phase,
+                                IntentionPhase::Suspended | IntentionPhase::Paused
+                            )
+                        } else {
+                            status.phase.active()
+                        }
+                })
+            {
+                return Err(StreamError::InconsistentState);
+            }
+        }
     }
     Ok(())
 }

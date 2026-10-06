@@ -90,6 +90,13 @@ fn main() {
         let mut app = App::new();
         app.set_state(
             ClientState::from_snapshot(Snapshot {
+                readiness: tor_protocol::Readiness {
+                    revision: 0,
+                    admission: false,
+                    resume: vec![],
+                    cancel: vec![],
+                },
+                context: fixture_context(),
                 intentions: Vec::new(),
                 actor: ActorId(1),
                 branch: engine.branch().clone(),
@@ -138,6 +145,7 @@ fn main() {
             let state = engine.state(ActorId(1)).unwrap();
             let observation_ms = ms(start);
             let update = StreamUpdate {
+                context: fixture_context(),
                 actor: ActorId(1),
                 branch: engine.branch().clone(),
                 cursor: StreamCursor {
@@ -186,5 +194,13 @@ fn main() {
             "checkpoint_bytes":checkpoint_bytes,"save_bytes":save_bytes,"restart_ms":restart_ms,"exact":true,
             "profile":if cfg!(debug_assertions) {"debug"} else {"release"},"platform":std::env::consts::OS})
         );
+    }
+}
+
+/// Context for one synthetic attachment used by this fixture/workload.
+fn fixture_context() -> tor_protocol::StreamContext {
+    tor_protocol::StreamContext {
+        stream: tor_protocol::StreamId("fixture-attachment".into()),
+        epoch: 0,
     }
 }

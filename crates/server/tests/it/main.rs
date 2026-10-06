@@ -29,5 +29,6 @@ mod streaming_websocket;
 mod support;
 mod travel;
 mod websocket;
+mod wire_client;
 mod wizard;
 mod wizard_websocket;

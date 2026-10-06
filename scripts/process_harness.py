@@ -310,12 +310,19 @@ class ProcessTestCase(unittest.TestCase):
             return accepted
         # Request acknowledgement is admission. Assert action effects only after
         # the matching ordered lifecycle update from simulation execution.
-        return self.frame(client, lambda frame: (
+        executed = self.frame(client, lambda frame: (
             (frame.get("message") or {}).get("type") == "update"
             and frame["message"]["update"]["body"]["type"] == "intention"
             and frame["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
             and frame["message"]["update"]["body"]["status"]["phase"] in
                 ("started", "resolved", "failed", "cancelled", "suspended")))
+        phase = executed["message"]["update"]["body"]["status"]["phase"]
+        if phase == "started":
+            return executed
+        # Completed/suspended work changes the available controls. Return after
+        # that ordered permission update, so callers can capture a fresh context.
+        revision = executed["readiness"]["revision"]
+        return self.frame(client, lambda frame: frame["readiness"]["revision"] > revision)
 
     def play(self, client, steps):
         """Play fixture steps as ordinary actions: `{"move": direction}` or `{"take": item name}`."""

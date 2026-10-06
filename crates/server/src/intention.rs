@@ -545,41 +545,47 @@ impl Engine {
         })
     }
 
+    /// Derived actor permissions contain only journal-filtered opaque identities;
+    /// Session applies controller/role policy and assigns the transport revision.
+    pub(crate) fn input_readiness(&self, actor: ActorId) -> tor_protocol::Readiness {
+        let input = self.game.intention_input(SimActor(actor.0));
+        let terminal = self.game.run_outcome().terminal;
+        let mut readiness = tor_protocol::Readiness {
+            revision: 0,
+            admission: input.slot_available && self.alive(actor) && !self.is_ai(actor) && !terminal,
+            resume: Vec::new(),
+            cancel: Vec::new(),
+        };
+        for control in input.controls() {
+            let Some(status) =
+                self.status_for_intention(control.intention, self.branch(), IntentionPhase::Queued)
+            else {
+                continue;
+            };
+            if control.can_resume && !terminal {
+                readiness.resume.push(status.intention.clone());
+            }
+            if control.can_cancel {
+                readiness.cancel.push(status.intention);
+            }
+        }
+        readiness
+    }
+
     pub(crate) fn pending_intentions(&self, actor: ActorId) -> Vec<IntentionStatus> {
-        let mut statuses = Vec::new();
-        if let Some(pending) = self.game.pending_intention(SimActor(actor.0)) {
-            if let Some(status) = self.status_for_intention(
-                pending.id,
-                self.branch(),
-                if pending.state == tor_simulation::IntentionState::Suspended {
-                    IntentionPhase::Suspended
-                } else {
-                    IntentionPhase::Queued
-                },
-            ) {
-                statuses.push(status);
-            }
-        }
-        if let Some(preparation) = self.game.preparation(SimActor(actor.0)) {
-            if let Some(id) = preparation.intention.filter(|id| {
-                self.game
-                    .pending_intention(SimActor(actor.0))
-                    .is_none_or(|queued| queued.id != *id)
-            }) {
-                if let Some(status) = self.status_for_intention(
-                    id,
-                    self.branch(),
-                    if preparation.active {
-                        IntentionPhase::Started
-                    } else {
-                        IntentionPhase::Paused
-                    },
-                ) {
-                    statuses.push(status);
-                }
-            }
-        }
-        statuses
+        self.game
+            .intention_input(SimActor(actor.0))
+            .controls()
+            .filter_map(|control| {
+                let phase = match control.state {
+                    tor_simulation::IntentionControlState::Queued => IntentionPhase::Queued,
+                    tor_simulation::IntentionControlState::Suspended => IntentionPhase::Suspended,
+                    tor_simulation::IntentionControlState::Started => IntentionPhase::Started,
+                    tor_simulation::IntentionControlState::Paused => IntentionPhase::Paused,
+                };
+                self.status_for_intention(control.intention, self.branch(), phase)
+            })
+            .collect()
     }
 
     fn end_phase(kind: IntentionEndKind) -> IntentionPhase {
@@ -736,6 +742,8 @@ impl Engine {
     pub(crate) fn request_receipt(&self, result: &CommandResult) -> RequestReceipt {
         let JournalContent::IntentionAdmitted { intention, .. } = result.entry.content else {
             return RequestReceipt::Immediate {
+                actor: result.entry.actor,
+                branch: result.entry.branch.clone(),
                 entry_id: Some(result.entry.id.clone()),
             };
         };

@@ -1,6 +1,77 @@
 use tor_protocol::*;
 
 #[test]
+fn error_scope_distinguishes_transport_unattached_and_disclosed_host_errors_strictly() {
+    for scope in [
+        serde_json::json!({"type":"transport"}),
+        serde_json::json!({"type":"unattached"}),
+        serde_json::json!({"type":"attached", "context": {
+            "input":{"stream":{"stream":"attachment","epoch":1},"readiness_revision":2},
+            "actor":1,"branch":"current","cursor":{"sequence":3,"tick":0},"revision":0 }}),
+    ] {
+        let value = serde_json::json!({"type":"error","scope":scope,"request_id":null,"code":"invalid_request","message":"Rejected"});
+        let message: ServerMessage = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(message).unwrap(), value);
+    }
+    for invalid in [
+        serde_json::json!({"type":"attached"}),
+        serde_json::json!({"type":"unattached","actor":1}),
+        serde_json::json!({"type":"transport","context":null}),
+        serde_json::json!({"type":"unknown"}),
+    ] {
+        assert!(
+            serde_json::from_value::<ErrorScope>(invalid.clone()).is_err(),
+            "invalid scope: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn errors_require_explicit_scope_instead_of_an_implicit_attachment() {
+    let error = serde_json::json!({"type":"error", "request_id":null, "code":"invalid_request", "message":"Rejected"});
+    assert!(
+        serde_json::from_value::<ServerMessage>(error).is_err(),
+        "an error must explicitly name its scope"
+    );
+}
+
+#[test]
+fn successful_replies_require_the_current_disclosed_context() {
+    for reply in [
+        serde_json::json!({"type":"ack", "request_id":"operation", "receipt": {
+            "type":"immediate", "actor":1, "branch":"original", "entry_id":null }}),
+        serde_json::json!({"type":"history", "request_id":"query", "page":{"entries":[], "older_before":null}}),
+        serde_json::json!({"type":"palette", "request_id":null, "palette":{"revision":1, "body":{"type":"full", "assets":[]}}}),
+    ] {
+        assert!(
+            serde_json::from_value::<ServerMessage>(reply.clone()).is_err(),
+            "successful reply must require current context: {reply}"
+        );
+    }
+}
+
+#[test]
+fn reply_context_requires_current_attachment_state_and_rejects_implicit_fields() {
+    let context = serde_json::json!({
+        "input": {"stream": {"stream": "attachment", "epoch": 3}, "readiness_revision": 8},
+        "actor": 2, "branch": "current", "cursor": {"sequence": 17, "tick": 20}, "revision": 9,
+    });
+    let decoded: ReplyContext = serde_json::from_value(context.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), context);
+    for field in ["input", "actor", "branch", "cursor", "revision"] {
+        let mut incomplete = context.clone();
+        incomplete.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<ReplyContext>(incomplete).is_err(),
+            "missing {field}"
+        );
+    }
+    let mut forged = context;
+    forged["receipt"] = serde_json::json!({"branch": "original"});
+    assert!(serde_json::from_value::<ReplyContext>(forged).is_err());
+}
+
+#[test]
 fn queued_intention_controls_round_trip_opaque_identity_and_reject_extra_authority() {
     for command in [
         Command::ResumeIntention {
@@ -62,6 +133,13 @@ fn place_names_use_opaque_keys_and_remain_read_only_for_spectators() {
         command
     );
     assert!(!AccessRole::Spectator.permits(&Request::Command {
+        context: InputContext {
+            stream: StreamContext {
+                stream: StreamId("authority-test".into()),
+                epoch: 1
+            },
+            readiness_revision: 0,
+        },
         branch: BranchId("branch".into()),
         command
     }));
@@ -71,6 +149,13 @@ fn place_names_use_opaque_keys_and_remain_read_only_for_spectators() {
 #[test]
 fn spectators_are_not_permitted_wizard_commands() {
     assert!(!AccessRole::Spectator.permits(&Request::Command {
+        context: InputContext {
+            stream: StreamContext {
+                stream: StreamId("authority-test".into()),
+                epoch: 1
+            },
+            readiness_revision: 0,
+        },
         branch: BranchId("branch".into()),
         command: Command::Wizard {
             expected_revision: 0,
@@ -200,6 +285,22 @@ fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from
 #[test]
 fn gameplay_acceptance_has_a_typed_receipt_and_an_opaque_intention_identity() {
     let response = ServerMessage::Ack {
+        context: ReplyContext {
+            input: InputContext {
+                stream: StreamContext {
+                    stream: StreamId("attachment".into()),
+                    epoch: 1,
+                },
+                readiness_revision: 3,
+            },
+            actor: ActorId(7),
+            branch: BranchId("current-branch".into()),
+            cursor: StreamCursor {
+                sequence: 4,
+                tick: 10,
+            },
+            revision: 2,
+        },
         request_id: "request".into(),
         receipt: RequestReceipt::Admitted {
             actor: ActorId(7),
@@ -227,13 +328,96 @@ fn gameplay_acceptance_has_a_typed_receipt_and_an_opaque_intention_identity() {
 #[test]
 fn immediate_completion_is_distinct_from_admitted_gameplay() {
     let response = ServerMessage::Ack {
+        context: ReplyContext {
+            input: InputContext {
+                stream: StreamContext {
+                    stream: StreamId("attachment".into()),
+                    epoch: 0,
+                },
+                readiness_revision: 0,
+            },
+            actor: ActorId(1),
+            branch: BranchId("branch-1".into()),
+            cursor: StreamCursor {
+                sequence: 0,
+                tick: 0,
+            },
+            revision: 0,
+        },
         request_id: "save".into(),
-        receipt: RequestReceipt::Immediate { entry_id: None },
+        receipt: RequestReceipt::Immediate {
+            actor: ActorId(1),
+            branch: BranchId("branch-1".into()),
+            entry_id: None,
+        },
     };
     let wire = serde_json::to_value(&response).unwrap();
     assert_eq!(wire["receipt"]["type"], "immediate");
+    assert_eq!(wire["receipt"]["actor"], 1);
+    assert_eq!(wire["receipt"]["branch"], "branch-1");
+    for required in ["actor", "branch"] {
+        let mut missing = wire.clone();
+        missing["receipt"].as_object_mut().unwrap().remove(required);
+        assert!(serde_json::from_value::<ServerMessage>(missing).is_err());
+    }
     assert_eq!(
         serde_json::from_value::<ServerMessage>(wire).unwrap(),
         response
     );
+}
+
+#[test]
+fn readiness_is_required_and_does_not_accept_extra_authority() {
+    let samples: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/wire-v25.json")).unwrap();
+    let snapshot = samples["server"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["type"] == "snapshot")
+        .unwrap()
+        .clone();
+    let mut missing = snapshot.clone();
+    missing["snapshot"]
+        .as_object_mut()
+        .unwrap()
+        .remove("readiness");
+    assert!(serde_json::from_value::<ServerMessage>(missing).is_err());
+    let mut forged = snapshot.clone();
+    forged["snapshot"]["readiness"]["actor"] = serde_json::json!(999);
+    assert!(serde_json::from_value::<ServerMessage>(forged).is_err());
+    for field in ["revision", "admission", "resume", "cancel"] {
+        let mut missing = snapshot.clone();
+        missing["snapshot"]["readiness"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(serde_json::from_value::<ServerMessage>(missing).is_err());
+    }
+}
+
+#[test]
+fn a_command_requires_the_stream_and_readiness_context_it_was_built_from() {
+    let request = serde_json::json!({
+        "type": "command", "branch": "branch-1",
+        "command": {"type": "act", "expected_revision": 0, "action": {"type": "wait"}}
+    });
+    assert!(
+        serde_json::from_value::<Request>(request.clone()).is_err(),
+        "a bare branch/revision must not authorize a newly submitted command"
+    );
+    let mut contextual = request;
+    contextual["context"] = serde_json::json!({
+        "stream": {"stream": "current-attachment", "epoch": 3}, "readiness_revision": 7,
+    });
+    let decoded: Request = serde_json::from_value(contextual.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), contextual);
+    for field in ["stream", "readiness_revision"] {
+        let mut missing = contextual.clone();
+        missing["context"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<Request>(missing).is_err());
+    }
+    let mut forged = contextual;
+    forged["context"]["has_control"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<Request>(forged).is_err());
 }

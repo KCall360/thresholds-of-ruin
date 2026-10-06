@@ -24,6 +24,7 @@ pub trait Link {
     fn client(&self) -> &ClientState;
     fn palette(&self) -> &Palette;
     fn role(&self) -> AccessRole;
+    fn is_synchronized(&self) -> bool;
     fn set_pace(&mut self, pace: Duration);
     fn pace(&self) -> Duration;
     /// Send a request; returns its id.
@@ -42,6 +43,9 @@ impl Link for Connection {
     }
     fn role(&self) -> AccessRole {
         Connection::role(self)
+    }
+    fn is_synchronized(&self) -> bool {
+        Connection::is_synchronized(self)
     }
     fn set_pace(&mut self, pace: Duration) {
         Connection::set_pace(self, pace);
@@ -115,7 +119,8 @@ impl Reader<'_> {
                 UpdateBody::Control { has_control } => {
                     self.beats.push(Beat::Control(*has_control));
                 }
-                UpdateBody::Travel { .. }
+                UpdateBody::Readiness { .. }
+                | UpdateBody::Travel { .. }
                 | UpdateBody::Annotation { .. }
                 | UpdateBody::Intention { .. } => {}
             },
@@ -157,25 +162,35 @@ async fn settle(
 ) -> Result<Settled, Error> {
     let id = link.send(request).await?;
     let mut acked = false;
+    let mut execution_failed = false;
     let mut receipt: Option<EntryId> = None;
     let mut ended = None;
     loop {
         let before = link.client().state().clone();
         // Play stopped, and not for this player: the turn is over.
-        let others = |ended: Option<TravelPhase>| match ended {
-            Some(phase) => Settled::Journey(phase),
-            None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
-            None => Settled::Done,
+        let others = |ended: Option<TravelPhase>, failed: bool| {
+            if failed {
+                Settled::Rejected(ErrorCode::InvalidAction)
+            } else {
+                match ended {
+                    Some(phase) => Settled::Journey(phase),
+                    None if until == Until::Journey => Settled::Journey(TravelPhase::Active),
+                    None => Settled::Done,
+                }
+            }
         };
         let Some(message) = link.next(ANSWER).await? else {
             if acked {
                 // The server always says when play stops; this is only a
                 // safety net if that word never comes.
-                return Ok(others(ended));
+                return Ok(others(ended, execution_failed));
             }
             return Err("The server did not answer. The action may have completed; reconnect and check history before trying again.".into());
         };
         reader.record(&before, link, &message);
+        if !link.is_synchronized() {
+            continue;
+        }
         if let ServerMessage::Waiting { on } = &message {
             reader.waiting = Some(*on);
         }
@@ -186,6 +201,7 @@ async fn settle(
             ServerMessage::Ack {
                 request_id,
                 receipt: accepted,
+                ..
             } if *request_id == id => {
                 acked = true;
                 receipt = accepted.entry_id().cloned();
@@ -195,7 +211,7 @@ async fn settle(
                 UpdateBody::Intention { status } if matches!(status.phase, IntentionPhase::Failed | IntentionPhase::Cancelled)
                     && receipt.as_ref() == Some(&status.entry_id)) =>
             {
-                return Ok(Settled::Rejected(ErrorCode::InvalidAction));
+                execution_failed = true;
             }
             ServerMessage::Snapshot { request_id, .. } if *request_id == id => {
                 return Ok(Settled::Done);
@@ -213,7 +229,7 @@ async fn settle(
                         .map(|t| t.phase)
                         .filter(|phase| *phase != TravelPhase::Active);
                 }
-                return Ok(others(ended));
+                return Ok(others(ended, execution_failed));
             }
             ServerMessage::Update { update } => {
                 if let UpdateBody::Control { has_control: false } = update.body {
@@ -228,11 +244,19 @@ async fn settle(
             continue;
         }
         let state = link.client().state();
-        let ready = state.observation.ready || terminal(state);
+        let ended_run = terminal(state);
+        let ready = state.observation.ready || ended_run;
+        // Observation and journey completion precede their permission update.
+        // Keep existing turn pacing, but consume that boundary before new input.
+        let permissions_ready = ended_run || link.client().can_admit_intention();
+        if execution_failed && permissions_ready {
+            return Ok(Settled::Rejected(ErrorCode::InvalidAction));
+        }
+        let gameplay_ready = ready && permissions_ready;
         match until {
             Until::Answered => return Ok(Settled::Done),
             Until::Ready if ready => return Ok(Settled::Done),
-            Until::Acted { revision } if ready && state.revision > revision => {
+            Until::Acted { revision } if gameplay_ready && state.revision > revision => {
                 return Ok(Settled::Done)
             }
             Until::Journey => {
@@ -243,7 +267,7 @@ async fn settle(
                     .map(|t| t.phase)
                     .filter(|phase| *phase != TravelPhase::Active);
                 if let Some(phase) = ended {
-                    if ready {
+                    if gameplay_ready {
                         return Ok(Settled::Journey(phase));
                     }
                 }
@@ -390,7 +414,9 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
 
 /// Whether this connection may act, or why not.
 pub fn may_act(link: &impl Link) -> Result<(), &'static str> {
-    if link.role() == AccessRole::Spectator {
+    if !link.is_synchronized() {
+        Err("Resynchronizing; input was not sent.")
+    } else if link.role() == AccessRole::Spectator {
         Err("Spectator access is read-only.")
     } else if !link.client().has_control() {
         Err("You are observing. Use control to take over when it is available.")
@@ -472,6 +498,7 @@ pub async fn run_goal(
             }
             Step::Act(action) => {
                 let request = Request::Command {
+                    context: link.client().input_context(),
                     branch,
                     command: Command::Act {
                         expected_revision: revision,
@@ -502,6 +529,7 @@ pub async fn run_goal(
                 loop {
                     let before = super::seen(link.client());
                     let request = Request::Command {
+                        context: link.client().input_context(),
                         branch,
                         command: Command::Travel {
                             expected_revision: revision,

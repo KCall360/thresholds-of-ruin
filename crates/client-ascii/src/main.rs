@@ -319,9 +319,15 @@ fn window_loop(
                         .try_send(Command::Pace(Duration::from_millis(ms)));
                 }
                 Effect::Request(request) => {
+                    let context = app
+                        .state
+                        .as_ref()
+                        .ok_or("No attached state for request")?
+                        .context()
+                        .clone();
                     if network
                         .commands
-                        .try_send(Command::Request(request))
+                        .try_send(Command::Request { context, request })
                         .is_err()
                     {
                         app.disconnect("Network command queue unavailable.".into());

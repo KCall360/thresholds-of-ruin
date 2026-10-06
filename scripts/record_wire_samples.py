@@ -37,7 +37,9 @@ CLIENT = [
         {"type": "snapshot"},
         {"type": "palette"},
         {"type": "history", "before": "entry-1", "limit": 20},
-        *({"type": "command", "branch": "branch-1", "command": command} for command in [
+        *({"type": "command", "context": {
+            "stream": {"stream": "sample-attachment", "epoch": 1}, "readiness_revision": 3},
+            "branch": "branch-1", "command": command} for command in [
             {"type": "rename_place", "expected_revision": 3, "key": "place-key", "name": "Lantern Hall"},
             {"type": "resume_intention", "expected_revision": 3, "intention": "admission-1"},
             {"type": "cancel_intention", "expected_revision": 3, "intention": "admission-1"},
@@ -71,13 +73,17 @@ class Recorder(ProcessTestCase):
         self.act(player, {"type": "move", "direction": "east"})
         self.act(player, {"type": "take", "item": 999999})
         state = self.request(player, {"type": "snapshot"})
-        self.request(player, {"type": "command", "branch": state["branch"], "command": {
+        state = self.request(player, {"type": "command", "context": state["input_context"], "branch": state["branch"], "command": {
             "type": "annotate", "anchor": {"type": "state", "revision": state["state"]["revision"]},
             "text": "Shared sample note", "audience": "actor"}})
+        self.assertIsNone(state["error"])
+        # Simulation effects may arrive between the snapshot and note receipt.
+        # Build travel from the latest applied frame, not the earlier snapshot.
         destination = state["state"]["observation"]["visible_cells"][0]["key"]
-        self.request(player, {"type": "command", "branch": state["branch"], "command": {
+        accepted = self.request(player, {"type": "command", "context": state["input_context"], "branch": state["branch"], "command": {
             "type": "travel", "expected_revision": state["state"]["revision"], "destination": destination}})
-        self.frame(player, lambda f: (f.get("travel") or {}).get("phase", "active") != "active")
+        self.assertIsNone(accepted["error"])
+        self.frame(player, lambda f: f.get("travel") and f["travel"]["phase"] != "active")
         self.request(player, {"type": "release_control"})
         self.request(watcher, {"type": "snapshot"})
         # The headless client consumes the welcome itself, so it's written here.

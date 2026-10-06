@@ -220,23 +220,31 @@ impl App {
         self.busy = false;
     }
 
-    pub fn intention_hint(&self) -> Option<&'static str> {
+    pub fn intention_hint(&self) -> Option<String> {
         if self.role == AccessRole::Spectator {
             return None;
         }
         let state = self.state.as_ref()?;
         let pending = state.intention_for_input()?;
-        Some(if !state.has_control() {
-            "Action pending. F3 acquire control; F8 resume suspended work; F9 cancel; F2 history; Esc quit"
-        } else if pending.phase == IntentionPhase::Paused {
-            "Attack paused. F8 resume; F9 cancel; F3/R control; F2 history; Esc quit"
-        } else if pending.phase == IntentionPhase::Started {
-            "Attack in progress. F9 cancel; F3/R control; F2 history; Esc quit"
-        } else if pending.phase == IntentionPhase::Suspended {
-            "Action suspended. F8 resume; F9 cancel; F3/R control; F2 history; Esc quit"
+        let label = match pending.phase {
+            IntentionPhase::Paused => "Attack paused.",
+            IntentionPhase::Started => "Attack in progress.",
+            IntentionPhase::Suspended => "Action suspended.",
+            _ => "Action queued.",
+        };
+        let mut hint = String::from(label);
+        if state.can_resume_intention() {
+            hint.push_str(" F8 resume;");
+        }
+        if state.can_cancel_intention() {
+            hint.push_str(" F9 cancel;");
+        }
+        hint.push_str(if state.has_control() {
+            " F3/R control; F2 history; Esc quit"
         } else {
-            "Action queued. F9 cancel; F3/R control; F2 history; Esc quit"
-        })
+            " F3 acquire control; F2 history; Esc quit"
+        });
+        Some(hint)
     }
 
     pub fn disconnect(&mut self, message: String) {
@@ -740,8 +748,8 @@ impl App {
                     self.attack_targets.clear();
                     self.place_name = None;
                     self.status = "You are observing. Press F3 to request control.".into();
-                } else if !state.state().observation.ready {
-                    self.status = "Waiting for another actor to act.".into();
+                } else if !state.can_admit_intention() {
+                    self.status = "The server is not accepting another action.".into();
                 } else if state
                     .travel()
                     .is_some_and(|t| t.phase == TravelPhase::Active)
@@ -854,9 +862,9 @@ impl App {
         };
         if self.role == AccessRole::Spectator
             || !state.has_control()
-            || !state.state().observation.ready
+            || !state.can_admit_intention()
         {
-            self.status = "Travel requires control of a ready actor.".into();
+            self.status = "Travel requires permission to admit an action.".into();
             return Effect::None;
         }
         let Some(cell) =
@@ -886,8 +894,9 @@ impl App {
             self.status = "You are observing. Press F3 to request control.".into();
             return Effect::None;
         }
-        if !state.state().observation.ready {
-            if matches!(action, Action::Wait)
+        if !state.can_admit_intention() {
+            if !state.state().observation.ready
+                && matches!(action, Action::Wait)
                 && state
                     .state()
                     .observation
@@ -897,7 +906,7 @@ impl App {
             {
                 return self.request(Request::Continue);
             }
-            self.status = "Waiting for another actor to act.".into();
+            self.status = "The server is not accepting another action.".into();
             return Effect::None;
         }
         if let Action::Move { direction } = action {
@@ -941,15 +950,12 @@ impl App {
             return Effect::None;
         };
         if matches!(command, Command::Act { .. } | Command::Travel { .. })
-            && state.has_pending_intention()
+            && !state.can_admit_intention()
         {
-            self.status = "An action is already queued.".into();
+            self.status = "The server is not accepting another action.".into();
             return Effect::None;
         }
-        self.request(Request::Command {
-            branch: state.branch().clone(),
-            command,
-        })
+        self.request(state.command_request(command))
     }
 
     fn request(&mut self, request: Request) -> Effect {

@@ -2,15 +2,13 @@
 //! client gets a palette forecast from the themes of the regions near its
 //! actor, never from what they hold. See docs/protocol.md#asset-palettes.
 use crate::support;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::time::timeout;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
 use tor_server::{
     scenario_package, serve, Account, Engine, Scenario, Service, Simulation, Streaming,
@@ -248,34 +246,14 @@ fn a_region_must_forecast_the_assets_it_shows() {
 
 // ----- Over WebSocket -----
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use crate::wire_client::WireClient as Client;
 
 async fn receive(client: &mut Client) -> Option<ServerMessage> {
-    let frame = timeout(Duration::from_secs(5), client.next())
-        .await
-        .ok()??
-        .ok()?;
-    match frame {
-        Message::Text(text) => serde_json::from_str(&text).ok(),
-        _ => None,
-    }
+    client.receive().await
 }
-
-async fn send(client: &mut Client, id: &str, request: Request) {
-    let message = ClientMessage::Request {
-        request_id: id.into(),
-        request,
-    };
-    client
-        .send(Message::Text(
-            serde_json::to_string(&message).unwrap().into(),
-        ))
-        .await
-        .unwrap();
-}
-
 async fn connect(address: &str, token: &str) -> Client {
-    let (mut client, _) = connect_async(address).await.unwrap();
+    let (socket, _) = connect_async(address).await.unwrap();
+    let mut client = Client::new(socket);
     let hello = ClientMessage::Hello {
         protocol: PROTOCOL_VERSION,
         token: token.into(),
@@ -306,7 +284,9 @@ impl Viewer {
     /// Attach, taking the snapshot and the palette that follows it.
     async fn attach(address: &str, token: &str) -> Self {
         let mut client = connect(address, token).await;
-        send(&mut client, "attach", Request::Attach { actor: ActorId(1) }).await;
+        client
+            .request("attach", Request::Attach { actor: ActorId(1) })
+            .await;
         let Some(ServerMessage::Snapshot { snapshot, .. }) = receive(&mut client).await else {
             panic!("expected a snapshot")
         };
@@ -336,6 +316,7 @@ impl Viewer {
             ServerMessage::Palette {
                 request_id,
                 palette,
+                ..
             } => {
                 self.palettes.push((request_id, palette));
                 None
@@ -356,13 +337,14 @@ impl Viewer {
         self.step += 1;
         let id = format!("step-{}", self.step);
         let request = Request::Command {
+            context: self.client.input_context(),
             branch: self.branch.clone(),
             command: Command::Act {
                 expected_revision: self.state.revision,
                 action,
             },
         };
-        send(&mut self.client, &id, request).await;
+        self.client.request(&id, request).await;
         let mut admitted = None;
         loop {
             let message = receive(&mut self.client).await.expect("connected");
@@ -385,6 +367,7 @@ impl Viewer {
                 Some(ServerMessage::Ack {
                     request_id,
                     receipt,
+                    ..
                 }) if request_id == id => {
                     let RequestReceipt::Admitted { intention, .. } = receipt else {
                         panic!("gameplay admission receipt required")
@@ -399,6 +382,7 @@ impl Viewer {
                 _ => {}
             }
             if let Some(result) = resolved {
+                self.client.resolution_readiness().await;
                 return result;
             }
         }
@@ -463,7 +447,7 @@ async fn clients_get_a_full_palette_then_deltas_and_can_ask_for_it_again() {
 
     // Attaching sends the whole palette, unasked.
     let mut player = Viewer::attach(&address, "alice-test-token").await;
-    send(&mut player.client, "control", Request::AcquireControl).await;
+    player.client.acquire_control("control").await;
     let (request, first) = &player.palettes[0];
     assert_eq!(*request, None);
     assert_eq!(first.revision, 1);
@@ -497,7 +481,7 @@ async fn clients_get_a_full_palette_then_deltas_and_can_ask_for_it_again() {
     assert_eq!(spectator.palettes[1].1.body, delta.body);
 
     // Asking gets the whole palette, answering the request. Spectators may ask.
-    send(&mut spectator.client, "palette", Request::Palette).await;
+    spectator.client.request("palette", Request::Palette).await;
     spectator.until(|v| v.palettes.len() >= 3).await;
     let (request, again) = &spectator.palettes[2];
     assert_eq!(request.as_deref(), Some("palette"));
