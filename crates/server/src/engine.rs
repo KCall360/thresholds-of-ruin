@@ -16,7 +16,7 @@ use crate::journal::{
     Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation, WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 20;
+pub(crate) const ARCHIVE_VERSION: u32 = 21;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -532,15 +532,23 @@ impl Record {
         else {
             return false;
         };
+        let native_travel = matches!(admitted.entry.content,
+            JournalContent::TravelIntentionAdmitted { intention: id, .. } if id == *intention);
         if admission != &admitted.entry.id
             || self.entry.actor != admitted.entry.actor
-            || !matches!(admitted.entry.content, JournalContent::IntentionAdmitted { intention: id, .. } if id == *intention)
+            || !(native_travel
+                || matches!(admitted.entry.content, JournalContent::IntentionAdmitted { intention: id, .. } if id == *intention))
         {
             return false;
         }
         match &self.receipt {
             None => {
-                *change == IntentionChange::Suspended
+                *change
+                    == if native_travel {
+                        IntentionChange::Cancelled
+                    } else {
+                        IntentionChange::Suspended
+                    }
                     && self.entry.audience == Audience::Actor
                     && self.entry.author
                         == Author::Backend {
@@ -548,7 +556,8 @@ impl Record {
                         }
             }
             Some(receipt) => {
-                receipt.actor == self.entry.actor
+                !native_travel
+                    && receipt.actor == self.entry.actor
                     && receipt.branch == self.entry.branch
                     && self.entry.author
                         == Author::User {
@@ -607,7 +616,8 @@ impl Record {
             return false;
         };
         let original_action = match work {
-            crate::journal::AdmittedWork::Human(action) => Some(action),
+            crate::journal::AdmittedWork::Human(action)
+            | crate::journal::AdmittedWork::Travel(action, _) => Some(action),
             crate::journal::AdmittedWork::AutonomousDecision => None,
         };
         admission == &admitted.entry.id
@@ -661,6 +671,28 @@ impl Record {
                             user: receipt.user.clone(),
                         }
             }
+            (
+                JournalContent::TravelIntentionAdmitted {
+                    intention,
+                    journey,
+                    step,
+                    action,
+                    destination,
+                },
+                None,
+            ) => {
+                intention.0 != 0
+                    && *step != 0
+                    && uuid::Uuid::parse_str(&journey.0).is_ok()
+                    && destination.region.0 != 0
+                    && matches!(action, Action::Move { .. })
+                    && self.entry.audience == Audience::Private
+                    && self.entry.author
+                        == Author::Backend {
+                            component: "scheduler".into(),
+                        }
+            }
+            (JournalContent::TravelIntentionAdmitted { .. }, Some(_)) => false,
             (JournalContent::AutonomousIntentionAdmitted { intention }, None) => {
                 intention.0 != 0
                     && self.entry.audience == Audience::Private
@@ -1449,6 +1481,17 @@ impl Engine {
                     engine
                         .apply_command(&receipt, Some(record.entry.id.clone()))
                         .map(|result| result.entry)
+                } else if matches!(
+                    record.entry.content,
+                    JournalContent::IntentionChanged {
+                        change: crate::journal::IntentionChange::Cancelled,
+                        ..
+                    }
+                ) {
+                    engine
+                        .cancel_travel_inner(record.entry.actor, Some(record.entry.id.clone()))?
+                        .ok_or_else(invalid_archive)
+                        .map(|result| result.entry)
                 } else {
                     engine
                         .suspend_intention_admission(
@@ -1470,6 +1513,29 @@ impl Engine {
                 engine
                     .execute_intention(Some(record.entry.id.clone()))?
                     .ok_or_else(invalid_archive)
+                    .map(|result| result.entry)
+            } else if let JournalContent::TravelIntentionAdmitted {
+                journey,
+                step,
+                action,
+                destination,
+                ..
+            } = &record.entry.content
+            {
+                let Action::Move { direction } = action else {
+                    return Err(invalid_archive());
+                };
+                engine
+                    .admit_travel_inner(
+                        record.entry.actor,
+                        journey,
+                        *step,
+                        tor_simulation::TravelStep {
+                            direction: adapt::direction(*direction),
+                            destination: *destination,
+                        },
+                        Some(record.entry.id.clone()),
+                    )
                     .map(|result| result.entry)
             } else if matches!(
                 record.entry.content,

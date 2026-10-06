@@ -143,6 +143,7 @@ impl EffectScope {
             }
             | JournalContent::IntentionAdmitted { .. }
             | JournalContent::AutonomousIntentionAdmitted { .. }
+            | JournalContent::TravelIntentionAdmitted { .. }
             | JournalContent::PlaceRenamed { .. }
             | JournalContent::Travel { .. }
             | JournalContent::Annotation { .. }
@@ -197,6 +198,9 @@ struct PhaseBoundary {
 
 pub(super) struct JournalLifecycle<'a> {
     roots: BTreeMap<Id, &'a Record>,
+    journeys: BTreeMap<EntryId, &'a JournalEntry>,
+    travel_steps: BTreeMap<EntryId, &'a JournalEntry>,
+    travel_resolutions: BTreeMap<Id, &'a JournalEntry>,
     branch: BranchId,
     phases: Arc<Phases>,
     boundaries: VecDeque<PhaseBoundary>,
@@ -212,6 +216,9 @@ impl<'a> JournalLifecycle<'a> {
         }]);
         Self {
             roots: BTreeMap::new(),
+            journeys: BTreeMap::new(),
+            travel_steps: BTreeMap::new(),
+            travel_resolutions: BTreeMap::new(),
             branch,
             phases,
             boundaries,
@@ -295,9 +302,39 @@ impl<'a> JournalLifecycle<'a> {
         } else if entry.branch != self.branch {
             return Err(invalid_archive());
         }
+        if matches!(entry.content, JournalContent::Travel { .. }) {
+            self.journeys.insert(entry.id.clone(), entry);
+        }
+        if let JournalContent::TravelIntentionAdmitted { journey, step, .. } = &entry.content {
+            let root = self.journeys.get(journey).ok_or_else(invalid_archive)?;
+            let previous = match self.travel_steps.get(journey) {
+                None => None,
+                Some(admitted) => {
+                    let (id, _) = admitted.content.admission().ok_or_else(invalid_archive)?;
+                    Some((
+                        *admitted,
+                        *self
+                            .travel_resolutions
+                            .get(&id)
+                            .ok_or_else(invalid_archive)?,
+                    ))
+                }
+            };
+            if !super::intention::valid_travel_link(
+                root,
+                previous,
+                entry.actor,
+                &entry.branch,
+                *step,
+            ) {
+                return Err(invalid_archive());
+            }
+            self.travel_steps.insert(journey.clone(), entry);
+        }
         match &entry.content {
             JournalContent::IntentionAdmitted { intention, .. }
-            | JournalContent::AutonomousIntentionAdmitted { intention } => {
+            | JournalContent::AutonomousIntentionAdmitted { intention }
+            | JournalContent::TravelIntentionAdmitted { intention, .. } => {
                 if self.roots.insert(*intention, record).is_some() {
                     return Err(invalid_archive());
                 }
@@ -418,6 +455,16 @@ impl<'a> JournalLifecycle<'a> {
             }
             self.remove(end.intention)?;
         }
+        if let Some((_, id)) = record.resolution() {
+            if self.root(id).is_some_and(|root| {
+                matches!(
+                    root.entry.content,
+                    JournalContent::TravelIntentionAdmitted { .. }
+                )
+            }) {
+                self.travel_resolutions.insert(id, entry);
+            }
+        }
         // Effects may replace preparation within this atomic record. Check the
         // final owned slots after terminal facts, not during intermediate phases.
         let mut affected = std::iter::once(entry.actor)
@@ -506,9 +553,11 @@ impl<'a> JournalLifecycle<'a> {
             work_matches_phase
                 && root.entry.actor.0 == queued.actor.0
                 && queued.state == queued_phase
-                && root.entry.content.admission().is_some_and(|(_, work)| {
-                    queued.origin == work.origin() && work.matches(queued.work)
-                })
+                && root
+                    .entry
+                    .content
+                    .admission()
+                    .is_some_and(|(_, work)| work.matches_intention(queued))
         }) {
             return false;
         }

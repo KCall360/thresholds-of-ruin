@@ -127,8 +127,15 @@ pub(super) fn derive_intention_ends(
     };
     let loaded: std::collections::BTreeSet<_> = after.loaded_actor_ids().collect();
     active.into_iter().filter_map(|(intention, actor)| {
+            // Ordinary queued work has no same-identity preparation in a detached
+            // record. Its explicit cancellation is terminal even while unloaded.
+            let cancelled_queue = matches!(&entry.content, JournalContent::IntentionChanged {
+                intention: id, change: IntentionChange::Cancelled, .. } if *id == intention)
+                && before.pending_intention(actor).is_some_and(|queued| {
+                    queued.id == intention && !matches!(queued.work, tor_simulation::IntentionWork::ResumeAttack { .. })
+                }) && after.pending_intention(actor).is_none();
             if after.preparation(actor).is_some_and(|p| p.intention == Some(intention))
-                || (!loaded.contains(&actor) && after.known_actor_region(actor).is_some()) {
+                || (!cancelled_queue && !loaded.contains(&actor) && after.known_actor_region(actor).is_some()) {
                 return None;
             }
             let resolved = after.combat_events().iter().any(|event| matches!(event,
@@ -146,6 +153,47 @@ pub(super) fn derive_intention_ends(
                 IntentionEndKind::Cancelled
             } else { IntentionEndKind::Failed } })
         }).collect()
+}
+
+/// One linkage rule serves live indexed admission and chronological recovery.
+pub(super) fn valid_travel_link(
+    root: &JournalEntry,
+    previous: Option<(&JournalEntry, &JournalEntry)>,
+    actor: ActorId,
+    branch: &BranchId,
+    ordinal: u64,
+) -> bool {
+    if root.actor != actor
+        || &root.branch != branch
+        || !matches!(root.content, JournalContent::Travel { .. })
+    {
+        return false;
+    }
+    let Some((admitted, resolved)) = previous else {
+        return ordinal == 1;
+    };
+    let JournalContent::TravelIntentionAdmitted {
+        intention,
+        journey,
+        step,
+        ..
+    } = &admitted.content
+    else {
+        return false;
+    };
+    journey == &root.id
+        && admitted.actor == actor
+        && &admitted.branch == branch
+        && step.checked_add(1) == Some(ordinal)
+        && resolved.actor == actor
+        && &resolved.branch == branch
+        && matches!(&resolved.content, JournalContent::IntentionStarted { admission, intention: id, .. }
+            if admission == &admitted.id && id == intention)
+        && resolved.intention_ends.iter().any(|end| {
+            end.actor == actor
+                && end.intention == *intention
+                && end.kind == IntentionEndKind::Resolved
+        })
 }
 
 impl Engine {
@@ -220,14 +268,158 @@ impl Engine {
         self.commit_candidate(candidate, entry, None, profile)
     }
 
+    pub(crate) fn admit_travel(
+        &mut self,
+        actor: ActorId,
+        journey: &EntryId,
+        ordinal: u64,
+        step: tor_simulation::TravelStep,
+    ) -> Result<CommandResult, Failure> {
+        self.admit_travel_inner(actor, journey, ordinal, step, None)
+    }
+
+    pub(super) fn admit_travel_inner(
+        &mut self,
+        actor: ActorId,
+        journey: &EntryId,
+        ordinal: u64,
+        step: tor_simulation::TravelStep,
+        recorded_id: Option<EntryId>,
+    ) -> Result<CommandResult, Failure> {
+        let unavailable = || Failure::new(ErrorCode::InvalidAction, "Journey step is unavailable");
+        let source = self.history_index.find(journey).ok_or_else(unavailable)?;
+        let root = &self.archive.records[source].entry;
+        let previous = match self.history_index.latest_travel_step(journey) {
+            None => None,
+            Some(position) => {
+                let admitted = &self.archive.records[position].entry;
+                let (id, _) = admitted.content.admission().ok_or_else(unavailable)?;
+                let resolved = self
+                    .history_index
+                    .intention_resolution(self.branch(), id)
+                    .ok_or_else(unavailable)?;
+                Some((admitted, &self.archive.records[resolved].entry))
+            }
+        };
+        if !valid_travel_link(root, previous, actor, self.branch(), ordinal)
+            || self.next_actor() != Some(actor)
+        {
+            return Err(unavailable());
+        }
+        let mut candidate = self.capture_command_candidate(None);
+        let intention = candidate
+            .game
+            .admit_travel_intention(SimActor(actor.0), step)
+            .map_err(|_| unavailable())?;
+        let action = adapt::disclosed_action(tor_simulation::Action::Move(step.direction))
+            .ok_or_else(unavailable)?;
+        let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
+            intention_ends: Vec::new(),
+            id: recorded_id.unwrap_or_else(new_id),
+            branch: candidate.branch().clone(),
+            actor,
+            tick: self.game.tick(),
+            author: Author::Backend {
+                component: "scheduler".into(),
+            },
+            audience: Audience::Private,
+            content: JournalContent::TravelIntentionAdmitted {
+                intention,
+                journey: journey.clone(),
+                step: ordinal,
+                action,
+                destination: step.destination,
+            },
+        };
+        self.commit_candidate(candidate, entry, None, None)
+    }
+
+    /// Settle a pending journey step without permitting manual human resumption.
+    pub(crate) fn cancel_travel(
+        &mut self,
+        actor: ActorId,
+    ) -> Result<Option<CommandResult>, Failure> {
+        self.cancel_travel_inner(actor, None)
+    }
+
+    pub(super) fn cancel_travel_inner(
+        &mut self,
+        actor: ActorId,
+        recorded_id: Option<EntryId>,
+    ) -> Result<Option<CommandResult>, Failure> {
+        let Some(queued) = self.game.pending_intention(SimActor(actor.0)) else {
+            return Ok(None);
+        };
+        if queued.origin != tor_simulation::IntentionOrigin::Travel {
+            return Ok(None);
+        }
+        let intention = queued.id;
+        let source = self
+            .history_index
+            .intention_admission(intention)
+            .ok_or_else(invalid_archive)?;
+        let root = &self.archive.records[source].entry;
+        if root.actor != actor
+            || !root
+                .content
+                .admission()
+                .is_some_and(|(_, work)| work.matches_intention(queued))
+        {
+            return Err(invalid_archive());
+        }
+        let admission = root.id.clone();
+        let mut candidate = self.capture_command_candidate(None);
+        apply_intention_change(
+            &mut candidate.game,
+            actor,
+            intention,
+            IntentionChange::Cancelled,
+        )?;
+        let entry = JournalEntry {
+            intention_suspensions: Vec::new(),
+            intention_ends: Vec::new(),
+            id: recorded_id.unwrap_or_else(new_id),
+            branch: candidate.branch().clone(),
+            actor,
+            tick: self.game.tick(),
+            author: Author::Backend {
+                component: "scheduler".into(),
+            },
+            audience: Audience::Actor,
+            content: JournalContent::IntentionChanged {
+                admission,
+                intention,
+                change: IntentionChange::Cancelled,
+            },
+        };
+        self.commit_candidate(candidate, entry, None, None)
+            .map(Some)
+    }
+
+    pub(crate) fn queued_travel_admission(&self, actor: ActorId) -> Option<&EntryId> {
+        let queued = self.game.pending_intention(SimActor(actor.0))?;
+        if queued.origin != tor_simulation::IntentionOrigin::Travel {
+            return None;
+        }
+        let source = self.history_index.intention_admission(queued.id)?;
+        Some(&self.archive.records[source].entry.id)
+    }
+
     pub(crate) fn next_intention_origin(&self) -> Option<tor_simulation::IntentionOrigin> {
         let actor = self.game.next_intention_actor()?;
         Some(self.game.pending_intention(actor)?.origin)
     }
     pub(crate) fn queued_human_actors(&self) -> Vec<ActorId> {
+        self.queued_actors(tor_simulation::IntentionOrigin::Human)
+    }
+    pub(crate) fn queued_travel_actors(&self) -> Vec<ActorId> {
+        self.queued_actors(tor_simulation::IntentionOrigin::Travel)
+    }
+    fn queued_actors(&self, origin: tor_simulation::IntentionOrigin) -> Vec<ActorId> {
         self.game
             .queued_intentions()
-            .filter(|queued| queued.origin == tor_simulation::IntentionOrigin::Human)
+            .filter(|queued| queued.origin == origin)
             .map(|queued| ActorId(queued.actor.0))
             .collect()
     }
@@ -649,8 +841,7 @@ impl Engine {
         };
         if admitted.actor != actor
             || admitted_id != intention
-            || execution.intention.origin != admitted_work.origin()
-            || !admitted_work.matches(execution.intention.work)
+            || !admitted_work.matches_intention(&execution.intention)
         {
             return Err(invalid_archive());
         }

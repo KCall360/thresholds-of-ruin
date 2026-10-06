@@ -153,6 +153,7 @@ impl JournalEntry {
         let content = match &self.content {
             JournalContent::IntentionAdmitted { .. }
             | JournalContent::AutonomousIntentionAdmitted { .. }
+            | JournalContent::TravelIntentionAdmitted { .. }
             | JournalContent::IntentionFailed { .. }
             | JournalContent::IntentionContinuationFailed { .. }
             | JournalContent::IntentionChanged { .. } => return None,
@@ -489,6 +490,14 @@ pub enum JournalContent {
     AutonomousIntentionAdmitted {
         intention: tor_simulation::IntentionId,
     },
+    /// Native movement linked to an accepted journey, without a fabricated RPC.
+    TravelIntentionAdmitted {
+        intention: tor_simulation::IntentionId,
+        journey: EntryId,
+        step: u64,
+        action: Action,
+        destination: tor_world::Location,
+    },
     /// Receipt of accepted work, before its simulation effect. Not a history event.
     IntentionAdmitted {
         intention: tor_simulation::IntentionId,
@@ -522,6 +531,7 @@ pub enum JournalContent {
 pub(crate) enum AdmittedWork<'a> {
     Human(&'a Action),
     AutonomousDecision,
+    Travel(&'a Action, tor_world::Location),
 }
 
 impl AdmittedWork<'_> {
@@ -529,7 +539,19 @@ impl AdmittedWork<'_> {
         match self {
             Self::Human(_) => tor_simulation::IntentionOrigin::Human,
             Self::AutonomousDecision => tor_simulation::IntentionOrigin::Autonomous,
+            Self::Travel(_, _) => tor_simulation::IntentionOrigin::Travel,
         }
+    }
+
+    pub(crate) fn matches_intention(self, queued: &tor_simulation::QueuedIntention) -> bool {
+        queued.origin == self.origin()
+            && self.matches(queued.work)
+            && match self {
+                Self::Travel(_, destination) => queued
+                    .movement_context
+                    .is_some_and(|context| context.destination() == destination),
+                _ => true,
+            }
     }
 
     pub(crate) fn matches(self, work: tor_simulation::IntentionWork) -> bool {
@@ -542,6 +564,9 @@ impl AdmittedWork<'_> {
                             tor_simulation::Action::Attack { target: expected }) if target == expected)
             }
             Self::AutonomousDecision => work == tor_simulation::IntentionWork::AiDecision,
+            Self::Travel(action, _) => {
+                work == tor_simulation::IntentionWork::Action(crate::adapt::action(action))
+            }
         }
     }
 }
@@ -552,6 +577,12 @@ impl JournalContent {
             Self::IntentionAdmitted { intention, action } => {
                 Some((*intention, AdmittedWork::Human(action)))
             }
+            Self::TravelIntentionAdmitted {
+                intention,
+                action,
+                destination,
+                ..
+            } => Some((*intention, AdmittedWork::Travel(action, *destination))),
             Self::AutonomousIntentionAdmitted { intention } => {
                 Some((*intention, AdmittedWork::AutonomousDecision))
             }
@@ -562,6 +593,7 @@ impl JournalContent {
         match self {
             Self::IntentionAdmitted { .. }
             | Self::AutonomousIntentionAdmitted { .. }
+            | Self::TravelIntentionAdmitted { .. }
             | Self::IntentionFailed { .. }
             | Self::IntentionContinuationFailed { .. }
             | Self::IntentionChanged { .. }
@@ -620,6 +652,7 @@ impl JournalEntry {
             self.content,
             JournalContent::IntentionAdmitted { .. }
                 | JournalContent::AutonomousIntentionAdmitted { .. }
+                | JournalContent::TravelIntentionAdmitted { .. }
                 | JournalContent::IntentionFailed { .. }
                 | JournalContent::IntentionContinuationFailed { .. }
                 | JournalContent::IntentionChanged { .. }

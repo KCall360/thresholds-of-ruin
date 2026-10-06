@@ -3,11 +3,78 @@ import json
 import os
 import subprocess
 import shutil
+import sqlite3
 from pathlib import Path
 import time
 import unittest
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+
+
+class TravelJournalProcesses(ProcessTestCase):
+    def terminal(self, client):
+        return self.frame(client, lambda frame: frame.get("travel") and frame["travel"]["phase"] != "active")
+
+    def test_backend_steps_have_private_admission_linked_execution_and_durable_history(self):
+        server = self.server(scenario="travel")
+        player, initial = self.client()
+        watcher, _ = self.client(SPECTATOR_TOKEN)
+        destination = next(cell["key"] for cell in initial["state"]["observation"]["visible_cells"]
+                           if cell["position"] == {"x": 5, "y": 0, "z": 0})
+        accepted = self.request(player, {"type": "command", "branch": initial["branch"],
+            "command": {"type": "travel", "expected_revision": initial["state"]["revision"],
+                        "destination": destination}})
+        self.assertIsNone(accepted["error"])
+        self.assertEqual(accepted["state"]["observation"]["tick"], 0)
+        self.assertEqual(accepted["travel"]["completed_steps"], 0)
+        self.assertEqual(accepted["intentions"], [])
+        arrived = self.terminal(player)
+        self.assertEqual(arrived["travel"]["phase"], "arrived")
+        self.assertEqual(arrived["travel"]["completed_steps"], 5)
+        self.assertEqual(arrived["state"]["observation"]["tick"], 500)
+        observed = self.terminal(watcher)
+        self.assertEqual(observed["state"], arrived["state"])
+        self.assertEqual(observed["travel"], arrived["travel"])
+        boundary = self.request(player, {"type": "snapshot"})
+        actions = [entry for entry in boundary["history"] if entry["content"]["type"] == "action"]
+        self.assertEqual(len(actions), 5)
+        self.assertTrue(all(entry["author"] == {"type": "backend", "component": "scheduler"}
+                            for entry in actions))
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            rows = db.execute("SELECT sequence,frame FROM journal WHERE sequence>0 "
+                "UNION ALL SELECT sequence,frame FROM history ORDER BY sequence").fetchall()
+        records = [json.loads(frame[24:])["record"] for _, frame in rows]
+        admissions = [record for record in records
+                      if record["entry"]["content"]["type"] == "travel_intention_admitted"]
+        self.assertEqual(len(admissions), 5)
+        self.assertEqual([record["entry"]["content"]["step"] for record in admissions], list(range(1, 6)))
+        visible_ids = {entry["id"] for entry in boundary["history"]}
+        for admission in admissions:
+            entry = admission["entry"]
+            self.assertIsNone(admission["receipt"])
+            self.assertEqual(entry["actor"], 1)
+            self.assertEqual(entry["audience"], "private")
+            self.assertEqual(entry["author"], {"type": "backend", "component": "scheduler"})
+            self.assertEqual(entry["content"]["journey"], arrived["travel"]["id"])
+            self.assertNotIn(entry["id"], visible_ids)
+            executions = [record for record in records
+                          if record["entry"]["content"].get("admission") == entry["id"]]
+            self.assertEqual(len(executions), 1)
+            execution = executions[0]
+            self.assertIsNone(execution["receipt"])
+            self.assertEqual(execution["entry"]["content"]["type"], "intention_started")
+            self.assertEqual(execution["entry"]["content"]["intention"], entry["content"]["intention"])
+            self.assertEqual(execution["entry"]["content"]["action"], entry["content"]["action"])
+            self.assertIn(execution["entry"]["id"], visible_ids)
+        self.assertNotIn('"region"', json.dumps(boundary))
+        server.stop(); player.stop(); watcher.stop()
+        self.server(scenario="travel")
+        _, recovered = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(recovered["state"], boundary["state"])
+        self.assertEqual(recovered["history"], boundary["history"])
+        self.assertEqual(recovered["intentions"], [])
+        self.assertIsNone(recovered["travel"])
 
 
 class TravelProcesses(ProcessTestCase):

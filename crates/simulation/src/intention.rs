@@ -17,6 +17,7 @@ pub struct IntentionId(pub u64);
 pub enum IntentionOrigin {
     Human,
     Autonomous,
+    Travel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +52,11 @@ pub struct MovementContext {
 }
 
 impl MovementContext {
+    /// Backend audit checks compare the saved region-local destination.
+    pub fn destination(&self) -> tor_world::Location {
+        self.to
+    }
+
     pub(crate) fn matches(
         &self,
         from: tor_world::Location,
@@ -117,9 +123,52 @@ impl Game {
         action: Action,
         origin: IntentionOrigin,
     ) -> Result<IntentionId, GameError> {
+        self.admit_action_intention(actor, action, origin, None)
+    }
+
+    /// Admit one planned region-local step without moving time or applying effects.
+    /// The ordinary movement context also protects its portal frame at execution.
+    pub fn admit_travel_intention(
+        &mut self,
+        actor: ActorId,
+        step: crate::TravelStep,
+    ) -> Result<IntentionId, GameError> {
+        self.admit_action_intention(
+            actor,
+            Action::Move(step.direction),
+            IntentionOrigin::Travel,
+            Some(step.destination),
+        )
+    }
+
+    fn admit_action_intention(
+        &mut self,
+        actor: ActorId,
+        action: Action,
+        origin: IntentionOrigin,
+        destination: Option<tor_world::Location>,
+    ) -> Result<IntentionId, GameError> {
         let next = self.check_intention_slot(actor)?;
+        if origin == IntentionOrigin::Travel && !matches!(action, Action::Move(_)) {
+            return Err(GameError::InvalidIntention);
+        }
         self.validate_intention_action(actor, action)?;
-        Ok(self.insert_intention(actor, IntentionWork::Action(action), origin, next))
+        let movement_context = match action {
+            Action::Move(direction) => self.movement_context(actor, direction),
+            _ => None,
+        };
+        if destination.is_some_and(|destination| {
+            movement_context.is_none_or(|context| context.to != destination)
+        }) {
+            return Err(GameError::InvalidLocation);
+        }
+        Ok(self.insert_intention(
+            actor,
+            IntentionWork::Action(action),
+            origin,
+            next,
+            movement_context,
+        ))
     }
 
     /// Queue the decision itself; no observation, search or RNG work runs here.
@@ -136,6 +185,7 @@ impl Game {
             IntentionWork::AiDecision,
             IntentionOrigin::Autonomous,
             next,
+            None,
         ))
     }
 
@@ -158,14 +208,9 @@ impl Game {
         work: IntentionWork,
         origin: IntentionOrigin,
         next: u64,
+        movement_context: Option<MovementContext>,
     ) -> IntentionId {
         let id = IntentionId(self.intentions.next_id);
-        let movement_context = match work {
-            IntentionWork::Action(Action::Move(direction)) => {
-                self.movement_context(actor, direction)
-            }
-            _ => None,
-        };
         self.intentions.entries.insert(
             actor,
             QueuedIntention {
@@ -420,6 +465,9 @@ impl Game {
                     && entry.id.0 != 0
                     && entry.id.0 < self.intentions.next_id
                     && ids.insert(entry.id)
+                    && (entry.origin != IntentionOrigin::Travel
+                        || (entry.state == IntentionState::Queued
+                            && matches!(entry.work, IntentionWork::Action(Action::Move(_)))))
                     && match (entry.work, entry.movement_context) {
                         (IntentionWork::Action(Action::Move(_)), Some(context)) => {
                             context.from.region.0 != 0
@@ -501,6 +549,72 @@ mod tests {
     }
 
     #[test]
+    fn travel_origin_queues_only_movement_and_preserves_its_checkpoint_identity() {
+        let origin: IntentionOrigin = serde_json::from_str("\"travel\"").unwrap();
+        let (mut game, actor) = fixture();
+        let before = game.clone();
+        assert_eq!(
+            game.admit_intention(actor, Action::Wait, origin),
+            Err(GameError::InvalidIntention)
+        );
+        assert_eq!(game, before);
+        let id = game
+            .admit_intention(actor, Action::Move(Direction::East), origin)
+            .unwrap();
+        assert_eq!(game.tick(), before.tick());
+        assert_eq!(game.actors[&actor].location, before.actors[&actor].location);
+        let mut shared = crate::checkpoint::SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+        assert_eq!(restored.pending_intention(actor).unwrap().id, id);
+        assert_eq!(restored.pending_intention(actor).unwrap().origin, origin);
+        assert_eq!(
+            restored.execute_next_intention(),
+            game.execute_next_intention()
+        );
+        assert_eq!(restored, game);
+        assert_eq!(game.tick(), 100);
+    }
+
+    #[test]
+    fn planned_travel_destination_is_checked_without_consuming_queue_identity() {
+        let (mut game, actor) = fixture();
+        let before = game.clone();
+        let wrong = crate::TravelStep {
+            direction: Direction::East,
+            destination: Location {
+                region: RegionId(2),
+                position: Position { x: 2, y: 1, z: 0 },
+            },
+        };
+        assert_eq!(
+            game.admit_travel_intention(actor, wrong),
+            Err(GameError::InvalidLocation)
+        );
+        assert_eq!(game, before);
+        let step = crate::TravelStep {
+            destination: Location {
+                region: RegionId(1),
+                ..wrong.destination
+            },
+            ..wrong
+        };
+        let id = game.admit_travel_intention(actor, step).unwrap();
+        assert_eq!(id, IntentionId(1));
+        assert_eq!(
+            game.pending_intention(actor).unwrap().origin,
+            IntentionOrigin::Travel
+        );
+        let mut cancelled = game.clone();
+        cancelled.cancel_intention(actor, id).unwrap();
+        assert_eq!(cancelled.tick(), before.tick());
+        assert!(cancelled.pending_intention(actor).is_none());
+        assert!(game.execute_next_intention().unwrap().outcome.is_ok());
+        assert_eq!(game.tick(), 100);
+        assert_eq!(game.actors[&actor].location, step.destination);
+    }
+
+    #[test]
     fn queued_move_does_not_reinterpret_direction_after_teleport_or_frame_change() {
         for teleport in [true, false] {
             let (mut game, actor) = fixture();
@@ -574,89 +688,100 @@ mod tests {
     #[test]
     fn queued_move_preserves_rotated_portal_destination_and_frame() {
         use tor_world::{Extent, Passage, Region, World};
-        let mut world = World::new(
-            (1..=2)
-                .map(|id| Region {
-                    id: RegionId(id),
-                    name: id.to_string(),
-                    bounds: Extent::new(3, 3, 1).unwrap(),
-                })
-                .collect(),
-            vec![],
-        )
-        .unwrap();
-        let from = Location {
-            region: RegionId(1),
-            position: Position { x: 2, y: 1, z: 0 },
-        };
-        let to = Location {
-            region: RegionId(2),
-            position: Position { x: 1, y: 0, z: 0 },
-        };
-        world
-            .connect(
-                Passage {
-                    from,
-                    direction: Direction::East,
-                    to,
-                },
-                1,
+        for origin in [IntentionOrigin::Human, IntentionOrigin::Travel] {
+            let mut world = World::new(
+                (1..=2)
+                    .map(|id| Region {
+                        id: RegionId(id),
+                        name: id.to_string(),
+                        bounds: Extent::new(3, 3, 1).unwrap(),
+                    })
+                    .collect(),
+                vec![],
             )
             .unwrap();
-        let mut game = Game::new(world, 42);
-        let actor = game
-            .spawn_actor(from, NonZeroU64::new(100).unwrap())
+            let from = Location {
+                region: RegionId(1),
+                position: Position { x: 2, y: 1, z: 0 },
+            };
+            let to = Location {
+                region: RegionId(2),
+                position: Position { x: 1, y: 0, z: 0 },
+            };
+            world
+                .connect(
+                    Passage {
+                        from,
+                        direction: Direction::East,
+                        to,
+                    },
+                    1,
+                )
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            let actor = game
+                .spawn_actor(from, NonZeroU64::new(100).unwrap())
+                .unwrap();
+            let id = if origin == IntentionOrigin::Travel {
+                game.admit_travel_intention(
+                    actor,
+                    crate::TravelStep {
+                        direction: Direction::East,
+                        destination: to,
+                    },
+                )
+            } else {
+                game.admit_intention(actor, Action::Move(Direction::East), origin)
+            }
             .unwrap();
-        let id = game
-            .admit_intention(actor, Action::Move(Direction::East), IntentionOrigin::Human)
-            .unwrap();
-        let context = game
-            .pending_intention(actor)
-            .unwrap()
-            .movement_context
-            .unwrap();
-        assert_eq!((context.to, context.next_orientation), (to, 1));
-        let mut remapped = game.clone();
-        let mut changed_world = World::new(
-            (1..=2)
-                .map(|id| Region {
-                    id: RegionId(id),
-                    name: id.to_string(),
-                    bounds: Extent::new(3, 3, 1).unwrap(),
-                })
-                .collect(),
-            vec![],
-        )
-        .unwrap();
-        changed_world
-            .connect(
-                Passage {
-                    from,
-                    direction: Direction::East,
-                    to,
-                },
-                3,
+            let context = game
+                .pending_intention(actor)
+                .unwrap()
+                .movement_context
+                .unwrap();
+            assert_eq!((context.to, context.next_orientation), (to, 1));
+            let mut remapped = game.clone();
+            let mut changed_world = World::new(
+                (1..=2)
+                    .map(|id| Region {
+                        id: RegionId(id),
+                        name: id.to_string(),
+                        bounds: Extent::new(3, 3, 1).unwrap(),
+                    })
+                    .collect(),
+                vec![],
             )
             .unwrap();
-        remapped.world = tor_world::Shared::new(changed_world);
-        assert!(
-            remapped.actor_translation(actor, Direction::East).is_some(),
-            "the changed portal still permits movement, but has a different meaning"
-        );
-        let mut rejected = remapped.clone();
-        rejected.cancel_intention(actor, id).unwrap();
-        assert_eq!(
-            remapped.execute_next_intention().unwrap().outcome,
-            Err(GameError::InvalidLocation)
-        );
-        assert_eq!(remapped, rejected);
-        let mut expected = game.clone();
-        expected.cancel_intention(actor, id).unwrap();
-        expected.act(actor, Action::Move(Direction::East)).unwrap();
-        assert!(game.execute_next_intention().unwrap().outcome.is_ok());
-        assert_eq!(game.actors[&actor].location, to);
-        assert_eq!(game.actors[&actor].orientation, 1);
-        assert_eq!(game, expected);
+            changed_world
+                .connect(
+                    Passage {
+                        from,
+                        direction: Direction::East,
+                        to,
+                    },
+                    3,
+                )
+                .unwrap();
+            remapped.world = tor_world::Shared::new(changed_world);
+            assert!(
+                remapped.actor_translation(actor, Direction::East).is_some(),
+                "the changed portal still permits movement, but has a different meaning"
+            );
+            let mut rejected = remapped.clone();
+            rejected.cancel_intention(actor, id).unwrap();
+            assert_eq!(
+                remapped.execute_next_intention().unwrap().outcome,
+                Err(GameError::InvalidLocation)
+            );
+            assert_eq!(remapped, rejected);
+            let mut expected = game.clone();
+            expected.cancel_intention(actor, id).unwrap();
+            expected.act(actor, Action::Move(Direction::East)).unwrap();
+            assert!(game.execute_next_intention().unwrap().outcome.is_ok());
+            assert_eq!(game.actors[&actor].location, to);
+            assert_eq!(game.actors[&actor].orientation, 1);
+            assert_eq!(game, expected);
+        }
     }
 
     fn paused_attack_fixture() -> (Game, ActorId, ActorId, IntentionId) {

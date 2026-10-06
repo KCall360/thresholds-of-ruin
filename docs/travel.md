@@ -48,9 +48,20 @@ ordinary movement one step at a time; a blocked attempt stops without rerouting.
 ## Execution and interruption
 
 Accepting travel costs no action time, records an actor-visible request, and
-acknowledges it immediately. Each completed step is a separately committed ordinary
-move with the actor's normal action cost, revision, event, and observer update.
-No planned route or future outcome is sent to clients.
+acknowledges it immediately. The backend admits each planned movement to the
+simulation-owned queue without advancing time. A private journal record links
+its identity and ordinal to the accepted journey; no client RPC is fabricated.
+The saved movement context fixes its region-local destination and portal frame.
+The shared simulation executor revalidates and applies movement with the actor's
+normal action cost, revision, event, and observer update. Only its committed
+result advances the route and completed-step count. No planned route or future
+outcome is sent to clients.
+
+Control and disclosed hazards are checked before admission and again after the
+mailbox pass before execution. Ending a journey settles any queued step through
+linked backend cancellation. Rejected persistence admission preserves the original
+route and queue identity; rejected cancellation blocks further simulation until
+settlement succeeds. Published observation output cannot resurrect a stopped job.
 
 The server [runs play until it needs a client's input](run-until-blocked.md),
 so a journey takes a step whenever its actor is next to act. When another
@@ -83,7 +94,9 @@ work. See [dungeon gameplay](dungeon.md) for damage and attack interruption, and
 connections.
 
 Travel status and active jobs are session-local. Restart restores completed moves,
-request receipts, and actor navigation knowledge but never resumes travel. Rewind
+request receipts, and actor navigation knowledge but never resumes travel. Before
+clients can acquire control, startup terminally cancels any restored pending step;
+it fails if that cancellation cannot be admitted to persistence. Rewind
 clears travel before publishing the new branch snapshot. Terminal status lasts
 until another trip or branch reset during the current server session; terminal
 reasons are not durable history records in this slice.

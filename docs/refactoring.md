@@ -28,11 +28,12 @@ measurements establish maintainability and performance within their stated scope
 
 The gameplay flow has two persistence/publication boundaries. The merged queue
 foundation connects human intentions, backend admission and execution, journal
-replay, and client lifecycle tracking. The unpublished preparation-recovery slice
-adds original-identity resume/cancel, durable interruption facts, explicit paused
+replay, and client lifecycle tracking. Published preparation recovery adds
+original-identity resume/cancel, durable interruption facts, explicit paused
 preparation, and a typed lifecycle proof shared by replay and checkpoint recovery.
-AI/travel migration and further stream-context work remain. Recovery verification,
-coordinated format versions and publication gates are still in progress.
+Autonomous decisions use the published common queue path. Native travel integration
+is under verification; further stream context and the remaining work sequences
+stay in scope.
 
 ```mermaid
 flowchart TD
@@ -323,7 +324,7 @@ process tests pass. Recovery publication verification and both-platform CI passe
 AI/travel migration, stream context, scenario compiler work, persistence scaling
 and latency/memory investigations remain within the full refactor scope.
 
-## Autonomous scheduling integration (in progress)
+## Autonomous scheduling integration (published)
 
 AI decisions now enter the simulation-owned queue through a private, typed backend
 admission. Admission chooses no action and changes no time, RNG, observation or
@@ -356,9 +357,35 @@ Ordinary publication does not wait for disk; an explicit save provides the barri
 
 This integration advances the current save and ruleset versions in the
 [format registry](milestones.md), with all 33 scenario certificates regenerated.
-Protocol, authored validator schema and binary framing are unchanged. It remains
-unpublished pending the required full/CI gates. No broad performance gain is
-claimed, and travel migration and the remaining work sequences stay in scope.
+Protocol, authored validator schema and binary framing are unchanged. Full and
+both-platform CI gates passed for publication. No broad performance gain is
+claimed; native travel and the remaining work sequences stay in scope.
+
+## Native travel scheduling integration (in progress)
+
+Each journey step now has a private backend admission linked to the accepted
+travel request and a consecutive step ordinal. The simulation owns its queue,
+region-local movement context and shared execution. Session retains disclosed
+routing, controller/hazard policy and client travel status. Admission changes no
+time or journey progress. Only the original committed scheduler result advances
+the route. No synthetic client RPC or separate movement executor remains.
+
+Live indexed admission and chronological recovery share a predecessor proof:
+only a successfully resolved step permits the next ordinal. Checkpoint validation
+also matches the queued destination to its original journal record. Native work
+is separate from human resume/cancel controls. Backend cancellation settles a
+stopped journey; startup settles saved pending steps before control acquisition.
+Travel route jobs do not resume automatically. Rejected admission, execution and
+cancellation retain authoritative state, revisions, receipts and queue identity.
+A failed stop settlement blocks simulation while reads and save polling continue.
+
+Tests cover effect-free admission, execution-based progress, release between
+boundaries, mismatched pending identity, unloaded cancellation facts, exact
+replay/checkpoint restoration, real storage rejection/reopen in checkpoint and
+journal modes, and startup rejection/retry. Actual server/headless tests verify
+private admission, receipt-free linked execution, observer disclosure and durable
+state/history. Full, performance and publication gates remain pending. Text-client
+fixes and scripting runtime implementation remain deferred.
 
 ## Shared item and combat definitions
 
