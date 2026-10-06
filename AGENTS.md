@@ -390,7 +390,9 @@ velocities. Typed Rust values and persisted numeric schemas remain unchanged.
 Callers preserve received strings and use exact arithmetic at counter boundaries;
 diagnostics and benchmark metadata keep their independent numeric schemas.
 All 834 Rust workspace tests passed, plus affected actual-client gameplay,
-scheduling, recovery, native presentation and restart tests. Full verification,
-release comparisons and final-head Windows/Linux CI remain required before push
-and merge. No text product behavior or scripting runtime is added. The remaining
-architecture scope in the [refactor plan](docs/refactoring.md) stays active.
+scheduling, recovery, native presentation and restart tests. The release
+comparison validated all 24 reports with matching counts and save sizes; a six-report repeat retained the original unresolved command tail.
+The first full gate failed only its stale documentation version reference;
+a renewed successful full gate and final-head Windows/Linux CI remain required
+before push and merge. No text product behavior or scripting runtime is added.
+The remaining architecture scope in the [refactor plan](docs/refactoring.md) stays active.
