@@ -256,14 +256,17 @@ pub struct RegionView {
 pub enum Command {
     ResumeIntention {
         expected_revision: u64,
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
     },
     CancelIntention {
         expected_revision: u64,
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
     },
     AdmitIntention {
         expected_revision: u64,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
     },
     PausePreparation,
@@ -282,16 +285,21 @@ pub enum Command {
     },
     Act {
         expected_revision: u64,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
     },
     Annotate {
+        #[serde(with = "crate::storage::schema::Anchor")]
         anchor: Anchor,
         text: String,
         #[serde(default)]
+        #[serde(with = "crate::storage::schema::ClientSource")]
         source: ClientSource,
         #[serde(default)]
+        #[serde(with = "crate::storage::schema::Audience")]
         audience: Audience,
         #[serde(default)]
+        #[serde(with = "crate::storage::schema::AnnotationCategory")]
         category: AnnotationCategory,
     },
 }
@@ -301,6 +309,7 @@ pub enum Command {
 pub enum Event {
     PreparationPaused,
     AttackStarted {
+        #[serde(with = "crate::storage::schema::ActorId")]
         target: ActorId,
     },
     DoorChanged {
@@ -343,17 +352,20 @@ pub enum WizardOperation {
         vector: [i32; 3],
     },
     SetBody {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
         cells: Vec<[i32; 3]>,
         eye: [i32; 3],
         mass: u32,
     },
     SetVelocity {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
         velocity: [i64; 3],
     },
     ConnectPortal {
         from: Position,
+        #[serde(with = "crate::storage::schema::Direction")]
         direction: Direction,
         to: Position,
         rotation: u8,
@@ -361,6 +373,7 @@ pub enum WizardOperation {
         height: u16,
     },
     IdentifyItem {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
         item: u64,
     },
@@ -375,6 +388,7 @@ pub enum WizardOperation {
     },
     ConnectArea {
         from: Position,
+        #[serde(with = "crate::storage::schema::Direction")]
         direction: Direction,
         to: Position,
         quarter_turns: u8,
@@ -386,6 +400,7 @@ pub enum WizardOperation {
     },
     Connect {
         from: Position,
+        #[serde(with = "crate::storage::schema::Direction")]
         direction: Direction,
         to: Position,
         quarter_turns: u8,
@@ -407,11 +422,13 @@ pub enum WizardOperation {
         turn_ticks: u64,
     },
     Teleport {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
         position: Position,
     },
     /// Restore the state after this retained action/setup entry; None is the initial state.
     Rewind {
+        #[serde(with = "crate::storage::schema::optional_entry")]
         target: Option<EntryId>,
     },
 }
@@ -434,15 +451,20 @@ pub enum WizardResult {
         item: u64,
     },
     ActorSpawned {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
     },
     Teleported {
+        #[serde(with = "crate::storage::schema::ActorId")]
         actor: ActorId,
     },
     Rewound {
+        #[serde(with = "crate::storage::schema::BranchId")]
         from_branch: BranchId,
+        #[serde(with = "crate::storage::schema::BranchId")]
         branch: BranchId,
         tick: u64,
+        #[serde(with = "crate::storage::schema::ActorId")]
         next_actor: ActorId,
     },
 }
@@ -460,29 +482,36 @@ pub enum IntentionChange {
 pub enum JournalContent {
     /// Resumed execution of existing attack progress, under its original admission.
     IntentionContinued {
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
         event: Event,
     },
     IntentionContinuationFailed {
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
     },
     IntentionChanged {
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
         change: IntentionChange,
     },
     /// The scheduler started this action. Attack impacts may resolve later.
     IntentionStarted {
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
         event: Event,
     },
     /// Execution revalidation failed; no substitute action was selected.
     IntentionFailed {
+        #[serde(with = "crate::storage::schema::EntryId")]
         admission: EntryId,
         intention: tor_simulation::IntentionId,
     },
@@ -493,14 +522,17 @@ pub enum JournalContent {
     /// Native movement linked to an accepted journey, without a fabricated RPC.
     TravelIntentionAdmitted {
         intention: tor_simulation::IntentionId,
+        #[serde(with = "crate::storage::schema::EntryId")]
         journey: EntryId,
         step: u64,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
         destination: tor_world::Location,
     },
     /// Receipt of accepted work, before its simulation effect. Not a history event.
     IntentionAdmitted {
         intention: tor_simulation::IntentionId,
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
     },
     PlaceRenamed {
@@ -516,11 +548,14 @@ pub enum JournalContent {
         result: WizardResult,
     },
     Action {
+        #[serde(with = "crate::storage::schema::Action")]
         action: Action,
         event: Event,
     },
     Annotation {
+        #[serde(with = "crate::storage::schema::Anchor")]
         anchor: Anchor,
+        #[serde(with = "crate::storage::schema::AnnotationCategory")]
         category: AnnotationCategory,
         text: String,
     },
@@ -619,6 +654,7 @@ pub enum IntentionEndKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntentionEnd {
+    #[serde(with = "crate::storage::schema::ActorId")]
     pub actor: ActorId,
     pub intention: tor_simulation::IntentionId,
     pub kind: IntentionEndKind,
@@ -627,6 +663,7 @@ pub struct IntentionEnd {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntentionSuspension {
+    #[serde(with = "crate::storage::schema::ActorId")]
     pub actor: ActorId,
     pub intention: tor_simulation::IntentionId,
 }
@@ -637,11 +674,16 @@ pub struct JournalEntry {
     pub intention_suspensions: Vec<IntentionSuspension>,
     /// Terminal work facts admitted atomically with this record's state effects.
     pub intention_ends: Vec<IntentionEnd>,
+    #[serde(with = "crate::storage::schema::EntryId")]
     pub id: EntryId,
+    #[serde(with = "crate::storage::schema::BranchId")]
     pub branch: BranchId,
+    #[serde(with = "crate::storage::schema::ActorId")]
     pub actor: ActorId,
     pub tick: u64,
+    #[serde(with = "crate::storage::schema::Author")]
     pub author: Author,
+    #[serde(with = "crate::storage::schema::Audience")]
     pub audience: Audience,
     pub content: JournalContent,
 }

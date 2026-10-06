@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::fs;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -496,7 +495,9 @@ pub(crate) struct Receipt {
     user: String,
     frontend: String,
     request_id: String,
+    #[serde(with = "crate::storage::schema::ActorId")]
     actor: ActorId,
+    #[serde(with = "crate::storage::schema::BranchId")]
     branch: BranchId,
     command: Command,
 }
@@ -717,6 +718,7 @@ pub(crate) struct Archive {
     pub(crate) version: u32,
     pub(crate) ruleset: String,
     pub(crate) scenario: Scenario,
+    #[serde(with = "crate::storage::schema::BranchId")]
     pub(crate) branch: BranchId,
     pub(crate) records: Vec<Record>,
 }
@@ -840,7 +842,9 @@ impl CommandProfile {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Revisions {
+    #[serde(with = "crate::storage::schema::revisions")]
     loaded: BTreeMap<ActorId, u64>,
+    #[serde(with = "crate::storage::schema::shared_revisions")]
     parked: tor_world::Shared<BTreeMap<ActorId, u64>>,
 }
 
@@ -1175,7 +1179,7 @@ pub struct Engine {
     history_index: crate::history_index::HistoryIndex,
     receipts: BTreeMap<(String, String), usize>,
     path: Option<PathBuf>,
-    lock: Option<Arc<fs::File>>,
+    lock: Option<Arc<crate::storage::JournalLock>>,
     store: Option<crate::storage::Store>,
     /// Region records, for games that stream.
     regions: Option<crate::regions::Regions>,
@@ -1269,7 +1273,7 @@ impl Engine {
     ) -> Result<Self, Failure> {
         let started = Instant::now();
         policy.validate()?;
-        let (path, lock) = lock_save(path.as_ref())?;
+        let (path, lock) = crate::storage::JournalLock::acquire(path.as_ref())?;
         let supplied = scenario.package.clone();
         let (store, archive, checkpoint, saved) = crate::storage::Store::open(
             &path,
@@ -1928,7 +1932,7 @@ impl Engine {
         if self.path.is_some() {
             return Err(storage_failure());
         }
-        let (path, lock) = lock_save(path.as_ref())?;
+        let (path, lock) = crate::storage::JournalLock::acquire(path.as_ref())?;
         if path.exists() {
             return Err(storage_failure());
         }
@@ -2796,38 +2800,29 @@ pub(crate) fn invalid_archive() -> Failure {
     )
 }
 
-fn lock_save(path: &Path) -> Result<(PathBuf, Arc<fs::File>), Failure> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent).map_err(|_| storage_failure())?;
-    let canonical = match fs::canonicalize(path) {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::canonicalize(parent)
-            .map_err(|_| storage_failure())?
-            .join(path.file_name().ok_or_else(storage_failure)?),
-        Err(_) => return Err(storage_failure()),
-    };
-    let mut lock_name = canonical
-        .file_name()
-        .ok_or_else(storage_failure)?
-        .to_os_string();
-    lock_name.push(".lock");
-    let file = fs::File::options()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(canonical.with_file_name(lock_name))
-        .map_err(|_| storage_failure())?;
-    file.try_lock().map_err(|_| {
-        Failure::new(
-            ErrorCode::StorageFailure,
-            "Game journal is already in use or cannot be locked",
-        )
-    })?;
-    Ok((canonical, Arc::new(file)))
+#[cfg(test)]
+mod save_lock_tests {
+    use super::*;
+
+    #[test]
+    fn last_journal_owner_releases_the_lock_even_if_an_inherited_descriptor_survives() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ownership.db");
+        let engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
+        let owner = engine.lock.as_ref().unwrap().clone();
+        // A descriptor inherited across a process spawn is not another Rust owner.
+        let inherited = owner.duplicate_descriptor().unwrap();
+        drop(engine);
+        assert!(Engine::open(&path, Scenario::two_room(0)).is_err());
+        drop(owner);
+        let restored = Engine::open(&path, Scenario::two_room(0))
+            .expect("last journal owner must release its lock before returning");
+        drop(inherited);
+        // Closing an old descriptor must not release the replacement owner's lock.
+        assert!(Engine::open(&path, Scenario::two_room(0)).is_err());
+        drop(restored);
+        Engine::open(&path, Scenario::two_room(0)).unwrap();
+    }
 }
 
 impl Candidate {

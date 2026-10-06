@@ -51,6 +51,11 @@ must be saved before privileged commands can execute. Once queued, the lineage
 remains marked even if the first flush fails; authority stays disabled until a
 successful retry. Rewind cannot clear the marker.
 
+The engine and background worker share one exclusive journal lease. Its final
+owner explicitly unlocks the sidecar file after the worker finishes. A copied
+file descriptor cannot extend ownership beyond shutdown; an immediate reopen
+can acquire the journal while a second live owner remains excluded.
+
 ## Save file format
 
 Only the current save format is supported; older saves are rejected without an

@@ -300,6 +300,18 @@ and wizard enablement retain durability barriers. Restart rolls back unsaved
 play consistently, including receipts and branch history. See
 [background saving](background-saving.md) for the exact contract and limitations.
 
+A storage-owned journal lease is shared by the engine and its save worker.
+The final owner explicitly releases the exclusive sidecar lock, so a file
+descriptor copied during process creation cannot prolong ownership after
+shutdown. The worker keeps its lease until it finishes, and shutdown joins it
+before returning.
+
+Persisted values also used by the protocol have save-owned typed schemas at the
+storage boundary. They specify actor and journal identities, actions, annotation
+metadata and revision maps independently of wire serializers. The existing strict
+save decoder validates the complete stored shape; wire encoding changes do not
+implicitly change journal or checkpoint encoding.
+
 SQLite is a server-only I/O dependency with a bundled native implementation.
 Simulation remains deterministic and independent of storage and wall-clock time.
 Framed records add application versioning, checksums, and save identity to SQLite's

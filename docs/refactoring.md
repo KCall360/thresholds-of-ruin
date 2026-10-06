@@ -387,7 +387,7 @@ private admission, receipt-free linked execution, observer disclosure and durabl
 state/history. Full, performance and publication gates remain pending. Text-client
 fixes and scripting runtime implementation remain deferred.
 
-## Stream context and exact observation bases (in progress)
+## Stream context and exact observation bases (merged, PR #69)
 
 Snapshots and updates require an opaque attachment identity and reset epoch.
 The host allocates identities outside simulation randomness and saved state;
@@ -406,9 +406,11 @@ retain original journal actor and branch identity through rewind and restart.
 
 Readiness combines one simulation-owned queue/control query with session
 ownership, role, actor validity, run and travel policy. Resume/cancel availability
-uses the validators that select the actual mutation. Existing work preserves its
-identity; capacity is required only for new admissions. Queue capacity does not
-grant authority or validate targets and timing. Required snapshot readiness and
+uses the validators that select the actual mutation. Suspended queue entries
+reuse their capacity and identity. Resuming paused preparation needs capacity to
+insert its continuation while preserving its identity and spent progress. New
+actions need capacity and a fresh identity. Queue capacity does not grant
+authority or validate targets and timing. Required snapshot readiness and
 ordered updates use a generation independent of observation revisions, including
 ownership changes when permissions remain empty. Publication queries each actor
 once per pass and repeats only when output rejection removes clients.
@@ -451,8 +453,11 @@ lint, architecture and rustdoc. Debug Python passed 252 of 253 cases; release
 applications passed 134 of 135. The only failure in each profile was the native
 mouse test intercepted by the Windows overlay, expressly waived by the maintainer.
 Tests remain enabled in ordinary CI. This is qualified local evidence, not an
-unqualified full pass. Complete final-commit Windows/Linux CI remains required
-before merging. All other refactor work sequences remain in scope.
+unqualified full pass. Exact head `c114373` subsequently passed all five required
+Windows/Linux CI checks and merged in PR #69. Its immutable candidate passed 43
+process checks; the three desktop launchers now use the hash-verified build and
+matching scenario files. Earlier builds and saves remain retained. All other
+refactor work sequences remain in scope.
 
 Subsequent cancellation review exposed a lost presentation boundary: when TCP
 output blocked an automatic palette query, cancellation after applying an
@@ -463,7 +468,7 @@ send deadlines. Applied observations remain pending until query output completes
 they are presented exactly once without being reapplied. Pending presentation
 also keeps playback active. Focused shared-client, real application recovery and
 palette checks pass. The refreshed full run above includes this correction;
-final-commit Windows/Linux CI remains required before merging.
+the final-commit Windows/Linux CI also passed.
 
 ### Stream context release comparison
 
@@ -1749,3 +1754,121 @@ removed the extra scene/body work and reduced the command p95 increase to the
 2.2% shown above. That intermediate comparison's save p95 fell 21.9%, while
 restart p95 remained higher; both comparisons are retained rather than selecting
 only favorable timings. Raw samples remain local and unpublished.
+
+## Save-owned nested schemas (in development)
+
+The journal owns its command enum, but nested protocol values previously invoked
+wire serializers directly. Save-owned typed Serde adapters now specify persisted
+actor and journal identifiers, actions, directions, authorship and annotation
+metadata. Checkpoint revision maps keep numeric keys independently of wire
+encoding. Current stored
+shapes remain unchanged, and the existing strict save decoder remains the single
+validation path. This avoids changing saved numeric fields when future wire
+integers become decimal strings. Further separation of simulation state from save
+DTOs and JavaScript-safe wire encoding remain in scope.
+
+A failing-first action-shape test and five schema tests cover numeric extremes,
+nested journal receipts, annotation metadata, intention facts, revision maps and
+all direction variants. The prior server library run passed 172 tests. All 23
+focused process/documentation tests passed, including a new real-client test
+that inspects stored journal shapes and checks state and history after restart.
+The full run passed all 829 Rust tests in each profile, formatting, clippy,
+architecture and rustdoc. Debug Python passed 253/254 and release applications
+passed 135/136. The only failure in each profile was the native mouse test
+intercepted by the Windows overlay, expressly waived by the maintainer. This is
+qualified local evidence, not an unqualified full pass. Ordinary CI coverage
+remains enabled; final-commit Windows/Linux CI is required before merging.
+
+### Nested-schema release comparison
+
+Release comparisons used the preceding merged implementation (`31fdb307`) and
+corrected schema checkpoint (`496b120e`) on the same Windows host, i7-9750H,
+15.8 GiB RAM and HDD save volume (machine fingerprint `6a1878811f37`). An initial
+three-round, three-cycle memory comparison validated all 12 reports. Its command
+p95 rose 8.5% for one actor and 3.1% for eight actors; restart p95 rose 2.1% and
+4.1%. A longer five-round, nine-cycle repeat validated all 20 reports and showed
+the following results. Memory cases time transitions and cold replay, but do not
+time journal encoding during transitions.
+
+A separate three-round, five-cycle durable comparison validated all 12 reports.
+It used checkpoint interval 256 to exercise journal encoding and checkpoint
+revision maps: 305/2,500 records serialized and 1/10 checkpoint captures per
+small/large run, respectively. The final persisted checkpoint count was one in
+each case. All operation counts, retained history, journal/checkpoint bytes and
+final save sizes matched between implementations within each comparison. There
+were no failed reports or competing build processes. Timings below are
+milliseconds, baseline to refactor; flush/restart groups have few samples.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-memory / command, repeat | 2,745 | 0.573 → 0.589 | 0.834 → 0.849 | 2.619 → 2.200 |
+| Same case / restart | 5 | 294.9 → 303.0 | 304.9 → 308.8 | 304.9 → 308.8 |
+| r64-a8-h100-memory / command, repeat | 22,505 | 0.037 → 0.036 | 2.573 → 2.643 | 8.399 → 13.649 |
+| Same case / restart | 5 | 2,771.7 → 2,869.6 | 2,826.8 → 2,926.0 | 2,826.8 → 2,926.0 |
+| r8-a1-h100-durable / command | 915 | 0.583 → 0.582 | 0.814 → 0.832 | 3.297 → 1.662 |
+| Same case / flush | 3 | 125.1 → 107.3 | 992.3 → 113.1 | 992.3 → 113.1 |
+| Same case / restart | 3 | 128.6 → 111.9 | 129.5 → 133.2 | 129.5 → 133.2 |
+| r64-a8-h100-durable / command | 7,500 | 0.041 → 0.041 | 2.528 → 2.600 | 12.957 → 8.557 |
+| Same case / flush | 3 | 363.0 → 346.4 | 374.3 → 396.7 | 374.3 → 396.7 |
+| Same case / restart | 3 | 172.9 → 178.6 | 197.0 → 180.2 | 197.0 → 180.2 |
+
+The repeat's command p95 rose 1.7%/2.7%; durable command p95 rose 2.2%/2.9%.
+No speedup is claimed. Small repeatable timing increases remain follow-up work;
+these runs do not isolate serialization from code layout or host scheduling.
+Flush tails varied, including a baseline spike, so the three-sample flush groups
+do not establish an improvement. Raw reports remain local and unpublished.
+
+The wire-integer prototype exposed a test-helper name collision: two standalone
+saved-action tests had selected the protocol Action serializer instead of the
+save-owned adapter. Explicitly qualifying the adapter corrected the tests. All
+five schema tests then passed with protocol-26 decimal-string wire encoding,
+including the already independent production nested-journal tests. The prototype
+is preserved separately; this checkpoint retains protocol 25. The corrected
+checkpoint requires renewed verification and final-head CI before merging.
+
+### Explicit journal lease ownership (in development)
+
+The corrected schema head (`e3b5cb90`) passed the complete local Windows gate,
+including native mouse verification in both profiles. Its final-head CI passed
+Windows and dependency checks, but Linux failed the retained-intention checkpoint
+test when reopening a dropped engine: the journal was still locked.
+
+A deterministic failing-first regression reproduced the lock-lifetime defect
+with a copied descriptor. Closing the final Rust file owner alone did not release
+the lock while that copy survived. One storage-owned guard now explicitly unlocks
+at its final owner boundary. The engine and worker share this guard, and shutdown
+still joins the worker. No delay, retry, or format change is introduced. The test
+also checks exclusion while a real owner survives and verifies that closing the
+old descriptor cannot release a replacement owner's lock. Descriptor inheritance
+during concurrent process spawning is a possible explanation for the Linux
+failure; it was not directly observed in that CI run.
+
+The deterministic ownership and retained-intention checkpoint regressions passed
+in debug and release. All eight background-save process tests passed, including
+three checkpointed immediate restarts that verify restored state and history.
+Renewed full verification and final-head Windows/Linux CI remain required before
+publication. The previous desktop build stays active until those gates pass.
+
+### Journal lease release comparison
+
+Three interleaved five-cycle rounds compared `e3b5cb90` with `21347939` on the
+same Windows host and HDD save volume (machine fingerprint `6a1878811f37`).
+Checkpoint interval 256 exercised both journal records and checkpoint captures.
+All twelve reports validated, with no failed runs or competing build processes.
+Operation counts, recovery counts, retained history and save/checkpoint bytes
+were identical. Timings are milliseconds, baseline to refactor.
+
+| Case / metric | n | p50 | p95 | max |
+| --- | ---: | --- | --- | --- |
+| r8-a1-h100-durable / command | 915 | 0.570 → 0.569 | 0.807 → 0.810 | 2.008 → 1.639 |
+| r8-a1-h100-durable / flush | 3 | 110.632 → 108.330 | 141.220 → 116.041 | 141.220 → 116.041 |
+| r8-a1-h100-durable / restart | 3 | 115.702 → 129.207 | 125.138 → 130.212 | 125.138 → 130.212 |
+| r64-a8-h100-durable / command | 7,500 | 0.039 → 0.039 | 2.582 → 2.586 | 8.995 → 6.894 |
+| r64-a8-h100-durable / flush | 3 | 389.368 → 374.957 | 1465.359 → 392.555 | 1465.359 → 392.555 |
+| r64-a8-h100-durable / restart | 3 | 184.487 → 178.808 | 193.309 → 193.488 | 193.309 → 193.488 |
+
+Command p95 rose 0.4%/0.2%. One-actor restart p95 rose 4.1%, while eight-actor
+restart p95 rose 0.1%; restart groups have only three samples each. Flush tails
+included a large baseline spike. These measurements do not establish a speedup
+or isolate the unlock cost from host scheduling. Raw reports remain local and
+unpublished. Broader persistence and restoration tails remain open work.

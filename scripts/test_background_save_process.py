@@ -1,4 +1,5 @@
 """Real-process save barriers, acknowledged rollback, and transaction interruption."""
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -10,6 +11,24 @@ from process_harness import ProcessTestCase
 
 
 class BackgroundSaveProcesses(ProcessTestCase):
+    def test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts(self):
+        server = self.server("--checkpoint-interval", 1, scenario="two-room")
+        player, _ = self.client()
+        for _ in range(3):
+            completed = self.act(player, {"type": "wait"})
+            self.assertIsNone(completed["error"])
+            self.assertIsNone(self.request(player, {"type": "save"})["error"])
+            with sqlite3.connect(self.save) as db:
+                checkpoint = db.execute("SELECT sequence FROM checkpoint").fetchone()
+                self.assertIsNotNone(checkpoint)
+                self.assertGreater(checkpoint[0], 0)
+            player.stop()
+            server.stop()
+            server = self.server("--checkpoint-interval", 1, scenario="two-room")
+            player, restored = self.client()
+            self.assertEqual(restored["state"], completed["state"])
+            self.assertEqual(restored["history"], completed["history"])
+
     def saving_server(self, target=3600000, maximum=7200000, idle=750):
         """A server with explicit background-save timing (milliseconds)."""
         return self.server("--save-target-ms", target, "--save-max-ms", maximum, "--save-idle-ms", idle,
@@ -29,6 +48,42 @@ class BackgroundSaveProcesses(ProcessTestCase):
         _, resumed = self.client()
         self.assertEqual(resumed["state"]["observation"]["tick"],100)
         self.assertEqual(resumed["history"],first["history"])
+
+    def test_saved_journal_shapes_and_disclosed_history_survive_restart(self):
+        server = self.saving_server()
+        player, _ = self.client()
+        completed = self.act(player, {"type": "wait"})
+        note = self.request(player, {
+            "type": "command", "context": completed["input_context"], "branch": completed["branch"],
+            "command": {"type": "annotate", "anchor": {"type": "state", "revision": completed["state"]["revision"]},
+                        "text": "Stored schema boundary", "source": "frontend",
+                        "audience": "actor", "category": "bookmark"}})
+        self.assertIsNone(note["error"])
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            records = [json.loads(frame[24:])["record"] for (frame,) in
+                       db.execute("SELECT frame FROM journal WHERE sequence>0 ORDER BY sequence")]
+        self.assertEqual([record["entry"]["content"]["type"] for record in records],
+                         ["intention_admitted", "intention_started", "annotation"])
+        for record in records:
+            self.assertIs(type(record["entry"]["actor"]), int)
+            self.assertIs(type(record["entry"]["tick"]), int)
+            self.assertIsInstance(record["entry"]["branch"], str)
+            if record["receipt"] is not None:
+                self.assertIs(type(record["receipt"]["actor"]), int)
+                self.assertIsInstance(record["receipt"]["branch"], str)
+        self.assertEqual(records[0]["receipt"]["command"]["action"], {"type": "wait"})
+        stored_note = records[-1]["entry"]
+        self.assertEqual(stored_note["author"]["type"], "frontend")
+        self.assertEqual(stored_note["audience"], "actor")
+        self.assertEqual(stored_note["content"]["category"], "bookmark")
+        self.assertIs(type(stored_note["content"]["anchor"]["revision"]), int)
+        server.stop()
+        self.saving_server()
+        _, restored = self.client()
+        self.assertEqual(restored["state"], note["state"])
+        self.assertEqual(restored["history"], note["history"])
+        self.assertEqual(restored["intentions"], [])
 
     def test_maximum_age_saves_even_when_idle_opportunity_is_unavailable(self):
         self.saving_server(target=100, maximum=300, idle=300)
