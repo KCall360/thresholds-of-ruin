@@ -9,6 +9,33 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_failed_lazy_generated_declaration_keeps_its_source_diagnostic(self):
+        package = self.directory / "infeasible-declaration"
+        shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
+        region = package / "regions/2.toml"
+        text = region.read_text().replace("size = [24, 12, 1]", "size = [24, 1, 1]")
+        text = text.replace("[0, 6, 0]", "[0, 0, 0]").replace("[23, 6, 0]", "[23, 0, 0]")
+        text = text.replace("rooms = [3, 6]", "rooms = [1, 1]")
+        text = text.replace("count = [1, 3]", "count = [10, 10]")
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("items =")) + "\n"
+        region.write_bytes(text.encode())
+        (package / "validation.json").unlink()
+        before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+        env = {key: value for key, value in os.environ.items()
+               if key not in ["TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN"]}
+        result = subprocess.run(
+            [self.bin / ("tor-server" + self.suffix), "--scenario", package,
+             "--allow-unvalidated", "--seed", "42", "--listen", "127.0.0.1:0", "--save", self.save],
+            env={**env, "TOR_SERVER_TOKEN": TOKEN}, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("InvalidAction", result.stderr)
+        self.assertIn("Region 2", result.stderr)
+        self.assertIn("capacity", result.stderr)
+        self.assertNotIn("StorageFailure", result.stderr)
+        self.assertFalse(self.save.exists(), "failed startup must not create a save")
+        self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                 for p in package.rglob("*") if p.is_file()})
+
     def test_lf_checkout_packages_start_and_resume_without_revalidation(self):
         for name in ["two-room", "tests/generated-filler"]:
             with self.subTest(package=name):
