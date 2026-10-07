@@ -26,6 +26,12 @@ interleaved on this machine: base, head, base, head, for `--rounds` pairs
 tree. Failed or rejected runs are kept, excluded from the tables, and make the
 script exit nonzero.
 
+The baseline always builds into its own worktree's `target` directory. The head
+uses `CARGO_TARGET_DIR` when set, resolved relative to the head worktree, or its
+local `target` directory otherwise. Both directories are passed explicitly to
+Cargo, checked for overlap, and recorded in the comparison. Binary snapshots
+come from these same directories; the baseline cannot inherit the head's cache.
+
 A case is either a `latency_bench` case name (`--cycles` sets its cycle count,
 default five) or `WORKLOAD[:GROUP]` for `combat`, `physics`, `items`, `client`,
 or `places`. The `latency_bench` region streaming cases, `stream-r16-memory`,
@@ -44,11 +50,14 @@ workload versions differ, since their timings aren't comparable.
 
 - Saves go to a temporary directory inside the run directory unless
   `--temp-dir` selects a volume. Choose it deliberately; the machine
-  fingerprint records the storage type of that volume.
+  fingerprint records the storage type of that volume. The selected directory
+  is a parent: each comparison creates and cleans only its own child, including
+  after failure or interruption. Existing files in the parent remain untouched.
 - The script refuses to start measuring while `cargo` or `rustc` processes are
   running. `--allow-competing` overrides this and is recorded.
-- `--no-build` reuses binaries that are already built. Don't edit Rust inputs
-  while a build is running.
+- `--no-build` reuses binaries from those selected targets. Use it only after
+  building the matching source revisions. Don't edit Rust inputs while a build
+  is running.
 - Run directories and base worktrees live in the gitignored `.local` directory.
   Remove old worktrees with `git worktree remove`.
 

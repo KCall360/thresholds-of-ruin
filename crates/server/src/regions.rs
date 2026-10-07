@@ -110,7 +110,7 @@ pub(crate) struct Regions {
     /// yet. Replay rebuilds regions from these copies.
     saved: BTreeSet<u64>,
     unsaved: BTreeSet<u64>,
-    /// Why the last build failed, to report instead of a generic failure.
+    /// Why the last build or declaration failed, instead of a generic failure.
     failure: Option<Failure>,
 }
 
@@ -484,7 +484,13 @@ impl RecordStore for Regions {
         Some(record)
     }
     fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
-        let unbuilt = self.package.unbuilt_region(&self.index, region.0).ok()?;
+        let unbuilt = match self.package.unbuilt_region(&self.index, region.0) {
+            Ok(unbuilt) => unbuilt,
+            Err(failure) => {
+                self.failure = Some(failure);
+                return None;
+            }
+        };
         // Declaring a generated region read its file; replay needs it too.
         if self.package.declaring_reads_file(region.0) {
             self.need_files([region.0]);
@@ -515,5 +521,58 @@ impl RecordStore for Pending<'_> {
     }
     fn unbuilt(&mut self, region: RegionId) -> Option<tor_simulation::UnbuiltRegion> {
         self.regions.unbuilt(region)
+    }
+}
+
+#[cfg(test)]
+mod declaration_error_tests {
+    use super::*;
+    use crate::scenario_package;
+    use std::path::Path;
+
+    #[test]
+    fn lazy_declaration_retains_the_generated_source_failure() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
+        let source = scenario_package::load(&root, 42, None, false)
+            .unwrap()
+            .package
+            .unwrap();
+        let mut definitions = source.region_defs().unwrap();
+        let region = definitions
+            .iter_mut()
+            .find(|region| region.id == 2)
+            .unwrap();
+        region.size = [24, 1, 1];
+        region.anchors = BTreeMap::from([("west".into(), [0, 0, 0]), ("east".into(), [23, 0, 0])]);
+        for portal in &mut region.portals {
+            portal.at[1] = 0;
+        }
+        let recipe = region.generate.as_mut().unwrap();
+        recipe.rooms = [1, 1];
+        recipe.actors.as_mut().unwrap().count = [10, 10];
+        recipe.items = None;
+        let package = Arc::new(Package::from_parts(source.manifest.clone(), definitions).unwrap());
+        let mut regions = Regions::new(package, 42, Streaming::default()).unwrap();
+        let expected = regions
+            .package
+            .unbuilt_region(&regions.index, 2)
+            .unwrap_err();
+        assert!(
+            expected.message.contains("capacity"),
+            "{}",
+            expected.message
+        );
+        assert!(regions.unbuilt(RegionId(2)).is_none());
+        let failure = regions
+            .failure
+            .take()
+            .expect("retain the precise source failure");
+        assert_eq!(failure.code, expected.code);
+        assert_eq!(failure.message, expected.message);
+        assert!(
+            regions.unsaved.is_empty(),
+            "failed declaration must not pin source bytes"
+        );
     }
 }

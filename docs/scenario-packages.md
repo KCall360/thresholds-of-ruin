@@ -122,28 +122,44 @@ are refused there. The generator fills the region the first time it's built:
 ```toml
 [generate]
 generator = "rooms"
-version = 1
+version = 2
+salt = 0 # optional; omitted means zero
 rooms = [3, 6]
 actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
 items = { archetypes = ["coin"], count = [2, 4] }
 ```
 
-- `rooms` (the only generator, version 1) keeps a clearing two cells wide
+- `rooms` (the only generator, version 2) keeps a clearing two cells wide
   around every anchor, places 1–16 rooms, and joins the anchors and rooms in
   turn with corridors, so every entry reaches every other. Two entries on the
   same row are joined by a straight corridor along it. Actors (up to 64, each
   an archetype from the pool, run by the named AI profile) and items (up to
   64) go on open floor away from the entries.
-- A region's content depends only on the game's seed, the region's own file
-  and its id: never on the rest of the package, or on which regions were
-  built before. Its actors and items take identities from a range of 256 fixed
+- Generation uses the game's seed, stable region id, generator name/version,
+  explicit `salt`, and normalized semantic parameters. Comments, whitespace,
+  table ordering and omitted/default-zero salt do not reroll content. Raw file
+  hashes remain mandatory integrity identities for validation and pinned saves.
+  Geometry and placement streams use bounds, ordered anchors and room ranges;
+  population and loot each use their own pool. Changing one pool cannot reroll
+  geometry or the other pool, and build order does not enter any stream.
+- Open floor outside entry clearings is shuffled deterministically and split
+  into alternating actor/item placement lanes. These disjoint lanes keep their
+  positions and capacities even when a pool is absent or its count changes.
+  Counts are sampled between the authored minimum and the smaller of the
+  authored maximum and that lane's capacity. A minimum above capacity is a
+  contextual construction error; generation never silently drops below it.
+  Validation samples seeds 0, 1 and 42 and does not prove capacity for every
+  possible seed.
+- Its actors and items take identities from a range of 256 fixed
   by its region id, above every authored identity; generated region ids are
   at most 65,536, and a game reserves the whole space. So identities don't
   depend on build order either, and the preloader can build generated regions
   ahead of need.
 - Declaring a generated region (see
   [region streaming](region-streaming.md#never-built-regions-and-region-sources))
-  runs its generator to learn the identities it will hold.
+  runs its generator to learn the identities it will hold. Authored character
+  starts remain declared alongside generated inhabitants, so selecting a
+  character starting in a generated region works during lazy startup.
 - Saves copy a generated region's file like any other, and replay regenerates
   it from the copy.
 - The validator checks each generated region at seeds 0, 1 and 42:

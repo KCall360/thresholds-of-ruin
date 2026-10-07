@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v21";
-const VALIDATOR: &str = "tor-scenario-7";
+pub const RULESET: &str = "dungeon-v22";
+const VALIDATOR: &str = "tor-scenario-8";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -1064,6 +1064,7 @@ fn corridor(
             hall.generate = Some(crate::generator::Generate {
                 generator: crate::generator::ROOMS.into(),
                 version: crate::generator::ROOMS_VERSION,
+                salt: 0,
                 rooms: [1, 3],
                 actors: None,
                 items: None,
@@ -1790,26 +1791,14 @@ impl Package {
             .index
             .region(region)
             .ok_or_else(|| fail(format!("Unknown region {region}")))?;
-        if r.generated {
-            let def = index.region(self, region)?;
-            return Ok(tor_simulation::UnbuiltRegion {
-                region: region_of(r.id, &r.name, r.size)?,
-                chamber: r.chamber,
-                identities: tor_simulation::RegionIdentities {
-                    actors: def
-                        .actors
-                        .iter()
-                        .map(|a| tor_simulation::ActorId(a.id))
-                        .collect(),
-                    items: def
-                        .items
-                        .iter()
-                        .map(|i| tor_simulation::ItemId(i.id))
-                        .collect(),
-                    doors: BTreeSet::new(),
-                },
-            });
-        }
+        let generated = if r.generated {
+            Some(index.region(self, region)?)
+        } else {
+            None
+        };
+        // Character starts are indexed independently of the region's source.
+        // Add generated inhabitants to those declarations instead of replacing
+        // them, so lazy startup knows every actor before configuring the run.
         Ok(tor_simulation::UnbuiltRegion {
             region: region_of(r.id, &r.name, r.size)?,
             chamber: r.chamber,
@@ -1820,14 +1809,32 @@ impl Package {
                     .into_iter()
                     .flatten()
                     .map(|(id, _, _)| tor_simulation::ActorId(*id))
+                    .chain(
+                        generated
+                            .iter()
+                            .flat_map(|def| &def.actors)
+                            .map(|a| tor_simulation::ActorId(a.id)),
+                    )
                     .collect(),
                 items: r
                     .items
                     .iter()
-                    .filter(|i| !index.definitions.omitted_carrier(i.carried_by))
-                    .map(|i| tor_simulation::ItemId(i.id))
+                    .map(|i| (i.id, i.carried_by))
+                    .chain(
+                        generated
+                            .iter()
+                            .flat_map(|def| &def.items)
+                            .map(|i| (i.id, i.carried_by)),
+                    )
+                    .filter(|(_, owner)| !index.definitions.omitted_carrier(*owner))
+                    .map(|(id, _)| tor_simulation::ItemId(id))
                     .collect(),
-                doors: r.doors.iter().copied().collect(),
+                doors: r
+                    .doors
+                    .iter()
+                    .copied()
+                    .chain(generated.iter().flat_map(|def| &def.doors).map(|d| d.id))
+                    .collect(),
             },
         })
     }
@@ -2191,7 +2198,7 @@ pub(crate) struct PackageIndex {
     /// One more than the largest actor, item and door identity the package
     /// can make, generated ones included.
     ceilings: (u64, u64, u64),
-    /// The game's seed: with a region's id and file, it seeds its generator.
+    /// The game's seed; semantic generator inputs derive independent streams.
     seed: u64,
     /// Where generated actor and item identity ranges start.
     generated_base: (u64, u64),
@@ -2217,22 +2224,10 @@ impl PackageIndex {
         Ok(Arc::new(crate::generator::materialize(
             &def,
             generate,
-            self.region_seed(id, &package.index.region(id).expect("defined region").hash),
+            self.seed,
             first(self.generated_base.0)?,
             first(self.generated_base.1)?,
         )?))
-    }
-
-    /// A generated region's seed, from the game's seed and the region's own
-    /// file: its content depends on nothing else in the package, and never on
-    /// which regions were generated before.
-    fn region_seed(&self, region: u64, file_hash: &str) -> u64 {
-        let mut hash = Sha256::new();
-        hash.update(self.seed.to_le_bytes());
-        hash.update(file_hash.as_bytes());
-        hash.update(region.to_le_bytes());
-        let bytes = <[u8; 32]>::from(hash.finalize());
-        u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes"))
     }
 
     /// Region definitions handed out so far.
@@ -2298,6 +2293,64 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_regions_declare_authored_character_identities_before_lazy_start() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
+        let template = read_package(&root).unwrap();
+        let mut manifest = template.manifest.clone();
+        manifest
+            .characters
+            .iter_mut()
+            .find(|c| c.id == 1)
+            .unwrap()
+            .anchor = "2/west".into();
+        let package = Package::from_parts(manifest, template.region_defs().unwrap()).unwrap();
+        let index = package.index(42).unwrap();
+        let declared = package.unbuilt_region(&index, 2).unwrap();
+        assert!(declared
+            .identities
+            .actors
+            .contains(&tor_simulation::ActorId(1)));
+        package.start(42).unwrap();
+    }
+
+    #[test]
+    fn generated_region_comments_change_integrity_hash_without_changing_content() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
+        let template = read_package(&root).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        write_package(
+            directory.path(),
+            &template.manifest,
+            &template.region_defs().unwrap(),
+        )
+        .unwrap();
+        let before = read_package(directory.path()).unwrap();
+        let file = directory.path().join("regions/2.toml");
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(
+            file,
+            format!("# Author notes must not reroll the cave.\n{text}\n"),
+        )
+        .unwrap();
+        let after = read_package(directory.path()).unwrap();
+        assert_ne!(
+            before.index.region(2).unwrap().hash,
+            after.index.region(2).unwrap().hash
+        );
+        for seed in [0, 1, 42, u64::MAX] {
+            let original = before.index(seed).unwrap().region(&before, 2).unwrap();
+            let annotated = after.index(seed).unwrap().region(&after, 2).unwrap();
+            assert_eq!(
+                serde_json::to_value(&*original).unwrap(),
+                serde_json::to_value(&*annotated).unwrap(),
+                "seed {seed}"
+            );
+        }
+    }
+
     #[test]
     fn construction_reference_errors_identify_source_without_reordering_failures() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");

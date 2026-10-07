@@ -32,9 +32,12 @@ tiered checks run the suite faster, but they can only run tests that exist.
 - Before every push, pass `python scripts/verify.py` (the `push` tier) or
   `python scripts/verify.py full`. A successful full run covers the push gate
   for unchanged inputs, toolchain and test configuration; do not repeat both.
-- Full remains required for save-format, protocol, ruleset, persistence,
-  storage, toolchain or dependency changes, and when CI can't run.
-- CI's full Windows and Linux matrix is **required before every merge**.
+- The local push gate runs all debug checks. Let CI run the broad release
+  suites, including for compatibility, persistence and dependency changes. Run
+  targeted local release checks for performance or release-specific behavior;
+  local full is required when CI cannot run or on request.
+- CI's full Windows and Linux debug/release matrix on the final commit is
+  **required before every merge**.
 - Record the tested state and evidence. Follow the
   [reuse rules](docs/testing.md#verification-evidence-and-reuse); a failed,
   incomplete or stale run never satisfies a gate.

@@ -4,7 +4,7 @@
 format = 2
 id = "streaming-corridor"
 version = "1.0"
-ruleset = "dungeon-v21"
+ruleset = "dungeon-v22"
 default_character = 1
 factions = { delvers = [], wardens = [] }
 ai_profiles = { patrol = { memory_ticks = 200, flee_percent = 0 } }

@@ -12,7 +12,7 @@ authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
 **Current formats:** protocol **28**, save format **21**, ruleset
-**`dungeon-v21`**, scenario validator **`tor-scenario-7`**. The server rejects
+**`dungeon-v22`**, scenario validator **`tor-scenario-8`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.

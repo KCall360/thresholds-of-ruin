@@ -2491,3 +2491,79 @@ Local worktrees now use exclusive compiler output directories after shared
 outputs caused mismatched executable startup failures. Those attempts are invalid
 verification evidence. Published full evidence and immutable copies preceded the
 overlap. All six refactor sequences and save/restore tail attribution remain open.
+
+
+## Semantic generation streams and lazy character declarations (in development)
+
+Rooms version 2 derives separate geometry, placement, population and loot streams
+from a versioned canonical seed envelope. Inputs are the game seed, stable region
+identity, generator name/version, explicit default-zero salt and that stream's
+normalized parameters. Raw SHA-256 file hashes still identify validated and
+pinned source bytes; they no longer select generated layouts. Geometry excludes
+pool recipes, and each pool has its own stream. Placement uses disjoint alternating
+actor/item lanes derived from geometry so requested counts do not move or consume
+the other pool's positions or capacity. Counts respect feasible authored bounds;
+a minimum beyond lane capacity fails with a region/kind/capacity diagnostic.
+Pool-free regions skip placement preparation. Validation still samples generated
+seeds and does not claim a proof over every possible seed.
+
+Lazy declarations now combine indexed character starts and generated inhabitants
+in one identity assembly, including item-carrier exclusions. This fixes a
+validated character starting in a generated region being rejected at run setup.
+The compatibility axes are rooms version 2, ruleset dungeon-v22 and validator
+tor-scenario-8; authoring format 2, save format 21 and protocol 28 are unchanged.
+No migration or scripting runtime is introduced.
+
+Failing-first regressions established raw-comment coupling, actor-count effects
+on loot, missing salt support, insufficient capacity silently violating minimums,
+and the omitted character identity. Focused checks passed 340 backend tests,
+workspace all-target Clippy and 33 regenerated package validations. The real
+validator/client test proves equal generated content across independently salted
+saves and exact state/token recovery with package directories unavailable.
+Comprehensive process checks, final full verification, performance comparison
+and both-platform CI remain before publication. Compiler source spans/reference
+normalization, broader admission/scheduler and persistence work and the other
+original work sequences remain open.
+
+Review also found authored pool maxima could overflow before shape validation.
+The sum now widens each input before addition, so malformed counts produce the
+normal structured diagnostic without rewriting a package. Its unit and real
+validator regressions failed first; all eight generator tests, six scenario
+process cases, five documentation checks and workspace all-target lint passed.
+
+Performance comparison now isolates baseline/head compiler outputs and copies
+from the actual selected targets. Temporary saves occupy an owned child of the
+chosen storage parent; caller files survive success, failure and interruption.
+The stale-snapshot and caller-deletion regressions failed first; 65 comparison,
+ledger, report-validation and documentation checks passed. The source checkpoint
+still requires its full compatibility gate and real release comparison before
+publication. The broader compiler, identity and persistence work stays open.
+
+**Testing policy update (2026-10-07).** At the user's direction, the local push
+gate now runs every debug check and leaves broad release suites to exact-head
+Windows/Linux CI before merge. This supersedes earlier notes requiring a local
+full run for compatibility or persistence changes. Targeted local release checks
+remain necessary for performance measurements and release-specific behavior;
+local full remains required when CI cannot run or on request. No CI coverage,
+native coverage or individual deadlines were removed. One broad debug gate per
+stable PR checkpoint covers the local publication requirement; focused
+failing-first development checks continue between checkpoints.
+
+PR #74 subsequently passed all nine exact-head CI jobs, merged, and its verified
+immutable desktop build was activated. Semantic generation remains unpublished:
+its broad debug gate, release measurements and final-head CI remain pending.
+All six original refactor sequences remain in scope.
+
+**Scenario checkout integrity correction (2026-10-07).** PR #75's first Linux
+profiles exposed certificates generated from local CRLF manifest edits, whereas
+Git's existing LF policy supplies different bytes on checkout. All 33 manifests
+and two edited recipes were restored to LF and certificates regenerated from
+those exact bytes. Integrity hashing remains byte-exact. A cheap repository
+regression checks both LF source bytes and every manifest/index/region digest.
+The actual-process regression fails against the prior committed certificates,
+then passes with corrected certificates: both authored and generated packages
+start without revalidation and recover exact state after their source disappears.
+All 33 release validators and all scenario process cases passed. Final debug
+publication evidence and replacement exact-head CI are still required; failed CI
+is retained, not rerun as a substitute for a correction. All original work
+sequences remain in scope.

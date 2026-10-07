@@ -194,12 +194,18 @@ class Tiers(unittest.TestCase):
         self.assertEqual(error.exception.code, 2)
         commands.assert_not_called()
 
-    def test_push_runs_every_debug_check_and_affected_release(self):
-        names = self.names("push", ["tor-world"], ["test_text_process"])
-        self.assertEqual(names[:6], ["fmt", "clippy", "python-debug", "architecture", "rustdoc", "rust-debug"])
-        self.assertEqual(names[6:], ["rust-release", "process-release"])
-        release = dict((n, c) for n, c, _ in verify.plan("push", {"tor-world"}, []))["rust-release"]
-        self.assertEqual(release[2:5], ["-p", "tor-world", "--release"])
+    def test_push_runs_every_debug_check_without_local_release(self):
+        for xvfb in [False, True]:
+            for affected, process in [(set(), []), ({"tor-world"}, ["test_text_process"])]:
+                with self.subTest(xvfb=xvfb, affected=affected):
+                    push = verify.plan("push", affected, process, xvfb=xvfb)
+                    debug = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="debug")
+                    self.assertEqual(push, debug)
+                    self.assertEqual([n for n, _, _ in push],
+                                     ["fmt", "clippy", "python-debug", "architecture", "rustdoc", "rust-debug"])
+                    for _, command, environment in push:
+                        self.assertNotIn("--release", command)
+                        self.assertNotEqual(environment.get("TOR_TEST_PROFILE"), "release")
 
     def test_quick_limits_rust_to_affected_packages(self):
         steps = {n: c for n, c, _ in verify.plan("quick", {"tor-world"}, [])}
