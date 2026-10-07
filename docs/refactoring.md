@@ -2271,3 +2271,21 @@ while map/history retention and server sharing across readers remain separate
 work. Measured source copies retain the pre-bound and final bounded code, and
 later edits only document results. Full verification remains required on the
 final commit; raw samples remain local without release/upload authorization.
+
+### Slow-reader verification with compact observations
+
+An earlier complete Windows gate passed, but Linux CI exposed two pressure
+fixtures whose fixed 1,500-turn workload no longer filled TCP buffers after
+collection encoding reduced observation traffic. The relay now optionally counts
+actor-state bytes from the healthy player without retaining payloads; command
+replies and authority metadata cannot inflate that count. The bounded workload
+exceeds the host send-buffer budget plus queued, in-flight and receive-window
+allowances before checking spectator disconnect and replacement. Existing stall
+and child-exit timeouts remain unchanged.
+
+Both Windows cases passed at their normal budget with 1,500 turns each. A separate
+4 MiB-budget diagnostic passed both cases at 12,509 turns each, including durable
+save and restart recovery. It exercises workload sizing on Windows; Linux runtime
+verification still requires refreshed final-commit CI. This repair changes test
+helpers only, so the production measurements above retain their original input
+provenance. Changed verification inputs require a new full gate before pushing.

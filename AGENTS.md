@@ -429,8 +429,12 @@ shared atomic rejection, real item checkpoint/restart/rewind and held-repair
 ASCII/text process tests passed. Current wire samples were recorded from real
 processes. Individual collection diagnostics vary 16/256/4,096 entries; release
 measurements validated 24 interleaved reports, 12 focused repeats and 2,400
-individual samples with stable operation/save counts. Final-head full verification
-remains pending. Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
+individual samples with stable operation/save counts. Earlier Windows full
+verification passed, but Linux CI exposed a fixed-size slow-reader workload that
+no longer filled socket buffers with compact deltas. The revised traffic-based
+workload passed both Windows pressure/restart cases at normal and 4 MiB budgets;
+refreshed final-head full verification and Windows/Linux CI remain required.
+Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
 full observations independently of individual frame size, with failing-first
 regressions and real ASCII/text held-repair checks. Earlier pre-bound measurements
 are preserved separately; refreshed evidence

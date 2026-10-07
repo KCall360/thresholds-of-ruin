@@ -180,7 +180,13 @@ steps before control acquisition; it never restarts a journey implicitly.
 - **Process**: `scripts/test_run_until_blocked_process.py` pauses a real
   spectator's connection while the player keeps acting: play continues, the
   spectator is disconnected after the stall timeout, and a new spectator
-  starts at the committed state. The travel, adventure, dungeon and stream
+  starts at the committed state. The workload measures actor-state traffic
+  through the healthy player and continues until it exceeds the host TCP
+  send-buffer budget plus the bounded outgoing queue and in-flight allowance.
+  It retains a minimum gameplay workload and a finite upper limit, so compact
+  deltas cannot silently turn the pressure test into an ordinary playback test.
+  The stall timeout is unchanged. The small-byte-budget variant also verifies
+  durable save and restart recovery. The travel, adventure, dungeon and stream
   recovery suites also run against the new server.
 
 ## Performance

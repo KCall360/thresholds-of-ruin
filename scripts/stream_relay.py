@@ -20,11 +20,15 @@ def exact(stream, size):
 
 
 class StreamRelay:
-    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False):
+    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_observations=False):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
         (bytes) on the relay's server connection keeps a paused relay from
         absorbing the server's output in socket buffers, which Linux grows to
         megabytes, so the server's own queue fills instead."""
+        self.measure_observations = measure_observations
+        self._traffic_lock = threading.Lock()
+        self._observation_bytes = 0
+        self._largest_frame = 0
         self.large_retained_base = large_retained_base
         self.upstream = upstream
         self.receive_buffer = receive_buffer
@@ -87,6 +91,21 @@ class StreamRelay:
                 if length > 16 * 1024 * 1024:
                     raise ValueError('Oversized test frame')
                 payload = exact(upstream, length)
+                if self.measure_observations:
+                    message = json.loads(payload) if prefix[0] == 0x81 else None
+                    body = (message or {}).get('update', {}).get('body', {})
+                    # Count only actor-state bytes, which are identical for the
+                    # player and a spectator with the same exact observation base.
+                    # Replies and authority metadata cannot inflate this count.
+                    state_bytes = 0
+                    if body.get('type') in ('observation', 'observation_delta'):
+                        state_bytes = len(json.dumps(body['state'], ensure_ascii=False,
+                                                     separators=(',', ':')).encode('utf-8'))
+                        if state_bytes > len(payload):
+                            raise ValueError('Observation byte accounting exceeds its frame')
+                    with self._traffic_lock:
+                        self._observation_bytes += state_bytes
+                        self._largest_frame = max(self._largest_frame, len(prefix) + len(extra) + len(payload))
                 if not self.gate.is_set():
                     self.held.set()
                 self.gate.wait()
@@ -124,6 +143,17 @@ class StreamRelay:
             self.errors.append(error)
         finally:
             self.close_sockets()
+
+    def reset_traffic(self):
+        """Start a measurement window after the initial snapshot is delivered."""
+        with self._traffic_lock:
+            self._observation_bytes = 0
+            self._largest_frame = 0
+
+    def traffic(self):
+        """Measured actor-state bytes and largest frame; no payloads are retained."""
+        with self._traffic_lock:
+            return self._observation_bytes, self._largest_frame
 
     def corrupt_observation(self, message):
         """Apply one requested test corruption while preserving its envelope."""
