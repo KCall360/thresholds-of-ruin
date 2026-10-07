@@ -482,7 +482,11 @@ facts use independent backend action/direction types, with exhaustive wire,
 simulation, disclosure and save DTO mappings. Save bytes and gameplay semantics
 are preserved. Focused Rust checks passed 188 unit and 147 integration tests;
 all 17 item/intention actual-process cases, all-target workspace lint and focused
-documentation checks passed. Performance and full/publication gates are pending. Original
+documentation checks passed. The release comparison validated 24 reports and six focused repeats with unchanged
+counts and mixed tails. Full/publication gates are pending. The preceding protocol
+checkpoint hit Linux CI's 35-minute job budget during release processes; split the
+profile jobs without removing coverage, then require complete final-head CI before
+merge/activation. Save/restore tail attribution remains open. Original
 receipt identity must be resolved before ephemeral target checks. See the
 [refactor plan](docs/refactoring.md). Protocol/observation PR CI runs separately
 against its immutable published checkpoint; do not attribute it to this increment.

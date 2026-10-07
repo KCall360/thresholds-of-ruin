@@ -2416,8 +2416,46 @@ outside that set retain the existing fallible record projection.
 Focused Rust checks passed 188 server unit tests and 147 integration tests.
 A new real-client acceptance case checks numeric saved action facts, original
 optional quantities, separate execution results and restart. All 17 item/intention process cases passed, including native clients, as did
-workspace all-target Clippy, Ruff and five documentation checks. Release comparison
-and required full/final-head CI remain pending.
+workspace all-target Clippy, Ruff and five documentation checks. The release comparison below retains its limitations; the required full and
+final-head CI gates still apply before publication.
 Opaque interaction targets, broader domain identities, admission/scheduler
 responsibilities, scenario compilation and persistence/history work remain open.
 No scripting runtime or text-client product work is included.
+
+
+Backend action mapping release comparison: three interleaved baseline/current
+rounds validated 24 reports with identical operation, history, disclosure and
+save counts, followed by six focused item reports. No competing builds or failed
+reports were recorded. Measurements use the same HDD/machine fingerprint as
+the preceding local comparisons. They do not establish a broad speedup or RSS gain.
+
+| Metric | n per side | Base p50/p95/max ms | Current p50/p95/max ms |
+| --- | ---: | --- | --- |
+| r8-a1-h100-memory authoritative total | 915 | 0.5685/0.8175/1.5265 | 0.5405/0.8153/2.2761 |
+| r64-a8-h100-memory authoritative total | 7500 | 0.0284/2.5329/5.8805 | 0.0292/2.4961/6.9528 |
+| r8-a1-h100-durable authoritative total | 915 | 0.5636/0.8110/1.2715 | 0.5518/0.8068/2.1957 |
+| i1000-id256 transfer | 1200 | 0.3882/0.5182/2.9971 | 0.3766/0.5137/1.7166 |
+| i16-id8 transfer | 1200 | 0.0526/0.1106/0.2693 | 0.0536/0.1065/0.5230 |
+| i1000-id256 save | 60 | 126.4979/183.7268/246.0333 | 127.9925/590.0359/908.6570 |
+| i1000-id256 restart | 60 | 47.2336/65.0856/68.0526 | 59.3442/64.5946/65.2009 |
+| i16-id8 save | 60 | 102.5905/123.5726/522.9216 | 102.9479/209.9438/565.0153 |
+| i16-id8 restart | 60 | 9.0026/13.3559/13.7160 | 9.2243/14.0400/16.2941 |
+
+The first item run exposed a substantially higher save tail and large-state
+restart median. The focused repeat did not reproduce their magnitude; it reversed
+the large-state restart median, with unchanged counts. This establishes variation,
+not its cause. Save/restore tails remain open for phase attribution rather than
+being dismissed or reported as an improvement.
+
+| Focused repeat | n per side | Base p50/p95/max ms | Current p50/p95/max ms |
+| --- | ---: | --- | --- |
+| i1000-id256 save | 60 | 131.1870/179.8675/581.0603 | 132.4226/182.5702/381.9498 |
+| i1000-id256 restart | 60 | 58.9224/65.1006/78.6418 | 48.1603/63.8556/66.6069 |
+| i16-id8 save | 60 | 109.1858/162.4124/327.9961 | 112.6745/165.6419/442.8157 |
+| i16-id8 restart | 60 | 11.9583/14.5202/24.6646 | 9.5723/13.7809/18.3018 |
+
+The preceding observation/protocol checkpoint's Linux job reached the overall
+35-minute CI budget during release process testing. Its debug and release Rust
+checks and earlier process cases passed, but the incomplete suite does not satisfy
+the merge gate. CI must complete both profiles on both platforms without removing
+coverage. The active desktop build remains unchanged until a complete gate passes.
