@@ -2332,8 +2332,12 @@ Encoding now has explicit frame-size, retained-state-size and serialization
 failure categories. Host admission adds closed/full queues and distinct client /
 aggregate byte-budget failures. No classification matches diagnostic strings.
 Tests prove that rejected preparation or pressure does not leak queue slots or
-byte leases. Aggregate fairness policy, capabilities and snapshot feasibility
-remain open; typed failures alone do not implement them.
+byte leases. Aggregate allocation now reserves one maximum frame per admitted
+connection and lends spare capacity under a shared accounting invariant. Closing
+connections retain their reservations through the last outstanding frame. The
+host ceiling is min(128, total/frame), 16 by default; borrowing can prevent new
+admissions below that ceiling. Rejected admission does not consume a client ID.
+Capabilities and snapshot feasibility remain open.
 
 Ownership-only measurements used the repaired client-fixture baseline e89e162
 and machine 6a1878811f37 (Windows, F:HDD). All 24 reports over three interleaved
@@ -2350,8 +2354,12 @@ these are logical representation counts, not heap/RSS measurements or network /
 UI latency. Raw samples remain local and no release/ledger upload is authorized.
 
 Affected library checks passed 214 tests and integration checks passed 243,
-with no failures or ignored tests; all-target Clippy passed. Process acceptance,
-final release evidence and full Windows/Linux CI remain required before merge.
+with no failures or ignored tests; all-target Clippy passed. The ownership/error
+checkpoint also passed 59 selected process/tool tests. The fair-allocation
+checkpoint passed the quick gate: 331 server library/integration tests, tooling
+checks and all selected process acceptance, including pressure, restart and the
+new connection-capacity regression. Final release evidence and full Windows/Linux
+CI remain required before merge. Capability reporting precedes publication.
 The preceding pressure-fixture full run retained one failed local native mouse
 check under the maintainer's mouse-verification waiver; it is recorded as a
 qualified local result, never an unqualified full pass. Ordinary CI keeps that

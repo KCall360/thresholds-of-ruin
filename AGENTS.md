@@ -459,6 +459,10 @@ Aggregate output fairness and the other six-sequence work remain active.
 views now share immutable ownership across readers with independent stream
 metadata; codec/admission failures distinguish capacity from preparation without
 string matching. Library/integration checks passed 457 tests and all-target
-Clippy passed. Process/release/CI verification remains pending. Aggregate fair
-allocation is next; see the full [refactor plan](docs/refactoring.md). The local
+Clippy passed; 59 selected process/tool tests passed. Aggregate allocation now
+reserves one maximum frame per connection with bounded borrowing and preserves
+reservations through outstanding output. Its quick gate passed, including 331
+Rust tests and actual-process acceptance. Protocol capabilities are next before
+publication; release/full/final-head CI remain pending. See the full
+[refactor plan](docs/refactoring.md). The local
 native mouse waiver does not remove ordinary Windows/Linux CI coverage.

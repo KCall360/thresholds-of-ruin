@@ -1,6 +1,9 @@
 //! Ordered, single-encoding output with byte leases covering queued and in-flight
 //! frames. These are host resource limits, never game state or scheduling inputs.
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tor_protocol::{EncodeError, ServerMessage, MAX_RESPONSE_BYTES};
 
@@ -63,7 +66,18 @@ impl Default for OutboundLimits {
     }
 }
 
+const MAX_CONNECTIONS: usize = 128;
+
 impl OutboundLimits {
+    /// Connections retain one maximum-frame guarantee for their entire output lifetime.
+    pub fn connection_limit(self) -> usize {
+        if self.is_valid() {
+            MAX_CONNECTIONS.min(self.total_bytes / self.frame_bytes)
+        } else {
+            0
+        }
+    }
+
     /// Whether the limits fit native frame and permit bounds, with room for at
     /// least one maximum frame in each connection and in the shared pool.
     pub fn is_valid(self) -> bool {
@@ -76,36 +90,143 @@ impl OutboundLimits {
     }
 }
 
+/// Reserved guarantees plus borrowing never exceed the host budget. Actual
+/// leases are tracked separately: reservations do not allocate frame storage.
+#[derive(Default)]
+struct Accounting {
+    reserved: usize,
+    borrowed: usize,
+    leased: usize,
+}
+
+struct Budget {
+    total: usize,
+    state: Mutex<Accounting>,
+}
+
+struct Allocation {
+    budget: Arc<Budget>,
+    reserve: usize,
+    // All writes are protected by budget.state, including frame destruction.
+    used: AtomicUsize,
+}
+
+impl Allocation {
+    fn lease(self: &Arc<Self>, bytes: usize) -> Result<FrameLease, SendError> {
+        let mut state = self
+            .budget
+            .state
+            .lock()
+            .expect("output accounting poisoned");
+        let used = self.used.load(Ordering::Relaxed);
+        let next = used.checked_add(bytes).ok_or(SendError::GlobalBudget)?;
+        let additional = next.saturating_sub(self.reserve) - used.saturating_sub(self.reserve);
+        if additional > self.budget.total - state.reserved - state.borrowed {
+            return Err(SendError::GlobalBudget);
+        }
+        state.borrowed += additional;
+        state.leased += bytes;
+        self.used.store(next, Ordering::Relaxed);
+        Ok(FrameLease {
+            allocation: Arc::clone(self),
+            bytes,
+        })
+    }
+}
+
+impl Drop for Allocation {
+    fn drop(&mut self) {
+        let mut state = self
+            .budget
+            .state
+            .lock()
+            .expect("output accounting poisoned");
+        assert_eq!(self.used.load(Ordering::Relaxed), 0);
+        state.reserved -= self.reserve;
+    }
+}
+
+struct FrameLease {
+    allocation: Arc<Allocation>,
+    bytes: usize,
+}
+
+impl Drop for FrameLease {
+    fn drop(&mut self) {
+        let mut state = self
+            .allocation
+            .budget
+            .state
+            .lock()
+            .expect("output accounting poisoned");
+        let used = self.allocation.used.load(Ordering::Relaxed);
+        let next = used - self.bytes;
+        state.borrowed -= used.saturating_sub(self.allocation.reserve)
+            - next.saturating_sub(self.allocation.reserve);
+        state.leased -= self.bytes;
+        self.allocation.used.store(next, Ordering::Relaxed);
+    }
+}
+
 pub(crate) struct Pool {
     limits: OutboundLimits,
-    bytes: Arc<Semaphore>,
+    budget: Arc<Budget>,
 }
 
 impl Pool {
     #[cfg(test)]
     pub(crate) fn available_bytes(&self) -> usize {
-        self.bytes.available_permits()
+        self.budget.total - self.budget.state.lock().unwrap().leased
+    }
+
+    pub(crate) fn connection_limit(&self) -> usize {
+        self.limits.connection_limit()
     }
 
     pub(crate) fn new(limits: OutboundLimits) -> Self {
         assert!(limits.is_valid());
         Self {
             limits,
-            bytes: Arc::new(Semaphore::new(limits.total_bytes)),
+            budget: Arc::new(Budget {
+                total: limits.total_bytes,
+                state: Mutex::default(),
+            }),
         }
     }
 
-    pub(crate) fn channel(&self, slots: usize) -> (Sender, Receiver) {
+    pub(crate) fn channel(&self, slots: usize) -> Result<(Sender, Receiver), SendError> {
+        let reserve = self.limits.frame_bytes;
+        {
+            let mut state = self
+                .budget
+                .state
+                .lock()
+                .expect("output accounting poisoned");
+            if state.reserved / reserve >= self.connection_limit()
+                || reserve > self.budget.total - state.reserved - state.borrowed
+            {
+                return Err(SendError::GlobalBudget);
+            }
+            state.reserved += reserve;
+        }
+        let allocation = Arc::new(Allocation {
+            budget: Arc::clone(&self.budget),
+            reserve,
+            used: AtomicUsize::new(0),
+        });
         let (sender, receiver) = mpsc::channel(slots);
-        (
+        Ok((
             Sender {
                 sender,
                 limits: self.limits,
                 bytes: Arc::new(Semaphore::new(self.limits.client_bytes)),
-                total: self.bytes.clone(),
+                allocation: Arc::clone(&allocation),
             },
-            Receiver { receiver },
-        )
+            Receiver {
+                receiver,
+                _allocation: allocation,
+            },
+        ))
     }
 }
 
@@ -114,7 +235,7 @@ pub(crate) struct Sender {
     sender: mpsc::Sender<Frame>,
     limits: OutboundLimits,
     bytes: Arc<Semaphore>,
-    total: Arc<Semaphore>,
+    allocation: Arc<Allocation>,
 }
 
 /// Kept alive until flush completes, or until the failed socket is dropped.
@@ -122,8 +243,8 @@ pub(crate) struct Sender {
 pub(crate) struct Frame {
     pub text: String,
     pub ack_id: Option<String>,
+    _allocation: FrameLease,
     _client: OwnedSemaphorePermit,
-    _total: OwnedSemaphorePermit,
 }
 
 impl Sender {
@@ -161,14 +282,7 @@ impl Sender {
                     tokio::sync::TryAcquireError::Closed => SendError::Closed,
                     tokio::sync::TryAcquireError::NoPermits => SendError::ClientBudget,
                 })?;
-        let total =
-            self.total
-                .clone()
-                .try_acquire_many_owned(bytes)
-                .map_err(|error| match error {
-                    tokio::sync::TryAcquireError::Closed => SendError::Closed,
-                    tokio::sync::TryAcquireError::NoPermits => SendError::GlobalBudget,
-                })?;
+        let allocation = self.allocation.lease(bytes as usize)?;
         let ack_id = match message {
             ServerMessage::Ack { request_id, .. } => Some(request_id.clone()),
             _ => None,
@@ -176,8 +290,8 @@ impl Sender {
         slot.send(Frame {
             text,
             ack_id,
+            _allocation: allocation,
             _client: client,
-            _total: total,
         });
         Ok(())
     }
@@ -201,6 +315,7 @@ impl Sender {
 
 pub(crate) struct Receiver {
     receiver: mpsc::Receiver<Frame>,
+    _allocation: Arc<Allocation>,
 }
 
 impl Receiver {
@@ -254,7 +369,7 @@ mod tests {
         let value = message(1);
         let n = serde_json::to_string(&value).unwrap().len();
         let pool = Pool::new(limits(n, n * 2, n * 4));
-        let (sender, receiver) = pool.channel(1);
+        let (sender, receiver) = pool.channel(1).unwrap();
         assert!(sender
             .try_send_with(&value, |_, _| Ok("x".repeat(n + 1)))
             .is_err());
@@ -277,24 +392,24 @@ mod tests {
             let expected = serde_json::to_string(&first).unwrap();
             let n = expected.len();
             let pool = Pool::new(limits(n, n * 2, n * 3));
-            let (sender, mut receiver) = pool.channel(slots);
-            let (other, mut other_receiver) = pool.channel(slots);
+            let (sender, mut receiver) = pool.channel(slots).unwrap();
+            let (other, mut other_receiver) = pool.channel(slots).unwrap();
             sender.try_send(first).unwrap();
             let frame = receiver.try_recv_frame().unwrap();
             assert_eq!(frame.text, expected);
             sender.try_send(message(128)).unwrap();
             assert!(sender.try_send(message(128)).is_err());
             assert_eq!(sender.bytes.available_permits(), 0);
-            assert_eq!(pool.bytes.available_permits(), n);
+            assert_eq!(pool.available_bytes(), n);
             other.try_send(message(128)).unwrap();
             assert!(other.try_send(message(128)).is_err());
-            assert_eq!(pool.bytes.available_permits(), 0);
+            assert_eq!(pool.available_bytes(), 0);
             drop(frame);
-            assert_eq!(pool.bytes.available_permits(), n);
+            assert_eq!(pool.available_bytes(), n);
             drop(receiver);
-            assert_eq!(pool.bytes.available_permits(), n * 2);
+            assert_eq!(pool.available_bytes(), n * 2);
             drop(other_receiver.try_recv_frame().unwrap());
-            assert_eq!(pool.bytes.available_permits(), n * 3);
+            assert_eq!(pool.available_bytes(), n * 3);
         }
     }
 
@@ -302,15 +417,15 @@ mod tests {
     fn failed_encoding_admission_and_closed_receivers_release_slots_and_bytes() {
         let n = serde_json::to_string(&message(1)).unwrap().len();
         let pool = Pool::new(limits(n, n * 2, n * 3));
-        let (sender, receiver) = pool.channel(1);
+        let (sender, receiver) = pool.channel(1).unwrap();
         assert!(sender.try_send(message(2)).is_err());
         assert_eq!(sender.sender.capacity(), 1);
-        assert_eq!(pool.bytes.available_permits(), n * 3);
+        assert_eq!(pool.available_bytes(), n * 3);
         sender.try_send(message(1)).unwrap();
         assert!(sender.try_send(message(1)).is_err());
-        assert_eq!(pool.bytes.available_permits(), n * 2);
+        assert_eq!(pool.available_bytes(), n * 2);
         drop(receiver);
-        assert_eq!(pool.bytes.available_permits(), n * 3);
+        assert_eq!(pool.available_bytes(), n * 3);
         assert!(sender.try_send(message(1)).is_err());
         assert_eq!(sender.bytes.available_permits(), n * 2);
     }
@@ -319,7 +434,7 @@ mod tests {
     async fn byte_headroom_waits_for_inflight_release_and_closed_queue_wakes() {
         let n = serde_json::to_string(&message(1)).unwrap().len();
         let pool = Pool::new(limits(n, n, n * 2));
-        let (sender, mut receiver) = pool.channel(16);
+        let (sender, mut receiver) = pool.channel(16).unwrap();
         sender.try_send(message(1)).unwrap();
         let frame = receiver.try_recv_frame().unwrap();
         assert!(!sender.has_headroom(16));
@@ -345,7 +460,7 @@ mod tests {
         let value = message(1);
         let n = serde_json::to_string(&value).unwrap().len();
         let pool = Pool::new(limits(n, n * 2, n * 3));
-        let (sender, receiver) = pool.channel(1);
+        let (sender, receiver) = pool.channel(1).unwrap();
         assert!(
             matches!(sender.try_send_with(&value, |_, _| Ok("x".repeat(n + 1))),
             Err(SendError::FrameLimit { limit }) if limit == n)
@@ -371,8 +486,8 @@ mod tests {
         let value = message(1);
         let n = serde_json::to_string(&value).unwrap().len();
         let pool = Pool::new(limits(n, n * 2, n * 3));
-        let (sender, receiver) = pool.channel(4);
-        let (other, other_receiver) = pool.channel(4);
+        let (sender, receiver) = pool.channel(4).unwrap();
+        let (other, other_receiver) = pool.channel(4).unwrap();
         sender.try_send(value.clone()).unwrap();
         sender.try_send(value.clone()).unwrap();
         assert!(matches!(
@@ -391,6 +506,80 @@ mod tests {
         drop(receiver);
         drop(other_receiver);
         assert_eq!(pool.available_bytes(), n * 3);
+    }
+
+    #[test]
+    fn borrower_cannot_consume_another_connections_maximum_frame_guarantee() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n * 4, n * 4));
+        let (borrower, _borrowed_output) = pool.channel(8).unwrap();
+        let (healthy, mut healthy_output) = pool.channel(8).unwrap();
+        for _ in 0..3 {
+            borrower.try_send(value.clone()).unwrap();
+        }
+        assert!(matches!(
+            borrower.try_send(value.clone()),
+            Err(SendError::GlobalBudget)
+        ));
+        healthy.try_send(value.clone()).unwrap();
+        assert_eq!(
+            healthy_output.try_recv_frame().unwrap().text,
+            serde_json::to_string(&value).unwrap()
+        );
+    }
+
+    #[test]
+    fn empty_connections_reserve_capacity_without_leasing_bytes() {
+        let pool = Pool::new(limits(100, 100, 200));
+        let first = pool.channel(1).unwrap();
+        let second = pool.channel(1).unwrap();
+        assert_eq!(pool.available_bytes(), 200);
+        assert_eq!(pool.budget.state.lock().unwrap().reserved, 200);
+        assert!(matches!(pool.channel(1), Err(SendError::GlobalBudget)));
+        drop(first);
+        assert!(pool.channel(1).is_ok());
+        drop(second);
+        assert_eq!(pool.budget.state.lock().unwrap().reserved, 0);
+    }
+
+    #[test]
+    fn reservation_outlives_channel_until_inflight_frame_is_released() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n, n));
+        let (sender, mut receiver) = pool.channel(1).unwrap();
+        sender.try_send(value).unwrap();
+        let frame = receiver.try_recv_frame().unwrap();
+        drop(sender);
+        drop(receiver);
+        assert!(matches!(pool.channel(1), Err(SendError::GlobalBudget)));
+        drop(frame);
+        assert_eq!(pool.available_bytes(), n);
+        assert!(pool.channel(1).is_ok());
+    }
+
+    #[test]
+    fn dropping_queued_frames_recalculates_borrowing_around_inflight_frame() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n * 3, n * 3));
+        let (sender, mut receiver) = pool.channel(3).unwrap();
+        for _ in 0..3 {
+            sender.try_send(value.clone()).unwrap();
+        }
+        let frame = receiver.try_recv_frame().unwrap();
+        assert!(matches!(pool.channel(1), Err(SendError::GlobalBudget)));
+        drop(receiver);
+        assert_eq!(pool.budget.state.lock().unwrap().borrowed, 0);
+        assert_eq!(pool.available_bytes(), n * 2);
+        let replacement = pool.channel(1).unwrap();
+        drop(sender);
+        assert_eq!(pool.budget.state.lock().unwrap().reserved, n * 2);
+        drop(frame);
+        assert_eq!(pool.budget.state.lock().unwrap().reserved, n);
+        drop(replacement);
+        assert_eq!(pool.budget.state.lock().unwrap().reserved, 0);
     }
 
     #[test]

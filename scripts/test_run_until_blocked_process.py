@@ -39,6 +39,22 @@ STALL_SECONDS = 5
 
 
 class RunUntilBlockedProcesses(ProcessTestCase):
+    def test_connection_guarantees_reject_excess_client_without_interrupting_play(self):
+        frame = 16 * 1024 * 1024
+        self.server("--outbound-client-bytes", frame, "--outbound-total-bytes", frame * 2)
+        player, _ = self.client()
+        observer, _ = self.client(SPECTATOR_TOKEN, observe=True)
+        excess = self.launch("tor-client-headless", ["--connect", self.address], token=SPECTATOR_TOKEN)
+        rejected = self.frame(excess, lambda value: value.get("type") == "fatal")
+        self.assertEqual(rejected["error"], "Authentication failed: InvalidRequest")
+        self.assertNotIn(SPECTATOR_TOKEN, rejected["error"])
+        self.assertNotEqual(excess.child.wait(timeout=15), 0)
+        final = self.act(player, {"type": "wait"})
+        self.assertIsNone(final["error"])
+        observed = self.frame(observer, lambda value: value["state"] == final["state"])
+        self.assertEqual(observed["state"]["observation"]["tick"], "100")
+        self.assertIsNone(observer.child.poll())
+
     def test_invalid_outbound_limits_fail_before_creating_or_changing_save(self):
         configurations = [
             ["--outbound-frame-bytes", "0"],

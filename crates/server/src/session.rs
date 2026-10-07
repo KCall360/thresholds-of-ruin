@@ -227,7 +227,7 @@ impl Service {
         account: &Account,
         frontend: String,
     ) -> Result<Connection, Failure> {
-        if !valid_label(&frontend) || self.clients.len() >= 128 {
+        if !valid_label(&frontend) || self.clients.len() >= self.outbound.connection_limit() {
             return Err(Failure::new(
                 ErrorCode::InvalidRequest,
                 "Connection is unavailable",
@@ -237,8 +237,11 @@ impl Service {
             Failure::new(ErrorCode::InvalidRequest, "Connection identity exhausted")
         })?;
         let id = self.next_client;
+        let (messages, receiver) = self
+            .outbound
+            .channel(QUEUE)
+            .map_err(|_| Failure::new(ErrorCode::InvalidRequest, "Connection is unavailable"))?;
         self.next_client = next;
-        let (messages, receiver) = self.outbound.channel(QUEUE);
         let (close, closing) = watch::channel(false);
         let actors: Vec<_> = self
             .engine
@@ -2824,9 +2827,43 @@ mod tests {
     }
 
     #[test]
+    fn rejected_connection_preserves_identity_and_waits_for_transport_release() {
+        let frame = tor_protocol::MAX_RESPONSE_BYTES;
+        let mut service = Service::with_outbound_limits(
+            Engine::memory(Scenario::two_room(0)).unwrap(),
+            crate::OutboundLimits {
+                frame_bytes: frame,
+                client_bytes: frame,
+                total_bytes: frame,
+            },
+        )
+        .unwrap();
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let connection = service.connect(&account, "first".into()).unwrap();
+        service.disconnect(connection.id);
+        let next = service.next_client;
+        assert!(service.connect(&account, "rejected".into()).is_err());
+        assert_eq!(service.next_client, next);
+        drop(connection);
+        let replacement = service.connect(&account, "replacement".into()).unwrap();
+        assert_eq!(replacement.id, next);
+    }
+
+    #[test]
     fn action_broadcast_observes_once_per_actor_with_independent_client_streams() {
         for watchers in [1, 8, 32] {
-            let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+            let mut limits = crate::OutboundLimits::default();
+            limits.total_bytes = limits.total_bytes.max(watchers * limits.frame_bytes);
+            let mut service = Service::with_outbound_limits(
+                Engine::memory(Scenario::two_room(0)).unwrap(),
+                limits,
+            )
+            .unwrap();
             let account = Account {
                 role: AccessRole::Spectator,
                 user: "observer".into(),

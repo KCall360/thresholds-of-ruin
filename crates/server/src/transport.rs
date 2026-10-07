@@ -377,7 +377,7 @@ mod tests {
             client_bytes: bytes,
             total_bytes: bytes,
         }));
-        let (sender, mut receiver) = pool.channel(16);
+        let (sender, mut receiver) = pool.channel(16).unwrap();
         sender.try_send(message).unwrap();
         let frame = receiver.try_recv_frame().unwrap();
         let destroyed = Arc::new(AtomicBool::new(false));

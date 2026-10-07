@@ -199,8 +199,14 @@ failures, client byte pressure and aggregate byte pressure. The codec reports
 frame and retained-state capacity separately from serialization errors; callers
 do not infer categories from diagnostic text. Rejected admission releases its
 queue reservation and byte permits. Admitted permits remain owned through
-queued and in-flight output. Fair aggregate allocation remains a separate host
-policy; these failure types do not change simulation scheduling or durability.
+queued and in-flight output. Each admitted connection reserves one maximum-frame
+allowance and can borrow remaining aggregate capacity. Reserved allowances plus
+borrowing cannot exceed the total budget; actual encoded bytes are accounted
+separately. Closing a connection releases its allowance only after its senders,
+receiver and all in-flight frames are gone. The connection ceiling is the smaller
+of 128 and total/frame bytes (16 with default limits), and active borrowing can
+reduce capacity for new admissions. These host limits do not change simulation
+scheduling or durability. Protocol capability advertisement remains pending.
 
 A single action or travel request can generate multiple updates. Clients do not
 poll to discover changes. Delivery and rendering are independent: a client may
