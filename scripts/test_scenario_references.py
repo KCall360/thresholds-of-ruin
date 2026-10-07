@@ -6,6 +6,8 @@ full (not built from fragments) so that a search finds every user.
 """
 from pathlib import Path
 import re
+import hashlib
+import json
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +20,26 @@ def test_sources():
 
 
 class ScenarioReferences(unittest.TestCase):
+    def test_certificates_match_repository_lf_source_bytes(self):
+        mismatches = []
+        for certificate_path in sorted((ROOT / "scenarios").rglob("validation.json")):
+            package = certificate_path.parent
+            certificate = json.loads(certificate_path.read_text(encoding="utf-8"))
+            indexed = json.loads((package / "index.json").read_text(encoding="utf-8"))
+            expected = dict(certificate["files"])
+            expected.update((region["file"], region["hash"]) for region in indexed["regions"])
+            for name, digest in expected.items():
+                source = (package / name).read_bytes()
+                # .gitattributes requires LF. Verify the bytes a fresh checkout
+                # receives, even when a local editor accidentally wrote CRLF.
+                checkout = source.replace(b"\r\n", b"\n")
+                if source != checkout:
+                    mismatches.append(str((package / name).relative_to(ROOT)) + ": requires LF")
+                if hashlib.sha256(checkout).hexdigest() != digest:
+                    mismatches.append(str((package / name).relative_to(ROOT)))
+        self.assertEqual(mismatches, [],
+                         "Regenerate certificates from repository LF bytes; local CRLF hashes cannot survive checkout")
+
     def test_every_test_package_is_named_by_a_test(self):
         packages = sorted(p.name for p in (ROOT / "scenarios/tests").iterdir() if (p / "scenario.toml").exists())
         self.assertTrue(packages)

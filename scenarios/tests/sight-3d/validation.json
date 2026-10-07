@@ -1,10 +1,10 @@
 {
   "validator": "tor-scenario-8",
   "ruleset": "dungeon-v22",
-  "content_hash": "7b94629991287c9c0b6490efc178b51537bfac960b24aeef2db4aba993408044",
+  "content_hash": "c81d4507525c2893f12e1a670b6607025884a3702d2cd4e3b7ff58255ade23c2",
   "files": {
     "index.json": "e9b4ef9ad159f60dbeb569718af15063e40ab1c2722aa7296b5c4414664442b9",
-    "scenario.toml": "b0699bf58b759837112871ca7abf97cb1bb79c7ce5c3c299f78e14d759e1c501"
+    "scenario.toml": "1570c481e45f114775c4a5f9528fd389b67769fcb45e8033592847493d66b4e1"
   },
   "regions": 1,
   "model_hash": "54369b2062352a964e9b08b6cd1caff7151fe4f37ab3366758deccd823a16692",

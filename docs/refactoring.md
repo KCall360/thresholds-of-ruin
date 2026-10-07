@@ -2553,3 +2553,17 @@ PR #74 subsequently passed all nine exact-head CI jobs, merged, and its verified
 immutable desktop build was activated. Semantic generation remains unpublished:
 its broad debug gate, release measurements and final-head CI remain pending.
 All six original refactor sequences remain in scope.
+
+**Scenario checkout integrity correction (2026-10-07).** PR #75's first Linux
+profiles exposed certificates generated from local CRLF manifest edits, whereas
+Git's existing LF policy supplies different bytes on checkout. All 33 manifests
+and two edited recipes were restored to LF and certificates regenerated from
+those exact bytes. Integrity hashing remains byte-exact. A cheap repository
+regression checks both LF source bytes and every manifest/index/region digest.
+The actual-process regression fails against the prior committed certificates,
+then passes with corrected certificates: both authored and generated packages
+start without revalidation and recover exact state after their source disappears.
+All 33 release validators and all scenario process cases passed. Final debug
+publication evidence and replacement exact-head CI are still required; failed CI
+is retained, not rerun as a substitute for a correction. All original work
+sequences remain in scope.

@@ -9,6 +9,30 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_lf_checkout_packages_start_and_resume_without_revalidation(self):
+        for name in ["two-room", "tests/generated-filler"]:
+            with self.subTest(package=name):
+                package = self.directory / name.replace("/", "-")
+                shutil.copytree(ROOT / "scenarios" / name, package)
+                for path in package.rglob("*"):
+                    if path.is_file() and path.suffix in [".toml", ".json"]:
+                        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
+                before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+                self.save = self.directory / (name.replace("/", "-") + ".db")
+                server = self.server(scenario=package)
+                player, initial = self.client()
+                self.flush_save()
+                player.stop()
+                server.stop()
+                self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                         for p in package.rglob("*") if p.is_file()})
+                package.rename(package.with_name(package.name + "-unavailable"))
+                server = self.server(seed=None)
+                player, restored = self.client()
+                self.assertEqual(restored["state"], initial["state"])
+                player.stop()
+                server.stop()
+
     def test_validator_rejects_oversized_generated_counts_without_panicking_or_rewriting(self):
         package = self.directory / "oversized-pool"
         shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
