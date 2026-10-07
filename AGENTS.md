@@ -434,6 +434,12 @@ verification passed, but Linux CI exposed a fixed-size slow-reader workload that
 no longer filled socket buffers with compact deltas. The revised traffic-based
 workload passed both Windows pressure/restart cases at normal and 4 MiB budgets;
 refreshed final-head full verification and Windows/Linux CI remain required.
+The first Linux traffic-sized run passed its 268 Python/process tests but hit
+CI's 35-minute job limit before completing Rust checks. The shared-fact counter
+now includes identically broadcast observation events and intention status,
+excluding replies, readiness and stream metadata. Both Windows 4 MiB cases
+passed at 4,527 turns each instead of 12,509, preserving pressure thresholds and
+stall/exit deadlines. The required full gate and final-head CI still apply.
 Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
 full observations independently of individual frame size, with failing-first
 regressions and real ASCII/text held-repair checks. Earlier pre-bound measurements

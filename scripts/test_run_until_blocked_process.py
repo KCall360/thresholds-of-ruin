@@ -179,7 +179,7 @@ class RunUntilBlockedProcesses(ProcessTestCase):
 
     def slow_spectator_recovery(self, *server_args):
         server = self.server(*server_args)
-        player_relay = StreamRelay(self.address, measure_observations=True)
+        player_relay = StreamRelay(self.address, measure_actor_facts=True)
         self.addCleanup(player_relay.close)
         player = self.launch("tor-client-headless", ["--connect", player_relay.address], token=TOKEN)
         initial = self.frame(player, lambda f: f["type"] == "ready")
@@ -197,8 +197,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
             final = self.act(player, {"type": "wait"})
             self.assertIsNone(final["error"])
             observed_bytes, largest_frame = player_relay.traffic()
-            # State payloads alone must exceed TCP buffering plus a full host
-            # message queue, one in-flight frame and the relay's held frame.
+            # Shared state, event and intention payloads must exceed TCP buffering
+            # plus a full host message queue, one in-flight frame and the relay's
+            # held frame.
             # Extra metadata/window allowance keeps differing stream cursors
             # and the OS's receive-buffer accounting out of the lower bound.
             pressure_bytes = send_budget + (OUTBOUND_SLOTS + 2) * (largest_frame + 64) + 2 * RECEIVE_BUFFER
@@ -206,9 +207,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
                 break
         else:
             self.fail(f"Pressure workload exhausted {MAX_PRESSURE_TURNS} turns: "
-                      f"{observed_bytes} observation bytes, {pressure_bytes} required, "
+                      f"{observed_bytes} shared actor bytes, {pressure_bytes} required, "
                       f"{send_budget} TCP budget, {largest_frame} largest frame")
-        print(f"Slow-spectator pressure: {turns} turns, {observed_bytes} observation bytes, "
+        print(f"Slow-spectator pressure: {turns} turns, {observed_bytes} shared actor bytes, "
               f"{pressure_bytes} required, {send_budget} TCP budget, {largest_frame} largest frame",
               file=sys.stderr)
         self.assertTrue(relay.held.wait(timeout=STALL_SECONDS), "spectator relay must actually hold output")

@@ -19,15 +19,36 @@ def exact(stream, size):
     return bytes(result)
 
 
+def actor_fact_bytes(message):
+    """Count only facts broadcast identically to clients watching one actor.
+
+    Observation state/events and intention status are shared; replies, stream
+    metadata and control readiness differ between a player and spectator.
+    """
+    if message.get('type') != 'update':
+        return 0
+    body = message['update']['body']
+    if body['type'] in ('observation', 'observation_delta'):
+        values = [body['state']]
+        if body.get('event') is not None:
+            values.append(body['event'])
+    elif body['type'] == 'intention':
+        values = [body['status']]
+    else:
+        return 0
+    return sum(len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+               for value in values)
+
+
 class StreamRelay:
-    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_observations=False):
+    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_actor_facts=False):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
         (bytes) on the relay's server connection keeps a paused relay from
         absorbing the server's output in socket buffers, which Linux grows to
         megabytes, so the server's own queue fills instead."""
-        self.measure_observations = measure_observations
+        self.measure_actor_facts = measure_actor_facts
         self._traffic_lock = threading.Lock()
-        self._observation_bytes = 0
+        self._actor_fact_bytes = 0
         self._largest_frame = 0
         self.large_retained_base = large_retained_base
         self.upstream = upstream
@@ -91,20 +112,13 @@ class StreamRelay:
                 if length > 16 * 1024 * 1024:
                     raise ValueError('Oversized test frame')
                 payload = exact(upstream, length)
-                if self.measure_observations:
+                if self.measure_actor_facts:
                     message = json.loads(payload) if prefix[0] == 0x81 else None
-                    body = (message or {}).get('update', {}).get('body', {})
-                    # Count only actor-state bytes, which are identical for the
-                    # player and a spectator with the same exact observation base.
-                    # Replies and authority metadata cannot inflate this count.
-                    state_bytes = 0
-                    if body.get('type') in ('observation', 'observation_delta'):
-                        state_bytes = len(json.dumps(body['state'], ensure_ascii=False,
-                                                     separators=(',', ':')).encode('utf-8'))
-                        if state_bytes > len(payload):
-                            raise ValueError('Observation byte accounting exceeds its frame')
+                    shared_bytes = actor_fact_bytes(message) if message is not None else 0
+                    if shared_bytes > len(payload):
+                        raise ValueError('Shared actor byte accounting exceeds its frame')
                     with self._traffic_lock:
-                        self._observation_bytes += state_bytes
+                        self._actor_fact_bytes += shared_bytes
                         self._largest_frame = max(self._largest_frame, len(prefix) + len(extra) + len(payload))
                 if not self.gate.is_set():
                     self.held.set()
@@ -147,13 +161,13 @@ class StreamRelay:
     def reset_traffic(self):
         """Start a measurement window after the initial snapshot is delivered."""
         with self._traffic_lock:
-            self._observation_bytes = 0
+            self._actor_fact_bytes = 0
             self._largest_frame = 0
 
     def traffic(self):
-        """Measured actor-state bytes and largest frame; no payloads are retained."""
+        """Measured shared actor facts and largest frame; no payloads are retained."""
         with self._traffic_lock:
-            return self._observation_bytes, self._largest_frame
+            return self._actor_fact_bytes, self._largest_frame
 
     def corrupt_observation(self, message):
         """Apply one requested test corruption while preserving its envelope."""
