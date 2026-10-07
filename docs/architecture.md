@@ -332,6 +332,14 @@ descriptor copied during process creation cannot prolong ownership after
 shutdown. The worker keeps its lease until it finishes, and shutdown joins it
 before returning.
 
+Backend action and direction facts have independent types. Exhaustive mappings
+connect requested wire actions, backend receipt/journal facts, native simulation
+work and disclosed history. Mapping a request does not resolve a target or mutate
+state: durable receipt lookup still precedes checks that require current targets.
+Receipts retain the original quantity choice even when execution consumes or
+merges a stack. Saved action DTOs enumerate numeric targets, quantities and
+variants independently of both wire and simulation serializers.
+
 Persisted values also used by the protocol have save-owned typed schemas at the
 storage boundary. They specify actor and journal identities, actions, annotation
 metadata and revision maps independently of wire serializers. The existing strict

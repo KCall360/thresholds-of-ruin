@@ -1,6 +1,7 @@
 use tempfile::tempdir;
-use tor_protocol::{Action, ActorId, Command as WireCommand, Direction, Position};
+use tor_protocol::{ActorId, Command as WireCommand, Position};
 use tor_server::journal::Command;
+use tor_server::journal::{Action, Direction};
 use tor_server::{Engine, Scenario};
 
 fn command(engine: &mut Engine, id: &str, command: Command) -> tor_server::CommandResult {

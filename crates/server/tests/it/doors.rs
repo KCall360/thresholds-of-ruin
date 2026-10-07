@@ -1,5 +1,6 @@
 use tempfile::tempdir;
-use tor_protocol::{Action, ActorId, ErrorCode, Position};
+use tor_protocol::{ActorId, ErrorCode, Position};
+use tor_server::journal::Action;
 use tor_server::journal::Command;
 use tor_server::{Engine, Scenario};
 
@@ -62,7 +63,7 @@ fn doors_replay_retry_and_rewind_with_disclosed_reach_and_approaches() {
             &mut engine,
             &format!("approach-{step}"),
             Action::Move {
-                direction: tor_protocol::Direction::East,
+                direction: tor_server::journal::Direction::East,
             },
         );
     }
@@ -209,7 +210,7 @@ fn new_fixture_places_its_only_door_in_an_unhinted_one_cell_hall() {
             &mut engine,
             &format!("approach-{step}"),
             Action::Move {
-                direction: tor_protocol::Direction::East,
+                direction: tor_server::journal::Direction::East,
             },
         );
     }
@@ -240,7 +241,7 @@ fn new_fixture_places_its_only_door_in_an_unhinted_one_cell_hall() {
             &mut engine,
             &format!("cross-{step}"),
             Action::Move {
-                direction: tor_protocol::Direction::East,
+                direction: tor_server::journal::Direction::East,
             },
         );
     }

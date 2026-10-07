@@ -1,5 +1,6 @@
 """Quantity transfers through real clients using an ordinary validated package."""
 import json
+import sqlite3
 import unittest
 
 from process_harness import ProcessTestCase
@@ -30,6 +31,35 @@ class ItemProcesses(ProcessTestCase):
         resumed = self.launch('tor-client-text', ['--script', '--connect', self.address])
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
+
+    def test_saved_action_facts_preserve_original_quantity_and_execution(self):
+        player, _ = self.client()
+        for item, quantity in [("10", None), ("11", "2")]:
+            taken = self.act(player, {"type": "take", "item": item, "quantity": quantity})
+            self.assertIsNone(taken["error"])
+        self.assertEqual(taken["state"]["observation"]["inventory"][0]["quantity"], "12")
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            rows = db.execute("SELECT sequence,frame FROM journal WHERE sequence>0 "
+                "UNION ALL SELECT sequence,frame FROM history ORDER BY sequence").fetchall()
+        records = [json.loads(frame[24:])["record"] for _, frame in rows]
+        admissions = [r for r in records if r["entry"]["content"]["type"] == "intention_admitted"]
+        self.assertEqual(len(admissions), 2)
+        for record, item, quantity, executed_quantity in zip(admissions, [10, 11], [None, 2], [10, 2]):
+            content = record["entry"]["content"]
+            original = {"type": "take", "item": item, "quantity": quantity}
+            self.assertEqual(record["receipt"]["command"]["action"], original)
+            self.assertEqual(content["action"], original)
+            effects = [r for r in records if r["entry"]["content"].get("admission") == record["entry"]["id"]]
+            self.assertEqual(len(effects), 1)
+            effect = effects[0]["entry"]["content"]
+            self.assertEqual(effect["action"], original)
+            self.assertEqual(effect["event"]["quantity"], executed_quantity)
+            self.assertIsNone(effects[0]["receipt"])
+        player.stop(); self.game.stop(); self.start()
+        _, restored = self.client()
+        self.assertEqual(restored["state"], taken["state"])
+        self.assertEqual(restored["intentions"], [])
 
     def test_adventure_quantities_count_from_one_stack(self):
         p, _ = self.adventure()

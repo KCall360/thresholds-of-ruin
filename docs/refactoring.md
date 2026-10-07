@@ -2394,3 +2394,30 @@ consumers now use the recorded current-contract sample with version assertions.
 All 877 workspace Rust tests, including example targets, passed. Failed gates
 are retained and do not count as full passes; fresh final-head debug/release
 verification and Windows/Linux CI remain required before merge or activation.
+
+
+### Backend action facts and explicit save DTO mapping (in development)
+
+Backend commands and journal action facts now use an independent action enum
+and request-direction enum. Transport conversion, native simulation conversion,
+history disclosure and save-owned numeric DTO conversion are exhaustive. No JSON
+round trip or implicit conversion selects a domain variant. Actor targets in the
+backend action use native actor identity rather than the wire identity wrapper.
+The stored action representation is unchanged, so the save version remains current.
+
+Original receipt commands remain distinct from queued native work and linked
+execution effects. The conversion does not inspect a live target. Matching retries
+still return their original admission after a ground stack is consumed, including
+checkpoint and journal recovery; an explicit quantity with the same eventual effect
+is a conflicting request when it reuses that request ID. Admission does not apply
+the action. All supported request axes are mapped explicitly; native directions
+outside that set retain the existing fallible record projection.
+
+Focused Rust checks passed 188 server unit tests and 147 integration tests.
+A new real-client acceptance case checks numeric saved action facts, original
+optional quantities, separate execution results and restart. All 17 item/intention process cases passed, including native clients, as did
+workspace all-target Clippy, Ruff and five documentation checks. Release comparison
+and required full/final-head CI remain pending.
+Opaque interaction targets, broader domain identities, admission/scheduler
+responsibilities, scenario compilation and persistence/history work remain open.
+No scripting runtime or text-client product work is included.

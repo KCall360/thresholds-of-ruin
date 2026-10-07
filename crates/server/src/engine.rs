@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::journal::Direction;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::num::NonZeroU64;
@@ -12,7 +14,8 @@ use uuid::Uuid;
 
 use crate::adapt;
 use crate::journal::{
-    Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation, WizardResult,
+    Action, Command, JournalContent, JournalEntry, Position, WizardItem, WizardOperation,
+    WizardResult,
 };
 
 pub(crate) const ARCHIVE_VERSION: u32 = 21;
@@ -1535,7 +1538,7 @@ impl Engine {
                         journey,
                         *step,
                         tor_simulation::TravelStep {
-                            direction: adapt::direction(*direction),
+                            direction: adapt::simulation_direction(*direction),
                             destination: *destination,
                         },
                         Some(record.entry.id.clone()),
@@ -1652,7 +1655,7 @@ impl Engine {
 
     pub fn next_ai_action(&self) -> Option<(ActorId, Action)> {
         let (actor, action) = self.game.next_ai_action()?;
-        let action = adapt::disclosed_action(action)?;
+        let action = adapt::recorded_action(action)?;
         Some((ActorId(actor.0), action))
     }
 
@@ -2051,7 +2054,7 @@ impl Engine {
                 },
                 audience: Audience::Actor,
                 content: JournalContent::Action {
-                    action: tor_protocol::Action::Wait,
+                    action: Action::Wait,
                     event: adapt::event(outcome.kind),
                 },
             };
@@ -2063,7 +2066,7 @@ impl Engine {
                 branch: self.branch().clone(),
                 command: Command::Act {
                     expected_revision,
-                    action: tor_protocol::Action::Wait,
+                    action: Action::Wait,
                 },
             };
             self.append_record(Record {
@@ -2320,9 +2323,7 @@ impl Engine {
                     },
                     Audience::Actor,
                     JournalContent::Action {
-                        action: Action::Attack {
-                            target: ActorId(target.0),
-                        },
+                        action: Action::Attack { target },
                         event: crate::journal::Event::PreparationPaused,
                     },
                 )
@@ -2893,7 +2894,7 @@ impl Candidate {
                     .connect_portal_area(
                         tor_world::Passage {
                             from: adapt::location(*from),
-                            direction: adapt::direction(*direction),
+                            direction: adapt::simulation_direction(*direction),
                             to: adapt::location(*to),
                         },
                         *rotation,
@@ -2933,7 +2934,7 @@ impl Candidate {
                     .connect_area(
                         tor_world::Passage {
                             from: adapt::location(*from),
-                            direction: adapt::direction(*direction),
+                            direction: adapt::simulation_direction(*direction),
                             to: adapt::location(*to),
                         },
                         *quarter_turns,
@@ -2980,7 +2981,7 @@ impl Candidate {
                     .connect(
                         tor_world::Passage {
                             from: adapt::location(*from),
-                            direction: adapt::direction(*direction),
+                            direction: adapt::simulation_direction(*direction),
                             to: adapt::location(*to),
                         },
                         *quarter_turns,
@@ -3200,7 +3201,7 @@ mod scaling_tests {
                         let action = trace.secondary[secondary % trace.secondary.len()]
                             .resolve(&engine.state(actor).unwrap());
                         secondary += 1;
-                        action
+                        Action::from_wire(&action)
                     } else {
                         Action::Wait
                     };
@@ -3208,7 +3209,7 @@ mod scaling_tests {
                     request += 1;
                 }
                 let action = step.resolve(&engine.state(ActorId(1)).unwrap());
-                checked_action(&mut engine, ActorId(1), action, request);
+                checked_action(&mut engine, ActorId(1), Action::from_wire(&action), request);
                 request += 1;
             }
         }

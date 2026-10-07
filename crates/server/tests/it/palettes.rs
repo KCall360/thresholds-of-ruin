@@ -59,7 +59,7 @@ fn union(parts: &[BTreeSet<String>]) -> BTreeSet<String> {
 
 /// Act as the character after any AI turns due first.
 fn act(engine: &mut Engine, action: Action) -> Result<(), tor_server::Failure> {
-    support::play(engine, action).map(|_| ())
+    support::play(engine, tor_server::journal::Action::from_wire(&action)).map(|_| ())
 }
 
 /// Step east along the caves' straight corridor, waiting for rats in the way.

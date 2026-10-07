@@ -1,5 +1,6 @@
+use crate::journal::Direction;
 use crate::journal::{Position, RegionView, WizardItem, WizardOperation};
-use tor_protocol::{ActorId, Direction, EntryId};
+use tor_protocol::{ActorId, EntryId};
 
 pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
     if text.trim_start().starts_with('{') {

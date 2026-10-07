@@ -1,6 +1,7 @@
 use crate::support;
 use tempfile::tempdir;
 use tor_protocol::*;
+use tor_server::journal::Action;
 use tor_server::journal::{Command, Position, WizardItem, WizardOperation};
 use tor_server::{Engine, Scenario};
 

@@ -1993,7 +1993,7 @@ mod tests {
                     &engine.branch().clone(),
                     crate::journal::Command::AdmitIntention {
                         expected_revision: 0,
-                        action: Action::Wait,
+                        action: crate::journal::Action::Wait,
                     },
                 )
                 .unwrap();
@@ -2577,8 +2577,8 @@ mod tests {
                 &engine.branch().clone(),
                 crate::journal::Command::AdmitIntention {
                     expected_revision: 0,
-                    action: Action::Move {
-                        direction: Direction::East,
+                    action: crate::journal::Action::Move {
+                        direction: crate::journal::Direction::East,
                     },
                 },
             )
@@ -2936,7 +2936,7 @@ mod tests {
                     &service.engine.branch().clone(),
                     crate::journal::Command::Act {
                         expected_revision: 0,
-                        action: Action::Wait,
+                        action: crate::journal::Action::Wait,
                     },
                 )
                 .unwrap();
@@ -3000,7 +3000,7 @@ mod tests {
                     &service.engine.branch().clone(),
                     crate::journal::Command::Act {
                         expected_revision: expected.revision,
-                        action: Action::Wait,
+                        action: crate::journal::Action::Wait,
                     },
                 )
                 .unwrap();

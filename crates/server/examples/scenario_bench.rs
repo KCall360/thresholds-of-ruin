@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &engine.branch().clone(),
                 tor_server::journal::Command::Act {
                     expected_revision: 0,
-                    action: tor_protocol::Action::Wait,
+                    action: tor_server::journal::Action::Wait,
                 },
             )?;
             let action_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &durable.branch().clone(),
                 tor_server::journal::Command::Act {
                     expected_revision: 0,
-                    action: tor_protocol::Action::Wait,
+                    action: tor_server::journal::Action::Wait,
                 },
             )?;
             let expected = durable.state(actor)?;

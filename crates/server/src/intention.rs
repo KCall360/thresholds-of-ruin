@@ -311,7 +311,7 @@ impl Engine {
             .game
             .admit_travel_intention(SimActor(actor.0), step)
             .map_err(|_| unavailable())?;
-        let action = adapt::disclosed_action(tor_simulation::Action::Move(step.direction))
+        let action = adapt::recorded_action(tor_simulation::Action::Move(step.direction))
             .ok_or_else(unavailable)?;
         let entry = JournalEntry {
             intention_suspensions: Vec::new(),
@@ -862,7 +862,7 @@ impl Engine {
             Ok(outcome) => {
                 let action = execution
                     .action
-                    .and_then(adapt::disclosed_action)
+                    .and_then(adapt::recorded_action)
                     .ok_or_else(invalid_archive)?;
                 let outcome = self.resolve_action_transition(
                     &mut candidate,

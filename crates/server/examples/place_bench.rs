@@ -5,6 +5,7 @@ use std::time::Instant;
 use tor_client_ascii::{render::Canvas, App};
 use tor_client_common::ClientState;
 use tor_protocol::*;
+use tor_server::journal::Action;
 use tor_server::{journal, Engine, SavePolicy, Scenario};
 
 #[derive(Deserialize)]

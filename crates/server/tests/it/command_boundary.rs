@@ -92,3 +92,27 @@ fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
     .is_err());
     assert!(tor_protocol::Command::try_from(Command::PausePreparation).is_err());
 }
+
+#[test]
+fn backend_actions_use_independent_types_and_numeric_save_payloads() {
+    use std::any::TypeId;
+    use tor_server::journal::{Action as BackendAction, Direction as BackendDirection};
+    assert_ne!(TypeId::of::<BackendAction>(), TypeId::of::<Action>());
+    assert_ne!(TypeId::of::<BackendDirection>(), TypeId::of::<Direction>());
+    let action = BackendAction::Attack {
+        target: tor_simulation::ActorId(u64::MAX),
+    };
+    let command = Command::AdmitIntention {
+        expected_revision: u64::MAX,
+        action,
+    };
+    let stored = serde_json::to_value(&command).unwrap();
+    assert_eq!(stored["action"]["target"], serde_json::json!(u64::MAX));
+    assert_eq!(serde_json::from_value::<Command>(stored).unwrap(), command);
+    let wire = tor_protocol::Command::try_from(command.clone()).unwrap();
+    assert_eq!(Command::from_wire(&wire).unwrap(), command);
+    assert_eq!(
+        serde_json::to_value(wire).unwrap()["action"]["target"],
+        u64::MAX.to_string()
+    );
+}

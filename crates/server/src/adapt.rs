@@ -22,58 +22,139 @@ pub fn position(location: w::Location) -> crate::journal::Position {
     }
 }
 
-pub fn direction(direction: p::Direction) -> w::Direction {
-    match direction {
-        p::Direction::North => w::Direction::North,
-        p::Direction::East => w::Direction::East,
-        p::Direction::South => w::Direction::South,
-        p::Direction::West => w::Direction::West,
-        p::Direction::NorthEast => w::Direction::NorthEast,
-        p::Direction::SouthEast => w::Direction::SouthEast,
-        p::Direction::SouthWest => w::Direction::SouthWest,
-        p::Direction::NorthWest => w::Direction::NorthWest,
+use crate::actions as a;
 
-        p::Direction::Up => w::Direction::Up,
-        p::Direction::Down => w::Direction::Down,
+pub fn requested_direction(direction: p::Direction) -> a::Direction {
+    match direction {
+        p::Direction::North => a::Direction::North,
+        p::Direction::East => a::Direction::East,
+        p::Direction::South => a::Direction::South,
+        p::Direction::West => a::Direction::West,
+        p::Direction::NorthEast => a::Direction::NorthEast,
+        p::Direction::SouthEast => a::Direction::SouthEast,
+        p::Direction::SouthWest => a::Direction::SouthWest,
+        p::Direction::NorthWest => a::Direction::NorthWest,
+        p::Direction::Up => a::Direction::Up,
+        p::Direction::Down => a::Direction::Down,
     }
 }
 
-pub fn action(action: &p::Action) -> s::Action {
+pub fn wire_direction(direction: a::Direction) -> p::Direction {
+    match direction {
+        a::Direction::North => p::Direction::North,
+        a::Direction::East => p::Direction::East,
+        a::Direction::South => p::Direction::South,
+        a::Direction::West => p::Direction::West,
+        a::Direction::NorthEast => p::Direction::NorthEast,
+        a::Direction::SouthEast => p::Direction::SouthEast,
+        a::Direction::SouthWest => p::Direction::SouthWest,
+        a::Direction::NorthWest => p::Direction::NorthWest,
+        a::Direction::Up => p::Direction::Up,
+        a::Direction::Down => p::Direction::Down,
+    }
+}
+
+pub fn simulation_direction(direction: a::Direction) -> w::Direction {
+    match direction {
+        a::Direction::North => w::Direction::North,
+        a::Direction::East => w::Direction::East,
+        a::Direction::South => w::Direction::South,
+        a::Direction::West => w::Direction::West,
+        a::Direction::NorthEast => w::Direction::NorthEast,
+        a::Direction::SouthEast => w::Direction::SouthEast,
+        a::Direction::SouthWest => w::Direction::SouthWest,
+        a::Direction::NorthWest => w::Direction::NorthWest,
+        a::Direction::Up => w::Direction::Up,
+        a::Direction::Down => w::Direction::Down,
+    }
+}
+
+pub fn direction(direction: p::Direction) -> w::Direction {
+    simulation_direction(requested_direction(direction))
+}
+
+pub fn requested_action(action: &p::Action) -> a::Action {
     match action {
-        p::Action::Attack { target } => s::Action::Attack {
+        p::Action::Attack { target } => a::Action::Attack {
             target: s::ActorId(target.0),
         },
-        p::Action::SetDoor { door, open } => s::Action::SetDoor {
+        p::Action::SetDoor { door, open } => a::Action::SetDoor {
             door: *door,
             open: *open,
         },
-        p::Action::Move { direction: value } => s::Action::Move(direction(*value)),
-        p::Action::Take { item, quantity } => s::Action::Take {
-            item: s::ItemId(*item),
+        p::Action::Move { direction } => a::Action::Move {
+            direction: requested_direction(*direction),
+        },
+        p::Action::Take { item, quantity } => a::Action::Take {
+            item: *item,
             quantity: *quantity,
         },
-        p::Action::Drop { item, quantity } => s::Action::Drop {
-            item: s::ItemId(*item),
+        p::Action::Drop { item, quantity } => a::Action::Drop {
+            item: *item,
             quantity: *quantity,
         },
-        p::Action::Wait => s::Action::Wait,
+        p::Action::Wait => a::Action::Wait,
     }
 }
 
-pub fn disclosed_action(action: s::Action) -> Option<p::Action> {
+pub fn wire_action(action: &a::Action) -> p::Action {
+    match action {
+        a::Action::Attack { target } => p::Action::Attack {
+            target: p::ActorId(target.0),
+        },
+        a::Action::SetDoor { door, open } => p::Action::SetDoor {
+            door: *door,
+            open: *open,
+        },
+        a::Action::Move { direction } => p::Action::Move {
+            direction: wire_direction(*direction),
+        },
+        a::Action::Take { item, quantity } => p::Action::Take {
+            item: *item,
+            quantity: *quantity,
+        },
+        a::Action::Drop { item, quantity } => p::Action::Drop {
+            item: *item,
+            quantity: *quantity,
+        },
+        a::Action::Wait => p::Action::Wait,
+    }
+}
+
+pub fn action(action: &a::Action) -> s::Action {
+    match action {
+        a::Action::Attack { target } => s::Action::Attack { target: *target },
+        a::Action::SetDoor { door, open } => s::Action::SetDoor {
+            door: *door,
+            open: *open,
+        },
+        a::Action::Move { direction } => s::Action::Move(simulation_direction(*direction)),
+        a::Action::Take { item, quantity } => s::Action::Take {
+            item: s::ItemId(*item),
+            quantity: *quantity,
+        },
+        a::Action::Drop { item, quantity } => s::Action::Drop {
+            item: s::ItemId(*item),
+            quantity: *quantity,
+        },
+        a::Action::Wait => s::Action::Wait,
+    }
+}
+
+pub fn recorded_action(action: s::Action) -> Option<a::Action> {
     Some(match action {
-        s::Action::Move(d) => p::Action::Move {
-            direction: match d {
-                w::Direction::North => p::Direction::North,
-                w::Direction::East => p::Direction::East,
-                w::Direction::South => p::Direction::South,
-                w::Direction::West => p::Direction::West,
-                w::Direction::NorthEast => p::Direction::NorthEast,
-                w::Direction::SouthEast => p::Direction::SouthEast,
-                w::Direction::SouthWest => p::Direction::SouthWest,
-                w::Direction::NorthWest => p::Direction::NorthWest,
-                w::Direction::Up => p::Direction::Up,
-                w::Direction::Down => p::Direction::Down,
+        s::Action::Move(direction) => a::Action::Move {
+            direction: match direction {
+                w::Direction::North => a::Direction::North,
+                w::Direction::East => a::Direction::East,
+                w::Direction::South => a::Direction::South,
+                w::Direction::West => a::Direction::West,
+                w::Direction::NorthEast => a::Direction::NorthEast,
+                w::Direction::SouthEast => a::Direction::SouthEast,
+                w::Direction::SouthWest => a::Direction::SouthWest,
+                w::Direction::NorthWest => a::Direction::NorthWest,
+                w::Direction::Up => a::Direction::Up,
+                w::Direction::Down => a::Direction::Down,
                 w::Direction::EastUp
                 | w::Direction::WestUp
                 | w::Direction::NorthUp
@@ -84,19 +165,17 @@ pub fn disclosed_action(action: s::Action) -> Option<p::Action> {
                 | w::Direction::SouthDown => return None,
             },
         },
-        s::Action::Attack { target } => p::Action::Attack {
-            target: p::ActorId(target.0),
-        },
-        s::Action::SetDoor { door, open } => p::Action::SetDoor { door, open },
-        s::Action::Take { item, quantity } => p::Action::Take {
+        s::Action::Attack { target } => a::Action::Attack { target },
+        s::Action::SetDoor { door, open } => a::Action::SetDoor { door, open },
+        s::Action::Take { item, quantity } => a::Action::Take {
             item: item.0,
             quantity,
         },
-        s::Action::Drop { item, quantity } => p::Action::Drop {
+        s::Action::Drop { item, quantity } => a::Action::Drop {
             item: item.0,
             quantity,
         },
-        s::Action::Wait => p::Action::Wait,
+        s::Action::Wait => a::Action::Wait,
     })
 }
 

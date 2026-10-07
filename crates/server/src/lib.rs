@@ -1,5 +1,6 @@
 //! Authoritative sessions, durable action/annotation history, and WebSocket transport.
 
+mod actions;
 mod adapt;
 mod developer;
 mod diagnostics;

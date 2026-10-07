@@ -394,7 +394,7 @@ impl<'a> JournalLifecycle<'a> {
                         .flatten()
                         .find(|work| work.intention == *intention)
                         .ok_or_else(invalid_archive)?
-                        .target = Some(*target);
+                        .target = Some(ActorId(target.0));
                 }
                 if !matches!(action, Action::Attack { .. }) {
                     self.require_end(record, *intention, IntentionEndKind::Resolved)?;

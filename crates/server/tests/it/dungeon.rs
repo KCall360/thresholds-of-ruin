@@ -1,5 +1,6 @@
 use crate::support::{self, act, act_as, run_ai_turns};
-use tor_protocol::{Action, ActorId, Direction, Position};
+use tor_protocol::{ActorId, Position};
+use tor_server::journal::{Action, Direction};
 use tor_server::{scenario_package, Engine};
 
 #[test]
@@ -27,7 +28,9 @@ fn authored_dungeon_completes_retrieval_and_escape() {
                     Direction::East
                 },
             },
-            |a| Action::Attack { target: a.id },
+            |a| Action::Attack {
+                target: tor_simulation::ActorId(a.id.0),
+            },
         );
         let action = if state
             .observation
@@ -63,7 +66,9 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
         act_as(
             &mut engine,
             ActorId(1),
-            Action::Attack { target: ActorId(2) },
+            Action::Attack {
+                target: tor_simulation::ActorId(2),
+            },
         )
         .unwrap();
         let pending = engine.state(ActorId(1)).unwrap();
@@ -205,7 +210,9 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack { target: ActorId(2) },
+        Action::Attack {
+            target: tor_simulation::ActorId(2),
+        },
     )
     .unwrap();
     let remaining = engine
@@ -254,7 +261,9 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack { target: ActorId(2) },
+        Action::Attack {
+            target: tor_simulation::ActorId(2),
+        },
     )
     .unwrap();
     run_ai_turns(&mut engine);
@@ -287,7 +296,9 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack { target: ActorId(2) },
+        Action::Attack {
+            target: tor_simulation::ActorId(2),
+        },
     )
     .unwrap();
     run_ai_turns(&mut engine);
@@ -313,7 +324,9 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
             &engine.branch().clone(),
             tor_server::journal::Command::Act {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
-                action: Action::Attack { target: ActorId(2) },
+                action: Action::Attack {
+                    target: tor_simulation::ActorId(2),
+                },
             },
         )
         .unwrap();

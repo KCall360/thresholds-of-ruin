@@ -4,7 +4,8 @@
 #![allow(dead_code)]
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::journal::Command;
 use tor_server::{scenario_package, CommandResult, Engine, Failure, Scenario};
 

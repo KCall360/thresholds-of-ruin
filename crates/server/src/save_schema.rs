@@ -1,6 +1,7 @@
-//! Save-owned schemas for values also used by the wire protocol.
-//! Serde remote derives enumerate the stored shape without calling wire serializers.
-//! In-memory domain values are retained; serialization ownership is explicit here.
+//! Save-owned schemas and explicit mappings from backend values.
+//! Action DTOs own numeric targets and stored variants independently of transport
+//! and simulation enums. Remaining shared identity/metadata values use remote
+//! derives so wire serializers never define the persisted representation.
 use serde::{Deserialize, Serialize};
 use tor_protocol as wire;
 
@@ -9,7 +10,7 @@ use tor_protocol as wire;
 pub(crate) struct ActorId(pub u64);
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "wire::Direction", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Direction {
     North,
     East,
@@ -24,34 +25,114 @@ pub(crate) enum Direction {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(
-    remote = "wire::Action",
-    tag = "type",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
-    Attack {
-        #[serde(with = "ActorId")]
-        target: wire::ActorId,
-    },
-    SetDoor {
-        door: u64,
-        open: bool,
-    },
-    Move {
-        #[serde(with = "Direction")]
-        direction: wire::Direction,
-    },
-    Take {
-        item: u64,
-        quantity: Option<u64>,
-    },
-    Drop {
-        item: u64,
-        quantity: Option<u64>,
-    },
+    Attack { target: u64 },
+    SetDoor { door: u64, open: bool },
+    Move { direction: Direction },
+    Take { item: u64, quantity: Option<u64> },
+    Drop { item: u64, quantity: Option<u64> },
     Wait,
+}
+
+impl Direction {
+    pub(crate) fn serialize<S: serde::Serializer>(
+        direction: &crate::actions::Direction,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Serialize::serialize(&Self::from(*direction), serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::actions::Direction, D::Error> {
+        <Self as Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
+impl From<crate::actions::Direction> for Direction {
+    fn from(direction: crate::actions::Direction) -> Self {
+        match direction {
+            crate::actions::Direction::North => Self::North,
+            crate::actions::Direction::East => Self::East,
+            crate::actions::Direction::South => Self::South,
+            crate::actions::Direction::West => Self::West,
+            crate::actions::Direction::NorthEast => Self::NorthEast,
+            crate::actions::Direction::SouthEast => Self::SouthEast,
+            crate::actions::Direction::SouthWest => Self::SouthWest,
+            crate::actions::Direction::NorthWest => Self::NorthWest,
+            crate::actions::Direction::Up => Self::Up,
+            crate::actions::Direction::Down => Self::Down,
+        }
+    }
+}
+impl From<Direction> for crate::actions::Direction {
+    fn from(direction: Direction) -> Self {
+        match direction {
+            Direction::North => Self::North,
+            Direction::East => Self::East,
+            Direction::South => Self::South,
+            Direction::West => Self::West,
+            Direction::NorthEast => Self::NorthEast,
+            Direction::SouthEast => Self::SouthEast,
+            Direction::SouthWest => Self::SouthWest,
+            Direction::NorthWest => Self::NorthWest,
+            Direction::Up => Self::Up,
+            Direction::Down => Self::Down,
+        }
+    }
+}
+
+impl From<&crate::actions::Action> for Action {
+    fn from(action: &crate::actions::Action) -> Self {
+        use crate::actions::Action as Backend;
+        match action {
+            Backend::Attack { target } => Self::Attack { target: target.0 },
+            Backend::SetDoor { door, open } => Self::SetDoor {
+                door: *door,
+                open: *open,
+            },
+            Backend::Move { direction } => Self::Move {
+                direction: (*direction).into(),
+            },
+            Backend::Take { item, quantity } => Self::Take {
+                item: *item,
+                quantity: *quantity,
+            },
+            Backend::Drop { item, quantity } => Self::Drop {
+                item: *item,
+                quantity: *quantity,
+            },
+            Backend::Wait => Self::Wait,
+        }
+    }
+}
+impl From<Action> for crate::actions::Action {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Attack { target } => Self::Attack {
+                target: tor_simulation::ActorId(target),
+            },
+            Action::SetDoor { door, open } => Self::SetDoor { door, open },
+            Action::Move { direction } => Self::Move {
+                direction: direction.into(),
+            },
+            Action::Take { item, quantity } => Self::Take { item, quantity },
+            Action::Drop { item, quantity } => Self::Drop { item, quantity },
+            Action::Wait => Self::Wait,
+        }
+    }
+}
+impl Action {
+    pub(crate) fn serialize<S: serde::Serializer>(
+        action: &crate::actions::Action,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Serialize::serialize(&Self::from(action), serializer)
+    }
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::actions::Action, D::Error> {
+        <Self as Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -196,7 +277,8 @@ pub(crate) mod shared_revisions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tor_protocol::{Action, ActorId, Direction};
+    use crate::actions::{Action, Direction};
+    use tor_simulation::ActorId;
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct Stored {
         #[serde(with = "super::Action")]

@@ -1,5 +1,6 @@
 use std::path::Path;
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::{
     journal::{Command, WizardOperation},
     scenario_package, Engine, SavePolicy, Scenario,

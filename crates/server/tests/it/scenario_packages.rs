@@ -188,7 +188,7 @@ fn pinned_inputs_survive_source_edits_and_checkpoint_restart() {
             &engine.branch().clone(),
             tor_server::journal::Command::Act {
                 expected_revision: 0,
-                action: tor_protocol::Action::Wait,
+                action: tor_server::journal::Action::Wait,
             },
         )
         .unwrap();

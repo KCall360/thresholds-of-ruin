@@ -3,7 +3,8 @@
 //! docs/scenario-packages.md#generated-regions.
 use crate::support;
 use std::path::Path;
-use tor_protocol::{Action, ActorId, Direction, Observation};
+use tor_protocol::{ActorId, Observation};
+use tor_server::journal::{Action, Direction};
 use tor_server::{
     journal::{Command, WizardOperation},
     scenario_package, Engine, SavePolicy, Scenario, Streaming,

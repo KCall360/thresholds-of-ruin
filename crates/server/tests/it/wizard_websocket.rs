@@ -164,7 +164,7 @@ fn operations() -> Vec<WizardOperation> {
                 y: 1,
                 z: 0,
             },
-            direction: Direction::Up,
+            direction: tor_server::journal::Direction::Up,
             to: Position {
                 region: 1,
                 x: 1,

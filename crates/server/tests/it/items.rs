@@ -1,6 +1,7 @@
 use crate::support;
 use std::path::Path;
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::journal::{Command, WizardOperation};
 use tor_server::{scenario_package, Engine, SavePolicy, Scenario};
 
@@ -245,5 +246,97 @@ fn selected_character_knowledge_and_seed_mapping_are_deterministic() {
     ] {
         std::fs::write(&manifest, invalid).unwrap();
         assert!(scenario_package::validate(dir.path()).is_err());
+    }
+}
+
+#[test]
+fn queued_take_retry_keeps_original_quantity_after_consumption_and_recovery() {
+    for checkpoint_interval in [1, 100] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("retry.db");
+        let policy = SavePolicy {
+            checkpoint_interval,
+            ..Default::default()
+        };
+        let mut engine = Engine::open_with_policy(&path, scenario(None), policy.clone()).unwrap();
+        let actor = ActorId(1);
+        let branch = engine.branch().clone();
+        let before = engine.state(actor).unwrap();
+        let command = Command::AdmitIntention {
+            expected_revision: before.revision,
+            action: Action::Take {
+                item: 10,
+                quantity: None,
+            },
+        };
+        let admitted = engine
+            .command(
+                "player",
+                "test",
+                actor,
+                "take-original",
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state(actor).unwrap(),
+            before,
+            "admission must not execute gameplay"
+        );
+        engine.execute_next_intention().unwrap().unwrap();
+        let after = engine.state(actor).unwrap();
+        assert!(!after
+            .observation
+            .ground_items
+            .iter()
+            .any(|entry| entry.item.id == 10));
+        assert_eq!(after.observation.inventory[0].quantity, 10);
+        let retry = engine
+            .command(
+                "player",
+                "other-client",
+                actor,
+                "take-original",
+                &branch,
+                command.clone(),
+            )
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, admitted.entry);
+        assert_eq!(engine.state(actor).unwrap(), after);
+        // An explicit count producing the same effect is a different request.
+        let conflict = Command::AdmitIntention {
+            expected_revision: before.revision,
+            action: Action::Take {
+                item: 10,
+                quantity: Some(10),
+            },
+        };
+        assert_eq!(
+            engine
+                .command("player", "test", actor, "take-original", &branch, conflict)
+                .unwrap_err()
+                .code,
+            tor_protocol::ErrorCode::RequestConflict
+        );
+        engine.flush().unwrap();
+        drop(engine);
+        let mut recovered = Engine::open_with_policy(&path, scenario(None), policy).unwrap();
+        assert_eq!(recovered.state(actor).unwrap(), after);
+        let retry = recovered
+            .command(
+                "player",
+                "reconnected",
+                actor,
+                "take-original",
+                &branch,
+                command,
+            )
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(retry.entry, admitted.entry);
+        assert_eq!(recovered.state(actor).unwrap(), after);
+        assert!(recovered.execute_next_intention().unwrap().is_none());
     }
 }

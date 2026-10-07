@@ -475,3 +475,14 @@ control timeout and a stale decoder fixture. The corrected process module and
 examples after current fixture/version guards were updated. Production behavior
 and concurrent-reader deadlines are unchanged. Fresh full verification remains
 required; failed evidence is retained.
+
+
+**Backend action facts (in development).** Receipt commands and journal action
+facts use independent backend action/direction types, with exhaustive wire,
+simulation, disclosure and save DTO mappings. Save bytes and gameplay semantics
+are preserved. Focused Rust checks passed 188 unit and 147 integration tests;
+all 17 item/intention actual-process cases, all-target workspace lint and focused
+documentation checks passed. Performance and full/publication gates are pending. Original
+receipt identity must be resolved before ephemeral target checks. See the
+[refactor plan](docs/refactoring.md). Protocol/observation PR CI runs separately
+against its immutable published checkpoint; do not attribute it to this increment.
