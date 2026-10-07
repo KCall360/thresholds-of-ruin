@@ -19,7 +19,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 
 | Area | Status | Implemented scope |
 | --- | --- | --- |
-| Foundation | Complete | Rust workspace, architecture checks, GPL licensing, Windows/Linux CI |
+| Foundation | Complete | Rust workspace, architecture checks, GPL licensing, full Windows/Linux CI in independent debug/release profile jobs |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits and retained-state byte validation are in development |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |

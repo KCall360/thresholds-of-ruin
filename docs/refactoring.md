@@ -2459,3 +2459,19 @@ The preceding observation/protocol checkpoint's Linux job reached the overall
 checks and earlier process cases passed, but the incomplete suite does not satisfy
 the merge gate. CI must complete both profiles on both platforms without removing
 coverage. The active desktop build remains unchanged until a complete gate passes.
+
+
+CI scheduling now partitions the existing full verifier into debug and release
+jobs on each platform. The native Windows desktop and Linux Xvfb paths are kept
+in each profile. All original Rust, process, tooling, architecture and rustdoc
+commands remain in the combined plan. Each profile retains the 35-minute job
+budget, with separate compiler caches and preserved verification logs. Existing
+required platform check names are aggregate guards over all four profiles and
+fail for failed, cancelled or skipped dependencies. No individual test deadline
+or workload threshold was relaxed. Local `full` still runs all eight stages;
+partition logs and summaries cannot certify a local full gate.
+
+The profile-union and reduced-tier rejection regressions failed first. Twenty-nine
+focused verification/documentation tests, actual debug/release CLI dry-run plans,
+actionlint and Ruff passed. The required complete local gate and new final-head
+CI are still needed before publishing or merging this combined checkpoint.

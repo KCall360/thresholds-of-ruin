@@ -1,6 +1,9 @@
 """Tests for verify.py's change selection, which must never select too little."""
 from pathlib import Path
 import tempfile
+from contextlib import redirect_stderr
+from io import StringIO
+from unittest.mock import patch
 import unittest
 
 import verify
@@ -147,6 +150,34 @@ class Tiers(unittest.TestCase):
             self.names("full", ["tor-world"], ["test_text_process"]),
             ["fmt", "clippy", "python-debug", "architecture", "rustdoc", "rust-debug", "rust-release", "process-release"],
         )
+
+    def test_ci_profile_partitions_preserve_every_full_command_and_environment(self):
+        for xvfb in [False, True]:
+            full = verify.plan("full", {"tor-world"}, ["test_text_process"], xvfb=xvfb)
+            debug = verify.plan("full", {"tor-world"}, [], xvfb=xvfb, ci_profile="debug")
+            release = verify.plan("full", set(), [], xvfb=xvfb, ci_profile="release")
+            self.assertEqual(debug + release, full)
+            self.assertFalse(set(n for n, _, _ in debug) & set(n for n, _, _ in release))
+            self.assertEqual([n for n, _, _ in release], ["rust-release", "process-release"])
+            self.assertIn("--workspace", release[0][1])
+            self.assertEqual(release[1][2], {"TOR_TEST_PROFILE": "release"})
+            self.assertIn("test_*process.py", release[1][1])
+            self.assertIn("test_*.py", next(c for n, c, _ in debug if n == "python-debug"))
+
+    def test_ci_profile_cannot_partition_a_reduced_tier(self):
+        for tier in ["quick", "push"]:
+            for profile in ["debug", "release"]:
+                with self.assertRaises(ValueError):
+                    verify.plan(tier, set(), [], ci_profile=profile)
+        with self.assertRaises(ValueError):
+            verify.plan("full", set(), [], ci_profile="unknown")
+
+    def test_cli_rejects_ci_profile_on_reduced_tier_before_inspecting_workspace(self):
+        with patch.object(verify.subprocess, "run") as commands, redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                verify.main(["push", "--ci-profile", "release", "--dry-run"])
+        self.assertEqual(error.exception.code, 2)
+        commands.assert_not_called()
 
     def test_push_runs_every_debug_check_and_affected_release(self):
         names = self.names("push", ["tor-world"], ["test_text_process"])
