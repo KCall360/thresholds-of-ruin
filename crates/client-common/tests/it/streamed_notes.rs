@@ -45,7 +45,7 @@ fn notes_advance_stream_order_but_not_action_revision_or_observation() {
     let initial = snapshot();
     let mut model = ClientState::from_snapshot(initial.clone()).unwrap();
     model.apply(note(1)).unwrap();
-    assert_eq!(model.state(), &initial.state);
+    assert_eq!(model.state(), initial.state.as_ref());
     assert_eq!(model.cursor().sequence, 1);
     assert_eq!(model.history().len(), 1);
     model

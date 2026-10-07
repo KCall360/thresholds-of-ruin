@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_protocol::*;
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
@@ -257,7 +258,7 @@ fn complete_observation(state: StateView, sequence: u64) -> ServerMessage {
                 tick: state.observation.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(state),
+                state: state.into(),
                 event: None,
             },
         }),
@@ -451,7 +452,7 @@ fn encoded_collection_update(base: &StateView, next: &StateView) -> usize {
         panic!("update")
     };
     let reconstructed = match update.body {
-        UpdateBody::Observation { state, .. } => *state,
+        UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
         UpdateBody::ObservationDelta { state, .. } => state.apply(base).unwrap(),
         _ => panic!("observation"),
     };
@@ -626,10 +627,14 @@ fn complete_encoding_rejects_a_fitting_delta_when_retained_state_would_exceed_th
     next.observation.tick += 1;
     next.observation.ground_items[0].item.description = "y".repeat(MAX_RESPONSE_BYTES / 2);
     let message = complete_observation(next, 2);
-    assert!(encode_response(
-        &message,
-        Some((exact_base(&base, 1), &base)),
-        MAX_RESPONSE_BYTES
-    )
-    .is_err());
+    assert!(matches!(
+        encode_response(
+            &message,
+            Some((exact_base(&base, 1), &base)),
+            MAX_RESPONSE_BYTES
+        ),
+        Err(EncodeError::RetainedStateTooLarge {
+            limit: MAX_STATE_BYTES
+        })
+    ));
 }

@@ -1,5 +1,6 @@
 use crate::{ActorId, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub const PROTOCOL_VERSION: u32 = 27;
 /// Server-granted session authority; never selected by the client.
@@ -700,7 +701,8 @@ pub struct Snapshot {
     pub actor: ActorId,
     pub branch: BranchId,
     pub cursor: StreamCursor,
-    pub state: StateView,
+    /// Immutable disclosed state; shared ownership does not change its wire shape.
+    pub state: Arc<StateView>,
     pub has_control: bool,
     pub history: HistoryPage,
 }
@@ -734,7 +736,8 @@ pub enum UpdateBody {
         entry: Option<Box<HistoryEntry>>,
     },
     Observation {
-        state: Box<StateView>,
+        /// One immutable observation may be retained by multiple readers.
+        state: Arc<StateView>,
         event: Option<Box<HistoryEntry>>,
     },
     /// The next observation as changes to the previous one on this stream.

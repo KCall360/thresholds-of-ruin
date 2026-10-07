@@ -3,6 +3,7 @@
 use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -64,7 +65,7 @@ impl Player {
             {
                 ServerMessage::Update { update, .. } => {
                     self.state = match update.body {
-                        UpdateBody::Observation { state, .. } => *state,
+                        UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
                         UpdateBody::ObservationDelta { state, .. } => {
                             state.apply(&self.state).unwrap()
                         }
@@ -156,7 +157,7 @@ async fn a_spectator_whose_actor_leaves_the_loaded_world_is_detached_not_the_pla
     client.acquire_control("control").await;
     let mut player = Player {
         client,
-        state: snapshot.state,
+        state: Arc::unwrap_or_clone(snapshot.state),
         branch: snapshot.branch,
         step: 0,
     };

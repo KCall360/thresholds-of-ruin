@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sequence: 0,
                         tick: 0,
                     },
-                    state: engine.state(actor)?,
+                    state: engine.state(actor)?.into(),
                     has_control: true,
                     history: tor_protocol::HistoryPage {
                         entries: vec![],
@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tick: state.observation.tick,
                     },
                     body: tor_protocol::UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: state.into(),
                         event: Some(Box::new(
                             result
                                 .entry

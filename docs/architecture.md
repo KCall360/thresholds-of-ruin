@@ -186,6 +186,22 @@ travel interrupted, or death. Stream numbering is per observation stream, not a
 global counter that reveals other actors' activity. New attachments reset the
 stream through an explicit snapshot.
 
+Disclosed current state has immutable shared ownership. The server builds one
+view per observed actor at a publication boundary and shares it among readers;
+equal snapshot views may reuse that allocation only for the same actor and
+branch. Each reader retains its own cursor, reset context, permissions and
+history audience. The shared client validates a candidate before replacing its
+current view, so retained bases cannot be mutated by later updates. Shared
+ownership changes the in-process representation without changing JSON fields.
+
+Output admission distinguishes closed/full queues, frame limits, preparation
+failures, client byte pressure and aggregate byte pressure. The codec reports
+frame and retained-state capacity separately from serialization errors; callers
+do not infer categories from diagnostic text. Rejected admission releases its
+queue reservation and byte permits. Admitted permits remain owned through
+queued and in-flight output. Fair aggregate allocation remains a separate host
+policy; these failure types do not change simulation scheduling or durability.
+
 A single action or travel request can generate multiple updates. Clients do not
 poll to discover changes. Delivery and rendering are independent: a client may
 animate, summarize, or fast-forward without influencing simulation outcomes.

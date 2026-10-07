@@ -99,7 +99,7 @@ impl Runner {
                 sequence: 0,
                 tick: state.observation.tick,
             },
-            state,
+            state: state.into(),
             has_control: false,
             history: HistoryPage {
                 entries: vec![],
@@ -224,7 +224,7 @@ impl Runner {
                         tick,
                     },
                     body: UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: state.into(),
                         event,
                     },
                 }),

@@ -1,6 +1,7 @@
 use crate::engine::valid_label;
 use crate::{Engine, Failure};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 use tokio::sync::watch;
 use tor_protocol::*;
 
@@ -16,7 +17,7 @@ pub struct Account {
 struct DisclosedObservation {
     branch: BranchId,
     base: ObservationBase,
-    state: StateView,
+    state: Arc<StateView>,
 }
 
 /// Ownership is part of the generation even when permission vectors stay empty.
@@ -756,6 +757,20 @@ impl Service {
         }
     }
 
+    /// Reuse only an equal disclosure for the same actor and branch. Stream
+    /// cursors and reset contexts remain owned by each connection.
+    fn share_observation(&self, state: StateView) -> Arc<StateView> {
+        self.clients
+            .values()
+            .filter(|client| client.actor == Some(state.observation.actor))
+            .filter_map(|client| client.last_observation.as_ref())
+            .find(|disclosed| {
+                &disclosed.branch == self.engine.branch() && disclosed.state.as_ref() == &state
+            })
+            .map(|disclosed| Arc::clone(&disclosed.state))
+            .unwrap_or_else(|| Arc::new(state))
+    }
+
     fn action_update(
         &mut self,
         revisions: &BTreeMap<ActorId, u64>,
@@ -775,7 +790,15 @@ impl Service {
             .map(|(_, actor)| *actor)
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .map(|actor| (actor, self.engine.state(actor).ok()))
+            .map(|actor| {
+                (
+                    actor,
+                    self.engine
+                        .state(actor)
+                        .ok()
+                        .map(|state| self.share_observation(state)),
+                )
+            })
             .collect();
         for (recipient, observer) in recipients {
             // Region streaming can unload an actor nobody keeps in play (an
@@ -788,7 +811,7 @@ impl Service {
                 self.update(
                     recipient,
                     UpdateBody::Observation {
-                        state: Box::new(state.clone()),
+                        state: Arc::clone(state),
                         event: entry
                             .filter(|entry| observer == entry.actor)
                             .map(|entry| Box::new(entry.clone())),
@@ -1312,7 +1335,7 @@ impl Service {
                 sequence: client.sequence,
                 tick: state.observation.tick,
             },
-            state,
+            state: self.share_observation(state),
             has_control: readiness.has_control,
             history: self
                 .engine
@@ -1516,7 +1539,7 @@ impl Service {
             .last_observation
             .as_ref()
             .filter(|previous| previous.branch == branch)
-            .map(|previous| (previous.base, &previous.state));
+            .map(|previous| (previous.base, previous.state.as_ref()));
         let message = ServerMessage::Update {
             update: Box::new(StreamUpdate {
                 context: client.context.clone().expect("attached stream context"),
@@ -1550,7 +1573,7 @@ impl Service {
                     cursor: StreamCursor { sequence, tick },
                     revision: state.revision,
                 },
-                state: *state,
+                state,
             });
         }
     }
@@ -1774,7 +1797,7 @@ mod tests {
         service.update(
             client.id,
             UpdateBody::Observation {
-                state: Box::new(base.clone()),
+                state: base.clone().into(),
                 event: None,
             },
         );
@@ -1784,7 +1807,7 @@ mod tests {
             .as_ref()
             .unwrap();
         let previous = disclosed.base;
-        assert_eq!(disclosed.state, base);
+        assert_eq!(*disclosed.state, base);
         let mut next = base.clone();
         next.revision += 1;
         next.observation.tick += 1;
@@ -1831,7 +1854,7 @@ mod tests {
             }),
         };
         let full_bytes = serde_json::to_vec(&envelope(UpdateBody::Observation {
-            state: Box::new(next.clone()),
+            state: next.clone().into(),
             event: None,
         }))
         .unwrap()
@@ -1850,7 +1873,7 @@ mod tests {
         service.update(
             client.id,
             UpdateBody::Observation {
-                state: Box::new(next.clone()),
+                state: next.clone().into(),
                 event: None,
             },
         );
@@ -1859,7 +1882,7 @@ mod tests {
             panic!("expected actual encoded observation");
         };
         let restored = match update.body {
-            UpdateBody::Observation { state, .. } => *state,
+            UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
             UpdateBody::ObservationDelta {
                 base: actual_base,
                 state,
@@ -2491,7 +2514,7 @@ mod tests {
                 panic!("healthy peer must receive its snapshot");
             };
             assert_eq!(request_id, "healthy-reset");
-            assert_eq!(snapshot.state, before);
+            assert_eq!(*snapshot.state, before);
         }
     }
 
@@ -2747,8 +2770,62 @@ mod tests {
     }
 
     #[test]
+    fn observation_sharing_requires_equal_state_actor_and_branch() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut connection = service.connect(&account, "observer".into()).unwrap();
+        connection.messages.try_recv().unwrap();
+        service.handle(
+            connection.id,
+            "attach".into(),
+            Request::Attach { actor: ActorId(1) },
+        );
+        connection.messages.try_recv().unwrap();
+        let original = Arc::clone(
+            &service.clients[&connection.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state,
+        );
+        assert!(Arc::ptr_eq(
+            &original,
+            &service.share_observation((*original).clone())
+        ));
+
+        // Metadata can change without changing the revision or simulation tick.
+        let mut changed = (*original).clone();
+        changed.wizard_game = !changed.wizard_game;
+        let replacement = service.share_observation(changed.clone());
+        assert!(!Arc::ptr_eq(&original, &replacement));
+        assert_eq!(replacement.as_ref(), &changed);
+        assert_ne!(original.wizard_game, replacement.wizard_game);
+        assert_eq!(original.revision, replacement.revision);
+        assert_eq!(original.observation.tick, replacement.observation.tick);
+
+        let client = service.clients.get_mut(&connection.id).unwrap();
+        client.actor = Some(ActorId(2));
+        assert!(!Arc::ptr_eq(
+            &original,
+            &service.share_observation((*original).clone())
+        ));
+        let client = service.clients.get_mut(&connection.id).unwrap();
+        client.actor = Some(ActorId(1));
+        client.last_observation.as_mut().unwrap().branch = BranchId("other-branch".into());
+        assert!(!Arc::ptr_eq(
+            &original,
+            &service.share_observation((*original).clone())
+        ));
+    }
+
+    #[test]
     fn action_broadcast_observes_once_per_actor_with_independent_client_streams() {
-        for watchers in [1, 8] {
+        for watchers in [1, 8, 32] {
             let mut service = Service::new(Engine::memory(Scenario::two_room(0)).unwrap());
             let account = Account {
                 role: AccessRole::Spectator,
@@ -2773,6 +2850,30 @@ mod tests {
                 };
                 connections.push((client, snapshot));
             }
+            let first = &service.clients[&connections[0].0.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state;
+            for (client, _) in &connections {
+                let disclosed = &service.clients[&client.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state;
+                assert!(
+                    Arc::ptr_eq(first, disclosed),
+                    "equal initial snapshots must share their retained observation"
+                );
+            }
+            assert_eq!(
+                connections
+                    .iter()
+                    .map(|(_, snapshot)| snapshot.context.stream.0.clone())
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                watchers
+            );
             let revisions = BTreeMap::from([(ActorId(1), 0)]);
             let result = service
                 .engine
@@ -2797,14 +2898,39 @@ mod tests {
                 "watchers: {watchers}"
             );
             let expected = service.engine.state(ActorId(1)).unwrap();
-            for (mut client, snapshot) in connections {
+            let first: &StateView = &service.clients[&connections[0].0.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state;
+            for (client, _) in &connections {
+                let disclosed: &StateView = &service.clients[&client.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state;
+                assert!(
+                    std::ptr::eq(first, disclosed),
+                    "one actor observation must be shared across its readers"
+                );
+            }
+            let retained = Arc::clone(
+                &service.clients[&connections[0].0.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state,
+            );
+            for (client, snapshot) in &mut connections {
                 let ServerMessage::Update { update } = client.messages.try_recv().unwrap() else {
                     panic!("observation update");
                 };
                 assert_eq!(update.cursor.sequence, snapshot.cursor.sequence + 1);
                 assert_eq!(update.branch, snapshot.branch);
                 let (state, event) = match update.body {
-                    UpdateBody::Observation { state, event } => (*state, event),
+                    UpdateBody::Observation { state, event } => {
+                        (Arc::unwrap_or_clone(state), event)
+                    }
                     UpdateBody::ObservationDelta { state, event, .. } => {
                         (state.apply(&snapshot.state).unwrap(), event)
                     }
@@ -2812,6 +2938,41 @@ mod tests {
                 };
                 assert_eq!(state, expected);
                 assert_eq!(event.unwrap().id, result.entry.id);
+            }
+            let next_result = service
+                .engine
+                .command(
+                    "test",
+                    "test",
+                    ActorId(1),
+                    "wait-again",
+                    &service.engine.branch().clone(),
+                    crate::journal::Command::Act {
+                        expected_revision: expected.revision,
+                        action: Action::Wait,
+                    },
+                )
+                .unwrap();
+            service
+                .action_result_update(
+                    &BTreeMap::from([(ActorId(1), expected.revision)]),
+                    &next_result,
+                )
+                .unwrap();
+            assert_eq!(*retained, expected, "an older boundary stays immutable");
+            let current = &service.clients[&connections[0].0.id]
+                .last_observation
+                .as_ref()
+                .unwrap()
+                .state;
+            assert!(!Arc::ptr_eq(&retained, current));
+            for (client, _) in &connections {
+                let next = &service.clients[&client.id]
+                    .last_observation
+                    .as_ref()
+                    .unwrap()
+                    .state;
+                assert!(Arc::ptr_eq(current, next));
             }
         }
     }

@@ -49,13 +49,60 @@ def validate(rows, version=1):
     return {key: distribution(values) for key, values in groups.items()}
 
 
+def validate_ownership(rows):
+    """Validate paired clone costs and distinct serialized contents, not RSS."""
+    expected = [(cells, readers, sample, method)
+                for cells in (64, 4096, 20956) for readers in (1, 8, 32) for sample in range(100)
+                for method in (('owned_clone', 'shared_handle') if sample % 2 == 0
+                               else ('shared_handle', 'owned_clone'))]
+    if len(rows) != len(expected):
+        raise ValueError('Incomplete observation ownership workload')
+    fields = {'diagnostic', 'version', 'cells', 'readers', 'method', 'sample',
+              'state_bytes', 'retained_objects', 'distinct_state_serialized_bytes', 'clone_ms', 'verified'}
+    groups, payloads = {}, {}
+    for row, identity in zip(rows, expected):
+        if not isinstance(row, dict) or set(row) != fields:
+            raise ValueError('Invalid ownership diagnostic fields')
+        for key in ('version', 'cells', 'readers', 'sample', 'state_bytes',
+                    'retained_objects', 'distinct_state_serialized_bytes'):
+            if type(row[key]) is not int:
+                raise ValueError('Invalid ownership diagnostic integer')
+        if (row['diagnostic'] != 'observation_ownership' or row['version'] != 1
+                or row['verified'] is not True
+                or (row['cells'], row['readers'], row['sample'], row['method']) != identity):
+            raise ValueError('Wrong version, order or verification of ownership samples')
+        objects = row['readers'] if row['method'] == 'owned_clone' else 1
+        if (row['state_bytes'] <= 0 or row['retained_objects'] != objects
+                or row['distinct_state_serialized_bytes'] != row['state_bytes'] * objects):
+            raise ValueError('Wrong distinct observation content counts')
+        if payloads.setdefault(row['cells'], row['state_bytes']) != row['state_bytes']:
+            raise ValueError('Observation payload changed between ownership methods')
+        elapsed = row['clone_ms']
+        if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+            raise ValueError('Invalid ownership phase duration')
+        key = f"cells-{row['cells']}-readers-{row['readers']}-{row['method']}"
+        group = groups.setdefault(key, {'samples': [], 'state_bytes': row['state_bytes'],
+                                       'retained_objects': objects,
+                                       'distinct_state_serialized_bytes': row['distinct_state_serialized_bytes']})
+        group['samples'].append(elapsed)
+    result = {}
+    for key, group in groups.items():
+        result[key] = {**distribution(group['samples']), 'state_bytes': group['state_bytes'],
+                       'retained_objects': group['retained_objects'],
+                       'distinct_state_serialized_bytes': group['distinct_state_serialized_bytes']}
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("samples", type=Path)
-    parser.add_argument('--narration', action='store_true', help='Require version 2 semantic workload')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--narration', action='store_true', help='Require version 2 semantic workload')
+    mode.add_argument('--ownership', action='store_true', help='Require paired immutable observation ownership samples')
     args = parser.parse_args()
     rows = [json.loads(line) for line in args.samples.read_text(encoding="utf-8-sig").splitlines()]
-    print(json.dumps(validate(rows, version=2 if args.narration else 1), indent=2))
+    result = validate_ownership(rows) if args.ownership else validate(rows, version=2 if args.narration else 1)
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

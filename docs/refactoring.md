@@ -2315,3 +2315,44 @@ Endpoint/inode matching excludes orphaned TCP rows after descriptor closure.
 Production timeouts and the client-exit assertion remain unchanged. The new
 unit regressions failed first; actual Linux acceptance remains unverified until
 fresh final-head CI passes. No failing candidate is merged or activated.
+
+
+### Immutable observation ownership and typed output failures (in development)
+
+Current disclosed StateView values now use shared immutable ownership in the
+protocol DTOs, server disclosure bases and shared client snapshots. Publication
+adapts one view per observed actor, and equal snapshots reuse only an exact
+same-actor/same-branch view. Per-stream cursors, resets, permissions and private
+history remain independently owned. Regressions cover 1/8/32 readers, distinct
+stream identities, old-view immutability and changed metadata at equal tick and
+revision. JSON representation and protocol/save/rules/scenario versions do not
+change.
+
+Encoding now has explicit frame-size, retained-state-size and serialization
+failure categories. Host admission adds closed/full queues and distinct client /
+aggregate byte-budget failures. No classification matches diagnostic strings.
+Tests prove that rejected preparation or pressure does not leak queue slots or
+byte leases. Aggregate fairness policy, capabilities and snapshot feasibility
+remain open; typed failures alone do not implement them.
+
+Ownership-only measurements used the repaired client-fixture baseline e89e162
+and machine 6a1878811f37 (Windows, F:HDD). All 24 reports over three interleaved
+rounds validated with matching operation/history/save counts and no competing
+jobs. Ordinary timings were mixed: large-client 64-update application p95 rose
+38.2463 to 39.1874 ms; small-client 64-update rendering maximum rose 0.8675 to
+1.3841 ms. No broad application, engine or persistence speedup is established.
+These measurements preceded the typed-error change and do not qualify its final
+performance. A separate clone-only diagnostic measured 100 pairs per reader /
+view size. With 20,956 cells and 32 readers, owned clone p50/p95/max was
+53.8623/56.0717/76.1052 ms versus 0.0009/0.0039/0.0042 ms for shared handles.
+Distinct serialized-state duplication was 96,955,680 versus 3,029,865 bytes;
+these are logical representation counts, not heap/RSS measurements or network /
+UI latency. Raw samples remain local and no release/ledger upload is authorized.
+
+Affected library checks passed 214 tests and integration checks passed 243,
+with no failures or ignored tests; all-target Clippy passed. Process acceptance,
+final release evidence and full Windows/Linux CI remain required before merge.
+The preceding pressure-fixture full run retained one failed local native mouse
+check under the maintainer's mouse-verification waiver; it is recorded as a
+qualified local result, never an unqualified full pass. Ordinary CI keeps that
+test. All six original work sequences remain active.

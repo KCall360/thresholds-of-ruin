@@ -1,5 +1,6 @@
 //! Same-build full-versus-selected observation diagnostic. Synthetic disclosed
 //! collections vary individually; this does not measure world topology or UI.
+use std::sync::Arc;
 use std::{hint::black_box, time::Instant};
 use tor_protocol::*;
 
@@ -16,7 +17,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     let ServerMessage::Snapshot { snapshot, .. } = serde_json::from_value(message).unwrap() else {
         unreachable!()
     };
-    let mut base = snapshot.state;
+    let mut base = Arc::unwrap_or_clone(snapshot.state);
     base.revision = 1;
     let o = &mut base.observation;
     o.tick = 1;
@@ -114,7 +115,7 @@ fn message(state: StateView) -> ServerMessage {
                 tick: state.observation.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(state),
+                state: state.into(),
                 event: None,
             },
         }),
@@ -126,7 +127,7 @@ fn reconstruct(message: ServerMessage, base: &StateView) -> StateView {
         panic!("update")
     };
     let state = match update.body {
-        UpdateBody::Observation { state, .. } => *state,
+        UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
         UpdateBody::ObservationDelta { state, .. } => state.apply(base).unwrap(),
         _ => panic!("observation"),
     };

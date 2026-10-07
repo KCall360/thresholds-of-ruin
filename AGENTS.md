@@ -453,3 +453,12 @@ includes production validation cost. Smaller wire payloads do not establish a
 broad engine, persistence or resident-memory gain.
 No scripting runtime or text-client product fix is added.
 Aggregate output fairness and the other six-sequence work remain active.
+
+
+**Observation ownership and output failure types (in development).** Disclosed
+views now share immutable ownership across readers with independent stream
+metadata; codec/admission failures distinguish capacity from preparation without
+string matching. Library/integration checks passed 457 tests and all-target
+Clippy passed. Process/release/CI verification remains pending. Aggregate fair
+allocation is next; see the full [refactor plan](docs/refactoring.md). The local
+native mouse waiver does not remove ordinary Windows/Linux CI coverage.

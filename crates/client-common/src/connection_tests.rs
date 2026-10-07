@@ -1,5 +1,6 @@
 //! Deadline coverage uses an expired stored deadline, avoiding clock sleeps.
 use super::*;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
@@ -238,7 +239,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let initial = snapshot();
-    let mut state = initial.state.clone();
+    let mut state = Arc::unwrap_or_clone(initial.state.clone());
     state.revision += 1;
     state.observation.visible_cells[0].asset = Some("missing.test.asset".into());
     let update = ServerMessage::Update {
@@ -251,7 +252,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
                 tick: initial.cursor.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(state.clone()),
+                state: state.clone().into(),
                 event: None,
             },
         }),

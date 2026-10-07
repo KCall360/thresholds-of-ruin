@@ -1,6 +1,7 @@
 //! Same-build diagnostic: typed Serde parsing versus the bounded wire decoder.
 //! Includes parsing/DTO construction, excludes validation, drop, network and UI.
 use serde::{de::DeserializeOwned, Serialize};
+use std::sync::Arc;
 use std::{fmt::Debug, hint::black_box, time::Instant};
 use tor_protocol::*;
 
@@ -60,7 +61,7 @@ fn snapshot(cells: usize) -> ServerMessage {
     let mut cell = snapshot.state.observation.visible_cells[0].clone();
     cell.door = None;
     // Synthetic disclosed positions, not a world geometry or topology benchmark.
-    snapshot.state.observation.visible_cells = (0..cells)
+    Arc::make_mut(&mut snapshot.state).observation.visible_cells = (0..cells)
         .map(|index| {
             let mut cell = cell.clone();
             cell.key = format!("decode-cell-{index}");

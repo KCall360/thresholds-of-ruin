@@ -100,7 +100,7 @@ fn update(sequence: u64, names: &[&str]) -> ServerMessage {
                 tick: sequence,
             },
             body: UpdateBody::Observation {
-                state: Box::new(observation(sequence, names)),
+                state: (observation(sequence, names)).into(),
                 event: None,
             },
         }),
@@ -152,7 +152,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
                 entries: vec![],
                 older_before: None,
             },
-            state: observation(0, &["terrain.floor.cave"]),
+            state: observation(0, &["terrain.floor.cave"]).into(),
             travel: None,
         };
         send(

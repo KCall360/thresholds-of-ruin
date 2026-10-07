@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
 use tor_client_common::ClientState;
 use tor_protocol::*;
@@ -30,7 +31,7 @@ fn suspended_work_does_not_advertise_or_send_undisclosed_controls() {
 fn action_admission_uses_disclosed_capacity_independently_of_simulation_turn() {
     for (due, admission) in [(true, false), (false, true)] {
         let mut snapshot = state().snapshot();
-        snapshot.state.observation.ready = due;
+        Arc::make_mut(&mut snapshot.state).observation.ready = due;
         snapshot.readiness.admission = admission;
         let mut app = App::new();
         app.role = AccessRole::Player;
@@ -275,10 +276,15 @@ fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_r
 #[test]
 fn quantity_picker_submits_partial_pickup_and_drop() {
     let mut snapshot = state().snapshot();
-    snapshot.state.observation.ground_items[0].item.quantity = 10;
+    Arc::make_mut(&mut snapshot.state).observation.ground_items[0]
+        .item
+        .quantity = 10;
     let mut carried = snapshot.state.observation.ground_items[0].item.clone();
     carried.id = 4;
-    snapshot.state.observation.inventory.push(carried);
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .inventory
+        .push(carried);
     for key in [Key::Pickup, Key::Drop] {
         let mut app = App::new();
         app.role = AccessRole::Player;
@@ -307,11 +313,14 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
 #[test]
 fn places_modal_displays_memory_and_renames_without_travel_or_time() {
     let mut snapshot = state().snapshot();
-    snapshot.state.observation.places.push(PlaceView {
-        key: "forgotten-cell".into(),
-        name: "Quiet Reverie".into(),
-        origin: PlaceNameOrigin::Authored,
-    });
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .places
+        .push(PlaceView {
+            key: "forgotten-cell".into(),
+            name: "Quiet Reverie".into(),
+            origin: PlaceNameOrigin::Authored,
+        });
     let mut app = App::new();
     app.role = AccessRole::Player;
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
@@ -561,8 +570,8 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         "history":{"entries":[],"older_before":null},"state":state().state()
     }))
     .unwrap();
-    snapshot
-        .state
+    let position = snapshot.state.observation.position;
+    Arc::make_mut(&mut snapshot.state)
         .observation
         .ground_items
         .push(GroundItemView {
@@ -576,7 +585,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
                 id: 4,
                 name: "another token".into(),
             },
-            position: snapshot.state.observation.position,
+            position,
         });
     let mut app = App::new();
     app.role = AccessRole::Player;
@@ -601,7 +610,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
     ));
     app.ready();
     app.input(Input::Key { key: Key::Pickup });
-    snapshot.state.revision += 1;
+    Arc::make_mut(&mut snapshot.state).revision += 1;
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     assert!(app.pickup.is_empty());
     assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
@@ -688,7 +697,7 @@ fn renderer_handles_large_rooms_and_long_untrusted_labels_without_mutating_state
             actor: ActorId(1),
             branch: original.branch().clone(),
             cursor: original.cursor(),
-            state: view,
+            state: view.into(),
             has_control: true,
             history: HistoryPage {
                 entries: vec![],
@@ -794,14 +803,15 @@ fn keys_skip_an_active_journey_and_changed_observations_clear_selection() {
                 tick: 100,
             },
             body: UpdateBody::Observation {
-                state: Box::new(StateView {
+                state: (StateView {
                     revision: 4,
                     observation: Observation {
                         tick: 100,
                         ..current.state().observation.clone()
                     },
                     ..current.state().clone()
-                }),
+                })
+                .into(),
                 event: None,
             },
         })
@@ -914,7 +924,7 @@ fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() 
     app.replace_snapshot(initial.clone()).unwrap();
     app.ready();
     for sequence in 1..=64 {
-        let mut view = initial.state.clone();
+        let mut view = Arc::unwrap_or_clone(initial.state.clone());
         view.revision += sequence;
         view.observation.tick += sequence;
         view.observation.visible_cells[0].key = format!("intermediate-{sequence}");
@@ -927,7 +937,7 @@ fn streamed_updates_retain_intermediate_memory_and_snapshot_resets_selections() 
                 tick: view.observation.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(view),
+                state: view.into(),
                 event: None,
             },
         })

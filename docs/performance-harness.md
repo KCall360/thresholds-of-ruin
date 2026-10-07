@@ -390,6 +390,19 @@ workload version 2 with actor and door sight changes; omitting the flag keeps
 version 1. Both use 64/20,956 remembered cells and 1/64-update bursts. See
 [narration and stream recovery](narration-and-recovery.md).
 
+For immutable observation ownership, run `cargo run --release --locked -p
+tor-client-ascii --example client_bench -- --ownership` and validate with
+`python scripts/client_performance_report.py FILE --ownership`. This diagnostic
+pairs deep state copies with shared handles for 64/4,096/20,956 disclosed cells
+and 1/8/32 readers, alternating method order over 100 samples per combination
+(1,800 rows). Setup, serialization, equality checks and pointer inspection stay
+outside timing; reader-vector allocation is included. The validator checks
+complete paired samples, payload consistency, distinct retained object counts
+and finite timings. Distinct serialized content measures logical duplication,
+not heap allocation or resident memory. These isolated clone timings do not
+measure server publication, transport, rendering or historical map retention.
+The ownership and narration modes are mutually exclusive.
+
 Compare against a reference with `perf_compare.py BASE --case client` (see
 [before-and-after comparisons](#before-and-after-comparisons)), which builds
 and runs matched binaries and keeps raw samples, sample counts, percentiles,

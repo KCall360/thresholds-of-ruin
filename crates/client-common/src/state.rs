@@ -1,6 +1,7 @@
 use crate::{ObservationStream, StreamError};
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use tor_protocol::*;
 
 /// Last disclosed contents of one cell, not current world truth. Only a fresh
@@ -324,7 +325,7 @@ impl ClientState {
                     return Err(StreamError::WrongObservationBase);
                 }
                 UpdateBody::Observation {
-                    state: Box::new(
+                    state: Arc::new(
                         state
                             .apply(&self.snapshot.state)
                             .map_err(|_| StreamError::InconsistentState)?,
@@ -438,7 +439,7 @@ impl ClientState {
                     cursor: update.cursor,
                     revision: state.revision,
                 };
-                self.snapshot.state = *state;
+                self.snapshot.state = state;
                 self.remember_view();
             }
             UpdateBody::ObservationDelta { .. } => unreachable!("expanded above"),

@@ -104,7 +104,7 @@ fn main() {
                     sequence: 0,
                     tick: state.observation.tick,
                 },
-                state,
+                state: state.into(),
                 has_control: true,
                 history: HistoryPage {
                     entries: vec![],
@@ -153,7 +153,7 @@ fn main() {
                     tick: state.observation.tick,
                 },
                 body: UpdateBody::Observation {
-                    state: Box::new(state),
+                    state: state.into(),
                     event: Some(Box::new(
                         entry
                             .entry

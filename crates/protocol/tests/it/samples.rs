@@ -6,6 +6,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use tor_protocol::*;
 
 fn samples() -> Value {
@@ -167,9 +168,9 @@ fn recorded_complete_views_validate_and_keep_projection_identity_separate() {
     for sample in samples()["server"].as_array().unwrap() {
         let message: ServerMessage = serde_json::from_value(sample.clone()).unwrap();
         let mut state = match message {
-            ServerMessage::Snapshot { snapshot, .. } => snapshot.state,
+            ServerMessage::Snapshot { snapshot, .. } => Arc::unwrap_or_clone(snapshot.state),
             ServerMessage::Update { update } => match update.body {
-                UpdateBody::Observation { state, .. } => *state,
+                UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
                 _ => continue,
             },
             _ => continue,
@@ -193,4 +194,27 @@ fn recorded_complete_views_validate_and_keep_projection_identity_separate() {
         }
     }
     assert!(checked > 0, "No recorded full views were validated");
+}
+
+#[test]
+fn shared_observation_ownership_preserves_canonical_wire_bytes() {
+    let mut checked = 0;
+    for sample in samples()["server"].as_array().unwrap() {
+        let message: ServerMessage = serde_json::from_value(sample.clone()).unwrap();
+        let state = match message {
+            ServerMessage::Snapshot { snapshot, .. } => snapshot.state,
+            ServerMessage::Update { update } => match update.body {
+                UpdateBody::Observation { state, .. } => state,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        assert_eq!(
+            serde_json::to_vec(&state).unwrap(),
+            serde_json::to_vec(state.as_ref()).unwrap(),
+            "shared ownership must not change encoded state bytes"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0);
 }

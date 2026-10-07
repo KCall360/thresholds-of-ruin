@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_client_ascii::{render, App, Effect, Input};
 use tor_client_common::ClientState;
 use tor_protocol::*;
@@ -75,7 +76,10 @@ fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
                 cell.key = format!("{x}:{y}:{z}");
                 cell.position = Position { x, y, z };
                 if !existing.contains(&cell.position) {
-                    first.state.observation.visible_cells.push(cell);
+                    Arc::make_mut(&mut first.state)
+                        .observation
+                        .visible_cells
+                        .push(cell);
                 }
             }
         }

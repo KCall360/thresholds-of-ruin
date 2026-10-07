@@ -2,7 +2,47 @@
 //! frames. These are host resource limits, never game state or scheduling inputs.
 use std::sync::Arc;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tor_protocol::{ServerMessage, MAX_RESPONSE_BYTES};
+use tor_protocol::{EncodeError, ServerMessage, MAX_RESPONSE_BYTES};
+
+/// Private admission failures. No capacity rejection is a simulation outcome.
+#[derive(Debug)]
+pub(crate) enum SendError {
+    Closed,
+    QueueFull,
+    FrameLimit { limit: usize },
+    Preparation(EncodeError),
+    ClientBudget,
+    GlobalBudget,
+}
+
+impl std::fmt::Display for SendError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => formatter.write_str("output is closed"),
+            Self::QueueFull => formatter.write_str("output queue is full"),
+            Self::FrameLimit { limit } => write!(formatter, "output frame exceeds {limit} bytes"),
+            Self::Preparation(error) => error.fmt(formatter),
+            Self::ClientBudget => formatter.write_str("client output byte budget exhausted"),
+            Self::GlobalBudget => formatter.write_str("aggregate output byte budget exhausted"),
+        }
+    }
+}
+
+impl std::error::Error for SendError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Preparation(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+fn preparation_error(error: EncodeError) -> SendError {
+    match error {
+        EncodeError::TooLarge { limit } => SendError::FrameLimit { limit },
+        error => SendError::Preparation(error),
+    }
+}
 
 /// Host output limits. The default frame ceiling matches the existing native
 /// clients' WebSocket frame limit; aggregate limits also include in-flight writes.
@@ -88,7 +128,7 @@ pub(crate) struct Frame {
 
 impl Sender {
     #[cfg(test)]
-    pub(crate) fn try_send(&self, message: ServerMessage) -> Result<(), ()> {
+    pub(crate) fn try_send(&self, message: ServerMessage) -> Result<(), SendError> {
         self.try_send_with(&message, tor_protocol::encode_bounded_json)
     }
 
@@ -98,24 +138,37 @@ impl Sender {
     pub(crate) fn try_send_with(
         &self,
         message: &ServerMessage,
-        prepare: impl FnOnce(&ServerMessage, usize) -> Result<String, serde_json::Error>,
-    ) -> Result<(), ()> {
-        let slot = self.sender.try_reserve().map_err(|_| ())?;
-        let text = prepare(message, self.limits.frame_bytes).map_err(|_| ())?;
+        prepare: impl FnOnce(&ServerMessage, usize) -> Result<String, EncodeError>,
+    ) -> Result<(), SendError> {
+        let slot = self.sender.try_reserve().map_err(|error| match error {
+            mpsc::error::TrySendError::Full(_) => SendError::QueueFull,
+            mpsc::error::TrySendError::Closed(_) => SendError::Closed,
+        })?;
+        let text = prepare(message, self.limits.frame_bytes).map_err(preparation_error)?;
         if text.len() > self.limits.frame_bytes {
-            return Err(());
+            return Err(SendError::FrameLimit {
+                limit: self.limits.frame_bytes,
+            });
         }
-        let bytes = u32::try_from(text.len()).map_err(|_| ())?;
-        let client = self
-            .bytes
-            .clone()
-            .try_acquire_many_owned(bytes)
-            .map_err(|_| ())?;
-        let total = self
-            .total
-            .clone()
-            .try_acquire_many_owned(bytes)
-            .map_err(|_| ())?;
+        let bytes = u32::try_from(text.len()).map_err(|_| SendError::FrameLimit {
+            limit: self.limits.frame_bytes,
+        })?;
+        let client =
+            self.bytes
+                .clone()
+                .try_acquire_many_owned(bytes)
+                .map_err(|error| match error {
+                    tokio::sync::TryAcquireError::Closed => SendError::Closed,
+                    tokio::sync::TryAcquireError::NoPermits => SendError::ClientBudget,
+                })?;
+        let total =
+            self.total
+                .clone()
+                .try_acquire_many_owned(bytes)
+                .map_err(|error| match error {
+                    tokio::sync::TryAcquireError::Closed => SendError::Closed,
+                    tokio::sync::TryAcquireError::NoPermits => SendError::GlobalBudget,
+                })?;
         let ack_id = match message {
             ServerMessage::Ack { request_id, .. } => Some(request_id.clone()),
             _ => None,
@@ -285,6 +338,59 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn typed_admission_failures_preserve_queue_and_byte_capacity() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n * 2, n * 3));
+        let (sender, receiver) = pool.channel(1);
+        assert!(
+            matches!(sender.try_send_with(&value, |_, _| Ok("x".repeat(n + 1))),
+            Err(SendError::FrameLimit { limit }) if limit == n)
+        );
+        assert!(
+            matches!(sender.try_send_with(&value, |_, _| Err(tor_protocol::EncodeError::RetainedStateTooLarge { limit: n })),
+            Err(SendError::Preparation(tor_protocol::EncodeError::RetainedStateTooLarge { limit })) if limit == n)
+        );
+        assert_eq!(sender.sender.capacity(), 1);
+        assert_eq!(pool.available_bytes(), n * 3);
+        sender.try_send(value.clone()).unwrap();
+        assert!(matches!(
+            sender.try_send(value.clone()),
+            Err(SendError::QueueFull)
+        ));
+        drop(receiver);
+        assert!(matches!(sender.try_send(value), Err(SendError::Closed)));
+        assert_eq!(pool.available_bytes(), n * 3);
+    }
+
+    #[test]
+    fn client_and_aggregate_pressure_have_distinct_failures_without_leaked_leases() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n * 2, n * 3));
+        let (sender, receiver) = pool.channel(4);
+        let (other, other_receiver) = pool.channel(4);
+        sender.try_send(value.clone()).unwrap();
+        sender.try_send(value.clone()).unwrap();
+        assert!(matches!(
+            sender.try_send(value.clone()),
+            Err(SendError::ClientBudget)
+        ));
+        assert_eq!(sender.sender.capacity(), 2);
+        other.try_send(value.clone()).unwrap();
+        assert!(matches!(
+            other.try_send(value),
+            Err(SendError::GlobalBudget)
+        ));
+        assert_eq!(other.sender.capacity(), 3);
+        assert_eq!(other.bytes.available_permits(), n);
+        assert_eq!(pool.available_bytes(), 0);
+        drop(receiver);
+        drop(other_receiver);
+        assert_eq!(pool.available_bytes(), n * 3);
     }
 
     #[test]
