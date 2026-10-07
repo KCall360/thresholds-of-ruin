@@ -469,8 +469,9 @@ passed; release/full/final-head CI remain pending before publication. See the fu
 [refactor plan](docs/refactoring.md). The local
 native mouse waiver does not remove ordinary Windows/Linux CI coverage.
 
-The capability full gate stopped at Python acceptance with two intermittent
-failures. Isolated reruns passed; the save fixture was corrected to wait for a
-failed-save warning rather than the first overdue warning, and its six-test
-process module passed. Production behavior and concurrent-reader deadlines are
-unchanged. Fresh full verification remains required; the failed run is retained.
+Earlier capability full gates exposed a save-warning test race, an intermittent
+control timeout and a stale decoder fixture. The corrected process module and
+278-test Python stage passed, as did all 877 workspace Rust tests including
+examples after current fixture/version guards were updated. Production behavior
+and concurrent-reader deadlines are unchanged. Fresh full verification remains
+required; failed evidence is retained.

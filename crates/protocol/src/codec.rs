@@ -365,7 +365,8 @@ mod tests {
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v27.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         let mut snapshot = samples["server"]
             .as_array()
             .unwrap()
@@ -509,7 +510,8 @@ mod tests {
     #[test]
     fn typed_decoders_preserve_all_recorded_message_kinds() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v27.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         for sample in samples["client"].as_array().unwrap() {
             let text = serde_json::to_string(sample).unwrap();
             assert_eq!(

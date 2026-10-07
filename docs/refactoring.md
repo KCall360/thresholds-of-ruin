@@ -2385,12 +2385,12 @@ verification and final-head Windows/Linux CI remain pending before publication.
 Recovery-envelope feasibility, opaque interaction IDs, domain/save separation,
 scenario compilation/generation and the remaining persistence work stay active.
 
-The first capability full gate stopped at debug Python acceptance: an overdue
-save warning arrived before the failed-save warning expected by one test, and
-the concurrent-reader test timed out during initial control acquisition. Both
-cases passed in an isolated rerun; the latter cause remains unproven and its
-deadlines are unchanged. The save test now waits for the specific failed-save
-warning while holding its database lock. All six tests in that process module
-passed after the correction. The failed gate did not run its remaining Rust or
-release steps and is not counted as a full pass; a fresh final-head gate is
-required. No candidate with failed required CI is merged or activated.
+Earlier full gates exposed a save-warning test race, an intermittent initial
+control timeout, and a decoder unit test loading an older welcome fixture. The
+save test now waits for the specific failed-save warning; concurrent-reader
+deadlines remain unchanged. All six process-module cases and the subsequent
+278-test Python/tool/process stage passed. Current decoder and benchmark fixture
+consumers now use the recorded current-contract sample with version assertions.
+All 877 workspace Rust tests, including example targets, passed. Failed gates
+are retained and do not count as full passes; fresh final-head debug/release
+verification and Windows/Linux CI remain required before merge or activation.

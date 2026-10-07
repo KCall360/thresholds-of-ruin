@@ -6,7 +6,8 @@ use tor_protocol::*;
 
 fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/wire-v27.json")).unwrap();
+        serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+    assert_eq!(fixture["protocol"], PROTOCOL_VERSION);
     let message = fixture["server"]
         .as_array()
         .unwrap()
