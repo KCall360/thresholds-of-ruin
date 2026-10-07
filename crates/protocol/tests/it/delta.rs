@@ -95,13 +95,14 @@ fn a_repeated_key_is_kept_apart_by_position() {
 }
 
 #[test]
-fn unrelated_views_are_sent_in_full() {
+fn unrelated_views_still_have_an_exact_candidate() {
     let base = room(15, 15, 1);
     let mut next = room(15, 15, 2);
     for cell in &mut next.observation.visible_cells {
         cell.key.push('!');
     }
-    assert_eq!(StateDelta::between(&base, &next), None);
+    let delta = StateDelta::between(&base, &next).unwrap();
+    assert_eq!(delta.apply(&base).unwrap(), next);
 }
 
 #[test]
@@ -197,12 +198,25 @@ fn delta_translation_rejects_coordinate_overflow_on_every_axis() {
 }
 
 #[test]
-fn delta_generation_falls_back_when_translation_is_unrepresentable() {
+fn complete_encoding_falls_back_when_translation_is_unrepresentable() {
     for axis in 0..3 {
         for (from, to) in [(i32::MAX, i32::MIN), (i32::MIN, i32::MAX)] {
             let base = edge_view(axis, from, 1);
             let next = edge_view(axis, to, 2);
-            assert_eq!(StateDelta::between(&base, &next), None, "axis {axis}");
+            // Zero shift with explicit replacement remains representable;
+            // an overflowing translation must never wrap either coordinate.
+            let candidate = StateDelta::between(&base, &next).unwrap();
+            assert_eq!(candidate.cells.shift, Position { x: 0, y: 0, z: 0 });
+            assert_eq!(candidate.apply(&base).unwrap(), next);
+            let message = complete_observation(next.clone(), 2);
+            let selected = encode_response(
+                &message,
+                Some((exact_base(&base, 1), &base)),
+                MAX_RESPONSE_BYTES,
+            )
+            .unwrap();
+            assert_eq!(selected.observation, Some(ObservationEncoding::Full));
+            assert_eq!(selected.text, serde_json::to_string(&message).unwrap());
             let full: StateView =
                 serde_json::from_value(serde_json::to_value(&next).unwrap()).unwrap();
             assert_eq!(full, next);
@@ -227,4 +241,153 @@ fn delta_generation_does_not_wrap_cells_that_would_be_removed() {
         .push(cell(i32::MAX, 0, 0, "removed"));
     let next = edge_view(0, 1, 2);
     assert_eq!(StateDelta::between(&base, &next), None);
+}
+
+fn complete_observation(state: StateView, sequence: u64) -> ServerMessage {
+    ServerMessage::Update {
+        update: Box::new(StreamUpdate {
+            context: StreamContext {
+                stream: StreamId("encoding-test".into()),
+                epoch: 1,
+            },
+            actor: state.observation.actor,
+            branch: BranchId("encoding-branch".into()),
+            cursor: StreamCursor {
+                sequence,
+                tick: state.observation.tick,
+            },
+            body: UpdateBody::Observation {
+                state: Box::new(state),
+                event: None,
+            },
+        }),
+    }
+}
+
+fn exact_base(state: &StateView, sequence: u64) -> ObservationBase {
+    ObservationBase {
+        cursor: StreamCursor {
+            sequence,
+            tick: state.observation.tick,
+        },
+        revision: state.revision,
+    }
+}
+
+#[test]
+fn complete_encoding_selects_exact_bytes_and_handles_both_frame_ceilings() {
+    let mut base = room(15, 15, 1);
+    base.observation.visible_cells[0].material = "é\"\\\n".repeat(128);
+    let mut next = base.clone();
+    next.revision = 2;
+    next.observation.tick = 2;
+    let message = complete_observation(next.clone(), 2);
+    let previous = exact_base(&base, 1);
+    let selected = encode_response(&message, Some((previous, &base)), MAX_RESPONSE_BYTES).unwrap();
+    assert_eq!(selected.observation, Some(ObservationEncoding::Delta));
+    let full = serde_json::to_string(&message).unwrap();
+    assert!(selected.text.len() < full.len());
+    let exact = encode_response(&message, Some((previous, &base)), selected.text.len()).unwrap();
+    assert_eq!(
+        exact.text, selected.text,
+        "a delta fits even when full does not"
+    );
+    assert!(encode_response(&message, Some((previous, &base)), selected.text.len() - 1).is_err());
+    let ServerMessage::Update { update } = decode_response(&exact.text).unwrap() else {
+        panic!("update")
+    };
+    let UpdateBody::ObservationDelta {
+        base: actual_base,
+        state,
+        ..
+    } = update.body
+    else {
+        panic!("delta")
+    };
+    assert_eq!(actual_base, previous);
+    assert_eq!(state.apply(&base).unwrap(), next);
+    let direct = encode_response(&message, None, full.len()).unwrap();
+    assert_eq!(direct.observation, Some(ObservationEncoding::Full));
+    assert_eq!(direct.text, full);
+    assert!(encode_response(&message, None, full.len() - 1).is_err());
+}
+
+#[test]
+fn complete_encoding_prefers_full_when_every_cell_changes_or_base_is_wrong() {
+    let base = room(15, 15, 1);
+    let mut next = room(15, 15, 2);
+    for cell in &mut next.observation.visible_cells {
+        cell.key.push('!');
+    }
+    let message = complete_observation(next, 2);
+    let full = serde_json::to_string(&message).unwrap();
+    let selected =
+        encode_response(&message, Some((exact_base(&base, 1), &base)), full.len()).unwrap();
+    assert_eq!(selected.observation, Some(ObservationEncoding::Full));
+    assert_eq!(selected.text, full);
+    let next = room(15, 15, 2);
+    let message = complete_observation(next, 2);
+    for wrong in [
+        ObservationBase {
+            revision: 99,
+            ..exact_base(&base, 1)
+        },
+        ObservationBase {
+            cursor: StreamCursor {
+                tick: 99,
+                sequence: 1,
+            },
+            ..exact_base(&base, 1)
+        },
+    ] {
+        let selected = encode_response(&message, Some((wrong, &base)), MAX_RESPONSE_BYTES).unwrap();
+        assert_eq!(selected.observation, Some(ObservationEncoding::Full));
+        assert_eq!(selected.text, serde_json::to_string(&message).unwrap());
+    }
+    let mut other = base.clone();
+    other.observation.actor = ActorId(2);
+    let selected = encode_response(
+        &message,
+        Some((exact_base(&other, 1), &other)),
+        MAX_RESPONSE_BYTES,
+    )
+    .unwrap();
+    assert_eq!(selected.observation, Some(ObservationEncoding::Full));
+}
+
+#[test]
+fn equal_complete_encoded_sizes_prefer_full() {
+    let mut found = false;
+    for key_length in 1..=256 {
+        let mut base = room(15, 15, 9_000_000_000_000_000_000);
+        base.observation.visible_cells.truncate(1);
+        base.observation.visible_cells[0].key = "k".repeat(key_length);
+        let mut next = base.clone();
+        next.revision += 1;
+        next.observation.tick += 1;
+        let previous = exact_base(&base, base.revision);
+        let full = complete_observation(next.clone(), next.revision);
+        let mut candidate = full.clone();
+        let ServerMessage::Update { update } = &mut candidate else {
+            unreachable!()
+        };
+        update.body = UpdateBody::ObservationDelta {
+            base: previous,
+            state: Box::new(StateDelta::between(&base, &next).unwrap()),
+            event: None,
+        };
+        if serde_json::to_vec(&candidate).unwrap().len() == serde_json::to_vec(&full).unwrap().len()
+        {
+            let selected =
+                encode_response(&full, Some((previous, &base)), MAX_RESPONSE_BYTES).unwrap();
+            assert_eq!(selected.observation, Some(ObservationEncoding::Full));
+            assert_eq!(selected.text, serde_json::to_string(&full).unwrap());
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "the fixture must cover an actual equal-size boundary"
+    );
 }

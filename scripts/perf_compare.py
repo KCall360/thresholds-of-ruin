@@ -151,9 +151,20 @@ def extract_latency(rows):
         elif kind == "sample":
             if row["expected"] != "blocked":
                 timings[case]["authoritative_total"].append(row["phases_ms"]["authoritative_total"])
+            for metric in ("wire_encoding", "wire_decoding"):
+                if metric in row["phases_ms"]:
+                    timings[case][metric].append(row["phases_ms"][metric])
             for name, value in (row.get("profile") or {}).items():
                 _add_count(counts[case], f"profile.{name}", value)
             counts[case]["client_memory"] = row["client_memory"]
+        elif kind == "wire":
+            complete = row.get("wire_profile_version", 1) == 2
+            names = ("full_envelope_bytes", "sent_envelope_bytes") if complete else (
+                "legacy_full_state_bytes", "legacy_update_bytes")
+            for name, field in zip(names, ("full_bytes_total", "sent_bytes_total")):
+                _add_count(counts[case], f"wire.{name}", row.get(field))
+            _add_count(counts[case], "wire.observations", row.get("n"))
+            _add_count(counts[case], "wire.deltas", row.get("deltas"))
         elif kind in ("case_end", "traversal_end", "stream_end"):
             end = row.get("persistence", row)
             for metric in ("restart_replay_ms", "final_flush_ms"):

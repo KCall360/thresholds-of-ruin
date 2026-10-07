@@ -2,7 +2,7 @@
 //! frames. These are host resource limits, never game state or scheduling inputs.
 use std::sync::Arc;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tor_protocol::{encode_bounded_json as encode, ServerMessage, MAX_RESPONSE_BYTES};
+use tor_protocol::{ServerMessage, MAX_RESPONSE_BYTES};
 
 /// Host output limits. The default frame ceiling matches the existing native
 /// clients' WebSocket frame limit; aggregate limits also include in-flight writes.
@@ -87,9 +87,24 @@ pub(crate) struct Frame {
 }
 
 impl Sender {
+    #[cfg(test)]
     pub(crate) fn try_send(&self, message: ServerMessage) -> Result<(), ()> {
+        self.try_send_with(&message, tor_protocol::encode_bounded_json)
+    }
+
+    /// Reserve capacity before preparation and admit the chosen text once.
+    /// The caller retains its message until successful admission so it can
+    /// transfer owned disclosed state without making another full copy.
+    pub(crate) fn try_send_with(
+        &self,
+        message: &ServerMessage,
+        prepare: impl FnOnce(&ServerMessage, usize) -> Result<String, serde_json::Error>,
+    ) -> Result<(), ()> {
         let slot = self.sender.try_reserve().map_err(|_| ())?;
-        let text = encode(&message, self.limits.frame_bytes).map_err(|_| ())?;
+        let text = prepare(message, self.limits.frame_bytes).map_err(|_| ())?;
+        if text.len() > self.limits.frame_bytes {
+            return Err(());
+        }
         let bytes = u32::try_from(text.len()).map_err(|_| ())?;
         let client = self
             .bytes
@@ -102,7 +117,7 @@ impl Sender {
             .try_acquire_many_owned(bytes)
             .map_err(|_| ())?;
         let ack_id = match message {
-            ServerMessage::Ack { request_id, .. } => Some(request_id),
+            ServerMessage::Ack { request_id, .. } => Some(request_id.clone()),
             _ => None,
         };
         slot.send(Frame {
@@ -179,6 +194,27 @@ mod tests {
             client_bytes: client,
             total_bytes: total,
         }
+    }
+
+    #[test]
+    fn preparation_does_not_run_without_queue_capacity_and_cannot_bypass_frame_limit() {
+        let value = message(1);
+        let n = serde_json::to_string(&value).unwrap().len();
+        let pool = Pool::new(limits(n, n * 2, n * 4));
+        let (sender, receiver) = pool.channel(1);
+        assert!(sender
+            .try_send_with(&value, |_, _| Ok("x".repeat(n + 1)))
+            .is_err());
+        assert_eq!(pool.available_bytes(), n * 4);
+        sender.try_send(value.clone()).unwrap();
+        assert!(sender
+            .try_send_with(&value, |_, _| panic!("full queue must not prepare"))
+            .is_err());
+        drop(receiver);
+        assert_eq!(pool.available_bytes(), n * 4);
+        assert!(sender
+            .try_send_with(&value, |_, _| panic!("closed queue must not prepare"))
+            .is_err());
     }
 
     #[test]

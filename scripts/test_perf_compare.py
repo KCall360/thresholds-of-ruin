@@ -79,6 +79,29 @@ class Scheduling(unittest.TestCase):
 
 
 class Extraction(unittest.TestCase):
+    def test_complete_wire_timings_and_bytes_keep_distinct_measurement_names(self):
+        case = "r8-a1-h100-memory"
+        rows = latency_rows()
+        rows[0]["wire_profile_version"] = 2
+        rows[1]["phases_ms"].update(wire_encoding=0.2, wire_decoding=0.3)
+        rows.append(dict(kind="wire", case=case, wire_profile_version=2,
+                         n=1, deltas=1, full_bytes_total=1000, sent_bytes_total=400))
+        timings, counts, _ = compare.extract_latency(rows)
+        self.assertEqual([0.2], timings[case].get("wire_encoding"))
+        self.assertEqual([0.3], timings[case].get("wire_decoding"))
+        self.assertEqual(1000, counts[case].get("wire.full_envelope_bytes"))
+        self.assertEqual(400, counts[case].get("wire.sent_envelope_bytes"))
+        self.assertEqual(1, counts[case].get("wire.observations"))
+        legacy = latency_rows()
+        legacy[1]["phases_ms"]["delta_encoding"] = 0.01
+        legacy.append(dict(kind="wire", case=case, n=1, deltas=1,
+                           full_bytes_total=900, sent_bytes_total=300))
+        old_timings, old_counts, _ = compare.extract_latency(legacy)
+        self.assertNotIn("wire_encoding", old_timings[case])
+        self.assertNotIn("wire.full_envelope_bytes", old_counts[case])
+        self.assertEqual(900, old_counts[case].get("wire.legacy_full_state_bytes"))
+        self.assertEqual(300, old_counts[case].get("wire.legacy_update_bytes"))
+
     def test_latency_uses_the_mixed_distribution_and_deterministic_counts(self):
         timings, counts, version = compare.extract_latency(latency_rows())
         case = "r8-a1-h100-memory"

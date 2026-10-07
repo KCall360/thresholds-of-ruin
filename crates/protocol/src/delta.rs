@@ -117,7 +117,7 @@ fn best_shift(base: &[CellView], next: &[CellView]) -> Position {
 
 impl StateDelta {
     /// Changes from `base` to `next`, or `None` when a delta cannot represent
-    /// `next` exactly or would not be smaller than sending it in full.
+    /// `next` exactly. Encoded-message size selection is a separate boundary.
     pub fn between(base: &StateView, next: &StateView) -> Option<Self> {
         let old = &base.observation.visible_cells;
         let new = &next.observation.visible_cells;
@@ -178,9 +178,6 @@ impl StateDelta {
             }
         }
         // Shifting preserves order, so the merge above saw both lists sorted.
-        if changed.len() + removed.len() / 4 >= new.len() {
-            return None;
-        }
         let observation = &next.observation;
         Some(Self {
             base_revision: base.revision,

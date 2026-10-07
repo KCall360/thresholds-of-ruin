@@ -392,7 +392,7 @@ build. The release comparison retained matching counts/saves and an unresolved
 command tail, with StreamUpdate bytes up about 0.8%/1.6%. No broad speedup is
 claimed. Prior builds, saves and helper backups remain retained.
 
-**Bounded typed decoding (in development).** Shared request/response decoding
+**Bounded typed decoding (merged, PR #72).** Shared request/response decoding
 checks complete UTF-8 bytes and a 64-container nesting ceiling before typed
 construction. The scan includes ignored fields and respects string escaping;
 Serde owns syntax/schema checks. Failing-first unit, fragmented-peer and actual
@@ -400,9 +400,19 @@ headless-process regressions passed; healthy-player continuation, reconnect and
 save/reopen rejection checks passed. The direct release diagnostic validated
 2,000 samples and measured added scan cost (4,096-cell median 7.06 → 7.99 ms).
 All 24 engine reports and six focused repeat reports validated with matching
-counts; command and persistence timing tails remain unresolved. Full final
-verification remains required before publication. The same-build diagnostic
+counts; command and persistence timing tails remain unresolved. Exact head
+`f85ca2e` passed full local verification and all five final-head CI jobs; the
+three desktop launchers use its verified immutable build. The same-build diagnostic
 compares identical typed payloads and excludes network/UI/semantic validation;
 ordinary engine benchmarks do not measure native JSON decoding. Text-client
 product fixes and scripting runtime implementation remain deferred. All six
 architecture sequences in the [refactor plan](docs/refactoring.md) remain active.
+
+**Complete observation encoding (in development).** Shared response selection
+compares complete encoded envelopes and admits the selected bounded text once.
+Snapshot/update disclosure state commits after output admission and transfers
+owned full state into the next base. Focused Rust, real headless reset/restart,
+and streaming diagnostic checks passed. Wire measurement version 2 distinguishes
+shared encoding/decoding timings and complete sizes from historical partial DTO
+measurements. Release comparisons and full verification remain pending. Collection
+deltas and fair aggregate output pressure remain in the full refactor scope.

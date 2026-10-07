@@ -1318,25 +1318,30 @@ impl Service {
                 .engine
                 .history(actor, &client.user, None, MAX_HISTORY_PAGE)?,
         };
-        let client = self.clients.get_mut(&id).expect("connected client");
+        let message = ServerMessage::Snapshot {
+            request_id: request_id.into(),
+            snapshot: Box::new(snapshot),
+        };
+        if !self.admit_output(id, &message) {
+            // Output rejection closes the connection; it is not a request error.
+            return Ok(());
+        }
+        let ServerMessage::Snapshot { snapshot, .. } = message else {
+            unreachable!()
+        };
+        let client = self.clients.get_mut(&id).expect("admitted client");
         client.context = Some(context);
         client.readiness = Some(readiness);
+        client.waiting = None;
         client.observation_tick = snapshot.state.observation.tick;
         client.last_observation = Some(DisclosedObservation {
-            branch: snapshot.branch.clone(),
+            branch: snapshot.branch,
             base: ObservationBase {
                 cursor: snapshot.cursor,
                 revision: snapshot.state.revision,
             },
-            state: snapshot.state.clone(),
+            state: snapshot.state,
         });
-        self.send(
-            id,
-            ServerMessage::Snapshot {
-                request_id: request_id.into(),
-                snapshot: Box::new(snapshot),
-            },
-        );
         // Attaching sends the whole palette; a later snapshot, what changed.
         self.palette_update(id);
         Ok(())
@@ -1492,7 +1497,8 @@ impl Service {
         }
     }
 
-    fn update(&mut self, id: u64, mut body: UpdateBody) {
+    fn update(&mut self, id: u64, body: UpdateBody) {
+        let branch = self.engine.branch().clone();
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
@@ -1501,49 +1507,52 @@ impl Service {
             return;
         };
         let actor = client.actor.expect("only attached clients receive updates");
+        // Control changes during a broadcast retain the last admitted tick.
+        let tick = match &body {
+            UpdateBody::Observation { state, .. } => state.observation.tick,
+            _ => client.observation_tick,
+        };
+        let previous = client
+            .last_observation
+            .as_ref()
+            .filter(|previous| previous.branch == branch)
+            .map(|previous| (previous.base, &previous.state));
+        let message = ServerMessage::Update {
+            update: Box::new(StreamUpdate {
+                context: client.context.clone().expect("attached stream context"),
+                actor,
+                branch: branch.clone(),
+                cursor: StreamCursor { sequence, tick },
+                body,
+            }),
+        };
+        if client
+            .messages
+            .try_send_with(&message, |message, limit| {
+                encode_response(message, previous, limit).map(|encoded| encoded.text)
+            })
+            .is_err()
+        {
+            self.disconnect(id);
+            return;
+        }
+        // Only an admitted output establishes the next disclosure base.
         client.sequence = sequence;
-        // Disconnecting a slow controller can publish control changes in the
-        // middle of an action broadcast. Keep those changes at each recipient's
-        // last disclosed tick until its new observation has been queued.
-        if let UpdateBody::Observation { state, event } = body {
-            client.observation_tick = state.observation.tick;
-            let delta = client.last_observation.as_ref().and_then(|previous| {
-                StateDelta::between(&previous.state, &state).map(|delta| (previous.base, delta))
-            });
+        client.observation_tick = tick;
+        client.waiting = None;
+        let ServerMessage::Update { update } = message else {
+            unreachable!()
+        };
+        if let UpdateBody::Observation { state, .. } = update.body {
             client.last_observation = Some(DisclosedObservation {
-                branch: self.engine.branch().clone(),
+                branch,
                 base: ObservationBase {
-                    cursor: StreamCursor {
-                        sequence,
-                        tick: state.observation.tick,
-                    },
+                    cursor: StreamCursor { sequence, tick },
                     revision: state.revision,
                 },
-                state: (*state).clone(),
+                state: *state,
             });
-            body = match delta {
-                Some((base, delta)) => UpdateBody::ObservationDelta {
-                    base,
-                    state: Box::new(delta),
-                    event,
-                },
-                None => UpdateBody::Observation { state, event },
-            };
         }
-        let tick = client.observation_tick;
-        let context = client.context.clone().expect("attached stream context");
-        self.send(
-            id,
-            ServerMessage::Update {
-                update: Box::new(StreamUpdate {
-                    context,
-                    actor,
-                    branch: self.engine.branch().clone(),
-                    cursor: StreamCursor { sequence, tick },
-                    body,
-                }),
-            },
-        );
     }
 
     fn reply_context(&self, id: u64) -> Option<ReplyContext> {
@@ -1583,26 +1592,35 @@ impl Service {
         })
     }
 
+    /// Admit an ordinary response before the caller commits disclosure state.
+    /// Output failure ends this stream; it must never silently skip a response.
+    fn admit_output(&mut self, id: u64, message: &ServerMessage) -> bool {
+        let Some(client) = self.clients.get(&id) else {
+            return false;
+        };
+        if client
+            .messages
+            .try_send_with(message, encode_bounded_json)
+            .is_err()
+        {
+            self.disconnect(id);
+            return false;
+        }
+        true
+    }
+
     fn send(&mut self, id: u64, message: ServerMessage) {
-        // Anything that changes what a client knows, and every answer to a
-        // request, needs a fresh word on whose move it is.
+        if !self.admit_output(id, &message) {
+            return;
+        }
+        // A successfully admitted answer or disclosure needs a fresh waiting word.
         if matches!(
             message,
             ServerMessage::Update { .. }
                 | ServerMessage::Snapshot { .. }
                 | ServerMessage::Ack { .. }
         ) {
-            if let Some(client) = self.clients.get_mut(&id) {
-                client.waiting = None;
-            }
-        }
-        if self
-            .clients
-            .get(&id)
-            .is_some_and(|client| client.messages.try_send(message).is_err())
-        {
-            // A slow client must reconnect for a snapshot, never silently miss updates.
-            self.disconnect(id);
+            self.clients.get_mut(&id).expect("admitted client").waiting = None;
         }
     }
 
@@ -1724,6 +1742,139 @@ mod tests {
     use super::*;
     use crate::Scenario;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn narrowing_a_view_chooses_the_smaller_complete_encoded_update() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "encoding-observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut client = service.connect(&account, "headless".into()).unwrap();
+        service.handle(client.id, "attach".into(), Request::Attach { actor });
+        while client.messages.try_recv_frame().is_ok() {}
+        let mut base = service.engine.state(actor).unwrap();
+        base.revision += 1;
+        base.observation.tick += 1;
+        base.observation.visible_cells.truncate(5);
+        assert_eq!(base.observation.visible_cells.len(), 5);
+        base.observation.visible_cells[0].door = Some(DoorView {
+            asset: None,
+            id: 77,
+            name: "visible door".into(),
+            description: "An already disclosed elaborate carving. ".repeat(128),
+            open: false,
+            reachable: false,
+            approaches: Vec::new(),
+        });
+        base.validate().unwrap();
+        service.update(
+            client.id,
+            UpdateBody::Observation {
+                state: Box::new(base.clone()),
+                event: None,
+            },
+        );
+        while client.messages.try_recv_frame().is_ok() {}
+        let disclosed = service.clients[&client.id]
+            .last_observation
+            .as_ref()
+            .unwrap();
+        let previous = disclosed.base;
+        assert_eq!(disclosed.state, base);
+        let mut next = base.clone();
+        next.revision += 1;
+        next.observation.tick += 1;
+        next.observation.visible_cells.truncate(1);
+        next.validate().unwrap();
+        // A concrete valid delta is a witness that counting removed cells is
+        // insufficient: the retained cell holds most of the full payload.
+        let o = &next.observation;
+        let witness = StateDelta {
+            base_revision: base.revision,
+            wizard_game: next.wizard_game,
+            revision: next.revision,
+            combat: o.combat.clone(),
+            motion: o.motion.clone(),
+            places: o.places.clone(),
+            actor: o.actor,
+            tick: o.tick,
+            position: o.position,
+            cells: CellChanges {
+                shift: Position { x: 0, y: 0, z: 0 },
+                removed: base.observation.visible_cells[1..]
+                    .iter()
+                    .map(|cell| cell.position)
+                    .collect(),
+                changed: Vec::new(),
+            },
+            ground_items: o.ground_items.clone(),
+            inventory: o.inventory.clone(),
+            visible_actors: o.visible_actors.clone(),
+            ready: o.ready,
+        };
+        assert_eq!(witness.clone().apply(&base).unwrap(), next);
+        let client_state = &service.clients[&client.id];
+        let envelope = |body| ServerMessage::Update {
+            update: Box::new(StreamUpdate {
+                context: client_state.context.clone().unwrap(),
+                actor,
+                branch: service.engine.branch().clone(),
+                cursor: StreamCursor {
+                    sequence: client_state.sequence + 1,
+                    tick: next.observation.tick,
+                },
+                body,
+            }),
+        };
+        let full_bytes = serde_json::to_vec(&envelope(UpdateBody::Observation {
+            state: Box::new(next.clone()),
+            event: None,
+        }))
+        .unwrap()
+        .len();
+        let delta_bytes = serde_json::to_vec(&envelope(UpdateBody::ObservationDelta {
+            base: previous,
+            state: Box::new(witness),
+            event: None,
+        }))
+        .unwrap()
+        .len();
+        assert!(
+            delta_bytes < full_bytes,
+            "the witness must actually save bytes"
+        );
+        service.update(
+            client.id,
+            UpdateBody::Observation {
+                state: Box::new(next.clone()),
+                event: None,
+            },
+        );
+        let frame = client.messages.try_recv_frame().unwrap();
+        let ServerMessage::Update { update } = decode_response(&frame.text).unwrap() else {
+            panic!("expected actual encoded observation");
+        };
+        let restored = match update.body {
+            UpdateBody::Observation { state, .. } => *state,
+            UpdateBody::ObservationDelta {
+                base: actual_base,
+                state,
+                ..
+            } => {
+                assert_eq!(actual_base, previous);
+                state.apply(&base).unwrap()
+            }
+            _ => panic!("expected observation update"),
+        };
+        assert_eq!(restored, next);
+        assert!(frame.text.len() <= delta_bytes,
+            "actual server chose {} bytes, but a complete equivalent delta needs {delta_bytes} (full {full_bytes})",
+            frame.text.len());
+    }
 
     #[test]
     fn published_disabled_admission_rejects_fresh_gameplay_without_mutation() {
@@ -2254,6 +2405,93 @@ mod tests {
                 }
             );
             assert_eq!(service.engine.state(actor).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn snapshot_admission_establishes_the_exact_reset_base() {
+        let actor = ActorId(1);
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "snapshot-observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        let mut connection = service.connect(&account, "headless".into()).unwrap();
+        service.handle(connection.id, "attach".into(), Request::Attach { actor });
+        while connection.messages.try_recv().is_ok() {}
+        let previous = service.clients[&connection.id].context.clone().unwrap();
+        service.snapshot(connection.id, "reset").unwrap();
+        let ServerMessage::Snapshot {
+            request_id,
+            snapshot,
+        } = connection.messages.try_recv().unwrap()
+        else {
+            panic!("reset must publish a snapshot first");
+        };
+        assert_eq!(request_id, "reset");
+        assert_eq!(snapshot.context, previous.next_reset().unwrap());
+        snapshot.state.validate().unwrap();
+        let client = &service.clients[&connection.id];
+        let disclosed = client.last_observation.as_ref().unwrap();
+        assert_eq!(client.context.as_ref(), Some(&snapshot.context));
+        assert_eq!(client.observation_tick, snapshot.cursor.tick);
+        assert_eq!(disclosed.branch, snapshot.branch);
+        assert_eq!(
+            disclosed.base,
+            ObservationBase {
+                cursor: snapshot.cursor,
+                revision: snapshot.state.revision,
+            }
+        );
+        assert_eq!(disclosed.state, snapshot.state);
+        assert_eq!(client.waiting, None);
+    }
+
+    #[test]
+    fn rejected_snapshot_output_disconnects_without_affecting_a_healthy_peer() {
+        let actor = ActorId(1);
+        for closed in [false, true] {
+            let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+            let account = Account {
+                role: AccessRole::Spectator,
+                user: "snapshot-observer".into(),
+                token: "test-only".into(),
+                actors: BTreeSet::from([actor]),
+            };
+            let mut connection = service.connect(&account, "headless".into()).unwrap();
+            let mut healthy = service.connect(&account, "headless".into()).unwrap();
+            for peer in [&mut connection, &mut healthy] {
+                service.handle(peer.id, "attach".into(), Request::Attach { actor });
+                while peer.messages.try_recv().is_ok() {}
+            }
+            let before = service.engine.state(actor).unwrap();
+            let id = connection.id;
+            if closed {
+                drop(connection.messages);
+            } else {
+                for _ in 0..QUEUE {
+                    service.clients[&id]
+                        .messages
+                        .try_send(ServerMessage::Waiting { on: Waiting::You })
+                        .unwrap();
+                }
+            }
+            service.snapshot(id, "reset").unwrap();
+            assert!(!service.clients.contains_key(&id));
+            assert!(*connection.close.borrow());
+            assert_eq!(service.engine.state(actor).unwrap(), before);
+            service.snapshot(healthy.id, "healthy-reset").unwrap();
+            let ServerMessage::Snapshot {
+                request_id,
+                snapshot,
+            } = healthy.messages.try_recv().unwrap()
+            else {
+                panic!("healthy peer must receive its snapshot");
+            };
+            assert_eq!(request_id, "healthy-reset");
+            assert_eq!(snapshot.state, before);
         }
     }
 

@@ -131,9 +131,163 @@ pub fn encode_bounded_json(
     Ok(String::from_utf8(writer.bytes).expect("JSON serializer writes UTF-8"))
 }
 
+/// The selected observation representation; ordinary replies have no selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObservationEncoding {
+    Full,
+    Delta,
+}
+
+/// One bounded complete server envelope, ready for host output admission.
+/// No second encoded candidate buffer is retained.
+pub struct EncodedResponse {
+    pub text: String,
+    pub observation: Option<ObservationEncoding>,
+}
+
+struct Count {
+    length: usize,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl Write for Count {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let Some(length) = self
+            .length
+            .checked_add(bytes.len())
+            .filter(|n| *n <= self.limit)
+        else {
+            self.exceeded = true;
+            return Err(io::Error::other("wire message exceeds byte limit"));
+        };
+        self.length = length;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+// Overflow is an ineligible candidate; other serialization failures propagate.
+fn encoded_length(
+    message: &impl Serialize,
+    limit: usize,
+) -> Result<Option<usize>, serde_json::Error> {
+    let mut writer = Count {
+        length: 0,
+        limit,
+        exceeded: false,
+    };
+    match serde_json::to_writer(&mut writer, message) {
+        Ok(()) => Ok(Some(writer.length)),
+        Err(_) if writer.exceeded => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Select using complete encoded bytes, then allocate only the chosen text.
+/// `base` must be the host's exact previous disclosure for this attachment and
+/// branch. This codec does not grant authority or replace semantic validation.
+/// Equal sizes prefer a full observation; an oversized full may still use a
+/// fitting delta. The host may lower but never raise the protocol byte ceiling.
+/// Non-observation responses use ordinary bounded encoding.
+pub fn encode_response(
+    message: &crate::ServerMessage,
+    base: Option<(crate::ObservationBase, &crate::StateView)>,
+    limit: usize,
+) -> Result<EncodedResponse, serde_json::Error> {
+    use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
+    let limit = limit.min(MAX_RESPONSE_BYTES);
+    let observation = match message {
+        ServerMessage::Update { update } => match &update.body {
+            UpdateBody::Observation { state, event } => Some((update, state, event)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some((update, state, event)) = observation else {
+        return Ok(EncodedResponse {
+            text: encode_bounded_json(message, limit)?,
+            observation: None,
+        });
+    };
+    let full_length = encoded_length(message, limit)?;
+    let delta = base.and_then(|(base, previous)| {
+        if previous.revision != base.revision
+            || previous.observation.tick != base.cursor.tick
+            || previous.observation.actor != state.observation.actor
+            || update.actor != state.observation.actor
+        {
+            return None;
+        }
+        StateDelta::between(previous, state).map(|state| ServerMessage::Update {
+            update: Box::new(StreamUpdate {
+                context: update.context.clone(),
+                actor: update.actor,
+                branch: update.branch.clone(),
+                cursor: update.cursor,
+                body: UpdateBody::ObservationDelta {
+                    base,
+                    state: Box::new(state),
+                    event: event.clone(),
+                },
+            }),
+        })
+    });
+    if let Some(delta) = delta {
+        let smaller_limit = full_length.map_or(limit, |length| length.saturating_sub(1));
+        if encoded_length(&delta, smaller_limit)?.is_some() {
+            return Ok(EncodedResponse {
+                text: encode_bounded_json(&delta, limit)?,
+                observation: Some(ObservationEncoding::Delta),
+            });
+        }
+    }
+    Ok(EncodedResponse {
+        text: encode_bounded_json(message, limit)?,
+        observation: Some(ObservationEncoding::Full),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_response_encoding_cannot_raise_the_declared_wire_ceiling() {
+        let message = crate::ServerMessage::Error {
+            scope: crate::ErrorScope::Transport {},
+            request_id: None,
+            code: crate::ErrorCode::InvalidRequest,
+            message: "x".repeat(MAX_RESPONSE_BYTES),
+        };
+        assert!(
+            encode_response(&message, None, MAX_RESPONSE_BYTES * 2).is_err(),
+            "a caller's host limit cannot enlarge the protocol message ceiling"
+        );
+    }
+
+    #[test]
+    fn counting_propagates_serialization_errors_and_checks_arithmetic() {
+        struct Fails;
+        impl Serialize for Fails {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("intentional serializer failure"))
+            }
+        }
+        let error = encoded_length(&Fails, 1024).unwrap_err();
+        assert!(error.to_string().contains("intentional serializer failure"));
+        let mut writer = Count {
+            length: usize::MAX,
+            limit: usize::MAX,
+            exceeded: false,
+        };
+        assert!(writer.write(b"x").is_err());
+        assert!(writer.exceeded);
+        assert_eq!(writer.length, usize::MAX);
+    }
+
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
         let samples: serde_json::Value =
