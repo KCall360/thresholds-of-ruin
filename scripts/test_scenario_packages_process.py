@@ -9,6 +9,63 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_validator_rejects_oversized_generated_counts_without_panicking_or_rewriting(self):
+        package = self.directory / "oversized-pool"
+        shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
+        region = package / "regions/2.toml"
+        text = region.read_text()
+        self.assertIn("count = [1, 3]", text)
+        region.write_text(text.replace("count = [1, 3]", "count = [4294967295, 4294967295]"))
+        before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("panicked at", result.stderr)
+        error = json.loads(result.stderr)["error"]
+        self.assertEqual(error["code"], "scenario_invalid")
+        self.assertIn("Region 2", error["message"])
+        self.assertIn("pools", error["message"])
+        self.assertEqual({p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}, before)
+
+    def test_generated_comments_preserve_real_client_content_and_pinned_restart(self):
+        observations, hashes, cell_keys = [], [], []
+        for name, comment in [("original", ""), ("annotated", "# Author notes do not reroll content.\n")]:
+            package = self.directory / name
+            shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
+            manifest = package / "scenario.toml"
+            manifest.write_text(manifest.read_text().replace('anchor = "1/start"', 'anchor = "2/west"'))
+            for region in [2, 3]:
+                path = package / f"regions/{region}.toml"
+                text = path.read_text().replace("count = [1, 3]", "count = [0, 0]")
+                path.write_text((comment if region == 2 else "") + text)
+            validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                       capture_output=True, text=True, timeout=15)
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            index = json.loads((package / "index.json").read_text())
+            hashes.append(next(region["hash"] for region in index["regions"] if region["id"] == 2))
+            self.save = self.directory / f"{name}.db"
+            server = self.server(scenario=package, seed=42)
+            player, initial = self.client()
+            observation = initial["state"]["observation"]
+            cell_keys.append([cell["key"] for cell in observation["visible_cells"]])
+            # Fresh saves have independent privacy salts; compare generated
+            # content across them, but retain exact token equality on restart.
+            observations.append({**observation, "visible_cells": [
+                {key: value for key, value in cell.items() if key != "key"}
+                for cell in observation["visible_cells"]]})
+            self.flush_save()
+            player.stop()
+            server.stop()
+            package.rename(self.directory / f"{name}-unavailable")
+            server = self.server(seed=None)
+            player, restored = self.client()
+            self.assertEqual(restored["state"], initial["state"])
+            player.stop()
+            server.stop()
+        self.assertNotEqual(*hashes)
+        self.assertNotEqual(*cell_keys)
+        self.assertEqual(*observations)
+
     def test_validator_reports_construction_references_without_rewriting_package(self):
         cases = [
             ('actor-ai', 'regions/1.toml',

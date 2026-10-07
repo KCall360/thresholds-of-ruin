@@ -9,7 +9,7 @@ portals = [{ at = [0, 6, 0], direction = "west", to = "1/east" }, { at = [23, 6,
 
 [generate]
 generator = "rooms"
-version = 1
+version = 2
 rooms = [3, 6]
 actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
 items = { archetypes = ["coin"], count = [2, 4] }

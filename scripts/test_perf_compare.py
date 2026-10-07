@@ -1,4 +1,12 @@
+from contextlib import redirect_stdout
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import perf_compare as compare
 
@@ -205,6 +213,110 @@ class Processes(unittest.TestCase):
         windows = '"cargo.exe","1234","Console","1","10,000 K"\n"explorer.exe","2","Console","1","1 K"\n'
         self.assertEqual(["cargo.exe", "explorer.exe"], compare.parse_process_names(windows))
         self.assertEqual(["rustc", "bash"], compare.parse_process_names("/usr/bin/rustc\nbash\n\n"))
+
+
+class ComparisonOwnership(unittest.TestCase):
+    def run_comparison(self, directory, *, build=False, failed_run=False, interrupted=False, shared_target=False):
+        head, base = directory / "head", directory / "base"
+        head_target = directory / "head-cache" if build else head / "target"
+        if shared_target:
+            head_target = base / "target"
+        output = directory / "report"
+        parent = directory / "caller-storage"
+        parent.mkdir(exist_ok=True)
+        sentinel = parent / "unrelated-save.db"
+        sentinel.write_bytes(b"preserve caller data")
+        # Existing default-path outputs expose stale snapshot selection as
+        # well as accidental inheritance of the head's ambient build target.
+        for tree, contents in [(base, b"base-built"), (head, b"stale-head")]:
+            binary = tree / "target/release/examples" / f"latency_bench{compare.EXE}"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(contents)
+        actual_head = head_target / "release/examples" / f"latency_bench{compare.EXE}"
+        actual_head.parent.mkdir(parents=True, exist_ok=True)
+        actual_head.write_bytes(b"head-built")
+        saves = []
+        self.save_directories = saves
+
+        def execute(command, *, cwd=None, env=None, stdout=None, **kwargs):
+            if command[0] == "cargo":
+                if shared_target:
+                    self.fail("Shared build targets must be rejected before any compilation")
+                target = (Path(command[command.index("--target-dir") + 1])
+                          if "--target-dir" in command else Path(os.environ["CARGO_TARGET_DIR"]))
+                binary = target / "release/examples" / f"latency_bench{compare.EXE}"
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_bytes(b"base-built" if cwd == base else b"head-built")
+            elif command[0] == "rustc":
+                return subprocess.CompletedProcess(command, 0, stdout="fixture rustc", stderr="")
+            elif stdout is not None:
+                saves.append(Path(env["TMP"]))
+                if interrupted:
+                    raise KeyboardInterrupt("synthetic interruption")
+                stdout.write("\n".join(json.dumps(row) for row in latency_rows()) + "\n")
+                return subprocess.CompletedProcess(command, int(failed_run))
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        def git(*args, **kwargs):
+            return "" if args[0] == "status" else ("b" * 40 if "--verify" in args else "a" * 40)
+
+        machine = {"fingerprint": "fixture", "cpu": "fixture", "ram_gib": 1,
+                   "os": "fixture", "os_build": "fixture", "storage": {"type": "fixture", "model": "fixture"}}
+        args = ["baseline", "--case", "r8-a1-h100-memory", "--rounds", "1",
+                "--output", str(output), "--temp-dir", str(parent)]
+        if not build:
+            args.append("--no-build")
+        with patch.object(compare, "ROOT", head), patch.object(compare, "git", git), \
+                patch.object(compare, "prepare_worktree", return_value=base), \
+                patch.object(compare, "competing_processes", return_value=[]), \
+                patch.object(compare.perf_ledger, "probe_machine", return_value=machine), \
+                patch.object(compare.subprocess, "run", side_effect=execute), \
+                patch.dict(os.environ, {"CARGO_TARGET_DIR": str(head_target)}), redirect_stdout(io.StringIO()):
+            code = compare.main(args)
+        return code, output, parent, sentinel, saves
+
+    def test_successful_comparison_preserves_caller_storage_and_cleans_only_owned_saves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, output, parent, sentinel, saves = self.run_comparison(Path(directory))
+            self.assertEqual(code, 0)
+            self.assertEqual(sentinel.read_bytes(), b"preserve caller data")
+            self.assertTrue((output / "comparison.json").is_file())
+            self.assertTrue(list(output.glob("*.tar.gz")))
+            self.assertEqual(len(saves), 2)
+            self.assertEqual(saves[0].parent, saves[1].parent)
+            self.assertEqual(saves[0].parent.parent, parent)
+            self.assertFalse(saves[0].parent.exists())
+
+    def test_failed_workload_preserves_caller_data_and_retained_failure_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, output, _, sentinel, saves = self.run_comparison(Path(directory), failed_run=True)
+            self.assertEqual(code, 1)
+            self.assertEqual(sentinel.read_bytes(), b"preserve caller data")
+            report = json.loads((output / "comparison.json").read_text())
+            self.assertEqual(len(report["failures"]), 2)
+            self.assertTrue(list((output / "raw").glob("*.jsonl.gz")))
+            self.assertFalse(saves[0].parent.exists())
+
+    def test_builds_and_snapshots_keep_baseline_distinct_from_ambient_head_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, output, _, _, _ = self.run_comparison(Path(directory), build=True)
+            self.assertEqual(code, 0)
+            self.assertEqual((output / f"bin/base-latency_bench{compare.EXE}").read_bytes(), b"base-built")
+            self.assertEqual((output / f"bin/head-latency_bench{compare.EXE}").read_bytes(), b"head-built")
+
+    def test_shared_target_is_rejected_before_either_build_can_overwrite_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(SystemExit, "distinct build target"):
+                self.run_comparison(Path(directory), build=True, shared_target=True)
+
+    def test_interruption_cleans_owned_saves_and_preserves_caller_storage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(KeyboardInterrupt, "synthetic interruption"):
+                self.run_comparison(root, interrupted=True)
+            self.assertEqual((root / "caller-storage/unrelated-save.db").read_bytes(), b"preserve caller data")
+            self.assertFalse(self.save_directories[0].parent.exists())
+            self.assertTrue((root / "report/raw").is_dir())
 
 
 if __name__ == "__main__":

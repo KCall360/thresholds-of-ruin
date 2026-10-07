@@ -508,3 +508,16 @@ Local worktrees now use exclusive compiler output directories after shared
 outputs caused mismatched executable startup failures. Those attempts are invalid
 verification evidence. Published full evidence and immutable copies preceded the
 overlap. All six refactor sequences and save/restore tail attribution remain open.
+
+
+**Semantic generation (in development).** Rooms v2 uses canonical semantic seed
+inputs and separate geometry/placement/population/loot streams; raw source hashes
+remain integrity identities. Default-zero salt is explicit, disjoint placement
+lanes preserve pool independence and infeasible minima fail instead of truncating
+silently. Lazy identity assembly now includes authored characters starting in
+generated regions. Ruleset dungeon-v22 and validator tor-scenario-8 changed;
+protocol 28, save 21 and authoring format 2 did not. Focused backend/validator and
+real-process regressions passed; final full, measurements and CI remain. The
+separate PR #74 checkpoint has passed Windows profiles, but Linux debug spectator
+drain failed its existing deadline; do not merge or activate it until corrected
+complete CI passes. See the refactor plan for all six remaining sequences.

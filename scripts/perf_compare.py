@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import perf_ledger  # noqa: E402
@@ -328,12 +329,12 @@ def prepare_worktree(commit):
     return path
 
 
-def build(tree, units, log):
+def build(tree, units, log, target):
     packages = defaultdict(set)
     for unit in units:
         packages[unit.spec.package].add(unit.spec.example)
     for package, examples in sorted(packages.items()):
-        command = ["cargo", "build", "--release", "--locked", "-p", package]
+        command = ["cargo", "build", "--release", "--locked", "--target-dir", str(target), "-p", package]
         for example in sorted(examples):
             command += ["--example", example]
         print(f"Building {', '.join(sorted(examples))} in {tree}", flush=True)
@@ -381,16 +382,22 @@ def main(argv=None):
     (run_dir / "bin").mkdir()
     base_tree = prepare_worktree(base_commit)
     trees = {"base": base_tree, "head": ROOT}
+    # An ambient target belongs to the head. The baseline must never inherit
+    # it and overwrite outputs that Cargo may later consider fresh for the head.
+    targets = {"base": (base_tree / "target").resolve(),
+               "head": (ROOT / (os.environ.get("CARGO_TARGET_DIR") or "target")).resolve()}
+    if targets["base"] == targets["head"]:
+        raise SystemExit("Baseline and head need distinct build target directories")
     if not args.no_build:
         for side, tree in trees.items():
-            build(tree, units, run_dir / f"build-{side}.log")
+            build(tree, units, run_dir / f"build-{side}.log", targets[side])
 
     # Copy binaries so later builds cannot change what is measured.
     binaries = {}
     for side, tree in trees.items():
         binaries[side] = {}
         for example in sorted({u.spec.example for u in units}):
-            source = tree / "target" / "release" / "examples" / f"{example}{EXE}"
+            source = targets[side] / "release" / "examples" / f"{example}{EXE}"
             if not source.exists():
                 raise SystemExit(f"Missing {source}; the {side} tree may predate this benchmark")
             target = run_dir / "bin" / f"{side}-{example}{EXE}"
@@ -401,81 +408,83 @@ def main(argv=None):
     if busy and not args.allow_competing:
         raise SystemExit(f"Competing build processes are running ({', '.join(busy)}); "
                          "wait for them or pass --allow-competing and record it")
-    temp_root = (args.temp_dir or run_dir / "tmp").resolve()
-    temp_root.mkdir(parents=True, exist_ok=True)
-    machine = perf_ledger.probe_machine(temp_root)
-    rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip()
-    print(f"Machine {machine['fingerprint']}: {machine['cpu']}, {machine['ram_gib']} GiB, "
-          f"{machine['os']} {machine['os_build']}, saves on {machine['storage']['type']} "
-          f"({machine['storage']['model']})", flush=True)
+    temp_parent = (args.temp_dir or run_dir / "tmp").resolve()
+    temp_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="tor-perf-", dir=temp_parent) as owned_temp:
+        temp_root = Path(owned_temp)
+        machine = perf_ledger.probe_machine(temp_root)
+        rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip()
+        print(f"Machine {machine['fingerprint']}: {machine['cpu']}, {machine['ram_gib']} GiB, "
+              f"{machine['os']} {machine['os_build']}, saves on {machine['storage']['type']} "
+              f"({machine['storage']['model']})", flush=True)
 
-    runs, extracted, failures = [], defaultdict(lambda: defaultdict(list)), []
-    versions = defaultdict(dict)
-    for round_index, unit, side in schedule(units, args.rounds):
-        name = f"{unit.id.replace(':', '-')}-r{round_index}-{side}"
-        output = run_dir / "raw" / f"{name}.jsonl"
-        stderr = run_dir / "raw" / f"{name}.stderr.log"
-        temp = temp_root / side
-        temp.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, TMP=str(temp), TEMP=str(temp), TMPDIR=str(temp))
-        command = [binaries[side][unit.spec.example]["path"], *unit.args, *extra]
-        print(f"[round {round_index}] {side:<4} {unit.id}", flush=True)
-        with open(output, "w", encoding="utf-8") as out, open(stderr, "w", encoding="utf-8") as err:
-            code = subprocess.run(command, cwd=trees[side], env=env, stdout=out, stderr=err).returncode
-        record = {"unit": unit.id, "round": round_index, "side": side, "exit_code": code,
-                  "raw": f"raw/{name}.jsonl.gz", "stderr": f"raw/{name}.stderr.log"}
-        validator = [sys.executable, str(trees[side] / unit.spec.validator), str(output),
-                     *unit.validator_args(extra)]
-        if code == 0:
-            check = subprocess.run(validator, capture_output=True, text=True, encoding="utf-8")
-            (run_dir / "raw" / f"{name}.validation.log").write_text(check.stdout + check.stderr, encoding="utf-8")
-            record["validated"] = check.returncode == 0
-            record["validator"] = " ".join(validator[1:])
-        else:
-            record["validated"] = False
-        if record["validated"]:
-            rows = [json.loads(line) for line in output.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
-            timings, counts, version = extract(unit, rows)
-            extracted[unit.id][side].append((timings, counts))
-            versions[unit.id][side] = {"name": unit.spec.name, "version": version}
-        else:
-            failures.append(f"{name}: exit {code}, validation {'failed' if code == 0 else 'not run'}")
-            print(f"  FAILED: {failures[-1]} (kept in {output.name})", flush=True)
-        with open(output, "rb") as source, gzip.open(str(output) + ".gz", "wb") as target:
-            shutil.copyfileobj(source, target)
-        output.unlink()
-        record["sha256"] = perf_ledger.sha256_file(str(output) + ".gz")
-        runs.append(record)
+        runs, extracted, failures = [], defaultdict(lambda: defaultdict(list)), []
+        versions = defaultdict(dict)
+        for round_index, unit, side in schedule(units, args.rounds):
+            name = f"{unit.id.replace(':', '-')}-r{round_index}-{side}"
+            output = run_dir / "raw" / f"{name}.jsonl"
+            stderr = run_dir / "raw" / f"{name}.stderr.log"
+            temp = temp_root / side
+            temp.mkdir(parents=True, exist_ok=True)
+            env = dict(os.environ, TMP=str(temp), TEMP=str(temp), TMPDIR=str(temp))
+            command = [binaries[side][unit.spec.example]["path"], *unit.args, *extra]
+            print(f"[round {round_index}] {side:<4} {unit.id}", flush=True)
+            with open(output, "w", encoding="utf-8") as out, open(stderr, "w", encoding="utf-8") as err:
+                code = subprocess.run(command, cwd=trees[side], env=env, stdout=out, stderr=err).returncode
+            record = {"unit": unit.id, "round": round_index, "side": side, "exit_code": code,
+                      "raw": f"raw/{name}.jsonl.gz", "stderr": f"raw/{name}.stderr.log"}
+            validator = [sys.executable, str(trees[side] / unit.spec.validator), str(output),
+                         *unit.validator_args(extra)]
+            if code == 0:
+                check = subprocess.run(validator, capture_output=True, text=True, encoding="utf-8")
+                (run_dir / "raw" / f"{name}.validation.log").write_text(check.stdout + check.stderr, encoding="utf-8")
+                record["validated"] = check.returncode == 0
+                record["validator"] = " ".join(validator[1:])
+            else:
+                record["validated"] = False
+            if record["validated"]:
+                rows = [json.loads(line) for line in output.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+                timings, counts, version = extract(unit, rows)
+                extracted[unit.id][side].append((timings, counts))
+                versions[unit.id][side] = {"name": unit.spec.name, "version": version}
+            else:
+                failures.append(f"{name}: exit {code}, validation {'failed' if code == 0 else 'not run'}")
+                print(f"  FAILED: {failures[-1]} (kept in {output.name})", flush=True)
+            with open(output, "rb") as source, gzip.open(str(output) + ".gz", "wb") as target:
+                shutil.copyfileobj(source, target)
+            output.unlink()
+            record["sha256"] = perf_ledger.sha256_file(str(output) + ".gz")
+            runs.append(record)
 
-    results = {}
-    for unit in units:
-        sides = {side: pool(extracted[unit.id][side]) for side in ("base", "head")}
-        groups = unit.groups or tuple(sorted(set(sides["base"]) | set(sides["head"])))
-        results[unit.id] = {}
-        for group in groups:
-            empty = {"timings": {}, "counts": {}}
-            results[unit.id][group] = {"workload": versions[unit.id],
-                                       "base": sides["base"].get(group, empty),
-                                       "head": sides["head"].get(group, empty)}
+        results = {}
+        for unit in units:
+            sides = {side: pool(extracted[unit.id][side]) for side in ("base", "head")}
+            groups = unit.groups or tuple(sorted(set(sides["base"]) | set(sides["head"])))
+            results[unit.id] = {}
+            for group in groups:
+                empty = {"timings": {}, "counts": {}}
+                results[unit.id][group] = {"workload": versions[unit.id],
+                                           "base": sides["base"].get(group, empty),
+                                           "head": sides["head"].get(group, empty)}
 
-    bundle = f"perf-{stamp}-{base_commit[:8]}-{head_commit[:8]}.tar.gz"
-    comparison = {
-        "tool_version": 1,
-        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "order": "ABAB", "rounds": args.rounds, "machine": machine, "rustc": rustc,
-        "temp_dir": str(temp_root), "competing_processes": busy,
-        "sides": {"base": {"ref": args.base, "commit": base_commit, "dirty": False},
-                  "head": {"ref": "working tree", "commit": head_commit, "dirty": head_dirty}},
-        "binaries": {side: {k: v["sha256"] for k, v in examples.items()} for side, examples in binaries.items()},
-        "units": {u.id: {"workload": u.workload, "command": [u.spec.example, *u.args, *extra],
-                         "validator_args": u.validator_args(extra)} for u in units},
-        "runs": runs, "failures": failures, "results": results, "bundle": bundle,
-    }
-    (run_dir / "comparison.json").write_text(json.dumps(comparison, indent=2) + "\n", encoding="utf-8")
-    with tarfile.open(run_dir / bundle, "w:gz") as archive:
-        archive.add(run_dir / "comparison.json", arcname="comparison.json")
-        archive.add(run_dir / "raw", arcname="raw")
-    shutil.rmtree(temp_root, ignore_errors=True)
+        bundle = f"perf-{stamp}-{base_commit[:8]}-{head_commit[:8]}.tar.gz"
+        comparison = {
+            "tool_version": 1,
+            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "order": "ABAB", "rounds": args.rounds, "machine": machine, "rustc": rustc,
+            "temp_dir": str(temp_root), "competing_processes": busy,
+            "build_targets": {side: str(target) for side, target in targets.items()},
+            "sides": {"base": {"ref": args.base, "commit": base_commit, "dirty": False},
+                      "head": {"ref": "working tree", "commit": head_commit, "dirty": head_dirty}},
+            "binaries": {side: {k: v["sha256"] for k, v in examples.items()} for side, examples in binaries.items()},
+            "units": {u.id: {"workload": u.workload, "command": [u.spec.example, *u.args, *extra],
+                             "validator_args": u.validator_args(extra)} for u in units},
+            "runs": runs, "failures": failures, "results": results, "bundle": bundle,
+        }
+        (run_dir / "comparison.json").write_text(json.dumps(comparison, indent=2) + "\n", encoding="utf-8")
+        with tarfile.open(run_dir / bundle, "w:gz") as archive:
+            archive.add(run_dir / "comparison.json", arcname="comparison.json")
+            archive.add(run_dir / "raw", arcname="raw")
 
     print()
     print(f"base {args.base} {base_commit[:12]}  vs  head {head_commit[:12]}{' (dirty)' if head_dirty else ''}; "

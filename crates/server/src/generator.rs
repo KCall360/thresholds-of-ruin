@@ -11,13 +11,14 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::scenario_package::{Actor, Item, RegionDef};
 use crate::Failure;
 
 /// The generator and version a region asks for.
 pub const ROOMS: &str = "rooms";
-pub const ROOMS_VERSION: u32 = 1;
+pub const ROOMS_VERSION: u32 = 2;
 /// Identities each generated region may use, for actors and for items: a
 /// region's range starts at `base + (region - 1) * IDENTITY_STRIDE`.
 pub const IDENTITY_STRIDE: u64 = 256;
@@ -33,6 +34,9 @@ const CLEARING: i32 = 2;
 pub struct Generate {
     pub generator: String,
     pub version: u32,
+    /// Explicit generation variation; omitted and zero mean the same thing.
+    #[serde(default)]
+    pub salt: u64,
     /// How many rooms, at least and at most.
     pub rooms: [u32; 2],
     pub actors: Option<ActorPool>,
@@ -61,6 +65,79 @@ fn fail(message: impl AsRef<str>) -> Failure {
     Failure::new(tor_protocol::ErrorCode::InvalidAction, message.as_ref())
 }
 
+/// Only geometry inputs participate in geometry and placement streams.
+/// Region names, raw file bytes, population and loot recipes do not reroll the floor.
+#[derive(Serialize)]
+struct GeometryParameters<'a> {
+    size: [i32; 3],
+    anchors: &'a BTreeMap<String, [i32; 3]>,
+    rooms: [u32; 2],
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RandomStream {
+    Geometry,
+    Placement,
+    Population,
+    Loot,
+}
+
+#[derive(Serialize)]
+struct StreamSeed<'a, P> {
+    contract: &'static str,
+    generator: &'a str,
+    version: u32,
+    salt: u64,
+    game_seed: u64,
+    region: u64,
+    stream: RandomStream,
+    parameters: &'a P,
+}
+
+fn stream_rng<P: Serialize>(
+    def: &RegionDef,
+    generate: &Generate,
+    game_seed: u64,
+    stream: RandomStream,
+    parameters: &P,
+) -> Result<Rng, Failure> {
+    // These owned schema fields, ordered maps and integer/string values form
+    // the versioned canonical seed encoding. No authoring text or integrity
+    // digest is admitted here.
+    let bytes = serde_json::to_vec(&StreamSeed {
+        contract: "tor-region-generation-v2",
+        generator: &generate.generator,
+        version: generate.version,
+        salt: generate.salt,
+        game_seed,
+        region: def.id,
+        stream,
+        parameters,
+    })
+    .map_err(|e| fail(format!("Region {}: seed encoding: {e}", def.id)))?;
+    let digest = Sha256::digest(bytes);
+    let mut seed = [0; 8];
+    seed.copy_from_slice(&digest[..8]);
+    Ok(Rng(u64::from_le_bytes(seed)))
+}
+
+fn placement_count(
+    region: u64,
+    kind: &str,
+    rng: &mut Rng,
+    [minimum, maximum]: [u32; 2],
+    capacity: usize,
+) -> Result<u32, Failure> {
+    let maximum = maximum.min(capacity.min(MAX_PLACED as usize) as u32);
+    if minimum > maximum {
+        return Err(fail(format!(
+            "Region {region}: {kind} placement capacity {capacity} is below requested minimum {minimum}"
+        )));
+    }
+    Ok(rng.range(minimum, maximum))
+}
+
 /// Deterministic SplitMix64, seeded per region.
 struct Rng(u64);
 
@@ -72,7 +149,7 @@ impl Rng {
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         z ^ (z >> 31)
     }
-    /// Uniform in `low..=high`.
+    /// Select in `low..=high` using one deterministic draw.
     fn range(&mut self, low: u32, high: u32) -> u32 {
         low + (self.next() % u64::from(high - low + 1)) as u32
     }
@@ -94,8 +171,8 @@ pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure>
     if !range(generate.rooms, MAX_ROOMS) || generate.rooms[1] == 0 {
         return Err(fail(format!("Region {id}: rooms must be 1..{MAX_ROOMS}")));
     }
-    let placed = generate.actors.as_ref().map_or(0, |p| p.count[1])
-        + generate.items.as_ref().map_or(0, |p| p.count[1]);
+    let placed = u64::from(generate.actors.as_ref().map_or(0, |p| p.count[1]))
+        + u64::from(generate.items.as_ref().map_or(0, |p| p.count[1]));
     if generate
         .actors
         .as_ref()
@@ -104,7 +181,7 @@ pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure>
             .items
             .as_ref()
             .is_some_and(|p| !range(p.count, MAX_PLACED) || p.archetypes.is_empty())
-        || u64::from(placed) > IDENTITY_STRIDE
+        || placed > IDENTITY_STRIDE
     {
         return Err(fail(format!(
             "Region {id}: pools need archetypes and at most {MAX_PLACED} of each"
@@ -144,7 +221,12 @@ pub(crate) fn materialize(
 ) -> Result<RegionDef, Failure> {
     check(def, generate)?;
     let [width, depth, height] = def.size;
-    let mut rng = Rng(seed);
+    let geometry = GeometryParameters {
+        size: def.size,
+        anchors: &def.anchors,
+        rooms: generate.rooms,
+    };
+    let mut rng = stream_rng(def, generate, seed, RandomStream::Geometry, &geometry)?;
     let mut open: BTreeSet<Cell> = BTreeSet::new();
     let inside = |(x, y): Cell| x >= 0 && y >= 0 && x < width && y < depth;
     // Entries, with their clearings, are always open.
@@ -193,6 +275,9 @@ pub(crate) fn materialize(
         .filter(|cell| !open.contains(cell))
         .flat_map(|(x, y)| (0..height).map(move |z| [x, y, z]))
         .collect();
+    if generate.actors.is_none() && generate.items.is_none() {
+        return Ok(out);
+    }
     // Placement: open floor away from every entry's clearing.
     let near_entry = |(x, y): Cell| {
         entries
@@ -200,24 +285,31 @@ pub(crate) fn materialize(
             .any(|(ex, ey)| (x - ex).abs() <= CLEARING && (y - ey).abs() <= CLEARING)
     };
     let mut floor: Vec<Cell> = open.iter().copied().filter(|c| !near_entry(*c)).collect();
-    let mut take = |rng: &mut Rng| -> Option<[i32; 3]> {
-        if floor.is_empty() {
-            return None;
-        }
-        let (x, y) = floor.remove((rng.next() % floor.len() as u64) as usize);
-        Some([x, y, 0])
-    };
+    // A shared deterministic permutation assigns disjoint alternating lanes.
+    // Lane capacity and positions never depend on either pool's presence or
+    // requested count; removing actors cannot move or crowd out loot.
+    let mut placement = stream_rng(def, generate, seed, RandomStream::Placement, &geometry)?;
+    for last in (1..floor.len()).rev() {
+        let chosen = (placement.next() % (last + 1) as u64) as usize;
+        floor.swap(last, chosen);
+    }
     if let Some(pool) = &generate.actors {
-        let count = rng.range(pool.count[0], pool.count[1]);
-        for n in 0..u64::from(count) {
-            let Some(at) = take(&mut rng) else { break };
+        let mut population = stream_rng(def, generate, seed, RandomStream::Population, pool)?;
+        let count = placement_count(
+            def.id,
+            "actor",
+            &mut population,
+            pool.count,
+            floor.len().div_ceil(2),
+        )?;
+        for (n, &(x, y)) in floor.iter().step_by(2).take(count as usize).enumerate() {
             out.actors.push(Actor {
                 combat: None,
                 body: None,
                 velocity: None,
-                id: first_actor + n,
-                at,
-                archetype: Some(rng.pick(&pool.archetypes).clone()),
+                id: first_actor + n as u64,
+                at: [x, y, 0],
+                archetype: Some(population.pick(&pool.archetypes).clone()),
                 turn_ticks: None,
                 controller: "ai".into(),
                 ai: Some(pool.ai.clone()),
@@ -225,16 +317,22 @@ pub(crate) fn materialize(
         }
     }
     if let Some(pool) = &generate.items {
-        let count = rng.range(pool.count[0], pool.count[1]);
-        for n in 0..u64::from(count) {
-            let Some(at) = take(&mut rng) else { break };
+        let mut loot = stream_rng(def, generate, seed, RandomStream::Loot, pool)?;
+        let count = placement_count(def.id, "item", &mut loot, pool.count, floor.len() / 2)?;
+        for (n, &(x, y)) in floor
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .take(count as usize)
+            .enumerate()
+        {
             out.items.push(Item {
                 quantity: 1,
                 stackable: None,
                 properties: BTreeMap::new(),
-                id: first_item + n,
-                at,
-                archetype: Some(rng.pick(&pool.archetypes).clone()),
+                id: first_item + n as u64,
+                at: [x, y, 0],
+                archetype: Some(loot.pick(&pool.archetypes).clone()),
                 name: None,
                 carried_by: None,
                 seed_names: Vec::new(),
@@ -309,6 +407,86 @@ mod tests {
     }
 
     #[test]
+    fn generator_salt_defaults_to_zero_and_explicit_salts_change_content() {
+        let (def, generate) = cave();
+        let mut value = serde_json::to_value(&generate).unwrap();
+        value.as_object_mut().unwrap().remove("salt");
+        let omitted: Generate = serde_json::from_value(value.clone()).unwrap();
+        value["salt"] = serde_json::json!(0);
+        let zero: Generate = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(omitted, zero);
+        value["salt"] = serde_json::json!(1);
+        let salted: Generate = serde_json::from_value(value).unwrap();
+        assert!((0..8).any(|seed| {
+            json(&materialize(&def, &zero, seed, 100, 200).unwrap())
+                != json(&materialize(&def, &salted, seed, 100, 200).unwrap())
+        }));
+    }
+
+    #[test]
+    fn insufficient_placement_capacity_does_not_silently_violate_requested_minimum() {
+        let (mut def, mut generate) = cave();
+        def.size = [1, 1, 1];
+        def.anchors = BTreeMap::from([("entry".into(), [0, 0, 0])]);
+        def.portals.clear();
+        generate.rooms = [1, 1];
+        generate.actors.as_mut().unwrap().count = [1, 1];
+        generate.items = None;
+        let error = materialize(&def, &generate, 42, 100, 200).unwrap_err();
+        assert!(error.message.contains("Region 2"), "{}", error.message);
+        assert!(error.message.contains("capacity"), "{}", error.message);
+    }
+
+    #[test]
+    fn actor_population_does_not_reroll_geometry_or_loot_placements() {
+        let (def, generate) = cave();
+        let mut sparse = generate.clone();
+        sparse.actors.as_mut().unwrap().count = [0, 0];
+        let mut populated = generate;
+        populated.actors.as_mut().unwrap().count = [3, 3];
+        for seed in [0, 1, 7, 42, u64::MAX] {
+            let before = materialize(&def, &sparse, seed, 100, 200).unwrap();
+            let after = materialize(&def, &populated, seed, 100, 200).unwrap();
+            assert_eq!(before.walls, after.walls, "geometry, seed {seed}");
+            assert_eq!(
+                serde_json::to_value(&before.items).unwrap(),
+                serde_json::to_value(&after.items).unwrap(),
+                "loot, seed {seed}"
+            );
+            assert!(before.actors.is_empty());
+            assert_eq!(after.actors.len(), 3);
+        }
+    }
+
+    #[test]
+    fn oversized_authored_pool_counts_are_rejected_without_arithmetic_overflow() {
+        let (def, mut generate) = cave();
+        generate.actors.as_mut().unwrap().count = [u32::MAX, u32::MAX];
+        generate.items.as_mut().unwrap().count = [0, 1];
+        let error = check(&def, &generate).unwrap_err();
+        assert!(error.message.contains("Region 2"), "{}", error.message);
+        assert!(error.message.contains("pools"), "{}", error.message);
+    }
+
+    #[test]
+    fn loot_changes_do_not_reroll_geometry_or_actor_placements() {
+        let (def, generate) = cave();
+        let mut empty = generate.clone();
+        empty.items = None;
+        for seed in [0, 1, 7, 42, u64::MAX] {
+            let before = materialize(&def, &generate, seed, 100, 200).unwrap();
+            let after = materialize(&def, &empty, seed, 100, 200).unwrap();
+            assert_eq!(before.walls, after.walls, "geometry, seed {seed}");
+            assert_eq!(
+                serde_json::to_value(&before.actors).unwrap(),
+                serde_json::to_value(&after.actors).unwrap(),
+                "population, seed {seed}"
+            );
+            assert!(after.items.is_empty());
+        }
+    }
+
+    #[test]
     fn entries_connect_and_placements_stay_on_open_floor_within_their_ranges() {
         let (def, generate) = cave();
         for seed in 0..300 {
@@ -342,7 +520,7 @@ mod tests {
         unknown.generator = "mazes".into();
         assert!(check(&def, &unknown).is_err());
         let mut newer = generate.clone();
-        newer.version = 2;
+        newer.version = ROOMS_VERSION + 1;
         assert!(check(&def, &newer).is_err());
         let mut roomless = generate.clone();
         roomless.rooms = [0, 0];
