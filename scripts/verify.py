@@ -359,9 +359,15 @@ def main(argv=None):
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout)
     dirs, deps = workspace(metadata)
-    paths, diff = changes(args.base)
+    if args.ci_profile:
+        # CI checks the complete workspace, including shallow checkouts without
+        # origin/main. Change selection is only needed for local tiers.
+        paths, diff = [], ""
+        direct, everything, unknown = set(dirs), True, []
+    else:
+        paths, diff = changes(args.base)
+        direct, everything, unknown = classify(paths, dirs)
     untested = missing_tests(paths, diff)
-    direct, everything, unknown = classify(paths, dirs)
     affected = set(dirs) if everything else dependents(direct, deps)
     process = select_process_tests(paths, affected, everything, SCRIPTS)
     free = free_memory_gb()
@@ -370,7 +376,8 @@ def main(argv=None):
                  xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY"),
                  ci_profile=args.ci_profile)
 
-    print(f"tier {label}; {len(paths)} changed paths since {args.base}; jobs {jobs} ({free:.1f} GB free)")
+    selection = "complete workspace" if args.ci_profile else f"{len(paths)} changed paths since {args.base}"
+    print(f"tier {label}; {selection}; jobs {jobs} ({free:.1f} GB free)")
     if unknown:
         print("unmapped paths select everything: " + ", ".join(unknown[:5]) + (" ..." if len(unknown) > 5 else ""))
     print("packages: " + (", ".join(sorted(affected)) or "none"))
