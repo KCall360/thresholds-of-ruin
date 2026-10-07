@@ -393,6 +393,57 @@ mod tests {
     }
 
     #[test]
+    fn rooms_v2_keeps_its_generated_content_contract() {
+        // Keep these inputs independent of editable scenario packages.
+        let def: RegionDef = toml::from_str(
+            r#"
+            id = 2
+            name = "Generation vector"
+            zone = "vector"
+            size = [24, 12, 1]
+            anchors = { west = [0, 6, 0], east = [23, 6, 0] }
+            [generate]
+            generator = "rooms"
+            version = 2
+            salt = 0
+            rooms = [3, 6]
+            actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
+            items = { archetypes = ["coin"], count = [2, 4] }
+            "#,
+        )
+        .unwrap();
+        let generate = def.generate.as_ref().unwrap();
+        assert_eq!(generate.version, 2);
+        for seed in [0, 42, u64::MAX] {
+            let region = materialize(&def, generate, seed, 100, 200).unwrap();
+            let actors: Vec<_> = region
+                .actors
+                .iter()
+                .map(|actor| (actor.id, actor.at, &actor.archetype, &actor.ai))
+                .collect();
+            let items: Vec<_> = region
+                .items
+                .iter()
+                .map(|item| (item.id, item.at, &item.archetype))
+                .collect();
+            // Hash semantic outcomes, excluding author labels and DTO field
+            // ordering. Changing these vectors requires a generator version decision.
+            let bytes = serde_json::to_vec(&(&region.walls, actors, items)).unwrap();
+            let digest: String = Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let expected = match seed {
+                0 => "99628da25696e30d2a6d94fc045617362e3b9c19414f4fc93862939759a73eaa",
+                42 => "ebbfc0ae1e72b68c5927b622e9a72ffbdd97d4a6ee4f702df55966b255a49833",
+                u64::MAX => "1dd3271c039fec56c3723e707e2d5e6bec0f726ed89b1ad58f4e911e7df226ea",
+                _ => unreachable!(),
+            };
+            assert_eq!(digest, expected, "rooms-v2 seed {seed}");
+        }
+    }
+
+    #[test]
     fn a_seed_always_generates_the_same_region_and_other_seeds_differ() {
         let (def, generate) = cave();
         let first = materialize(&def, &generate, 7, 100, 200).unwrap();

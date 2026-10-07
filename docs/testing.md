@@ -208,15 +208,16 @@ without a duplicate run on unchanged inputs:
 | --- | --- | --- | --- |
 | Focused checks | After each meaningful development change | The regression, affected unit/integration tests and relevant actual-process scenarios, run directly | Establish a failing reproduction first and give fast feedback while the change is still evolving |
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
-| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Every debug check CI runs, plus release Rust tests and release process tests for the affected packages | Catches regressions anywhere in the workspace and in any client, plus release-only timing and ordering problems in the changed code, before anyone else sees the branch |
-| `full` | **Required** for save-format, protocol, ruleset, persistence, or storage changes, and for toolchain or dependency updates. Also required when CI can't run, and on request | Everything CI runs on one platform, debug and release | These changes can break any layer in either profile. A local full run covers the local publication gate; both-platform CI is still required before merging |
+| `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Every debug check CI runs | Catches regressions anywhere in the workspace and in any client before publishing the branch; CI checks release behavior before merge |
+| `full` | Required when CI cannot run or on request; otherwise optional | Everything CI runs on one platform, debug and release | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
 CI runs the debug and release partitions of the full plan in separate jobs on
 each platform. `full --ci-profile debug` runs the first six stages, and
 `full --ci-profile release` runs the two release stages. Their ordered union is
-the unchanged local full plan; neither partition satisfies the local full or
-publication gate on its own. Native Windows tests and Linux Xvfb tests remain in
+the unchanged local full plan. The debug partition contains the same checks as
+local `push`, but a CI run does not certify a local run. Neither partition alone
+satisfies the full or merge gate. Native Windows tests and Linux Xvfb tests remain in
 both profiles. Profile caches are separate, and each job preserves its logs for
 investigation. The existing required platform checks fail unless every profile
 on both platforms succeeds, including when a profile is cancelled or skipped.
@@ -229,8 +230,19 @@ checks and architectural review before starting a broad tier. Run the new
 regression against the failing implementation first, apply the fix, then run
 its affected unit, integration and process scenarios. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
-back to back merely because all three commands exist. A required full run can
-be the checkpoint and publication check once the change is stable.
+back to back merely because all three commands exist. Run one broad debug
+`push` gate per stable PR checkpoint; a successful unchanged full run also
+covers that gate. Let CI run the broad release suites before merge, including
+for protocol, ruleset, save-format, persistence, storage, toolchain and dependency
+changes. These boundaries still require complete coverage in both profiles.
+
+Run targeted local release tests when investigating debug/release differences,
+optimized behavior, timing or ordering issues, and use release builds for
+performance measurements. Select the affected tests and workloads based on the
+behavior being investigated. Do not run the whole local release suite merely
+because a performance measurement needs release binaries. Escalate to local
+`full` when CI cannot run or a maintainer requests it. Local full coverage does
+not waive the requirement for both-platform CI before merge.
 
 Focused commands use the existing suite; they introduce no separate test tier
 or exclusions. For example:

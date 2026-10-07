@@ -4,8 +4,7 @@ Tiers (see docs/testing.md#running-the-checks):
 
   quick  at stable checkpoints: formatting, clippy and debug tests for affected
          packages, the Python tool tests, and the process tests the change maps to
-  push   before pushing: every debug check CI runs, plus release tests and release
-         process tests for the affected packages
+  push   before pushing: every debug check CI runs; release coverage runs in CI
   full   exactly what CI runs on one platform, debug and release; also covers
          the push gate for unchanged inputs, toolchain and test configuration
 
@@ -13,7 +12,8 @@ Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
 than it needs but never less. CI's full Windows and Linux matrix remains the
 required gate before merging. CI partitions the full plan by debug/release profile;
-a single partition is never a full or publication gate.
+a single partition is never a full or merge gate. The debug partition has the
+same checks as local push; CI evidence does not certify a local run.
 
 Tiers only choose which existing tests run. Every feature and bug fix must add
 its tests to the suite (docs/testing.md), and this script warns when code
@@ -262,10 +262,6 @@ def plan(tier, affected, process, xvfb=False, ci_profile=None):
         if ci_profile == "release":
             return release_steps
         return steps + release_steps
-    if affected:
-        steps.append(("rust-release", ["cargo", "test", *selected, "--release", "--locked"], {}))
-    if process:
-        steps.append(("process-release", [*unittest, "-v", *process], {**release, "_cwd": "scripts"}))
     return steps
 
 
@@ -416,12 +412,12 @@ def main(argv=None):
     if untested:
         lines.append(UNTESTED_WARNING)
     if args.ci_profile:
-        lines.append(f"CI {args.ci_profile} partition only; both profiles on both platforms are required. This partition does not satisfy the local full/publication gate.")
+        lines.append(f"CI {args.ci_profile} partition only; both profiles on both platforms are required. This partition is not a full run or a merge gate.")
     elif args.tier == "quick":
         lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
     elif args.tier == "push":
-        lines.append("Format, protocol, ruleset, persistence, storage, toolchain or dependency changes also need the full tier; "
-                     "CI on both platforms is required before merging.")
+        lines.append("Local debug push gate complete. Full debug/release CI on both platforms is required before merging. "
+                     "Run targeted local release checks for performance or release-specific behavior; use full when CI cannot run or on request.")
     else:
         lines.append("CI on both platforms is required before merging.")
     summary = "\n".join(lines)

@@ -2538,3 +2538,18 @@ The stale-snapshot and caller-deletion regressions failed first; 65 comparison,
 ledger, report-validation and documentation checks passed. The source checkpoint
 still requires its full compatibility gate and real release comparison before
 publication. The broader compiler, identity and persistence work stays open.
+
+**Testing policy update (2026-10-07).** At the user's direction, the local push
+gate now runs every debug check and leaves broad release suites to exact-head
+Windows/Linux CI before merge. This supersedes earlier notes requiring a local
+full run for compatibility or persistence changes. Targeted local release checks
+remain necessary for performance measurements and release-specific behavior;
+local full remains required when CI cannot run or on request. No CI coverage,
+native coverage or individual deadlines were removed. One broad debug gate per
+stable PR checkpoint covers the local publication requirement; focused
+failing-first development checks continue between checkpoints.
+
+PR #74 subsequently passed all nine exact-head CI jobs, merged, and its verified
+immutable desktop build was activated. Semantic generation remains unpublished:
+its broad debug gate, release measurements and final-head CI remain pending.
+All six original refactor sequences remain in scope.

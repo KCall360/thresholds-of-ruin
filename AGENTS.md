@@ -31,9 +31,11 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   can cover that checkpoint without a preceding duplicate quick run.
 - Before every push, pass the default `push` tier or `full`. A successful full
   run satisfies the push gate for the same unchanged inputs, toolchain and test
-  configuration. Full remains required for save-format, protocol, ruleset,
-  persistence, storage, toolchain or dependency changes, and when CI can't run.
-  Both-platform CI on the final commit remains required before merging. Record
+  configuration. The push tier runs all debug checks; broad release suites run
+  in CI before merge, including for compatibility and persistence changes. Run
+  targeted local release checks for performance or release-specific behavior.
+  Local full is required when CI cannot run or on request. Both-platform
+  debug/release CI on the final commit remains required before merging. Record
   the tested state, commands and logs; report failures and checks not run.
   See [verification evidence](docs/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and
@@ -521,3 +523,18 @@ real-process regressions passed; final full, measurements and CI remain. The
 separate PR #74 checkpoint has passed Windows profiles, but Linux debug spectator
 drain failed its existing deadline; do not merge or activate it until corrected
 complete CI passes. See the refactor plan for all six remaining sequences.
+
+**Testing policy update (2026-10-07).** At the user's direction, the local push
+gate now runs every debug check and leaves broad release suites to exact-head
+Windows/Linux CI before merge. This supersedes earlier notes requiring a local
+full run for compatibility or persistence changes. Targeted local release checks
+remain necessary for performance measurements and release-specific behavior;
+local full remains required when CI cannot run or on request. No CI coverage,
+native coverage or individual deadlines were removed. One broad debug gate per
+stable PR checkpoint covers the local publication requirement; focused
+failing-first development checks continue between checkpoints.
+
+PR #74 subsequently passed all nine exact-head CI jobs, merged, and its verified
+immutable desktop build was activated. Semantic generation remains unpublished:
+its broad debug gate, release measurements and final-head CI remain pending.
+All six original refactor sequences remain in scope.
