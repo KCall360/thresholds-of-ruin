@@ -468,3 +468,9 @@ capacity rejection uses resource_limit. Its unit/integration/actual-process chec
 passed; release/full/final-head CI remain pending before publication. See the full
 [refactor plan](docs/refactoring.md). The local
 native mouse waiver does not remove ordinary Windows/Linux CI coverage.
+
+The capability full gate stopped at Python acceptance with two intermittent
+failures. Isolated reruns passed; the save fixture was corrected to wait for a
+failed-save warning rather than the first overdue warning, and its six-test
+process module passed. Production behavior and concurrent-reader deadlines are
+unchanged. Fresh full verification remains required; the failed run is retained.

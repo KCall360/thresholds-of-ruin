@@ -116,7 +116,12 @@ class RunUntilBlockedProcesses(ProcessTestCase):
             database.execute("BEGIN EXCLUSIVE")
             played = self.act(player, {"type": "wait"})
             self.assertIsNone(played["error"])
-            warning = self.frame(player, lambda f: (f.get("message") or {}).get("type") == "error")
+            # Overdue and failed saves are distinct asynchronous warnings. Keep
+            # the lock until an actual failure, regardless of which arrives first.
+            warning = self.frame(player, lambda f:
+                (f.get("message") or {}).get("type") == "error"
+                and f["message"].get("code") == "storage_failure"
+                and "save failed" in f["message"].get("message", "").lower())
             self.assertIn("save failed", warning["message"]["message"].lower())
         saved = self.request(player, {"type": "save"})
         self.assertIsNone(saved["error"])
