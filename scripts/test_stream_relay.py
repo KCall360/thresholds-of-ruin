@@ -1,7 +1,7 @@
 """Conservative accounting of simulation facts shared by actor watchers."""
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import socket
 
 import stream_relay
@@ -43,11 +43,36 @@ class PressureConnection(unittest.TestCase):
         calls = Mock()
         calls.attach_mock(relay._server_socket, 'socket')
         calls.attach_mock(relay.gate, 'gate')
-        relay.resume_reading()
+        with patch.object(stream_relay.sys, "platform", "win32"):
+            relay.resume_reading()
         self.assertEqual(calls.mock_calls, [
             unittest.mock.call.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536),
             unittest.mock.call.gate.set(),
         ])
+
+    def test_linux_resume_restores_advertised_window_before_releasing_pressure(self):
+        relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)
+        relay.receive_buffer = 4096
+        relay._server_socket = Mock()
+        relay.gate = Mock()
+        capacity = {"buffer": 4096, "window": 4096}
+
+        def configure(level, option, value):
+            if (level, option) == (socket.SOL_SOCKET, socket.SO_RCVBUF):
+                capacity["buffer"] = value
+            elif (level, option) == (socket.IPPROTO_TCP, 10):
+                capacity["window"] = value
+
+        def resume():
+            self.assertGreaterEqual(min(capacity.values()), 65536,
+                                    "Receive memory and advertised window both remain pressure controls")
+
+        relay._server_socket.setsockopt.side_effect = configure
+        relay.gate.set.side_effect = resume
+        with patch.object(stream_relay.sys, "platform", "linux"), \
+                patch.object(socket, "TCP_WINDOW_CLAMP", 10, create=True):
+            relay.resume_reading()
+        relay.gate.set.assert_called_once_with()
 
     def test_resume_without_pressure_buffer_preserves_socket_configuration(self):
         relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)

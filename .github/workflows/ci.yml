@@ -78,7 +78,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Configure Linux graphical test display
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+        # Dependency acquisition has its own bounded budget; a stalled mirror
+        # must not consume the profile's complete verification budget.
+        run: |
+          timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
       - name: Verify Windows graphical test desktop
         if: runner.os == 'Windows'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"

@@ -2475,3 +2475,19 @@ The profile-union and reduced-tier rejection regressions failed first. Twenty-ni
 focused verification/documentation tests, actual debug/release CLI dry-run plans,
 actionlint and Ruff passed. The required complete local gate and new final-head
 CI are still needed before publishing or merging this combined checkpoint.
+
+**Verification correction (2026-10-07).** Published head `143c87a` passed the
+complete local full gate (283 Python checks, 880 Rust checks per profile and 148
+release process checks) and 25 immutable-build smoke checks. Both Windows CI
+profiles passed; Linux debug timed out draining the artificial spectator relay,
+and Linux release stalled acquiring graphical dependencies before testing.
+Failed CI prevents merge and desktop activation. The fixture now restores
+Linux's independent advertised-window clamp before releasing receive pressure;
+a failing-first regression covers this. Dependency setup has a separate bounded
+budget. Actual Linux verification and the updated publication gate remain
+required. Test deadlines, thresholds and native coverage are preserved.
+
+Local worktrees now use exclusive compiler output directories after shared
+outputs caused mismatched executable startup failures. Those attempts are invalid
+verification evidence. Published full evidence and immutable copies preceded the
+overlap. All six refactor sequences and save/restore tail attribution remain open.
