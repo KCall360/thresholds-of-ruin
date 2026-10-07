@@ -65,7 +65,7 @@ CLIENT = [
 class Recorder(ProcessTestCase):
     def runTest(self):
         self.server(scenario="generated-filler", seed=5)
-        player, _ = self.client()
+        player, initial = self.client()
         watcher, _ = self.client(SPECTATOR_TOKEN)
         self.request(player, {"type": "palette"})
         self.request(player, {"type": "history", "limit": 5, "before": None})
@@ -88,7 +88,7 @@ class Recorder(ProcessTestCase):
         self.request(watcher, {"type": "snapshot"})
         # The headless client consumes the welcome itself, so it's written here.
         server_samples = {"welcome": {"type": "welcome", "protocol": PROTOCOL, "user": "sample-user",
-                                      "actors": ["1"], "role": "player"}}
+                                      "actors": ["1"], "role": "player", "capabilities": initial["capabilities"]}}
         for client in (player, watcher):
             for line in client.transcript + [line for line in list(client.lines.queue) if line]:
                 if line.startswith("{"):

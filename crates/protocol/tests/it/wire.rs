@@ -369,7 +369,8 @@ fn immediate_completion_is_distinct_from_admitted_gameplay() {
 #[test]
 fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v26.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v28.json")).unwrap();
+    assert_eq!(samples["protocol"], PROTOCOL_VERSION);
     let snapshot = samples["server"]
         .as_array()
         .unwrap()
@@ -547,4 +548,54 @@ fn wire_64_bit_signed_motion_keeps_extremes_and_small_scalars_are_numbers() {
     ] {
         assert!(serde_json::from_value::<MotionView>(serde_json::json!({"velocity":[value,"0","0"],"units_per_cell":256,"displaced":false,"impacted":false})).is_err());
     }
+}
+
+#[test]
+fn capability_limits_are_explicit_bounded_and_required_in_welcome() {
+    let capabilities = ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16);
+    assert!(capabilities.is_valid());
+    assert_eq!(capabilities.max_request_bytes, MAX_REQUEST_BYTES as u32);
+    assert_eq!(
+        capabilities.max_retained_state_bytes,
+        MAX_STATE_BYTES as u32
+    );
+    assert_eq!(
+        capabilities.max_history_page_entries,
+        MAX_HISTORY_PAGE as u32
+    );
+    for invalid in [
+        ServerCapabilities {
+            max_response_bytes: 0,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_response_bytes: MAX_RESPONSE_BYTES as u32 + 1,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_connections: 0,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_request_bytes: 0,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_request_bytes: MAX_REQUEST_BYTES as u32 + 1,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_history_page_entries: 0,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_retained_state_bytes: MAX_STATE_BYTES as u32 + 1,
+            ..capabilities
+        },
+    ] {
+        assert!(!invalid.is_valid());
+    }
+    let missing = serde_json::json!({"type":"welcome", "protocol":PROTOCOL_VERSION,
+        "user":"test", "actors":["1"], "role":"player"});
+    assert!(serde_json::from_value::<ServerMessage>(missing).is_err());
 }

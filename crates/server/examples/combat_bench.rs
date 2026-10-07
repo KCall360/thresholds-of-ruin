@@ -1,7 +1,8 @@
 //! Combat workload v1: real AI decisions, typed attacks, history, client drawing,
 //! checkpoint barriers and deterministic restart. Timings exclude report output.
 use std::{path::Path, time::Instant};
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sequence: 0,
                         tick: 0,
                     },
-                    state: engine.state(player)?,
+                    state: engine.state(player)?.into(),
                     has_control: true,
                     history: tor_protocol::HistoryPage {
                         entries: vec![],
@@ -80,23 +81,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut sequence = 0;
                 for turn in 0..history + 64 {
                     let decision_start = Instant::now();
-                    let (actor, action) = if let Some(actor) =
-                        engine.next_actor().filter(|id| engine.is_ai(*id))
-                    {
-                        (actor, None)
-                    } else {
-                        let observation = engine.observation(player)?;
-                        let target = observation.visible_actors.iter().find(|a| {
-                            a.id != player
-                                && a.position.x.abs() <= 1
-                                && a.position.y.abs() <= 1
-                                && a.position.z == 0
-                        });
-                        (
-                            player,
-                            Some(target.map_or(Action::Wait, |a| Action::Attack { target: a.id })),
-                        )
-                    };
+                    let (actor, action) =
+                        if let Some(actor) = engine.next_actor().filter(|id| engine.is_ai(*id)) {
+                            (actor, None)
+                        } else {
+                            let observation = engine.observation(player)?;
+                            let target = observation.visible_actors.iter().find(|a| {
+                                a.id != player
+                                    && a.position.x.abs() <= 1
+                                    && a.position.y.abs() <= 1
+                                    && a.position.z == 0
+                            });
+                            (
+                                player,
+                                Some(target.map_or(Action::Wait, |a| Action::Attack {
+                                    target: tor_simulation::ActorId(a.id.0),
+                                })),
+                            )
+                        };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;
                     let revision = engine.revision(actor)?;
                     let start = Instant::now();
@@ -145,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             tick: state.observation.tick,
                         },
                         body: tor_protocol::UpdateBody::Observation {
-                            state: Box::new(state),
+                            state: state.into(),
                             event: None,
                         },
                     };

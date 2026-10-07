@@ -5,6 +5,7 @@ use std::time::Instant;
 use tor_client_ascii::{render::Canvas, App};
 use tor_client_common::ClientState;
 use tor_protocol::*;
+use tor_server::journal::Action;
 use tor_server::{journal, Engine, SavePolicy, Scenario};
 
 #[derive(Deserialize)]
@@ -104,7 +105,7 @@ fn main() {
                     sequence: 0,
                     tick: state.observation.tick,
                 },
-                state,
+                state: state.into(),
                 has_control: true,
                 history: HistoryPage {
                     entries: vec![],
@@ -153,7 +154,7 @@ fn main() {
                     tick: state.observation.tick,
                 },
                 body: UpdateBody::Observation {
-                    state: Box::new(state),
+                    state: state.into(),
                     event: Some(Box::new(
                         entry
                             .entry

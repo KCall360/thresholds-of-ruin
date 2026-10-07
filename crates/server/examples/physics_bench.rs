@@ -1,7 +1,8 @@
 //! Physics workload v1: falling/resting populations, footprint scaling, actual
 //! disclosed client application/drawing, durable barriers and checkpoint resume.
 use std::{path::Path, time::Instant};
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -81,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             sequence: 0,
                             tick: 0,
                         },
-                        state: engine.state(player)?,
+                        state: engine.state(player)?.into(),
                         has_control: true,
                         history: tor_protocol::HistoryPage {
                             entries: vec![],
@@ -129,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             tick: state.observation.tick,
                         },
                         body: tor_protocol::UpdateBody::Observation {
-                            state: Box::new(state),
+                            state: state.into(),
                             event: None,
                         },
                     };

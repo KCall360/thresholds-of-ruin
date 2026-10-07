@@ -1,5 +1,6 @@
 use tempfile::tempdir;
-use tor_protocol::{Action, ActorId, ErrorCode};
+use tor_protocol::{ActorId, ErrorCode};
+use tor_server::journal::Action;
 use tor_server::{journal::Command, Engine, SavePolicy, Scenario};
 
 fn wait(engine: &mut Engine, id: &str) -> tor_server::CommandResult {

@@ -1,8 +1,12 @@
 """Running until blocked through real processes: a client that stops reading
 can't hold the game. See docs/run-until-blocked.md."""
 import os
+from pathlib import Path
+import socket
+import sys
 import sqlite3
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import unittest
@@ -11,14 +15,51 @@ from stream_relay import StreamRelay
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, TOKEN
 
-# Enough turns to fill a stalled spectator's outgoing queue (256 messages)
-# and what's left of its socket buffers several times over.
+# Retain the original gameplay coverage, but do not assume a turn's wire size.
 TURNS = 1500
+MAX_PRESSURE_TURNS = 20000
+OUTBOUND_SLOTS = 256
+RECEIVE_BUFFER = 4096
+
+
+def tcp_send_buffer_budget():
+    """Host TCP buffering budget, used only to size this pressure workload."""
+    if sys.platform.startswith("linux"):
+        # The server uses default TCP send buffers. Linux may autotune them up
+        # to tcp_wmem[2], even when the receiving peer advertises a tiny window.
+        # https://docs.kernel.org/networking/ip-sysctl.html#tcp-wmem
+        values = [int(value) for value in Path("/proc/sys/net/ipv4/tcp_wmem").read_text(encoding="utf-8").split()]
+        if len(values) != 3 or not 0 < values[0] <= values[1] <= values[2]:
+            raise ValueError("Invalid host tcp_wmem budget")
+        return values[2]
+    with socket.socket() as probe:
+        return max(65536, probe.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF))
 # The server drops a client whose queue stays full this long (runner::STALL).
 STALL_SECONDS = 5
 
 
 class RunUntilBlockedProcesses(ProcessTestCase):
+    def test_connection_guarantees_reject_excess_client_without_interrupting_play(self):
+        frame = 65536
+        self.server("--outbound-frame-bytes", frame, "--outbound-client-bytes", frame,
+                    "--outbound-total-bytes", frame * 2)
+        player, ready = self.client()
+        self.assertEqual(ready["capabilities"]["max_connections"], 2)
+        self.assertEqual(ready["capabilities"]["max_response_bytes"], frame)
+        self.assertEqual(ready["capabilities"]["max_request_bytes"], 16 * 1024)
+        observer, observed = self.client(SPECTATOR_TOKEN, observe=True)
+        self.assertEqual(observed["capabilities"], ready["capabilities"])
+        excess = self.launch("tor-client-headless", ["--connect", self.address], token=SPECTATOR_TOKEN)
+        rejected = self.frame(excess, lambda value: value.get("type") == "fatal")
+        self.assertEqual(rejected["error"], "Connection rejected: ResourceLimit")
+        self.assertNotIn(SPECTATOR_TOKEN, rejected["error"])
+        self.assertNotEqual(excess.child.wait(timeout=15), 0)
+        final = self.act(player, {"type": "wait"})
+        self.assertIsNone(final["error"])
+        observed = self.frame(observer, lambda value: value["state"] == final["state"])
+        self.assertEqual(observed["state"]["observation"]["tick"], "100")
+        self.assertIsNone(observer.child.poll())
+
     def test_invalid_outbound_limits_fail_before_creating_or_changing_save(self):
         configurations = [
             ["--outbound-frame-bytes", "0"],
@@ -75,7 +116,12 @@ class RunUntilBlockedProcesses(ProcessTestCase):
             database.execute("BEGIN EXCLUSIVE")
             played = self.act(player, {"type": "wait"})
             self.assertIsNone(played["error"])
-            warning = self.frame(player, lambda f: (f.get("message") or {}).get("type") == "error")
+            # Overdue and failed saves are distinct asynchronous warnings. Keep
+            # the lock until an actual failure, regardless of which arrives first.
+            warning = self.frame(player, lambda f:
+                (f.get("message") or {}).get("type") == "error"
+                and f["message"].get("code") == "storage_failure"
+                and "save failed" in f["message"].get("message", "").lower())
             self.assertIn("save failed", warning["message"]["message"].lower())
         saved = self.request(player, {"type": "save"})
         self.assertIsNone(saved["error"])
@@ -160,22 +206,57 @@ class RunUntilBlockedProcesses(ProcessTestCase):
 
     def slow_spectator_recovery(self, *server_args):
         server = self.server(*server_args)
-        player, initial = self.client()
-        relay = StreamRelay(self.address, receive_buffer=4096)
+        player_relay = StreamRelay(self.address, measure_actor_facts=True)
+        self.addCleanup(player_relay.close)
+        player = self.launch("tor-client-headless", ["--connect", player_relay.address], token=TOKEN)
+        initial = self.frame(player, lambda f: f["type"] == "ready")
+        send_budget = tcp_send_buffer_budget()
+        relay = StreamRelay(self.address, receive_buffer=RECEIVE_BUFFER)
         self.addCleanup(relay.close)
         stalled = self.launch("tor-client-headless", ["--connect", relay.address], token=SPECTATOR_TOKEN)
         self.frame(stalled, lambda f: f["type"] == "ready")
+        if sys.platform.startswith("linux"):
+            self.assertTrue(relay.server_connection_open(server.child.pid),
+                            "socket ownership probe must identify the attached spectator")
         relay.gate.clear()
+        player_relay.reset_traffic()
         # Wait for this actor's simulation effects before filling its one queue
         # slot again. Delivery to the stalled spectator cannot gate these turns.
         final = None
-        for _ in range(TURNS):
+        for turns in range(1, MAX_PRESSURE_TURNS + 1):
             final = self.act(player, {"type": "wait"})
             self.assertIsNone(final["error"])
-        tick = int(initial["state"]["observation"]["tick"]) + TURNS * 100
+            observed_bytes, largest_frame = player_relay.traffic()
+            # Shared state, event and intention payloads must exceed TCP buffering
+            # plus a full host message queue, one in-flight frame and the relay's
+            # held frame.
+            # Extra metadata/window allowance keeps differing stream cursors
+            # and the OS's receive-buffer accounting out of the lower bound.
+            pressure_bytes = send_budget + (OUTBOUND_SLOTS + 2) * (largest_frame + 64) + 2 * RECEIVE_BUFFER
+            if turns >= TURNS and observed_bytes > pressure_bytes:
+                break
+        else:
+            self.fail(f"Pressure workload exhausted {MAX_PRESSURE_TURNS} turns: "
+                      f"{observed_bytes} shared actor bytes, {pressure_bytes} required, "
+                      f"{send_budget} TCP budget, {largest_frame} largest frame")
+        print(f"Slow-spectator pressure: {turns} turns, {observed_bytes} shared actor bytes, "
+              f"{pressure_bytes} required, {send_budget} TCP budget, {largest_frame} largest frame",
+              file=sys.stderr)
+        self.assertTrue(relay.held.wait(timeout=STALL_SECONDS), "spectator relay must actually hold output")
+        self.assertEqual(player_relay.errors, [])
+        self.assertEqual(relay.errors, [])
+        tick = int(initial["state"]["observation"]["tick"]) + turns * 100
         self.assertEqual(int(final["state"]["observation"]["tick"]), tick)
-        # Released after the stall timeout, the spectator finds itself disconnected.
-        relay.gate.set()
+        if sys.platform.startswith("linux"):
+            # Crossing a byte budget is not itself proof that the server closed
+            # the stream. Keep pressure applied through its existing stall/I/O
+            # deadline, and distinguish server closure from later client drain.
+            deadline = time.monotonic() + STALL_SECONDS * 2
+            while relay.server_connection_open(server.child.pid):
+                if time.monotonic() >= deadline:
+                    self.fail("Server still owns the stalled spectator socket after pressure and stall deadline")
+                time.sleep(0.05)
+        relay.resume_reading()
         self.assertNotEqual(stalled.child.wait(timeout=STALL_SECONDS * 4), 0)
         # A replacement spectator starts at the committed state.
         watcher, watching = self.client(SPECTATOR_TOKEN)

@@ -77,7 +77,7 @@ impl Scripted {
                 sequence: 0,
                 tick: state.observation.tick,
             },
-            state,
+            state: state.into(),
             has_control: true,
             history: HistoryPage {
                 entries: vec![],
@@ -240,7 +240,7 @@ impl Link for Scripted {
                     self.update(
                         tick,
                         UpdateBody::Observation {
-                            state: Box::new(state),
+                            state: state.into(),
                             event,
                         },
                     )
@@ -951,11 +951,12 @@ async fn what_happens_between_turns_is_one_passage() {
     let message = link.update(
         0,
         UpdateBody::Observation {
-            state: Box::new({
+            state: ({
                 let mut a = after.clone();
                 a.revision = 1;
                 a
-            }),
+            })
+            .into(),
             event: None,
         },
     );
@@ -1433,7 +1434,7 @@ async fn a_move_told_between_turns_describes_where_it_arrives() {
     let message = link.update(
         60,
         UpdateBody::Observation {
-            state: Box::new(after),
+            state: after.into(),
             event: None,
         },
     );

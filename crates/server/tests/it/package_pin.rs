@@ -3,7 +3,8 @@
 //! See docs/scenario-packages.md.
 use crate::support;
 use std::path::Path;
-use tor_protocol::{Action, ActorId, Direction};
+use tor_protocol::ActorId;
+use tor_server::journal::{Action, Direction};
 use tor_server::{scenario_package, Engine, SavePolicy, Scenario, Streaming};
 
 fn corridor_root() -> std::path::PathBuf {

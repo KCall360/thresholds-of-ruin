@@ -9,8 +9,9 @@
 //! Feature tests don't need to repeat these checks for their own packages:
 //! adding a package to `scenarios/` or `scenarios/tests/` covers it here.
 use crate::support::{self, run_ai_turns};
-use tor_protocol::{Action, ActorId, Direction, StateView};
+use tor_protocol::{ActorId, StateView};
 use tor_server::journal::Command;
+use tor_server::journal::{Action, Direction};
 use tor_server::{scenario_package, Engine, Scenario};
 
 const TURNS: usize = 12;

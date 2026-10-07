@@ -1190,8 +1190,9 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::Action;
     use crate::{Engine, Scenario};
-    use tor_protocol::{Action, ActorId};
+    use tor_protocol::ActorId;
 
     #[test]
     fn acquisition_package_chunks_preserve_bounds_order_and_types() {
@@ -1650,7 +1651,7 @@ mod tests {
         scenario
     }
 
-    fn walk(engine: &mut Engine, direction: tor_protocol::Direction, steps: usize) {
+    fn walk(engine: &mut Engine, direction: crate::journal::Direction, steps: usize) {
         for _ in 0..steps {
             let revision = engine.revision(ActorId(1)).unwrap();
             let request = format!("walk-{direction:?}-{revision}");
@@ -1679,7 +1680,7 @@ mod tests {
             ..SavePolicy::default()
         };
         let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
-        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        walk(&mut engine, crate::journal::Direction::East, TO_HALL_4);
         let expected = engine.state(ActorId(1)).unwrap();
         engine.flush().unwrap();
         let status = engine.save_status();
@@ -1693,7 +1694,7 @@ mod tests {
         drop(engine);
         let mut restored = Engine::open_with_policy(&path, corridor(), policy).unwrap();
         assert_eq!(restored.state(ActorId(1)).unwrap(), expected);
-        walk(&mut restored, tor_protocol::Direction::West, 1);
+        walk(&mut restored, crate::journal::Direction::West, 1);
         restored.flush().unwrap();
         assert_eq!(restored.save_status().pending_bytes, 0);
     }
@@ -1718,7 +1719,7 @@ mod tests {
                 &engine.branch().clone(),
                 crate::journal::Command::Act {
                     expected_revision: engine.revision(ActorId(1)).unwrap(),
-                    action: tor_protocol::Action::Wait,
+                    action: crate::journal::Action::Wait,
                 },
             )
             .unwrap();
@@ -1823,8 +1824,8 @@ mod tests {
         let branch = engine.branch().clone();
         let command = crate::journal::Command::AdmitIntention {
             expected_revision: engine.revision(ActorId(1)).unwrap(),
-            action: tor_protocol::Action::Move {
-                direction: tor_protocol::Direction::East,
+            action: crate::journal::Action::Move {
+                direction: crate::journal::Direction::East,
             },
         };
         let admission = engine
@@ -1914,7 +1915,7 @@ mod tests {
             },
         )
         .unwrap();
-        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        walk(&mut engine, crate::journal::Direction::East, TO_HALL_4);
         assert_eq!(engine.region_counts().unwrap().detached, 2);
         engine.flush().unwrap();
         let (_, _, save_id, _, _, _) = load(path).unwrap();
@@ -1975,7 +1976,7 @@ mod tests {
                 if committed { 0 } else { TO_HALL_4 },
                 "{stage}"
             );
-            walk(&mut recovered, tor_protocol::Direction::West, TO_HALL_4);
+            walk(&mut recovered, crate::journal::Direction::West, TO_HALL_4);
             let counts = recovered.region_counts().unwrap();
             assert_eq!(counts.detached, 3, "{stage}");
             assert_eq!(
@@ -2000,7 +2001,7 @@ mod tests {
                 ..SavePolicy::default()
             };
             let mut engine = Engine::open_with_policy(&path, corridor(), policy.clone()).unwrap();
-            walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+            walk(&mut engine, crate::journal::Direction::East, TO_HALL_4);
             engine.flush().unwrap();
             drop(engine);
             let conn = connection(&path).unwrap();
@@ -2043,7 +2044,7 @@ mod tests {
                     crate::journal::Command::Act {
                         expected_revision: before.revision,
                         action: Action::Move {
-                            direction: tor_protocol::Direction::West,
+                            direction: crate::journal::Direction::West,
                         },
                     },
                 );
@@ -2088,7 +2089,7 @@ mod tests {
             },
         )
         .unwrap();
-        walk(&mut engine, tor_protocol::Direction::East, TO_HALL_4);
+        walk(&mut engine, crate::journal::Direction::East, TO_HALL_4);
         engine.flush().unwrap();
         let id: i64 = connection(&path)
             .unwrap()

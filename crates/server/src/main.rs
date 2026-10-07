@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--help" | "-h" => {
-                println!("Outgoing buffers: --outbound-frame-bytes 16777216 --outbound-client-bytes 67108864 --outbound-total-bytes 268435456. Byte limits include queued and in-flight payloads. Frame <= client <= total; frame is at most 16 MiB. Exhausted streams disconnect and must reconnect for a snapshot.");
+                println!("Outgoing buffers: --outbound-frame-bytes 16777216 --outbound-client-bytes 67108864 --outbound-total-bytes 268435456. Byte limits include queued and in-flight payloads. Frame <= client <= total; frame is at most 16 MiB. Each connection reserves one maximum frame; the connection limit is min(128, total/frame), 16 by default. Exhausted streams disconnect and must reconnect for a snapshot.");
                 println!("Background saves: --save-target-ms 30000 --save-max-ms 60000 --save-idle-ms 750 --save-queue-bytes 8388608. Ordinary acknowledgements may be lost after a crash; explicit save and clean shutdown wait for storage.");
                 println!("Checkpoints: --checkpoint-interval 1024 journal entries (0 disables). Retains all history; bounds simulation replay after the latest committed checkpoint.");
                 println!("Authored packages: --scenario <directory> [--character <id>] [--allow-unvalidated]. Validate with tor-scenario validate <directory>. Saves pin their original package.");

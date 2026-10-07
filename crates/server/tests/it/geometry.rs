@@ -1,5 +1,6 @@
 use tempfile::tempdir;
 use tor_protocol::*;
+use tor_server::journal::{Action, Direction};
 use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOperation};
 use tor_server::{Engine, Scenario};
 

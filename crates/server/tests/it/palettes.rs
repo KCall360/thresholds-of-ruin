@@ -5,6 +5,7 @@ use crate::support;
 use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -58,7 +59,7 @@ fn union(parts: &[BTreeSet<String>]) -> BTreeSet<String> {
 
 /// Act as the character after any AI turns due first.
 fn act(engine: &mut Engine, action: Action) -> Result<(), tor_server::Failure> {
-    support::play(engine, action).map(|_| ())
+    support::play(engine, tor_server::journal::Action::from_wire(&action)).map(|_| ())
 }
 
 /// Step east along the caves' straight corridor, waiting for rats in the way.
@@ -292,7 +293,7 @@ impl Viewer {
         };
         let mut viewer = Self {
             client,
-            state: snapshot.state,
+            state: Arc::unwrap_or_clone(snapshot.state),
             branch: snapshot.branch,
             palettes: Vec::new(),
             step: 0,
@@ -305,7 +306,9 @@ impl Viewer {
         match message {
             ServerMessage::Update { update } => {
                 match update.body {
-                    UpdateBody::Observation { state, .. } => self.state = *state,
+                    UpdateBody::Observation { state, .. } => {
+                        self.state = Arc::unwrap_or_clone(state)
+                    }
                     UpdateBody::ObservationDelta { state, .. } => {
                         self.state = state.apply(&self.state).unwrap()
                     }

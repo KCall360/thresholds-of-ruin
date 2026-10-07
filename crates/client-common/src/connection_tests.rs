@@ -1,5 +1,6 @@
 //! Deadline coverage uses an expired stored deadline, avoiding clock sleeps.
 use super::*;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
@@ -37,6 +38,7 @@ async fn an_expired_recovery_cannot_send_or_apply_queued_traffic_in_any_phase() 
                 &mut socket,
                 ServerMessage::Welcome {
                     protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                     user: "test".into(),
                     actors: vec![ActorId(1)],
                     role: AccessRole::Spectator,
@@ -163,6 +165,7 @@ async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() 
                     &mut socket,
                     ServerMessage::Welcome {
                         protocol: PROTOCOL_VERSION,
+                        capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                         user: "test".into(),
                         actors: vec![initial.actor],
                         role: AccessRole::Player,
@@ -238,7 +241,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let initial = snapshot();
-    let mut state = initial.state.clone();
+    let mut state = Arc::unwrap_or_clone(initial.state.clone());
     state.revision += 1;
     state.observation.visible_cells[0].asset = Some("missing.test.asset".into());
     let update = ServerMessage::Update {
@@ -251,7 +254,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
                 tick: initial.cursor.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(state.clone()),
+                state: state.clone().into(),
                 event: None,
             },
         }),
@@ -273,6 +276,7 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
             &mut socket,
             ServerMessage::Welcome {
                 protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                 user: "test".into(),
                 actors: vec![initial.actor],
                 role: AccessRole::Spectator,
@@ -383,5 +387,166 @@ async fn palette_backpressure_cancellation_does_not_lose_the_applied_observation
         ServerMessage::Palette { .. }
     ));
     assert!(client.palette.holds("missing.test.asset"));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_server_capabilities_are_rejected_before_actor_attachment() {
+    for capabilities in [
+        ServerCapabilities {
+            max_connections: 0,
+            ..ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16)
+        },
+        ServerCapabilities {
+            max_request_bytes: u32::MAX,
+            ..ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16)
+        },
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            assert!(matches!(
+                receive(&mut socket).await,
+                ClientMessage::Hello { .. }
+            ));
+            send(
+                &mut socket,
+                ServerMessage::Welcome {
+                    protocol: PROTOCOL_VERSION,
+                    capabilities,
+                    user: "test".into(),
+                    actors: vec![ActorId(1)],
+                    role: AccessRole::Spectator,
+                },
+            )
+            .await;
+            let next = timeout(Duration::from_secs(2), socket.next()).await;
+            assert!(
+                !matches!(next, Ok(Some(Ok(Message::Text(_))))),
+                "invalid capabilities must not grant attachment"
+            );
+        });
+        assert!(
+            Connection::connect(address, "test".into(), ActorId(1), "headless")
+                .await
+                .is_err()
+        );
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn advertised_request_limit_rejects_locally_and_keeps_connection_usable() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        assert!(matches!(
+            receive(&mut socket).await,
+            ClientMessage::Hello { .. }
+        ));
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities {
+                    max_request_bytes: 256,
+                    ..ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16)
+                },
+                user: "test".into(),
+                actors: vec![ActorId(1)],
+                role: AccessRole::Wizard,
+            },
+        )
+        .await;
+        assert!(matches!(
+            receive(&mut socket).await,
+            ClientMessage::Request {
+                request: Request::Attach { .. },
+                ..
+            }
+        ));
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial),
+            },
+        )
+        .await;
+        assert!(
+            matches!(
+                receive(&mut socket).await,
+                ClientMessage::Request {
+                    request: Request::Snapshot,
+                    ..
+                }
+            ),
+            "oversized command must not be sent before the valid query"
+        );
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    assert_eq!(client.capabilities().max_request_bytes, 256);
+    let oversized = client.state.command_request(Command::Wizard {
+        expected_revision: client.state.state().revision,
+        operation: "x".repeat(512),
+    });
+    let error = client.request(oversized).await.unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<EncodeError>(),
+        Some(EncodeError::TooLarge { limit: 256 })
+    ));
+    client.request(Request::Snapshot).await.unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn attachment_rejects_response_exceeding_advertised_frame_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(512, 16),
+                user: "test".into(),
+                actors: vec![ActorId(1)],
+                role: AccessRole::Spectator,
+            },
+        )
+        .await;
+        assert!(matches!(
+            receive(&mut socket).await,
+            ClientMessage::Request {
+                request: Request::Attach { .. },
+                ..
+            }
+        ));
+        let oversized = ServerMessage::Snapshot {
+            request_id: "attach".into(),
+            snapshot: Box::new(initial),
+        };
+        assert!(serde_json::to_string(&oversized).unwrap().len() > 512);
+        send(&mut socket, oversized).await;
+    });
+    let result = Connection::connect(address, "test".into(), ActorId(1), "headless").await;
+    assert!(matches!(
+        result
+            .err()
+            .and_then(|e| e.downcast::<DecodeError>().ok())
+            .as_deref(),
+        Some(DecodeError::TooLarge { limit: 512 })
+    ));
     server.await.unwrap();
 }

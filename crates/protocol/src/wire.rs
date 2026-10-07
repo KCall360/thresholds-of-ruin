@@ -1,7 +1,46 @@
 use crate::{ActorId, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 28;
+/// Static limits of this authenticated server. Available capacity is not
+/// advertised: it can change between welcome and the next request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerCapabilities {
+    pub max_request_bytes: u32,
+    pub max_response_bytes: u32,
+    pub max_retained_state_bytes: u32,
+    pub max_connections: u32,
+    pub max_history_page_entries: u32,
+}
+
+impl ServerCapabilities {
+    /// Advertise native protocol bounds with the host's response and connection limits.
+    pub fn new(max_response_bytes: u32, max_connections: u32) -> Self {
+        Self {
+            max_request_bytes: crate::MAX_REQUEST_BYTES as u32,
+            max_response_bytes,
+            max_retained_state_bytes: crate::MAX_STATE_BYTES as u32,
+            max_connections,
+            max_history_page_entries: MAX_HISTORY_PAGE as u32,
+        }
+    }
+
+    /// Reject unsupported or nonsensical limits before attaching an actor.
+    pub fn is_valid(self) -> bool {
+        self.max_request_bytes > 0
+            && self.max_request_bytes <= crate::MAX_REQUEST_BYTES as u32
+            && self.max_response_bytes > 0
+            && self.max_response_bytes <= crate::MAX_RESPONSE_BYTES as u32
+            && self.max_retained_state_bytes > 0
+            && self.max_retained_state_bytes <= crate::MAX_STATE_BYTES as u32
+            && self.max_connections > 0
+            && self.max_history_page_entries > 0
+            && self.max_history_page_entries <= MAX_HISTORY_PAGE as u32
+    }
+}
+
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -700,7 +739,8 @@ pub struct Snapshot {
     pub actor: ActorId,
     pub branch: BranchId,
     pub cursor: StreamCursor,
-    pub state: StateView,
+    /// Immutable disclosed state; shared ownership does not change its wire shape.
+    pub state: Arc<StateView>,
     pub has_control: bool,
     pub history: HistoryPage,
 }
@@ -734,7 +774,8 @@ pub enum UpdateBody {
         entry: Option<Box<HistoryEntry>>,
     },
     Observation {
-        state: Box<StateView>,
+        /// One immutable observation may be retained by multiple readers.
+        state: Arc<StateView>,
         event: Option<Box<HistoryEntry>>,
     },
     /// The next observation as changes to the previous one on this stream.
@@ -767,6 +808,8 @@ pub enum ErrorCode {
     Unauthorized,
     VersionMismatch,
     InvalidRequest,
+    /// Host capacity is exhausted; the request has not entered the simulation.
+    ResourceLimit,
     NotAttached,
     AlreadyAttached,
     ControlTaken,
@@ -789,6 +832,7 @@ pub enum ErrorCode {
 pub enum ServerMessage {
     Welcome {
         protocol: u32,
+        capabilities: ServerCapabilities,
         user: String,
         actors: Vec<ActorId>,
         role: AccessRole,

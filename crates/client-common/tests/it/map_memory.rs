@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
@@ -29,7 +30,7 @@ fn advance(client: &mut ClientState, next: Snapshot) {
                 tick: next.cursor.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(next.state),
+                state: next.state,
                 event: None,
             },
         })
@@ -40,13 +41,16 @@ fn advance(client: &mut ClientState, next: Snapshot) {
 fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
     let mut client = ClientState::from_snapshot(snapshot(&[("a", 0, 0)], 0)).unwrap();
     let mut seen = snapshot(&[("a", 0, 0)], 1);
-    seen.state.observation.visible_actors.push(ActorView {
-        asset: None,
-        id: ActorId(2),
-        name: "figure".into(),
-        description: String::new(),
-        position: Position { x: 1, y: 0, z: 0 },
-    });
+    Arc::make_mut(&mut seen.state)
+        .observation
+        .visible_actors
+        .push(ActorView {
+            asset: None,
+            id: ActorId(2),
+            name: "figure".into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
     advance(&mut client, seen);
     assert_eq!(client.narration(), ["You notice a figure."]);
     let unchanged = client.clone();
@@ -61,7 +65,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
                 tick: 2
             },
             body: UpdateBody::Observation {
-                state: Box::new(next.state.clone()),
+                state: next.state.clone(),
                 event: None
             },
         })
@@ -77,26 +81,32 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
 #[test]
 fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
     let mut initial = snapshot(&[("a", 0, 0), ("b", 1, 0), ("item", 3, 0)], 0);
-    initial.state.observation.ground_items.push(GroundItemView {
-        item: ItemView {
+    Arc::make_mut(&mut initial.state)
+        .observation
+        .ground_items
+        .push(GroundItemView {
+            item: ItemView {
+                asset: None,
+                quantity: 1,
+                appearance: String::new(),
+                identified: true,
+                id: 7,
+                name: "token".into(),
+                description: String::new(),
+            },
+            position: Position { x: 3, y: 0, z: 0 },
+            reachable: false,
+        });
+    Arc::make_mut(&mut initial.state)
+        .observation
+        .visible_actors
+        .push(ActorView {
             asset: None,
-            quantity: 1,
-            appearance: String::new(),
-            identified: true,
-            id: 7,
-            name: "token".into(),
+            id: ActorId(2),
+            position: Position { x: 3, y: 0, z: 0 },
+            name: "figure".into(),
             description: String::new(),
-        },
-        position: Position { x: 3, y: 0, z: 0 },
-        reachable: false,
-    });
-    initial.state.observation.visible_actors.push(ActorView {
-        asset: None,
-        id: ActorId(2),
-        position: Position { x: 3, y: 0, z: 0 },
-        name: "figure".into(),
-        description: String::new(),
-    });
+        });
     let mut client = ClientState::from_snapshot(initial).unwrap();
     advance(&mut client, snapshot(&[("a", -1, 0), ("b", 0, 0)], 1));
     advance(&mut client, snapshot(&[("b", -1, 0), ("c", 0, 0)], 2));
@@ -157,7 +167,9 @@ fn map_tracks_elevation_and_rejects_bad_updates_atomically() {
     let first = snapshot(&[("anchor", 0, 0), ("old", 1, 0)], 0);
     let mut client = ClientState::from_snapshot(first).unwrap();
     let mut upstairs = snapshot(&[("anchor", 0, 0)], 1);
-    upstairs.state.observation.visible_cells[0].position.z = -1;
+    Arc::make_mut(&mut upstairs.state).observation.visible_cells[0]
+        .position
+        .z = -1;
     advance(&mut client, upstairs);
     assert_eq!(
         client
@@ -180,7 +192,7 @@ fn map_tracks_elevation_and_rejects_bad_updates_atomically() {
                 tick: 2
             },
             body: UpdateBody::Observation {
-                state: Box::new(next.state),
+                state: next.state,
                 event: None
             }
         })
@@ -196,7 +208,10 @@ fn chart_size_and_extreme_translations_are_bounded() {
         let mut cell = template.clone();
         cell.key = format!("cell-{x}");
         cell.position.x = x;
-        initial.state.observation.visible_cells.push(cell);
+        Arc::make_mut(&mut initial.state)
+            .observation
+            .visible_cells
+            .push(cell);
     }
     let mut client = ClientState::from_snapshot(initial).unwrap();
     assert_eq!(client.map_memory().count(), 4096);
@@ -233,7 +248,7 @@ fn deltas_rebuild_the_full_view_and_reject_another_base_atomically() {
     let first = row(0);
     let mut client = ClientState::from_snapshot(snapshot(&cells(&first), 0)).unwrap();
     // One step east: every retained cell moves one place west.
-    let mut next = snapshot(&cells(&row(1)[1..]), 1).state;
+    let mut next = Arc::unwrap_or_clone(snapshot(&cells(&row(1)[1..]), 1).state);
     next.observation.visible_cells[0].wall = true;
     let delta = StateDelta::between(client.state(), &next).unwrap();
     assert_eq!(delta.cells.shift, Position { x: -1, y: 0, z: 0 });
@@ -260,7 +275,7 @@ fn overflowing_delta_preserves_the_entire_client_model() {
             .collect();
         let initial = snapshot(&cells(&row), 0);
         let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
-        let mut next = initial.state;
+        let mut next = Arc::unwrap_or_clone(initial.state);
         next.revision = 1;
         next.observation.tick = 1;
         let mut delta = StateDelta::between(client.state(), &next).unwrap();

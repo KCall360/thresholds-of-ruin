@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_protocol::*;
 
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
@@ -257,7 +258,7 @@ fn complete_observation(state: StateView, sequence: u64) -> ServerMessage {
                 tick: state.observation.tick,
             },
             body: UpdateBody::Observation {
-                state: Box::new(state),
+                state: state.into(),
                 event: None,
             },
         }),
@@ -390,4 +391,250 @@ fn equal_complete_encoded_sizes_prefer_full() {
         found,
         "the fixture must cover an actual equal-size boundary"
     );
+}
+
+fn collection_view(count: usize) -> StateView {
+    let mut state = room(15, 15, 1);
+    for index in 0..count {
+        let item = ItemView {
+            quantity: 1,
+            appearance: "disclosed appearance".repeat(4),
+            identified: true,
+            description: "disclosed description".repeat(4),
+            id: index as u64 + 1,
+            name: format!("carried item {index}"),
+            asset: None,
+        };
+        state.observation.inventory.push(item.clone());
+        state.observation.ground_items.push(GroundItemView {
+            reachable: false,
+            item: ItemView {
+                id: index as u64 + 10_000,
+                ..item
+            },
+            position: Position {
+                x: index as i32,
+                y: 1,
+                z: 0,
+            },
+        });
+        state.observation.visible_actors.push(ActorView {
+            name: format!("actor {index}"),
+            description: "disclosed actor appearance".repeat(4),
+            id: ActorId(index as u64 + 10),
+            position: Position {
+                x: index as i32,
+                y: 2,
+                z: 0,
+            },
+            asset: None,
+        });
+        state.observation.places.push(PlaceView {
+            key: format!("opaque-place-{index}"),
+            name: "remembered place name".repeat(4),
+            origin: PlaceNameOrigin::Invented,
+        });
+    }
+    state.validate().unwrap();
+    state
+}
+
+fn encoded_collection_update(base: &StateView, next: &StateView) -> usize {
+    next.validate().unwrap();
+    let message = complete_observation(next.clone(), 2);
+    let encoded = encode_response(
+        &message,
+        Some((exact_base(base, 1), base)),
+        MAX_RESPONSE_BYTES,
+    )
+    .unwrap();
+    let ServerMessage::Update { update } = decode_response(&encoded.text).unwrap() else {
+        panic!("update")
+    };
+    let reconstructed = match update.body {
+        UpdateBody::Observation { state, .. } => Arc::unwrap_or_clone(state),
+        UpdateBody::ObservationDelta { state, .. } => state.apply(base).unwrap(),
+        _ => panic!("observation"),
+    };
+    reconstructed.validate().unwrap();
+    assert_eq!(reconstructed, *next);
+    encoded.text.len()
+}
+
+#[test]
+fn unchanged_collection_update_bytes_do_not_grow_with_retained_contents() {
+    let mut lengths = Vec::new();
+    for count in [16, 256, 4096] {
+        let base = collection_view(count);
+        let mut next = base.clone();
+        next.revision += 1;
+        next.observation.tick += 1;
+        next.observation.visible_cells[3].wall = true;
+        lengths.push(encoded_collection_update(&base, &next));
+    }
+    assert!(
+        lengths.iter().all(|bytes| *bytes < 2048),
+        "complete update sizes: {lengths:?}"
+    );
+    assert_eq!(
+        lengths[0], lengths[2],
+        "retained collections must have no wire payload"
+    );
+}
+
+#[test]
+fn separated_collection_edits_send_changed_values_without_retained_contents() {
+    let base = collection_view(4096);
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.tick += 1;
+    for index in [3, 2000, 4090] {
+        next.observation.inventory[index].quantity += 1;
+        next.observation.ground_items[index].reachable = true;
+        next.observation.visible_actors[index].description.push('!');
+        next.observation.places[index].name.push('!');
+    }
+    let bytes = encoded_collection_update(&base, &next);
+    assert!(bytes < 8192, "sparse collection update used {bytes} bytes");
+}
+
+#[test]
+fn collection_updates_keep_repeated_portal_entities_at_distinct_offsets() {
+    let mut base = collection_view(256);
+    let mut ground = base.observation.ground_items[0].clone();
+    ground.position.y = -1;
+    base.observation.ground_items.insert(100, ground);
+    let mut actor = base.observation.visible_actors[0].clone();
+    actor.position.y = -2;
+    base.observation.visible_actors.insert(100, actor);
+    base.validate().unwrap();
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.tick += 1;
+    next.observation.ground_items[100].reachable = true;
+    next.observation.visible_actors.remove(100);
+    let bytes = encoded_collection_update(&base, &next);
+    assert!(
+        bytes < 2048,
+        "one projected occurrence update used {bytes} bytes"
+    );
+}
+
+#[test]
+fn ordered_collection_edits_reconstruct_reorders_insertions_and_empty_transitions() {
+    let base = collection_view(16);
+    for case in 0..6 {
+        let mut next = base.clone();
+        next.revision += 1;
+        next.observation.tick += 1;
+        match case {
+            0 => {
+                next.observation.inventory.reverse();
+                next.observation.ground_items.reverse();
+                next.observation.visible_actors.reverse();
+                next.observation.places.reverse();
+            }
+            1 => {
+                next.observation.inventory.rotate_left(7);
+                next.observation.ground_items.rotate_right(3);
+                next.observation.visible_actors.swap(0, 15);
+                next.observation.places.swap(5, 10);
+            }
+            2 => {
+                next.observation.inventory.clear();
+                next.observation.ground_items.clear();
+                next.observation.visible_actors.clear();
+                next.observation.places.clear();
+            }
+            3 => {
+                next.observation.inventory.remove(2);
+                next.observation.ground_items.remove(3);
+                next.observation.visible_actors.remove(4);
+                next.observation.places.remove(5);
+            }
+            4 => {
+                let mut extra = next.observation.inventory[0].clone();
+                extra.id = 100_000;
+                next.observation.inventory.insert(8, extra);
+                let mut extra = next.observation.ground_items[0].clone();
+                extra.position.z = 3;
+                next.observation.ground_items.insert(8, extra);
+                let mut extra = next.observation.visible_actors[0].clone();
+                extra.position.z = 3;
+                next.observation.visible_actors.insert(8, extra);
+                let mut extra = next.observation.places[0].clone();
+                extra.key = "new-opaque-place".into();
+                next.observation.places.insert(8, extra);
+            }
+            _ => {}
+        }
+        next.validate().unwrap();
+        round_trip(&base, &next);
+        // Reversal is intentionally valid: a full view need not be sorted.
+        round_trip(&next, &base);
+    }
+}
+
+#[test]
+fn ordered_collection_edits_reject_invalid_original_base_ranges() {
+    let base = collection_view(16);
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.tick += 1;
+    let candidate = StateDelta::between(&base, &next).unwrap();
+    let edit = |start, remove| CollectionEdit::<ItemView> {
+        start,
+        remove,
+        insert: Vec::new(),
+    };
+    for invalid in [
+        vec![edit(17, 1)],
+        vec![edit(16, 1)],
+        vec![edit(1, u32::MAX)],
+        vec![edit(u32::MAX, u32::MAX)],
+        vec![edit(0, 0)],
+        vec![edit(2, 2), edit(3, 1)],
+        vec![edit(5, 1), edit(2, 1)],
+        vec![edit(2, 1), edit(2, 1)],
+    ] {
+        let mut delta = candidate.clone();
+        delta.inventory = invalid;
+        assert_eq!(delta.apply(&base), Err(DeltaError::InvalidChange));
+    }
+    assert_eq!(base, collection_view(16));
+    let encoded = serde_json::to_value(edit(0, 1)).unwrap();
+    let mut unknown = encoded;
+    unknown["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<CollectionEdit<ItemView>>(unknown).is_err());
+    for malformed in [
+        serde_json::json!(-1),
+        serde_json::json!(4294967296u64),
+        serde_json::json!("1"),
+    ] {
+        let mut value = serde_json::to_value(edit(0, 1)).unwrap();
+        value["start"] = malformed;
+        assert!(serde_json::from_value::<CollectionEdit<ItemView>>(value).is_err());
+    }
+}
+
+#[test]
+fn complete_encoding_rejects_a_fitting_delta_when_retained_state_would_exceed_the_ceiling() {
+    let mut base = collection_view(1);
+    base.observation.inventory[0].description = "x".repeat(MAX_RESPONSE_BYTES / 2);
+    base.validate().unwrap();
+    let mut next = base.clone();
+    next.revision += 1;
+    next.observation.tick += 1;
+    next.observation.ground_items[0].item.description = "y".repeat(MAX_RESPONSE_BYTES / 2);
+    let message = complete_observation(next, 2);
+    assert!(matches!(
+        encode_response(
+            &message,
+            Some((exact_base(&base, 1), &base)),
+            MAX_RESPONSE_BYTES
+        ),
+        Err(EncodeError::RetainedStateTooLarge {
+            limit: MAX_STATE_BYTES
+        })
+    ));
 }

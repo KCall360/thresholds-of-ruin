@@ -185,5 +185,45 @@ class PlacePerformanceReport(unittest.TestCase):
             validate_client(result)
 
 
+class ObservationOwnershipReport(unittest.TestCase):
+    def rows(self):
+        return [dict(diagnostic='observation_ownership', version=1, cells=c, readers=n,
+                     method=m, sample=i, state_bytes=c*128, retained_objects=n if m == 'owned_clone' else 1,
+                     distinct_state_serialized_bytes=c*128*(n if m == 'owned_clone' else 1),
+                     clone_ms=.2 if m == 'owned_clone' else .001, verified=True)
+                for c in (64, 4096, 20956) for n in (1, 8, 32) for i in range(100)
+                for m in (('owned_clone', 'shared_handle') if i % 2 == 0 else ('shared_handle', 'owned_clone'))]
+
+    def test_complete_matrix_reports_cloning_and_distinct_content(self):
+        result = client_performance_report.validate_ownership(self.rows())
+        self.assertEqual(len(result), 18)
+        owned = result['cells-4096-readers-32-owned_clone']
+        shared = result['cells-4096-readers-32-shared_handle']
+        self.assertEqual(owned['n'], 100)
+        self.assertEqual(shared['retained_objects'], 1)
+        self.assertEqual(owned['distinct_state_serialized_bytes'], shared['distinct_state_serialized_bytes'] * 32)
+        self.assertEqual(shared['p95_ms'], .001)
+
+    def test_missing_duplicate_unverified_and_unstable_payloads_are_rejected(self):
+        for mutate in (lambda r: r.pop(), lambda r: r.append(r[0]),
+                       lambda r: r.reverse(), lambda r: r[0].update(verified=False),
+                       lambda r: r[1].update(state_bytes=r[1]['state_bytes'] + 1),
+                       lambda r: r[201].update(retained_objects=7),
+                       lambda r: r[0].update(distinct_state_serialized_bytes=0)):
+            rows = self.rows(); mutate(rows)
+            with self.assertRaises(ValueError):
+                client_performance_report.validate_ownership(rows)
+
+    def test_invalid_numeric_types_versions_and_nonfinite_times_are_rejected(self):
+        for field, value in (('version', True), ('version', 2), ('readers', True),
+                             ('sample', False), ('clone_ms', float('nan')),
+                             ('clone_ms', float('inf')), ('clone_ms', -1),
+                             ('clone_ms', True), ('state_bytes', False),
+                             ('diagnostic', 'other'), ('unexpected', 1)):
+            rows = self.rows(); rows[0][field] = value
+            with self.assertRaises(ValueError):
+                client_performance_report.validate_ownership(rows)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 //! Shared transport recovery against a deliberately inconsistent server stream.
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -34,6 +35,7 @@ async fn attach_scripted(server: &mut Server, initial: &Snapshot) {
         server,
         ServerMessage::Welcome {
             protocol: PROTOCOL_VERSION,
+            capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
             user: "test".into(),
             actors: vec![initial.actor],
             role: AccessRole::Player,
@@ -370,6 +372,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
             &mut server,
             ServerMessage::Welcome {
                 protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                 user: "player".into(),
                 actors: vec![ActorId(1)],
                 role: AccessRole::Player,
@@ -526,6 +529,7 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
                 &mut server,
                 ServerMessage::Welcome {
                     protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                     user: "observer".into(),
                     actors: vec![ActorId(1)],
                     role: AccessRole::Spectator,
@@ -578,7 +582,9 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
                 "foreign attachment" => {
                     invalid.context.stream = StreamId("foreign-attachment".into())
                 }
-                "invalid observation" => invalid.state.observation.inventory[0].quantity = 0,
+                "invalid observation" => {
+                    Arc::make_mut(&mut invalid.state).observation.inventory[0].quantity = 0
+                }
                 "server denial" => {}
                 _ => unreachable!(),
             }
@@ -769,7 +775,7 @@ async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair(
             let mut server = accept_async(stream).await.unwrap();
             let initial = super::validation::snapshot(0);
             attach_scripted(&mut server, &initial).await;
-            let mut state = initial.state.clone();
+            let mut state = Arc::unwrap_or_clone(initial.state.clone());
             state.revision = 1;
             state.observation.tick = 1;
             let update = ServerMessage::Update {
@@ -782,7 +788,7 @@ async fn fragmented_response_depth_limit_rejects_before_state_changes_or_repair(
                         tick: 1,
                     },
                     body: UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: state.into(),
                         event: None,
                     },
                 }),

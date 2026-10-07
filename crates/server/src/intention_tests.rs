@@ -495,7 +495,9 @@ mod intention_admission_tests {
                         &engine.branch().clone(),
                         Command::Act {
                             expected_revision: engine.revision(actor).unwrap(),
-                            action: Action::Attack { target: ActorId(2) },
+                            action: Action::Attack {
+                                target: SimActor(2),
+                            },
                         },
                     )
                     .unwrap();
@@ -693,7 +695,9 @@ mod intention_admission_tests {
                 else {
                     panic!("AI execution");
                 };
-                *action = Action::Attack { target: actor };
+                *action = Action::Attack {
+                    target: SimActor(actor.0),
+                };
                 *event = crate::journal::Event::AttackStarted { target: actor };
             } else {
                 let record = archive
@@ -1221,7 +1225,9 @@ mod intention_admission_tests {
                     &engine.branch().clone(),
                     Command::AdmitIntention {
                         expected_revision: engine.revision(actor).unwrap(),
-                        action: Action::Attack { target: ActorId(2) },
+                        action: Action::Attack {
+                            target: SimActor(2),
+                        },
                     },
                 )
                 .unwrap();
@@ -1340,7 +1346,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -1516,7 +1524,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -1638,7 +1648,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -1776,7 +1788,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -1886,7 +1900,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -1944,7 +1960,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -2075,7 +2093,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -2155,7 +2175,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -2250,7 +2272,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: engine.revision(actor).unwrap(),
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();
@@ -2353,7 +2377,9 @@ mod intention_admission_tests {
                 &engine.branch().clone(),
                 Command::AdmitIntention {
                     expected_revision: 0,
-                    action: Action::Attack { target: ActorId(2) },
+                    action: Action::Attack {
+                        target: SimActor(2),
+                    },
                 },
             )
             .unwrap();

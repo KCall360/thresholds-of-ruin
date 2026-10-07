@@ -167,7 +167,7 @@ fn replay_private_boundary(
                 .admit_travel_intention(
                     SimActor(record.entry.actor.0),
                     tor_simulation::TravelStep {
-                        direction: adapt::direction(*direction),
+                        direction: adapt::simulation_direction(*direction),
                         destination: *destination,
                     },
                 )
@@ -484,7 +484,7 @@ mod tests {
                         &engine.branch().clone(),
                         Command::Act {
                             expected_revision: before.revision,
-                            action: step.resolve(&before),
+                            action: Action::from_wire(&step.resolve(&before)),
                         },
                     )
                     .unwrap();
@@ -520,7 +520,7 @@ mod tests {
         }
     }
 
-    fn walk(engine: &mut Engine, direction: tor_protocol::Direction, steps: usize) {
+    fn walk(engine: &mut Engine, direction: Direction, steps: usize) {
         for _ in 0..steps {
             let revision = engine.revision(ActorId(1)).unwrap();
             let request = format!("walk-{direction:?}-{revision}");
@@ -533,7 +533,7 @@ mod tests {
                     &engine.branch().clone(),
                     Command::Act {
                         expected_revision: revision,
-                        action: tor_protocol::Action::Move { direction },
+                        action: Action::Move { direction },
                     },
                 )
                 .unwrap();
@@ -587,14 +587,14 @@ mod tests {
                 },
             )
             .unwrap();
-        walk(&mut engine, tor_protocol::Direction::East, 68);
+        walk(&mut engine, Direction::East, 68);
         assert_eq!(engine.region_counts().unwrap().detached, 2);
         engine.flush().unwrap();
         // The next command learns what the checkpoint wrote; then memory
         // lets go of it.
-        walk(&mut engine, tor_protocol::Direction::East, 1);
+        walk(&mut engine, Direction::East, 1);
         engine.regions.as_mut().unwrap().evict_durable();
-        walk(&mut engine, tor_protocol::Direction::West, 69);
+        walk(&mut engine, Direction::West, 69);
         assert!(engine.region_counts().unwrap().records_read >= 2);
     }
 

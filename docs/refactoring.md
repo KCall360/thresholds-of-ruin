@@ -1823,7 +1823,7 @@ do not establish an improvement. Raw reports remain local and unpublished.
 The wire-integer prototype exposed a test-helper name collision: two standalone
 saved-action tests had selected the protocol Action serializer instead of the
 save-owned adapter. Explicitly qualifying the adapter corrected the tests. All
-five schema tests then passed with protocol-26 decimal-string wire encoding,
+five schema tests then passed with decimal-string wire encoding,
 including the already independent production nested-journal tests. The prototype
 is preserved separately; that checkpoint retains the preceding wire schema.
 The corrected checkpoint requires renewed verification and final-head CI before merging.
@@ -1881,7 +1881,7 @@ unpublished. Broader persistence and restoration tails remain open work.
 
 ## Lossless wire integers (merged, PR #71)
 
-Protocol 26 encodes every 64-bit wire integer as a canonical decimal string,
+The current protocol encodes every 64-bit wire integer as a canonical decimal string,
 including actor/item/door identities, ticks, revisions, stream counters,
 quantities, durations, travel steps and signed motion velocity components.
 Strict Serde adapters reject numeric tokens, noncanonical forms and overflow;
@@ -2148,3 +2148,346 @@ literals in three files. Measured production code and benchmark inputs remained
 unchanged; immutable measured copies retain provenance. The corrected source
 passed all 50 protocol tests. Full verification is still required on the final
 corrected source; earlier checks are not a substitute for that gate.
+
+
+### Ordered observation collection edits (in development)
+
+The current transport represents inventory, ground items, projected actors and
+remembered places as ordered edits against the exact original base vector.
+Unchanged vectors carry empty lists. Each edit retains explicit start/removal
+counts and complete inserted values; one forward merge validates ranges and
+computes the result length before allocation. There is no repeated tail shifting.
+Equal collections avoid an occurrence map. Changed collections retain equal
+occurrences in forward order through existing ordered keys; this is a deterministic
+exact candidate, not an optimal general-purpose diff. Complete envelope selection
+continues to decide whether the candidate is worth sending.
+
+Ground and actor keys include observer-relative position. Repeated underlying
+identities through portals stay distinct; place keys remain opaque. Arbitrary
+valid full-vector order, sparse edits, empty transitions and movement reconstruct
+exactly. Non-cell projections are not inferred from the cell translation. This
+adds no client access to private topology or authoritative spatial indexes.
+
+Failing-first regressions measured 15,302 / 237,121 / 3,821,580 bytes for the same
+small update with 16 / 256 / 4,096 retained entries per collection. Separated edits
+used 3,821,436 bytes; changing one repeated projected occurrence used 237,301 bytes.
+The new unchanged update stays under 2,048 bytes with identical sizes at all three
+counts; sparse edits stay under 8,192 bytes. Protocol/shared-client coverage checks
+exact order, checked spans and atomic rejection. Real ASCII/text recovery holds
+snapshot repair for malformed spans and zero-quantity insertions. Real item
+transfer, checkpoint, cold restart and rewind retain the reconstructed observation.
+A new diagnostic measures large individual observations independently from region
+count, using shared encoding, decoding, application and semantic validation.
+
+The wire shape changes independently of the numeric saved schemas. Archive records
+persist journal commands/effects and receipts; checkpoints persist simulation
+snapshots/revisions, not observation deltas. Further save DTO independence remains
+open. Release measurements, final full verification and both-platform CI remain
+required before publishing this checkpoint. Smaller payloads do not establish a
+latency or resident-memory gain. All six work sequences remain active.
+
+
+Final review found that individual fitting frames could accumulate a retained
+full state beyond the response ceiling. Failing-first shared-client and host
+encoder regressions proved that gap. Shared semantic validation now bounds the
+canonical encoded full state independently of each delta; host selection rejects
+oversized retained observations. The same constant-space serializer counter is
+reused, and ordinary fitting full responses already prove their state fits.
+Real ASCII/text tests seed a valid large snapshot, receive a separately fitting
+delta, reject the accumulated oversized state atomically, hold snapshot repair,
+and continue in the same process. This is a full-observation bound, not a cap on
+remembered map cells or history and not a resident-memory measurement.
+
+The first 24 interleaved release reports and 2,400 individual-collection samples
+validated, with exact measured input bytes and binaries retained locally. Those
+measurements precede this production validation change, so they cannot establish
+final timing costs. Refresh both diagnostics before full final-head verification;
+retain the earlier evidence and any regressions rather than presenting it as the
+final implementation. Other persistence/history/scenario/fairness/extension work
+remains in scope.
+
+
+### Bounded collection encoding release evidence
+
+The refreshed three-round interleaved comparison used the preceding complete
+encoding checkpoint on machine `cfb2fdc044dc`, with five workload cycles, one
+actor, 100 retained history actions and 8/256 regions in memory/durable modes.
+All 24 reports validated; all 12 focused repeat reports validated using identical
+binaries. No competing local jobs or failed runs occurred. All 532 measured input
+hashes were unchanged at measurement completion, and raw/binary hashes were
+verified. Operation, history, recovery and save counts matched and were stable
+across rounds. Each run selected 305 deltas: sent complete bytes fell from
+1,527,532 to 1,521,957; full reference bytes remained 7,111,372. Both region counts
+still expose the same observation workload.
+
+Authoritative command timings are milliseconds, n=915 per side/case:
+
+| Case | Base p50/p95/max | Candidate p50/p95/max |
+| --- | --- | --- |
+| 8 regions, memory | 0.5471 / 0.8013 / 1.7023 | 0.5477 / 0.8096 / 1.2318 |
+| 256 regions, memory | 0.6089 / 0.8632 / 2.5375 | 0.6334 / 0.9014 / 2.5353 |
+| 8 regions, durable | 0.5622 / 0.8037 / 1.5672 | 0.5648 / 0.8369 / 1.5742 |
+| 256 regions, durable | 0.6293 / 0.8857 / 2.5645 | 0.6475 / 0.8967 / 1.6676 |
+
+The focused repeat's large memory command p50/p95/max was
+0.6243/0.8828/1.9666 versus 0.6157/0.9006/1.8461 ms; small durable was
+0.5871/0.8632/1.9901 versus 0.5706/0.8195/2.2202 ms. The small durable p95
+shift reversed, while the large memory increase narrowed. Large memory restart
+p95 was initially 190.5592 versus 204.1517 ms, then 193.0299 versus 194.6388 ms.
+These persistence/restart groups have only three samples. Main durable flush
+p95 was 173.4141/107.4376 ms for 8 regions and 82.7714/56.1503 ms for 256 regions;
+repeat small durable flush was 38.2654/40.6580 ms. Restart and maximum tails remain
+unresolved. No broad engine/persistence speedup is established, and existing
+8 ms p95 / 33 ms maximum targets are unchanged.
+
+The separate same-build individual-collection diagnostic validated all 2,400
+samples (100 per method/case) across 16/256/4,096 entries in each of four
+collections. At 4,096 entries, unchanged complete responses were
+3,505,166 versus 516 bytes; sparse changes were 3,505,169 versus 3,489 bytes;
+projected movement was 3,505,162 versus 1,920,184 bytes; reorder was 3,505,166
+versus 1,743,005 bytes. An unchanged candidate inserts zero values; sparse edits
+insert 12, while movement/reorder insert 8,192. These are candidate-content
+counts, not counts of every allocation or retained client copy.
+
+At 4,096 entries, selected encoding p95 was 5.7987/8.6151/17.4399/17.4840 ms
+for unchanged/sparse/movement/reorder; full was
+16.9314/16.5266/16.4170/16.4431 ms. Selected application/validation p95 was
+7.9997/7.6033/6.9823/7.6518 ms versus full
+5.5703/5.5013/5.6164/6.3940 ms. Reconstructing retained values and checking the
+canonical full-state bound costs CPU even when wire payload is tiny.
+Per-sample encoding + decoding + reconstruction/validation p50/p95/max:
+
+| 4,096-entry case | Full response | Selected response |
+| --- | --- | --- |
+| Unchanged | 39.9484 / 42.5102 / 43.4337 | 12.6010 / 13.3838 / 13.8490 |
+| Sparse edits | 39.8267 / 41.4810 / 42.3272 | 15.2590 / 16.1470 / 16.8305 |
+| Projected movement | 39.4053 / 41.0209 / 41.9862 | 34.2401 / 35.5211 / 36.6291 |
+| Reorder | 39.7599 / 40.9896 / 42.7883 | 32.7018 / 34.1427 / 35.3415 |
+
+This is a synthetic same-build method comparison, not prior-version engine,
+network, rendering or physical-input latency evidence. It does not measure
+resident memory; current observations are bounded by canonical encoded bytes,
+while map/history retention and server sharing across readers remain separate
+work. Measured source copies retain the pre-bound and final bounded code, and
+later edits only document results. Full verification remains required on the
+final commit; raw samples remain local without release/upload authorization.
+
+### Slow-reader verification with compact observations
+
+An earlier complete Windows gate passed, but Linux CI exposed two pressure
+fixtures whose fixed 1,500-turn workload no longer filled TCP buffers after
+collection encoding reduced observation traffic. The relay now optionally counts
+shared observation state/events and intention status from the healthy player
+without retaining payloads; command replies, stream metadata and control
+readiness cannot inflate that count. These actor facts are broadcast identically
+to attached players and spectators. The bounded workload
+exceeds the host send-buffer budget plus queued, in-flight and receive-window
+allowances before checking spectator disconnect and replacement. Existing stall
+and child-exit timeouts remain unchanged.
+
+The earlier state-only counter passed both Windows cases at their normal budget
+with 1,500 turns each. A separate
+4 MiB-budget diagnostic passed both cases at 12,509 turns each, including durable
+save and restart recovery. It exercises workload sizing on Windows; Linux runtime
+verification still requires refreshed final-commit CI. Linux then passed all
+268 Python/process tests but hit the 35-minute CI job limit before completing
+the remaining Rust checks. Counting the shared lifecycle and event payloads
+keeps the conservative pressure threshold while avoiding unnecessary turns;
+the required suites and stall/child-exit deadlines remain unchanged.
+The shared-fact counter passed both Windows cases at normal budgets with
+1,500 turns each and at 4 MiB budgets with 4,527 turns each. The latter pair
+completed in 436.888 seconds rather than the earlier 1,219.612 seconds,
+including disconnect, replacement, durable save and restart. Unit coverage
+rejects counting replies, control readiness or stream metadata; the relay and
+recovery checks also passed. These are workload-sizing results on Windows,
+not proof of Linux runtime coverage or broader gameplay speedups.
+This repair changes test helpers only, so the production measurements above retain their original input
+provenance. Changed verification inputs require a new full gate before pushing.
+
+
+The shared-fact checkpoint passed Windows CI, but Linux failed both pressure
+cases: after 4,527 turns the released spectator did not exit within 20 seconds.
+That failure does not establish whether the server retained the connection or
+whether unread TCP output drained too slowly through the relay's small window.
+The revised fixture observes Linux server socket ownership before releasing
+pressure and restores the relay's normal receive buffer before draining.
+Endpoint/inode matching excludes orphaned TCP rows after descriptor closure.
+Production timeouts and the client-exit assertion remain unchanged. The new
+unit regressions failed first; actual Linux acceptance remains unverified until
+fresh final-head CI passes. No failing candidate is merged or activated.
+
+
+### Immutable observation ownership and typed output failures (in development)
+
+Current disclosed StateView values now use shared immutable ownership in the
+protocol DTOs, server disclosure bases and shared client snapshots. Publication
+adapts one view per observed actor, and equal snapshots reuse only an exact
+same-actor/same-branch view. Per-stream cursors, resets, permissions and private
+history remain independently owned. Regressions cover 1/8/32 readers, distinct
+stream identities, old-view immutability and changed metadata at equal tick and
+revision. JSON representation and protocol/save/rules/scenario versions do not
+change.
+
+Encoding now has explicit frame-size, retained-state-size and serialization
+failure categories. Host admission adds closed/full queues and distinct client /
+aggregate byte-budget failures. No classification matches diagnostic strings.
+Tests prove that rejected preparation or pressure does not leak queue slots or
+byte leases. Aggregate allocation now reserves one maximum frame per admitted
+connection and lends spare capacity under a shared accounting invariant. Closing
+connections retain their reservations through the last outstanding frame. The
+host ceiling is min(128, total/frame), 16 by default; borrowing can prevent new
+admissions below that ceiling. Rejected admission does not consume a client ID.
+Capabilities and snapshot feasibility remain open.
+
+Ownership-only measurements used the repaired client-fixture baseline e89e162
+and machine 6a1878811f37 (Windows, F:HDD). All 24 reports over three interleaved
+rounds validated with matching operation/history/save counts and no competing
+jobs. Ordinary timings were mixed: large-client 64-update application p95 rose
+38.2463 to 39.1874 ms; small-client 64-update rendering maximum rose 0.8675 to
+1.3841 ms. No broad application, engine or persistence speedup is established.
+These measurements preceded the typed-error change and do not qualify its final
+performance. A separate clone-only diagnostic measured 100 pairs per reader /
+view size. With 20,956 cells and 32 readers, owned clone p50/p95/max was
+53.8623/56.0717/76.1052 ms versus 0.0009/0.0039/0.0042 ms for shared handles.
+Distinct serialized-state duplication was 96,955,680 versus 3,029,865 bytes;
+these are logical representation counts, not heap/RSS measurements or network /
+UI latency. Raw samples remain local and no release/ledger upload is authorized.
+
+Affected library checks passed 214 tests and integration checks passed 243,
+with no failures or ignored tests; all-target Clippy passed. The ownership/error
+checkpoint also passed 59 selected process/tool tests. The fair-allocation
+checkpoint passed the quick gate: 331 server library/integration tests, tooling
+checks and all selected process acceptance, including pressure, restart and the
+new connection-capacity regression. Final release evidence and full Windows/Linux
+CI remain required before merge. Capability reporting precedes publication.
+The preceding pressure-fixture full run retained one failed local native mouse
+check under the maintainer's mouse-verification waiver; it is recorded as a
+qualified local result, never an unqualified full pass. Ordinary CI keeps that
+test. All six original work sequences remain active.
+
+### Static server capabilities (in development)
+
+The welcome now requires typed static byte, retained-state, history-page and
+connection limits. Configured frame ceilings and the derived connection ceiling
+are advertised; borrowed capacity is not presented as currently available
+capacity. Actor permissions remain in readiness. Capacity rejection has its own
+resource_limit code and preserves client identity on rejection. Shared clients
+validate advertisements before attachment and enforce request/response ceilings;
+a locally rejected oversized command leaves its connection usable.
+
+This changes the protocol contract; save, gameplay and scenario axes are unchanged.
+The current wire fixture was recorded through real applications. Capability tests
+failed first, including accepting a response above its advertised ceiling. The
+checkpoint passed 25 shared-client unit tests, 186 server unit tests, 244 affected
+integration tests and all-target Clippy, plus 18 documentation/process checks
+covering configured limits, capacity rejection and native/text recovery. Full
+verification and final-head Windows/Linux CI remain pending before publication.
+Recovery-envelope feasibility, opaque interaction IDs, domain/save separation,
+scenario compilation/generation and the remaining persistence work stay active.
+
+Earlier full gates exposed a save-warning test race, an intermittent initial
+control timeout, and a decoder unit test loading an older welcome fixture. The
+save test now waits for the specific failed-save warning; concurrent-reader
+deadlines remain unchanged. All six process-module cases and the subsequent
+278-test Python/tool/process stage passed. Current decoder and benchmark fixture
+consumers now use the recorded current-contract sample with version assertions.
+All 877 workspace Rust tests, including example targets, passed. Failed gates
+are retained and do not count as full passes; fresh final-head debug/release
+verification and Windows/Linux CI remain required before merge or activation.
+
+
+### Backend action facts and explicit save DTO mapping (in development)
+
+Backend commands and journal action facts now use an independent action enum
+and request-direction enum. Transport conversion, native simulation conversion,
+history disclosure and save-owned numeric DTO conversion are exhaustive. No JSON
+round trip or implicit conversion selects a domain variant. Actor targets in the
+backend action use native actor identity rather than the wire identity wrapper.
+The stored action representation is unchanged, so the save version remains current.
+
+Original receipt commands remain distinct from queued native work and linked
+execution effects. The conversion does not inspect a live target. Matching retries
+still return their original admission after a ground stack is consumed, including
+checkpoint and journal recovery; an explicit quantity with the same eventual effect
+is a conflicting request when it reuses that request ID. Admission does not apply
+the action. All supported request axes are mapped explicitly; native directions
+outside that set retain the existing fallible record projection.
+
+Focused Rust checks passed 188 server unit tests and 147 integration tests.
+A new real-client acceptance case checks numeric saved action facts, original
+optional quantities, separate execution results and restart. All 17 item/intention process cases passed, including native clients, as did
+workspace all-target Clippy, Ruff and five documentation checks. The release comparison below retains its limitations; the required full and
+final-head CI gates still apply before publication.
+Opaque interaction targets, broader domain identities, admission/scheduler
+responsibilities, scenario compilation and persistence/history work remain open.
+No scripting runtime or text-client product work is included.
+
+
+Backend action mapping release comparison: three interleaved baseline/current
+rounds validated 24 reports with identical operation, history, disclosure and
+save counts, followed by six focused item reports. No competing builds or failed
+reports were recorded. Measurements use the same HDD/machine fingerprint as
+the preceding local comparisons. They do not establish a broad speedup or RSS gain.
+
+| Metric | n per side | Base p50/p95/max ms | Current p50/p95/max ms |
+| --- | ---: | --- | --- |
+| r8-a1-h100-memory authoritative total | 915 | 0.5685/0.8175/1.5265 | 0.5405/0.8153/2.2761 |
+| r64-a8-h100-memory authoritative total | 7500 | 0.0284/2.5329/5.8805 | 0.0292/2.4961/6.9528 |
+| r8-a1-h100-durable authoritative total | 915 | 0.5636/0.8110/1.2715 | 0.5518/0.8068/2.1957 |
+| i1000-id256 transfer | 1200 | 0.3882/0.5182/2.9971 | 0.3766/0.5137/1.7166 |
+| i16-id8 transfer | 1200 | 0.0526/0.1106/0.2693 | 0.0536/0.1065/0.5230 |
+| i1000-id256 save | 60 | 126.4979/183.7268/246.0333 | 127.9925/590.0359/908.6570 |
+| i1000-id256 restart | 60 | 47.2336/65.0856/68.0526 | 59.3442/64.5946/65.2009 |
+| i16-id8 save | 60 | 102.5905/123.5726/522.9216 | 102.9479/209.9438/565.0153 |
+| i16-id8 restart | 60 | 9.0026/13.3559/13.7160 | 9.2243/14.0400/16.2941 |
+
+The first item run exposed a substantially higher save tail and large-state
+restart median. The focused repeat did not reproduce their magnitude; it reversed
+the large-state restart median, with unchanged counts. This establishes variation,
+not its cause. Save/restore tails remain open for phase attribution rather than
+being dismissed or reported as an improvement.
+
+| Focused repeat | n per side | Base p50/p95/max ms | Current p50/p95/max ms |
+| --- | ---: | --- | --- |
+| i1000-id256 save | 60 | 131.1870/179.8675/581.0603 | 132.4226/182.5702/381.9498 |
+| i1000-id256 restart | 60 | 58.9224/65.1006/78.6418 | 48.1603/63.8556/66.6069 |
+| i16-id8 save | 60 | 109.1858/162.4124/327.9961 | 112.6745/165.6419/442.8157 |
+| i16-id8 restart | 60 | 11.9583/14.5202/24.6646 | 9.5723/13.7809/18.3018 |
+
+The preceding observation/protocol checkpoint's Linux job reached the overall
+35-minute CI budget during release process testing. Its debug and release Rust
+checks and earlier process cases passed, but the incomplete suite does not satisfy
+the merge gate. CI must complete both profiles on both platforms without removing
+coverage. The active desktop build remains unchanged until a complete gate passes.
+
+
+CI scheduling now partitions the existing full verifier into debug and release
+jobs on each platform. The native Windows desktop and Linux Xvfb paths are kept
+in each profile. All original Rust, process, tooling, architecture and rustdoc
+commands remain in the combined plan. Each profile retains the 35-minute job
+budget, with separate compiler caches and preserved verification logs. Existing
+required platform check names are aggregate guards over all four profiles and
+fail for failed, cancelled or skipped dependencies. No individual test deadline
+or workload threshold was relaxed. Local `full` still runs all eight stages;
+partition logs and summaries cannot certify a local full gate.
+
+The profile-union and reduced-tier rejection regressions failed first. Twenty-nine
+focused verification/documentation tests, actual debug/release CLI dry-run plans,
+actionlint and Ruff passed. The required complete local gate and new final-head
+CI are still needed before publishing or merging this combined checkpoint.
+
+**Verification correction (2026-10-07).** Published head `143c87a` passed the
+complete local full gate (283 Python checks, 880 Rust checks per profile and 148
+release process checks) and 25 immutable-build smoke checks. Both Windows CI
+profiles passed; Linux debug timed out draining the artificial spectator relay,
+and Linux release stalled acquiring graphical dependencies before testing.
+Failed CI prevents merge and desktop activation. The fixture now restores
+Linux's independent advertised-window clamp before releasing receive pressure;
+a failing-first regression covers this. Dependency setup has a separate bounded
+budget. Actual Linux verification and the updated publication gate remain
+required. Test deadlines, thresholds and native coverage are preserved.
+
+Local worktrees now use exclusive compiler output directories after shared
+outputs caused mismatched executable startup failures. Those attempts are invalid
+verification evidence. Published full evidence and immutable copies preceded the
+overlap. All six refactor sequences and save/restore tail attribution remain open.

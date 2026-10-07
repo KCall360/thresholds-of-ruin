@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tor_client_common::{ClientState, StreamError};
 use tor_protocol::*;
 
@@ -117,7 +118,7 @@ fn reply_context_captures_current_disclosure_independently_of_receipt_origin() {
 fn admission_permission_is_independent_of_due_turn_and_blocks_interim_lifecycle() {
     let mut initial = snapshot(0);
     initial.has_control = true;
-    initial.state.observation.ready = false;
+    Arc::make_mut(&mut initial.state).observation.ready = false;
     initial.readiness.admission = true;
     let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
     assert!(client.can_admit_intention());
@@ -314,8 +315,7 @@ type Corrupt = fn(&mut Observation);
 fn paused_progress_can_coexist_with_independent_queued_work() {
     let mut initial = snapshot(0);
     initial.has_control = true;
-    initial
-        .state
+    Arc::make_mut(&mut initial.state)
         .observation
         .combat
         .as_mut()
@@ -349,8 +349,7 @@ fn mixed_intention_controls_are_independent_of_snapshot_order() {
         for queue_first in [false, true] {
             let mut initial = snapshot(0);
             initial.has_control = true;
-            initial
-                .state
+            Arc::make_mut(&mut initial.state)
                 .observation
                 .combat
                 .as_mut()
@@ -471,7 +470,7 @@ fn started_intention_can_suspend_resume_and_cancel_under_original_context() {
 fn intention_controls_require_current_control_and_never_reuse_an_abandoned_context() {
     let mut initial = snapshot(9);
     initial.has_control = true;
-    initial.state.observation.ready = false;
+    Arc::make_mut(&mut initial.state).observation.ready = false;
     initial.intentions = vec![IntentionStatus {
         actor: initial.actor,
         branch: initial.branch.clone(),
@@ -554,7 +553,7 @@ fn intention_lifecycle_is_separate_from_observation_readiness_and_rejects_foreig
             },
         })
         .unwrap();
-    assert_eq!(client.state(), &initial.state);
+    assert_eq!(client.state(), initial.state.as_ref());
     assert!(client.has_pending_intention());
     let before = client.clone();
     let mut foreign = queued.clone();
@@ -589,7 +588,7 @@ fn intention_lifecycle_is_separate_from_observation_readiness_and_rejects_foreig
         })
         .unwrap();
     assert!(!client.has_pending_intention());
-    assert_eq!(client.state(), &initial.state);
+    assert_eq!(client.state(), initial.state.as_ref());
 }
 
 fn corruptions() -> [(&'static str, Corrupt); 12] {
@@ -628,7 +627,7 @@ fn malformed_observations_reject_at_every_boundary_without_partial_effects() {
     for (label, corrupt) in corruptions() {
         let initial = snapshot(0);
         let mut next = snapshot(1);
-        corrupt(&mut next.state.observation);
+        corrupt(&mut Arc::make_mut(&mut next.state).observation);
         assert_eq!(
             ClientState::from_snapshot(next.clone()),
             Err(StreamError::InconsistentState),
@@ -644,7 +643,7 @@ fn malformed_observations_reject_at_every_boundary_without_partial_effects() {
         assert_eq!(client, before);
         let delta = StateDelta::between(client.state(), &next.state);
         let full = UpdateBody::Observation {
-            state: Box::new(next.state),
+            state: next.state,
             event: None,
         };
         let mut bodies = vec![full];
@@ -679,7 +678,7 @@ fn malformed_observations_reject_at_every_boundary_without_partial_effects() {
 #[test]
 fn repeated_portal_entities_at_distinct_offsets_remain_valid() {
     let mut next = snapshot(0);
-    let o = &mut next.state.observation;
+    let o = &mut Arc::make_mut(&mut next.state).observation;
     o.visible_cells[1].key = o.visible_cells[0].key.clone();
     let mut item = o.ground_items[0].clone();
     item.position = o.visible_cells[0].position;
@@ -745,7 +744,7 @@ fn snapshot_reset_requires_a_new_epoch_in_the_current_attachment() {
         assert_eq!(client, before);
     }
     let mut malformed = stream_context_snapshot(current, 3);
-    malformed.state.observation.actor = ActorId(2);
+    Arc::make_mut(&mut malformed.state).observation.actor = ActorId(2);
     assert!(client.replace_snapshot(malformed).is_err());
     assert_eq!(client, before);
     client
@@ -891,4 +890,139 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
             revision: 1,
         }
     );
+}
+
+#[test]
+fn malformed_collection_edits_leave_every_client_boundary_unchanged() {
+    let initial = snapshot(0);
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    let next = snapshot(1);
+    let valid = StateDelta::between(client.state(), &next.state).unwrap();
+    let edit = |start, remove| CollectionEdit::<ItemView> {
+        start,
+        remove,
+        insert: Vec::new(),
+    };
+    for edits in [
+        vec![edit(2, 1)],
+        vec![edit(0, u32::MAX)],
+        vec![edit(0, 1), edit(0, 1)],
+        vec![edit(1, 0)],
+    ] {
+        let mut delta = valid.clone();
+        delta.inventory = edits;
+        let before = client.clone();
+        assert_eq!(
+            client.apply(StreamUpdate {
+                context: initial.context.clone(),
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                cursor: StreamCursor {
+                    sequence: 1,
+                    tick: 1
+                },
+                body: UpdateBody::ObservationDelta {
+                    base: client.observation_base(),
+                    state: Box::new(delta),
+                    event: None,
+                },
+            }),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+    }
+    // A rejected edit must neither consume its sequence nor alter the exact base.
+    client
+        .apply(StreamUpdate {
+            context: initial.context,
+            actor: initial.actor,
+            branch: initial.branch,
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 1,
+            },
+            body: UpdateBody::ObservationDelta {
+                base: client.observation_base(),
+                state: Box::new(valid),
+                event: None,
+            },
+        })
+        .unwrap();
+    assert_eq!(client.state(), next.state.as_ref());
+}
+
+#[test]
+fn a_fitting_delta_cannot_grow_retained_state_past_the_response_byte_ceiling() {
+    let mut initial = snapshot(0);
+    Arc::make_mut(&mut initial.state).observation.inventory[0].description =
+        "x".repeat(MAX_RESPONSE_BYTES / 2);
+    let initial_message = ServerMessage::Snapshot {
+        request_id: "initial".into(),
+        snapshot: Box::new(initial.clone()),
+    };
+    assert!(serde_json::to_vec(&initial_message).unwrap().len() < MAX_RESPONSE_BYTES);
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    let before = client.clone();
+    let mut next = Arc::unwrap_or_clone(snapshot(1).state);
+    next.observation.inventory = Arc::make_mut(&mut initial.state)
+        .observation
+        .inventory
+        .clone();
+    next.observation.ground_items[0].item.description = "y".repeat(MAX_RESPONSE_BYTES / 2);
+    let delta = StateDelta::between(client.state(), &next).unwrap();
+    let update = StreamUpdate {
+        context: initial.context,
+        actor: initial.actor,
+        branch: initial.branch,
+        cursor: StreamCursor {
+            sequence: 1,
+            tick: 1,
+        },
+        body: UpdateBody::ObservationDelta {
+            base: client.observation_base(),
+            state: Box::new(delta),
+            event: None,
+        },
+    };
+    // The peer frame itself fits: the retained half is absent from the delta.
+    let text = serde_json::to_string(&ServerMessage::Update {
+        update: Box::new(update),
+    })
+    .unwrap();
+    assert!(text.len() < MAX_RESPONSE_BYTES);
+    let ServerMessage::Update { update } = decode_response(&text).unwrap() else {
+        panic!("update")
+    };
+    assert_eq!(client.apply(*update), Err(StreamError::InconsistentState));
+    assert_eq!(client, before);
+}
+
+#[test]
+fn cloned_client_models_share_immutable_current_observation() {
+    let original = ClientState::from_snapshot(snapshot(4)).unwrap();
+    let mut cloned = original.clone();
+    assert!(
+        std::ptr::eq(original.state(), cloned.state()),
+        "cloning a client model must retain its immutable observation without copying it"
+    );
+    assert_eq!(original, cloned);
+    let next = snapshot(5);
+    cloned
+        .apply(StreamUpdate {
+            context: cloned.context().clone(),
+            actor: next.actor,
+            branch: next.branch,
+            cursor: StreamCursor {
+                sequence: cloned.cursor().sequence + 1,
+                tick: next.cursor.tick,
+            },
+            body: UpdateBody::Observation {
+                state: next.state,
+                event: None,
+            },
+        })
+        .unwrap();
+    assert_eq!(original.state().revision, 4);
+    assert_eq!(cloned.state().revision, 5);
+    assert!(!std::ptr::eq(original.state(), cloned.state()));
 }

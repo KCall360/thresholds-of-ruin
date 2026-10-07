@@ -55,58 +55,62 @@ jobs:
         with:
           command: check ${{ matrix.checks }}
 
-  check:
-    name: Rust (${{ matrix.os }})
+  profiles:
+    name: Rust (${{ matrix.os }}, ${{ matrix.profile }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+        profile: [debug, release]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install stable Rust with formatting and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - name: Cache Rust dependencies
+      - name: Cache Rust dependencies by profile
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          shared-key: ${{ matrix.profile }}
           # Only main writes the cache, so pull requests can't evict it.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Configure Linux graphical test display
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
+        # Dependency acquisition has its own bounded budget; a stalled mirror
+        # must not consume the profile's complete verification budget.
+        run: |
+          timeout --kill-after=10s 2m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          timeout --kill-after=10s 3m sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y xvfb xauth xdotool libx11-dev libxcursor-dev libxrandr-dev
       - name: Verify Windows graphical test desktop
         if: runner.os == 'Windows'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
-      - name: Check formatting
-        run: cargo fmt --all --check
-      - name: Lint all targets
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test dependency checker and actual frontend/server processes (Windows desktop)
-        if: runner.os == 'Windows'
-        run: python -m unittest discover -s scripts -p "test_*.py" -v
-      - name: Test dependency checker and actual frontend/server processes (Linux Xvfb)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" python -m unittest discover -s scripts -p "test_*.py" -v
-      - name: Enforce workspace dependency boundaries
-        run: python scripts/check_architecture.py
-      - name: Build documentation without warnings
+      - name: Verify complete profile partition
+        run: python scripts/verify.py full --ci-profile ${{ matrix.profile }}
+      - name: Preserve verification logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-${{ matrix.os }}-${{ matrix.profile }}
+          path: .local/verify/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Preserve the existing required platform check names. A failed, cancelled or
+  # skipped profile must make these checks fail rather than appear as skipped.
+  check:
+    name: Rust (${{ matrix.os }})
+    needs: profiles
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Require every profile on both platforms
         env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --document-private-items --locked
-      - name: Unit and integration tests
-        run: cargo test --workspace --locked
-      - name: Unit and integration tests (release)
-        run: cargo test --workspace --release --locked
-      - name: Actual frontend/server process tests (release, Windows desktop)
-        if: runner.os == 'Windows'
-        env:
-          TOR_TEST_PROFILE: release
-        run: python -m unittest discover -s scripts -p "test_*process.py" -v
-      - name: Actual frontend/server process tests (release, Linux Xvfb)
-        if: runner.os == 'Linux'
-        env:
-          TOR_TEST_PROFILE: release
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" python -m unittest discover -s scripts -p "test_*process.py" -v
+          PROFILES_RESULT: ${{ needs.profiles.result }}
+        run: test "$PROFILES_RESULT" = success

@@ -212,6 +212,16 @@ without a duplicate run on unchanged inputs:
 | `full` | **Required** for save-format, protocol, ruleset, persistence, or storage changes, and for toolchain or dependency updates. Also required when CI can't run, and on request | Everything CI runs on one platform, debug and release | These changes can break any layer in either profile. A local full run covers the local publication gate; both-platform CI is still required before merging |
 | CI | **Required before every merge** | The full matrix on Windows and Linux, plus the tooling and dependency checks | The only gate that proves both platforms and both profiles. Nothing replaces it |
 
+CI runs the debug and release partitions of the full plan in separate jobs on
+each platform. `full --ci-profile debug` runs the first six stages, and
+`full --ci-profile release` runs the two release stages. Their ordered union is
+the unchanged local full plan; neither partition satisfies the local full or
+publication gate on its own. Native Windows tests and Linux Xvfb tests remain in
+both profiles. Profile caches are separate, and each job preserves its logs for
+investigation. The existing required platform checks fail unless every profile
+on both platforms succeeds, including when a profile is cancelled or skipped.
+This changes CI scheduling, not test selection or individual test deadlines.
+
 ### Development loop
 
 For the active architecture refactor, batch a cohesive change through focused

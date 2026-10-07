@@ -897,7 +897,7 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
     let ServerMessage::Snapshot { snapshot, .. } = drain(&mut replacement).pop().unwrap() else {
         panic!("replacement snapshot");
     };
-    assert_eq!(snapshot.state, service.engine.state(ActorId(1)).unwrap());
+    assert_eq!(*snapshot.state, service.engine.state(ActorId(1)).unwrap());
     assert_eq!(snapshot.travel.unwrap().completed_steps, 1);
     assert!(!snapshot.has_control);
     service.run_until_blocked();

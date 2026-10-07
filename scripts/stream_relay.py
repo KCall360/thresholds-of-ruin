@@ -4,8 +4,11 @@ The real server and clients keep their normal protocol, queue sizes and clocks.
 Only one server frame is held, including a separately gated repair snapshot; no unbounded test queue hides backpressure.
 """
 import json
+import os
+from pathlib import Path
 import socket
 import struct
+import sys
 import threading
 
 
@@ -19,14 +22,53 @@ def exact(stream, size):
     return bytes(result)
 
 
+def actor_fact_bytes(message):
+    """Count only facts broadcast identically to clients watching one actor.
+
+    Observation state/events and intention status are shared; replies, stream
+    metadata and control readiness differ between a player and spectator.
+    """
+    if message.get('type') != 'update':
+        return 0
+    body = message['update']['body']
+    if body['type'] in ('observation', 'observation_delta'):
+        values = [body['state']]
+        if body.get('event') is not None:
+            values.append(body['event'])
+    elif body['type'] == 'intention':
+        values = [body['status']]
+    else:
+        return 0
+    return sum(len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+               for value in values)
+
+
+def tcp_socket_owned(rows, owned_inodes, local_port, remote_port):
+    """Match the server endpoint and its live fd, excluding orphaned TCP state."""
+    for row in rows.splitlines()[1:]:
+        fields = row.split()
+        if (len(fields) >= 10 and fields[9] in owned_inodes
+                and int(fields[1].rsplit(':', 1)[1], 16) == local_port
+                and int(fields[2].rsplit(':', 1)[1], 16) == remote_port):
+            return True
+    return False
+
+
 class StreamRelay:
-    def __init__(self, upstream, receive_buffer=None):
+    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_actor_facts=False):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
         (bytes) on the relay's server connection keeps a paused relay from
         absorbing the server's output in socket buffers, which Linux grows to
         megabytes, so the server's own queue fills instead."""
+        self.measure_actor_facts = measure_actor_facts
+        self._traffic_lock = threading.Lock()
+        self._actor_fact_bytes = 0
+        self._largest_frame = 0
+        self.large_retained_base = large_retained_base
         self.upstream = upstream
         self.receive_buffer = receive_buffer
+        self._server_socket = None
+        self._server_ports = None
         self.gate = threading.Event()
         self.gate.set()
         self.held = threading.Event()
@@ -39,6 +81,8 @@ class StreamRelay:
         self.dropped = threading.Event()
         self.overflow_delta = threading.Event()
         self.invalid_inventory = threading.Event()
+        self.invalid_collection_range = threading.Event()
+        self.oversized_retained_state = threading.Event()
         self.overdeep = threading.Event()
         self.corrupted = threading.Event()
         self.listener = socket.socket()
@@ -62,6 +106,8 @@ class StreamRelay:
             upstream.settimeout(10)
             upstream.connect((host, int(port)))
             upstream.settimeout(None)
+            self._server_socket = upstream
+            self._server_ports = (int(port), upstream.getsockname()[1])
             self.sockets.append(upstream)
             sender = threading.Thread(target=self.forward, args=(downstream, upstream), daemon=True)
             sender.start()
@@ -84,6 +130,14 @@ class StreamRelay:
                 if length > 16 * 1024 * 1024:
                     raise ValueError('Oversized test frame')
                 payload = exact(upstream, length)
+                if self.measure_actor_facts:
+                    message = json.loads(payload) if prefix[0] == 0x81 else None
+                    shared_bytes = actor_fact_bytes(message) if message is not None else 0
+                    if shared_bytes > len(payload):
+                        raise ValueError('Shared actor byte accounting exceeds its frame')
+                    with self._traffic_lock:
+                        self._actor_fact_bytes += shared_bytes
+                        self._largest_frame = max(self._largest_frame, len(prefix) + len(extra) + len(payload))
                 if not self.gate.is_set():
                     self.held.set()
                 self.gate.wait()
@@ -96,6 +150,8 @@ class StreamRelay:
                 if message is not None and self.corrupt_observation(message):
                     payload = json.dumps(message, separators=(',', ':')).encode()
                     length = len(payload)
+                    if length > 16 * 1024 * 1024:
+                        raise ValueError('Corrupted test frame exceeds the frame ceiling')
                     if length < 126:
                         prefix, extra = bytes((0x81, length)), b''
                     elif length <= 65535:
@@ -120,8 +176,59 @@ class StreamRelay:
         finally:
             self.close_sockets()
 
+    def resume_reading(self):
+        """End artificial receive pressure before draining buffered output."""
+        if self.receive_buffer:
+            self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+            if sys.platform.startswith("linux"):
+                # Linux keeps the advertised-window clamp independently of
+                # receive memory. Restore both before ending artificial pressure.
+                self._server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_WINDOW_CLAMP, 65536)
+        self.gate.set()
+
+    def server_connection_open(self, server_pid):
+        """On Linux, observe whether the server still owns this exact TCP socket.
+
+        TCP rows alone can survive fd closure while unread data drains. This
+        checks both the endpoints and the server's fd ownership. Other hosts
+        return None and rely on the actual client's disconnect assertion.
+        """
+        if not sys.platform.startswith('linux'):
+            return None
+        if self._server_ports is None:
+            raise AssertionError('Relay connection has not been established')
+        process = Path('/proc') / str(server_pid)
+        owned = set()
+        for descriptor in (process / 'fd').iterdir():
+            try:
+                target = os.readlink(descriptor)
+            except FileNotFoundError:
+                continue  # A concurrent socket close removes its descriptor.
+            if target.startswith('socket:[') and target.endswith(']'):
+                owned.add(target[8:-1])
+        rows = (process / 'net' / 'tcp').read_text(encoding='utf-8')
+        return tcp_socket_owned(rows, owned, *self._server_ports)
+
+    def reset_traffic(self):
+        """Start a measurement window after the initial snapshot is delivered."""
+        with self._traffic_lock:
+            self._actor_fact_bytes = 0
+            self._largest_frame = 0
+
+    def traffic(self):
+        """Measured shared actor facts and largest frame; no payloads are retained."""
+        with self._traffic_lock:
+            return self._actor_fact_bytes, self._largest_frame
+
     def corrupt_observation(self, message):
         """Apply one requested test corruption while preserving its envelope."""
+        if (self.large_retained_base and message.get('type') == 'snapshot'
+                and message['request_id'] == 'attach'):
+            message['snapshot']['state']['observation']['inventory'].append({
+                'id':'18446744073709551614', 'quantity':'1', 'name':'retained test item',
+                'appearance':'stone', 'identified':False, 'description':'x' * (8 * 1024 * 1024)})
+            self.large_retained_base = False
+            return True
         if message.get('type') != 'update':
             return False
         body = message['update']['body']
@@ -138,11 +245,21 @@ class StreamRelay:
         elif self.overflow_delta.is_set():
             state['cells']['shift']['x'] = 2147483647
         elif self.invalid_inventory.is_set():
-            state['inventory'].append({'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
+            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False}]})
+        elif self.oversized_retained_state.is_set():
+            state['ground_items'].append({'start':0, 'remove':0, 'insert':[{
+                'reachable':False, 'position':{'x':0, 'y':0, 'z':0},
+                'item':{'id':'18446744073709551615', 'quantity':'1', 'name':'inserted test item',
+                        'appearance':'stone', 'identified':False,
+                        'description':'y' * (8 * 1024 * 1024)}}]})
+        elif self.invalid_collection_range.is_set():
+            state['places'].append({'start':4294967295, 'remove':1, 'insert':[]})
         else:
             return False
         self.overflow_delta.clear()
         self.invalid_inventory.clear()
+        self.invalid_collection_range.clear()
+        self.oversized_retained_state.clear()
         self.overdeep.clear()
         return True
 

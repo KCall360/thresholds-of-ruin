@@ -1,5 +1,6 @@
 """Quantity transfers through real clients using an ordinary validated package."""
 import json
+import sqlite3
 import unittest
 
 from process_harness import ProcessTestCase
@@ -31,6 +32,35 @@ class ItemProcesses(ProcessTestCase):
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
 
+    def test_saved_action_facts_preserve_original_quantity_and_execution(self):
+        player, _ = self.client()
+        for item, quantity in [("10", None), ("11", "2")]:
+            taken = self.act(player, {"type": "take", "item": item, "quantity": quantity})
+            self.assertIsNone(taken["error"])
+        self.assertEqual(taken["state"]["observation"]["inventory"][0]["quantity"], "12")
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        with sqlite3.connect(self.save) as db:
+            rows = db.execute("SELECT sequence,frame FROM journal WHERE sequence>0 "
+                "UNION ALL SELECT sequence,frame FROM history ORDER BY sequence").fetchall()
+        records = [json.loads(frame[24:])["record"] for _, frame in rows]
+        admissions = [r for r in records if r["entry"]["content"]["type"] == "intention_admitted"]
+        self.assertEqual(len(admissions), 2)
+        for record, item, quantity, executed_quantity in zip(admissions, [10, 11], [None, 2], [10, 2]):
+            content = record["entry"]["content"]
+            original = {"type": "take", "item": item, "quantity": quantity}
+            self.assertEqual(record["receipt"]["command"]["action"], original)
+            self.assertEqual(content["action"], original)
+            effects = [r for r in records if r["entry"]["content"].get("admission") == record["entry"]["id"]]
+            self.assertEqual(len(effects), 1)
+            effect = effects[0]["entry"]["content"]
+            self.assertEqual(effect["action"], original)
+            self.assertEqual(effect["event"]["quantity"], executed_quantity)
+            self.assertIsNone(effects[0]["receipt"])
+        player.stop(); self.game.stop(); self.start()
+        _, restored = self.client()
+        self.assertEqual(restored["state"], taken["state"])
+        self.assertEqual(restored["intentions"], [])
+
     def test_adventure_quantities_count_from_one_stack(self):
         p, _ = self.adventure()
         # The arrow stacks look alike, so a count comes from one of them
@@ -49,18 +79,55 @@ class ItemProcesses(ProcessTestCase):
         self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
                                 wizard=True, spectator=False)
         player, initial = self.client()
+
+        def collection_edits(start):
+            updates = []
+            for line in player.transcript[start:]:
+                if not line.startswith('{'):
+                    continue
+                frame = json.loads(line)
+                update = (frame.get('message') or {}).get('update') or {}
+                body = update.get('body') or {}
+                if body.get('type') != 'observation_delta':
+                    continue
+                self.assertTrue(frame['synchronized'])
+                for field in ['inventory', 'ground_items', 'visible_actors', 'places']:
+                    for edit in body['state'][field]:
+                        self.assertEqual(set(edit), {'start', 'remove', 'insert'})
+                updates.append(body['state'])
+            self.assertTrue(updates, 'Real item transfer must exercise a collection delta')
+            return updates[-1]
+
+        start = len(player.transcript)
         split = self.act(player, {'type': 'take', 'item': '10', 'quantity': '3'})
+        edits = collection_edits(start)
+        self.assertTrue(edits['inventory'])
+        self.assertTrue(edits['ground_items'])
+        self.assertEqual(edits['places'], [])
+        self.assertEqual(edits['visible_actors'], [])
         self.assertIsNone(split['error'])
         stack = split['state']['observation']['inventory'][0]
         self.assertEqual(stack['name'], 'arrow')
         self.assertEqual(stack['quantity'], '3')
+        start = len(player.transcript)
+        waited = self.act(player, {'type': 'wait'})
+        self.assertIsNone(waited['error'])
+        edits = collection_edits(start)
+        for field in ['inventory', 'ground_items', 'visible_actors', 'places']:
+            self.assertEqual(edits[field], [], f'Unchanged {field} was retransmitted')
+        # Save/restart must preserve the actual reconstructed observation.
+        split = waited
         self.assertIsNone(self.request(player, {'type': 'save'})['error'])
         player.stop(); self.game.stop()
         self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
                                 wizard=True, spectator=False)
         player, resumed = self.client()
         self.assertEqual(resumed['state']['observation'], split['state']['observation'])
+        start = len(player.transcript)
         dropped = self.act(player, {'type': 'drop', 'item': stack['id'], 'quantity': '1'})
+        edits = collection_edits(start)
+        self.assertTrue(edits['inventory'])
+        self.assertTrue(edits['ground_items'])
         self.assertIsNone(dropped['error'])
         self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], '2')
         wizard = self.wizard()

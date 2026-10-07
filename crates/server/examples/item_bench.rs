@@ -1,6 +1,7 @@
 //! Items workload v1. Timed phases exclude JSON reporting and authored setup.
 use std::{path::Path, time::Instant};
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::journal::Command;
 use tor_server::{scenario_package, Engine, SavePolicy, Scenario};
 
@@ -77,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sequence: 0,
                         tick: 0,
                     },
-                    state: engine.state(actor)?,
+                    state: engine.state(actor)?.into(),
                     has_control: true,
                     history: tor_protocol::HistoryPage {
                         entries: vec![],
@@ -129,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tick: state.observation.tick,
                     },
                     body: tor_protocol::UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: state.into(),
                         event: Some(Box::new(
                             result
                                 .entry

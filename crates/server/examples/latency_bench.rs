@@ -99,7 +99,7 @@ impl Runner {
                 sequence: 0,
                 tick: state.observation.tick,
             },
-            state,
+            state: state.into(),
             has_control: false,
             history: HistoryPage {
                 entries: vec![],
@@ -163,7 +163,7 @@ impl Runner {
                 &branch,
                 Command::Act {
                     expected_revision: before.revision,
-                    action: action.clone(),
+                    action: tor_server::journal::Action::from_wire(action),
                 },
             ),
             None => self.engine.advance_ai_profiled(actor),
@@ -197,7 +197,7 @@ impl Runner {
                 else {
                     panic!("AI execution did not record an action");
                 };
-                action = Some(selected.clone());
+                action = Some(selected.to_wire());
             }
             timings = phases(&p);
             profile = Some(p);
@@ -224,7 +224,7 @@ impl Runner {
                         tick,
                     },
                     body: UpdateBody::Observation {
-                        state: Box::new(state),
+                        state: state.into(),
                         event,
                     },
                 }),

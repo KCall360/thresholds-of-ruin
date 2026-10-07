@@ -1,7 +1,8 @@
 use crate::support;
 use std::time::Duration;
 use tempfile::tempdir;
-use tor_protocol::{Action, ActorId};
+use tor_protocol::ActorId;
+use tor_server::journal::Action;
 use tor_server::{journal::Command, Engine, SavePolicy, Scenario};
 
 fn act(engine: &mut Engine, request: &str) -> tor_server::CommandResult {

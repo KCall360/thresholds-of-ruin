@@ -12,7 +12,8 @@ Tiers (see docs/testing.md#running-the-checks):
 Affected packages include every workspace package that depends on a changed one.
 Anything the mapping doesn't recognize selects everything, so a tier can run more
 than it needs but never less. CI's full Windows and Linux matrix remains the
-required gate before merging.
+required gate before merging. CI partitions the full plan by debug/release profile;
+a single partition is never a full or publication gate.
 
 Tiers only choose which existing tests run. Every feature and bug fix must add
 its tests to the suite (docs/testing.md), and this script warns when code
@@ -220,8 +221,10 @@ def packages_args(packages):
     return [arg for p in sorted(packages) for arg in ("-p", p)]
 
 
-def plan(tier, affected, process, xvfb=False):
-    """Ordered (name, command, env) steps for a tier."""
+def plan(tier, affected, process, xvfb=False, ci_profile=None):
+    """Ordered steps; CI may partition only the complete full plan by profile."""
+    if ci_profile is not None and (tier != "full" or ci_profile not in ("debug", "release")):
+        raise ValueError("CI profile partitions require full and a debug/release profile")
     unittest = [sys.executable, "-m", "unittest"]
     if xvfb:
         unittest = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *unittest]
@@ -250,11 +253,15 @@ def plan(tier, affected, process, xvfb=False):
         ("rust-debug", ["cargo", "test", "--workspace", "--locked"], {}),
     ]
     if tier == "full":
-        steps += [
+        release_steps = [
             ("rust-release", ["cargo", "test", "--workspace", "--release", "--locked"], {}),
             ("process-release", [*unittest, "discover", "-s", "scripts", "-p", "test_*process.py", "-v"], release),
         ]
-        return steps
+        if ci_profile == "debug":
+            return steps
+        if ci_profile == "release":
+            return release_steps
+        return steps + release_steps
     if affected:
         steps.append(("rust-release", ["cargo", "test", *selected, "--release", "--locked"], {}))
     if process:
@@ -334,6 +341,8 @@ def run_step(name, command, env, logs, jobs, rerun):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("tier", nargs="?", default="push", choices=TIERS)
+    parser.add_argument("--ci-profile", choices=("debug", "release"),
+                        help="CI-only partition of full; both profiles remain required")
     parser.add_argument("--base", default="origin/main", help="Compare against this ref to find changes")
     parser.add_argument("--jobs", type=int, help="CARGO_BUILD_JOBS; chosen from free memory by default")
     parser.add_argument("--rerun-failed", action="store_true", help="Rerun failed Python tests once to show whether they are intermittent")
@@ -341,22 +350,34 @@ def main(argv=None):
     parser.add_argument("--allow-concurrent", action="store_true", help="Start even though other cargo/rustc processes are running")
     parser.add_argument("--dry-run", action="store_true", help="Print the selection and steps without running them")
     args = parser.parse_args(argv)
+    if args.ci_profile and args.tier != "full":
+        parser.error("--ci-profile requires the full tier")
+    label = f"full-ci-{args.ci_profile}" if args.ci_profile else args.tier
 
     metadata = json.loads(subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked"],
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout)
     dirs, deps = workspace(metadata)
-    paths, diff = changes(args.base)
+    if args.ci_profile:
+        # CI checks the complete workspace, including shallow checkouts without
+        # origin/main. Change selection is only needed for local tiers.
+        paths, diff = [], ""
+        direct, everything, unknown = set(dirs), True, []
+    else:
+        paths, diff = changes(args.base)
+        direct, everything, unknown = classify(paths, dirs)
     untested = missing_tests(paths, diff)
-    direct, everything, unknown = classify(paths, dirs)
     affected = set(dirs) if everything else dependents(direct, deps)
     process = select_process_tests(paths, affected, everything, SCRIPTS)
     free = free_memory_gb()
     jobs = args.jobs or jobs_for_memory(free, os.cpu_count())
-    steps = plan(args.tier, affected, process, xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY"))
+    steps = plan(args.tier, affected, process,
+                 xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY"),
+                 ci_profile=args.ci_profile)
 
-    print(f"tier {args.tier}; {len(paths)} changed paths since {args.base}; jobs {jobs} ({free:.1f} GB free)")
+    selection = "complete workspace" if args.ci_profile else f"{len(paths)} changed paths since {args.base}"
+    print(f"tier {label}; {selection}; jobs {jobs} ({free:.1f} GB free)")
     if unknown:
         print("unmapped paths select everything: " + ", ".join(unknown[:5]) + (" ..." if len(unknown) > 5 else ""))
     print("packages: " + (", ".join(sorted(affected)) or "none"))
@@ -373,7 +394,7 @@ def main(argv=None):
         return 2
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    logs = ROOT / ".local" / "verify" / f"{stamp}-{args.tier}"
+    logs = ROOT / ".local" / "verify" / f"{stamp}-{label}"
     logs.mkdir(parents=True)
     results, failed = [], False
     with Lock(ROOT / ".local" / "verify.lock"):
@@ -394,7 +415,9 @@ def main(argv=None):
     lines.append(f"total {total / 60:.1f} min; logs in {logs.relative_to(ROOT).as_posix()}")
     if untested:
         lines.append(UNTESTED_WARNING)
-    if args.tier == "quick":
+    if args.ci_profile:
+        lines.append(f"CI {args.ci_profile} partition only; both profiles on both platforms are required. This partition does not satisfy the local full/publication gate.")
+    elif args.tier == "quick":
         lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
     elif args.tier == "push":
         lines.append("Format, protocol, ruleset, persistence, storage, toolchain or dependency changes also need the full tier; "

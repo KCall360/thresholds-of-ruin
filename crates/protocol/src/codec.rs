@@ -6,20 +6,27 @@ use std::io::{self, Write};
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 /// Maximum UTF-8 bytes in one complete server message, including its envelope.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Ceiling for the canonical encoded full StateView retained by a stream,
+/// independently of whether an incoming observation is a full view or a delta.
+pub const MAX_STATE_BYTES: usize = MAX_RESPONSE_BYTES;
 
 struct Limited {
     bytes: Vec<u8>,
     limit: usize,
+    exceeded: bool,
 }
 
 impl Write for Limited {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let length = self
+        let Some(length) = self
             .bytes
             .len()
             .checked_add(bytes.len())
             .filter(|&length| length <= self.limit)
-            .ok_or_else(|| io::Error::other("wire message exceeds byte limit"))?;
+        else {
+            self.exceeded = true;
+            return Err(io::Error::other("wire message exceeds byte limit"));
+        };
         if length > self.bytes.capacity() {
             let capacity = length
                 .max(self.bytes.capacity().saturating_mul(2))
@@ -34,6 +41,45 @@ impl Write for Limited {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// Encoding distinguishes capacity rejection from serializer failure without
+/// inspecting diagnostic strings. Retained-state and envelope limits differ.
+#[derive(Debug)]
+pub enum EncodeError {
+    TooLarge { limit: usize },
+    RetainedStateTooLarge { limit: usize },
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for EncodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge { limit } => {
+                write!(formatter, "wire message exceeds byte limit ({limit} bytes)")
+            }
+            Self::RetainedStateTooLarge { limit } => write!(
+                formatter,
+                "observation exceeds retained-state byte limit ({limit} bytes)"
+            ),
+            Self::Json(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for EncodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for EncodeError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
     }
 }
 
@@ -119,15 +165,17 @@ pub fn decode_response(text: &str) -> Result<crate::ServerMessage, DecodeError> 
 
 /// Serialize JSON while bounding allocation and encoded UTF-8 bytes.
 /// Escaping counts toward the limit; failure returns no partial message.
-pub fn encode_bounded_json(
-    message: &impl Serialize,
-    limit: usize,
-) -> Result<String, serde_json::Error> {
+pub fn encode_bounded_json(message: &impl Serialize, limit: usize) -> Result<String, EncodeError> {
     let mut writer = Limited {
         bytes: Vec::new(),
         limit,
+        exceeded: false,
     };
-    serde_json::to_writer(&mut writer, message)?;
+    let result = serde_json::to_writer(&mut writer, message);
+    if writer.exceeded {
+        return Err(EncodeError::TooLarge { limit });
+    }
+    result?;
     Ok(String::from_utf8(writer.bytes).expect("JSON serializer writes UTF-8"))
 }
 
@@ -171,7 +219,7 @@ impl Write for Count {
 }
 
 // Overflow is an ineligible candidate; other serialization failures propagate.
-fn encoded_length(
+pub(crate) fn encoded_length(
     message: &impl Serialize,
     limit: usize,
 ) -> Result<Option<usize>, serde_json::Error> {
@@ -197,7 +245,7 @@ pub fn encode_response(
     message: &crate::ServerMessage,
     base: Option<(crate::ObservationBase, &crate::StateView)>,
     limit: usize,
-) -> Result<EncodedResponse, serde_json::Error> {
+) -> Result<EncodedResponse, EncodeError> {
     use crate::{ServerMessage, StateDelta, StreamUpdate, UpdateBody};
     let limit = limit.min(MAX_RESPONSE_BYTES);
     let observation = match message {
@@ -214,6 +262,14 @@ pub fn encode_response(
         });
     };
     let full_length = encoded_length(message, limit)?;
+    // A stream must not grow retained state without bound through small deltas.
+    // A fitting complete envelope already proves the state fits this ceiling.
+    if full_length.is_none() && encoded_length(state.as_ref(), MAX_STATE_BYTES)?.is_none() {
+        return Err(EncodeError::RetainedStateTooLarge {
+            limit: MAX_STATE_BYTES,
+        });
+    }
+
     let delta = base.and_then(|(base, previous)| {
         if previous.revision != base.revision
             || previous.observation.tick != base.cursor.tick
@@ -255,6 +311,24 @@ pub fn encode_response(
 mod tests {
     use super::*;
     #[test]
+    fn encoding_failures_distinguish_limits_from_serializer_errors() {
+        struct Rejected;
+        impl Serialize for Rejected {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("wire message exceeds byte limit"))
+            }
+        }
+        assert!(matches!(
+            encode_bounded_json(&"é", 3),
+            Err(EncodeError::TooLarge { limit: 3 })
+        ));
+        assert!(
+            matches!(encode_bounded_json(&Rejected, 100), Err(EncodeError::Json(error)) if error.is_data())
+        );
+        assert_eq!(encode_bounded_json(&"é", 4).unwrap(), "\"é\"");
+    }
+
+    #[test]
     fn typed_response_encoding_cannot_raise_the_declared_wire_ceiling() {
         let message = crate::ServerMessage::Error {
             scope: crate::ErrorScope::Transport {},
@@ -291,7 +365,8 @@ mod tests {
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         let mut snapshot = samples["server"]
             .as_array()
             .unwrap()
@@ -435,7 +510,8 @@ mod tests {
     #[test]
     fn typed_decoders_preserve_all_recorded_message_kinds() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         for sample in samples["client"].as_array().unwrap() {
             let text = serde_json::to_string(sample).unwrap();
             assert_eq!(
@@ -493,6 +569,7 @@ mod tests {
         let mut writer = Limited {
             bytes: Vec::new(),
             limit: 17,
+            exceeded: false,
         };
         writer.write_all(&[1; 16]).unwrap();
         assert!(writer.write_all(&[2; 2]).is_err());

@@ -2,7 +2,8 @@
 //! before a command needs them. Games must play identically with and without
 //! it. See docs/region-streaming.md.
 use std::path::Path;
-use tor_protocol::{Action, ActorId, Direction};
+use tor_protocol::ActorId;
+use tor_server::journal::{Action, Direction};
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario, Streaming};
 
 #[test]

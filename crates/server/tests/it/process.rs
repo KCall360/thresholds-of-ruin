@@ -131,7 +131,7 @@ async fn actual_server_rejects_new_work_while_recovered_queue_disables_admission
                 &engine.branch().clone(),
                 tor_server::journal::Command::AdmitIntention {
                     expected_revision: 0,
-                    action: Action::Wait,
+                    action: tor_server::journal::Action::Wait,
                 },
             )
             .unwrap();

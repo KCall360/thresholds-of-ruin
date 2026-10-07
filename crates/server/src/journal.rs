@@ -1,9 +1,19 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
+pub use crate::actions::{Action, Direction};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
-    Action, ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource,
-    Direction, EntryId,
+    ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
 };
+
+impl Action {
+    pub fn to_wire(&self) -> tor_protocol::Action {
+        crate::adapt::wire_action(self)
+    }
+
+    pub fn from_wire(action: &tor_protocol::Action) -> Self {
+        crate::adapt::requested_action(action)
+    }
+}
 
 impl Command {
     pub fn from_wire(command: &tor_protocol::Command) -> Result<Self, crate::Failure> {
@@ -57,7 +67,7 @@ impl Command {
                 action,
             } => Self::AdmitIntention {
                 expected_revision: *expected_revision,
-                action: action.clone(),
+                action: crate::adapt::requested_action(action),
             },
             tor_protocol::Command::Annotate {
                 anchor,
@@ -127,7 +137,7 @@ impl TryFrom<Command> for tor_protocol::Command {
                 action,
             } => Ok(Self::Act {
                 expected_revision,
-                action,
+                action: crate::adapt::wire_action(&action),
             }),
             Command::Annotate {
                 anchor,
@@ -175,7 +185,7 @@ impl JournalEntry {
             JournalContent::Action { action, event }
             | JournalContent::IntentionStarted { action, event, .. }
             | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
-                action: action.clone(),
+                action: crate::adapt::wire_action(action),
                 event: match event {
                     Event::PreparationPaused => VisibleEvent::PreparationPaused,
                     Event::AttackStarted { target } => {
@@ -187,7 +197,7 @@ impl JournalEntry {
                     },
                     Event::Moved { .. } => VisibleEvent::Moved {
                         direction: match action {
-                            Action::Move { direction } => *direction,
+                            Action::Move { direction } => crate::adapt::wire_direction(*direction),
                             _ => unreachable!("movement has a move action"),
                         },
                     },

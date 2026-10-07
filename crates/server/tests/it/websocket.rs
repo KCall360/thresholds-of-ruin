@@ -1,5 +1,6 @@
 use futures_util::SinkExt;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -64,7 +65,7 @@ async fn connect(address: &str, token: &str, frontend: &str) -> Client {
 /// A pushed observation as a full state, expanding a delta against `base`.
 fn observation(body: UpdateBody, base: &StateView) -> (StateView, Option<Box<HistoryEntry>>) {
     match body {
-        UpdateBody::Observation { state, event } => (*state, event),
+        UpdateBody::Observation { state, event } => (Arc::unwrap_or_clone(state), event),
         UpdateBody::ObservationDelta { state, event, .. } => (state.apply(base).unwrap(), event),
         other => panic!("{other:?}"),
     }
@@ -623,7 +624,7 @@ async fn spectators_receive_each_accepted_action_once_with_identical_disclosed_s
         },
     ];
     let mut entries = vec![];
-    let mut state = initial.state.clone();
+    let mut state = Arc::unwrap_or_clone(initial.state.clone());
     for (revision, action) in actions.into_iter().enumerate() {
         let id = format!("action-{revision}");
         let command = Request::Command {

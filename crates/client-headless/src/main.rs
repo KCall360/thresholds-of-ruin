@@ -205,6 +205,7 @@ fn emit(
         "type": kind,
         "synchronized": connection.is_synchronized(),
         "role": connection.role(),
+        "capabilities": connection.capabilities(),
         "state": connection.state.state(),
         "branch": connection.state.branch(),
         "cursor": connection.state.cursor(),

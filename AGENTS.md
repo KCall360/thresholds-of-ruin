@@ -408,11 +408,103 @@ ordinary engine benchmarks do not measure native JSON decoding. Text-client
 product fixes and scripting runtime implementation remain deferred. All six
 architecture sequences in the [refactor plan](docs/refactoring.md) remain active.
 
-**Complete observation encoding (in development).** Shared response selection
+**Complete observation encoding (merged, PR #73).** Shared response selection
 compares complete encoded envelopes and admits the selected bounded text once.
 Snapshot/update disclosure state commits after output admission and transfers
 owned full state into the next base. Focused Rust, real headless reset/restart,
 and streaming diagnostic checks passed. Wire measurement version 2 distinguishes
 shared encoding/decoding timings and complete sizes from historical partial DTO
-measurements. Release comparisons and full verification remain pending. Collection
-deltas and fair aggregate output pressure remain in the full refactor scope.
+measurements. Exact head `8cbc637` passed all eight full local stages and all
+five final-head Windows/Linux jobs. The three desktop launchers use its immutable
+verified build; 16 copied-build process checks passed and active binary/helper/
+backup/scenario hashes were verified. Collection deltas and fair aggregate output
+pressure remain in the full refactor scope.
+
+
+**Ordered observation collections (in development).** Protocol collection edits
+retain unchanged inventory, ground items, projected actors and opaque places.
+Original-base spans reconstruct exact order with checked ranges and a forward
+merge; projected occurrences remain distinct. Failing-first size regressions,
+shared atomic rejection, real item checkpoint/restart/rewind and held-repair
+ASCII/text process tests passed. Current wire samples were recorded from real
+processes. Individual collection diagnostics vary 16/256/4,096 entries; release
+measurements validated 24 interleaved reports, 12 focused repeats and 2,400
+individual samples with stable operation/save counts. Earlier Windows full
+verification passed, but Linux CI exposed a fixed-size slow-reader workload that
+no longer filled socket buffers with compact deltas. The revised traffic-based
+workload passed both Windows pressure/restart cases at normal and 4 MiB budgets;
+refreshed final-head full verification and Windows/Linux CI remain required.
+The first Linux traffic-sized run passed its 268 Python/process tests but hit
+CI's 35-minute job limit before completing Rust checks. The shared-fact counter
+now includes identically broadcast observation events and intention status,
+excluding replies, readiness and stream metadata. Both Windows 4 MiB cases
+passed at 4,527 turns each instead of 12,509, preserving pressure thresholds and
+stall/exit deadlines. That checkpoint passed Windows CI but Linux failed both
+spectator child-exit checks. The test relay now separates server socket closure
+from client drain: Linux checks exact endpoint/process-owned inode while reads
+remain paused, then restores a normal receive buffer before draining. Unit
+regressions failed first; Linux acceptance remains unverified. The required
+full gate and final-head CI still apply; do not merge or activate a failing head.
+Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
+full observations independently of individual frame size, with failing-first
+regressions and real ASCII/text held-repair checks. Earlier pre-bound measurements
+are preserved separately; refreshed evidence
+includes production validation cost. Smaller wire payloads do not establish a
+broad engine, persistence or resident-memory gain.
+No scripting runtime or text-client product fix is added.
+Aggregate output fairness and the other six-sequence work remain active.
+
+
+**Observation ownership and output failure types (in development).** Disclosed
+views now share immutable ownership across readers with independent stream
+metadata; codec/admission failures distinguish capacity from preparation without
+string matching. Library/integration checks passed 457 tests and all-target
+Clippy passed; 59 selected process/tool tests passed. Aggregate allocation now
+reserves one maximum frame per connection with bounded borrowing and preserves
+reservations through outstanding output. Its quick gate passed, including 331
+Rust tests and 147 actual-process tests. Required typed welcome capabilities now
+advertise static limits; shared clients enforce request/response ceilings and
+capacity rejection uses resource_limit. Its unit/integration/actual-process checks
+passed; release/full/final-head CI remain pending before publication. See the full
+[refactor plan](docs/refactoring.md). The local
+native mouse waiver does not remove ordinary Windows/Linux CI coverage.
+
+Earlier capability full gates exposed a save-warning test race, an intermittent
+control timeout and a stale decoder fixture. The corrected process module and
+278-test Python stage passed, as did all 877 workspace Rust tests including
+examples after current fixture/version guards were updated. Production behavior
+and concurrent-reader deadlines are unchanged. Fresh full verification remains
+required; failed evidence is retained.
+
+
+**Backend action facts (in development).** Receipt commands and journal action
+facts use independent backend action/direction types, with exhaustive wire,
+simulation, disclosure and save DTO mappings. Save bytes and gameplay semantics
+are preserved. Focused Rust checks passed 188 unit and 147 integration tests;
+all 17 item/intention actual-process cases, all-target workspace lint and focused
+documentation checks passed. The release comparison validated 24 reports and six focused repeats with unchanged
+counts and mixed tails. Full/publication gates are pending. The preceding protocol
+checkpoint hit Linux CI's 35-minute job budget during release processes. CI now
+partitions the unchanged full plan into separate debug/release jobs per platform,
+with existing platform check names guarded by all four profile results. Profile
+regressions, CLI dry-run plans and workflow/tooling lint passed; full local and
+actual final-head CI remain required before publication/merge/activation. Save/restore tail attribution remains open. Original
+receipt identity must be resolved before ephemeral target checks. See the
+[refactor plan](docs/refactoring.md). Protocol/observation PR CI runs separately
+against its immutable published checkpoint; do not attribute it to this increment.
+
+**Verification correction (2026-10-07).** Published head `143c87a` passed the
+complete local full gate (283 Python checks, 880 Rust checks per profile and 148
+release process checks) and 25 immutable-build smoke checks. Both Windows CI
+profiles passed; Linux debug timed out draining the artificial spectator relay,
+and Linux release stalled acquiring graphical dependencies before testing.
+Failed CI prevents merge and desktop activation. The fixture now restores
+Linux's independent advertised-window clamp before releasing receive pressure;
+a failing-first regression covers this. Dependency setup has a separate bounded
+budget. Actual Linux verification and the updated publication gate remain
+required. Test deadlines, thresholds and native coverage are preserved.
+
+Local worktrees now use exclusive compiler output directories after shared
+outputs caused mismatched executable startup failures. Those attempts are invalid
+verification evidence. Published full evidence and immutable copies preceded the
+overlap. All six refactor sequences and save/restore tail attribution remain open.

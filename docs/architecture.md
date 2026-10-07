@@ -186,6 +186,32 @@ travel interrupted, or death. Stream numbering is per observation stream, not a
 global counter that reveals other actors' activity. New attachments reset the
 stream through an explicit snapshot.
 
+Disclosed current state has immutable shared ownership. The server builds one
+view per observed actor at a publication boundary and shares it among readers;
+equal snapshot views may reuse that allocation only for the same actor and
+branch. Each reader retains its own cursor, reset context, permissions and
+history audience. The shared client validates a candidate before replacing its
+current view, so retained bases cannot be mutated by later updates. Shared
+ownership changes the in-process representation without changing JSON fields.
+
+Output admission distinguishes closed/full queues, frame limits, preparation
+failures, client byte pressure and aggregate byte pressure. The codec reports
+frame and retained-state capacity separately from serialization errors; callers
+do not infer categories from diagnostic text. Rejected admission releases its
+queue reservation and byte permits. Admitted permits remain owned through
+queued and in-flight output. Each admitted connection reserves one maximum-frame
+allowance and can borrow remaining aggregate capacity. Reserved allowances plus
+borrowing cannot exceed the total budget; actual encoded bytes are accounted
+separately. Closing a connection releases its allowance only after its senders,
+receiver and all in-flight frames are gone. The connection ceiling is the smaller
+of 128 and total/frame bytes (16 with default limits), and active borrowing can
+reduce capacity for new admissions. These host limits do not change simulation
+scheduling or durability. The welcome advertises typed static limits, including
+the configured frame and connection ceilings. The shared client validates them
+before attaching, enforces request/response byte ceilings, and keeps this metadata
+separate from changing actor permissions. Capacity rejection uses resource_limit;
+malformed requests retain invalid_request.
+
 A single action or travel request can generate multiple updates. Clients do not
 poll to discover changes. Delivery and rendering are independent: a client may
 animate, summarize, or fast-forward without influencing simulation outcomes.
@@ -305,6 +331,14 @@ The final owner explicitly releases the exclusive sidecar lock, so a file
 descriptor copied during process creation cannot prolong ownership after
 shutdown. The worker keeps its lease until it finishes, and shutdown joins it
 before returning.
+
+Backend action and direction facts have independent types. Exhaustive mappings
+connect requested wire actions, backend receipt/journal facts, native simulation
+work and disclosed history. Mapping a request does not resolve a target or mutate
+state: durable receipt lookup still precedes checks that require current targets.
+Receipts retain the original quantity choice even when execution consumes or
+merges a stack. Saved action DTOs enumerate numeric targets, quantities and
+variants independently of both wire and simulation serializers.
 
 Persisted values also used by the protocol have save-owned typed schemas at the
 storage boundary. They specify actor and journal identities, actions, annotation

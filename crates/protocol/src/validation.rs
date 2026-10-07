@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvalidState {
+    StateTooLarge,
     DuplicateCell,
     DuplicateInventoryItem,
     DuplicateGroundItem,
@@ -88,6 +89,12 @@ impl StateView {
             .is_some_and(|motion| motion.units_per_cell == 0)
         {
             return Err(InvalidState::InvalidMotion);
+        }
+        if !matches!(
+            crate::codec::encoded_length(self, crate::MAX_STATE_BYTES),
+            Ok(Some(_))
+        ) {
+            return Err(InvalidState::StateTooLarge);
         }
         Ok(())
     }

@@ -123,11 +123,21 @@ change the current save format or ruleset.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":26,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":28,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
-server-granted `role` (`player`, `spectator`, or `wizard`).
+server-granted `role` (`player`, `spectator`, or `wizard`), and required typed
+`capabilities`. These state `max_request_bytes`, `max_response_bytes`,
+`max_retained_state_bytes`, `max_connections` and `max_history_page_entries` as
+bounded numeric counts. Clients validate capabilities before attaching and obey
+the advertised request ceiling. The response ceiling follows the configured
+frame limit; the connection ceiling is min(128, total/frame), 16 by default.
+Existing borrowing may exhaust admission before that ceiling. Capacity rejection
+uses `resource_limit`, distinct from `invalid_request`, and consumes no client ID.
+Capabilities describe static limits, not available capacity or actor authority.
+The retained-state ceiling does not promise that a full recovery envelope fits;
+frame admission still checks the complete encoded response.
 It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 
@@ -164,8 +174,10 @@ Gameplay acknowledgements report admission, before simulation execution:
 
 The simulation chooses when the actor's intention executes. Observations disclose
 its effects; ordered `intention` updates report lifecycle changes. Snapshots include
-active `intentions`, separately from observation readiness. `queued` and `suspended`
-work occupy the queue slot. An attack's `started` phase retains its preparation
+active `intentions`, separately from observation readiness. Each actor can hold
+one queued or suspended intention, and the simulation bounds the global queue
+at 4,096 entries. New admission requires that actor to have no queued intention
+and the global queue to have capacity. An attack's `started` phase retains its preparation
 identity while wind-up and impact are in progress. `paused` retains inactive
 preparation with its spent progress and original target; it can coexist with a
 separate queued action. Changed observations precede their lifecycle updates.
@@ -218,7 +230,7 @@ Clients receive `update` messages without polling:
 | Update body | Meaning |
 | --- | --- |
 | `observation` | New disclosed state, its revision, and an optional actor action/event entry |
-| `observation_delta` | The same as `observation`, with visible cells sent as changes to the previous state on this stream |
+| `observation_delta` | The same as `observation`, with cells and ordered collections sent as changes to the previous state on this stream |
 | `annotation` | A visible note was committed; game state is unchanged |
 | `travel` | Travel status and optional accepted-request history entry; no future route |
 | `control` | This connection gained or lost control |
@@ -249,15 +261,40 @@ An exhausted reset counter closes the attachment rather than wrapping.
 
 ### View deltas
 
-Most observation updates are `observation_delta`s. A delta carries every
-observation field in full except `visible_cells`, which it replaces with
-`cells`:
+Most observation updates are `observation_delta`s. Scalars and optional combat
+and motion fields are carried in full. `visible_cells` is replaced with `cells`:
 
 - `shift` is added to the position of every cell in the previous state. Cell
   positions are observer-relative, so a step moves every retained cell.
 - `removed` lists positions, after the shift, of cells no longer in view.
 - `changed` lists complete cells that entered view or differ from the shifted
   cell at the same position.
+
+The `inventory`, `ground_items`, `visible_actors` and `places` fields contain
+ordered edit lists. Each edit is `{ start, remove, insert }`: `start` is an
+unsigned 32-bit index into the original base collection, `remove` is the number
+of original entries to remove, and `insert` contains complete replacement values.
+An empty list retains the collection. Edits must have increasing distinct starts,
+nonoverlapping in-bounds ranges and at least one removal or insertion. All ranges
+refer to the original base, so applying an earlier edit does not shift later
+indices. Result order exactly matches the next full observation, even when the
+full collection is unordered. Unknown edit fields are rejected.
+
+Ground items and visible actors are separate occurrences keyed by their relative
+position and underlying identity; the same entity seen through multiple portals
+remains distinct. Places use disclosed opaque keys and inventory uses item IDs.
+These edits expose no private region coordinates or topology. Cell shifts do not
+translate non-cell collections; changed projections are represented explicitly.
+
+A stream's retained full `StateView` is limited to 16 MiB of canonical encoded
+JSON, independently of the complete-response limit. Shared semantic validation
+checks this bound after snapshot or delta reconstruction; a fitting delta cannot
+accumulate unlimited retained strings or entries. The host also rejects an
+observation exceeding this bound before choosing its delta. A lower configured
+frame ceiling may still admit a fitting delta for a retained state within the
+protocol ceiling. Counting uses the same serializer with a constant-space byte
+sink, without allocating another full JSON buffer. This bound covers the current
+observation; remembered map cells and history have separate retention policies.
 
 An `observation_delta` body requires `base { cursor, revision }`, identifying
 the last observation within its enclosing context and branch. Its embedded
