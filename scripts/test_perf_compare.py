@@ -284,7 +284,8 @@ class ComparisonOwnership(unittest.TestCase):
             self.assertTrue(list(output.glob("*.tar.gz")))
             self.assertEqual(len(saves), 2)
             self.assertEqual(saves[0].parent, saves[1].parent)
-            self.assertEqual(saves[0].parent.parent, parent)
+            self.assertTrue(saves[0].parent.parent.samefile(parent),
+                            "Save paths must use the caller-selected storage directory")
             self.assertFalse(saves[0].parent.exists())
 
     def test_failed_workload_preserves_caller_data_and_retained_failure_reports(self):
