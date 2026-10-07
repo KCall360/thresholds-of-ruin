@@ -274,9 +274,10 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         .visible_actors
         .iter()
         .any(|a| a.id == ActorId(2)));
-    assert!(
-        tor_protocol::Command::try_from(tor_server::journal::Command::PausePreparation).is_err()
-    );
+    assert!(tor_server::wire_adapter::encode_command(
+        tor_server::journal::Command::PausePreparation
+    )
+    .is_err());
 }
 
 #[test]

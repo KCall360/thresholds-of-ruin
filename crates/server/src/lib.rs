@@ -21,6 +21,7 @@ mod session;
 mod storage;
 pub use storage::{inspect_save, SavePolicy, SaveStatus};
 mod transport;
+pub mod wire_adapter;
 pub use engine::{
     ActorSetup, BootstrapProfile, CommandProfile, CommandResult, Engine, Failure, RecoveryProfile,
     RegionCounts, Scenario,

@@ -218,7 +218,7 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                         let action = trace.secondary[secondary % trace.secondary.len()]
                             .resolve(&engine.state(actor).unwrap());
                         secondary += 1;
-                        Action::from_wire(&action)
+                        tor_server::wire_adapter::decode_action(&action)
                     } else {
                         Action::Wait
                     };
@@ -252,7 +252,7 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                     accepted += 1;
                 }
                 let before = engine.state(ActorId(1)).unwrap();
-                let action = Action::from_wire(&step.resolve(&before));
+                let action = tor_server::wire_adapter::decode_action(&step.resolve(&before));
                 let result = engine.command(
                     "trace",
                     "test",
@@ -332,7 +332,10 @@ fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
         for _ in 0..regions - 1 {
             for action in &trace.traversal {
                 let before = engine.state(ActorId(1)).unwrap();
-                step(&mut engine, Action::from_wire(&action.resolve(&before)));
+                step(
+                    &mut engine,
+                    tor_server::wire_adapter::decode_action(&action.resolve(&before)),
+                );
                 action.verify(&before, &engine.state(ActorId(1)).unwrap(), true);
             }
         }

@@ -163,7 +163,7 @@ impl Runner {
                 &branch,
                 Command::Act {
                     expected_revision: before.revision,
-                    action: tor_server::journal::Action::from_wire(action),
+                    action: tor_server::wire_adapter::decode_action(action),
                 },
             ),
             None => self.engine.advance_ai_profiled(actor),
@@ -197,7 +197,7 @@ impl Runner {
                 else {
                     panic!("AI execution did not record an action");
                 };
-                action = Some(selected.to_wire());
+                action = Some(tor_server::wire_adapter::encode_action(selected));
             }
             timings = phases(&p);
             profile = Some(p);

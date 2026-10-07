@@ -73,54 +73,6 @@ pub fn direction(direction: p::Direction) -> w::Direction {
     simulation_direction(requested_direction(direction))
 }
 
-pub fn requested_action(action: &p::Action) -> a::Action {
-    match action {
-        p::Action::Attack { target } => a::Action::Attack {
-            target: s::ActorId(target.0),
-        },
-        p::Action::SetDoor { door, open } => a::Action::SetDoor {
-            door: *door,
-            open: *open,
-        },
-        p::Action::Move { direction } => a::Action::Move {
-            direction: requested_direction(*direction),
-        },
-        p::Action::Take { item, quantity } => a::Action::Take {
-            item: *item,
-            quantity: *quantity,
-        },
-        p::Action::Drop { item, quantity } => a::Action::Drop {
-            item: *item,
-            quantity: *quantity,
-        },
-        p::Action::Wait => a::Action::Wait,
-    }
-}
-
-pub fn wire_action(action: &a::Action) -> p::Action {
-    match action {
-        a::Action::Attack { target } => p::Action::Attack {
-            target: p::ActorId(target.0),
-        },
-        a::Action::SetDoor { door, open } => p::Action::SetDoor {
-            door: *door,
-            open: *open,
-        },
-        a::Action::Move { direction } => p::Action::Move {
-            direction: wire_direction(*direction),
-        },
-        a::Action::Take { item, quantity } => p::Action::Take {
-            item: *item,
-            quantity: *quantity,
-        },
-        a::Action::Drop { item, quantity } => p::Action::Drop {
-            item: *item,
-            quantity: *quantity,
-        },
-        a::Action::Wait => p::Action::Wait,
-    }
-}
-
 pub fn action(action: &a::Action) -> s::Action {
     match action {
         a::Action::Attack { target } => s::Action::Attack { target: *target },

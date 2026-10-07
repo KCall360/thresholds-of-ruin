@@ -62,7 +62,7 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
         ("room", "room 3 3 3 1 Hidden"),
         ("visit", "teleport 1 3 1 1 0"),
     ] {
-        let setup = Command::from_wire(&WireCommand::Wizard {
+        let setup = tor_server::wire_adapter::decode_command(&WireCommand::Wizard {
             expected_revision: engine.revision(ActorId(1)).unwrap(),
             operation: operation.into(),
         })
@@ -72,7 +72,7 @@ fn replay_restores_knowledge_receipts_and_moves_and_rewind_forgets_future() {
     let future = engine.observation(ActorId(1)).unwrap().visible_cells[0]
         .key
         .clone();
-    let rewind = Command::from_wire(&WireCommand::Wizard {
+    let rewind = tor_server::wire_adapter::decode_command(&WireCommand::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation: "rewind initial".into(),
     })
@@ -92,7 +92,7 @@ fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
         ("room", "room 3 20 1 1 Corridor"),
         ("teleport", "teleport 1 3 0 0 0"),
     ] {
-        let setup = Command::from_wire(&WireCommand::Wizard {
+        let setup = tor_server::wire_adapter::decode_command(&WireCommand::Wizard {
             expected_revision: engine.revision(ActorId(1)).unwrap(),
             operation: operation.into(),
         })

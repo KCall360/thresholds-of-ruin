@@ -4,6 +4,12 @@ This is the accepted refactor scope. Implementation proceeds in verified
 increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
+The command-boundary follow-up separates wire command/action conversion from
+journal types. The explicit adapter preserves developer normalization, original
+receipt facts and human intention admission. This is preparation for scoped
+opaque targets; target identifiers and history disclosure still require that
+follow-up. It does not complete the transport/persistence separation sequence.
+
 ## Contracts to preserve
 
 The server owns authority, world topology, scheduling, and disclosure. Gameplay

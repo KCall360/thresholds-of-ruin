@@ -82,7 +82,7 @@ pub fn wizard(
     actor: ActorId,
     operation: &str,
 ) -> Result<CommandResult, Failure> {
-    let command = Command::from_wire(&tor_protocol::Command::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
         expected_revision: engine.revision(actor)?,
         operation: operation.into(),
     })?;

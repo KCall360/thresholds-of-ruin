@@ -1,6 +1,5 @@
 use tempfile::tempdir;
 use tor_protocol::{ActorId, Command as WireCommand};
-use tor_server::journal::Command;
 use tor_server::{Engine, Scenario};
 
 fn wizard(
@@ -8,7 +7,7 @@ fn wizard(
     id: &str,
     operation: &str,
 ) -> Result<tor_server::CommandResult, tor_server::Failure> {
-    let command = Command::from_wire(&WireCommand::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&WireCommand::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation: operation.into(),
     })?;
@@ -37,7 +36,7 @@ fn chamber_setup_is_atomic_retryable_rewindable_and_durable() {
         assert!(wizard(&mut engine, "invalid", text).is_err());
         assert_eq!(engine.state(ActorId(1)).unwrap(), before);
     }
-    let command = Command::from_wire(&WireCommand::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&WireCommand::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation: "chamber 3 5 3 2 Stone chamber".into(),
     })

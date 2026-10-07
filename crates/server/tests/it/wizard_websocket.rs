@@ -228,11 +228,10 @@ fn wizard_request(
     Request::Command {
         context,
         branch: branch.clone(),
-        command: Command::Wizard {
+        command: tor_server::wire_adapter::encode_command(Command::Wizard {
             expected_revision,
             operation,
-        }
-        .try_into()
+        })
         .unwrap(),
     }
 }

@@ -8,7 +8,7 @@ fn setup(
     id: &str,
     operation: &str,
 ) -> Result<tor_server::CommandResult, tor_server::Failure> {
-    let command = Command::from_wire(&tor_protocol::Command::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation: operation.into(),
     })?;

@@ -18,7 +18,7 @@ struct Spec {
     checkpoint_interval: u64,
 }
 fn wizard(engine: &mut Engine, id: &str, operation: String) -> tor_server::CommandProfile {
-    let command = journal::Command::from_wire(&Command::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&Command::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation,
     })

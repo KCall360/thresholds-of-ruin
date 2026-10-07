@@ -7,6 +7,14 @@ use tor_server::journal::{Command, WizardOperation};
 fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
     use tor_protocol::Command as Wire;
     let mut commands = vec![
+        Wire::ResumeIntention {
+            expected_revision: u64::MAX,
+            intention: tor_protocol::IntentionId("original-admission".into()),
+        },
+        Wire::CancelIntention {
+            expected_revision: u64::MAX,
+            intention: tor_protocol::IntentionId("original-admission".into()),
+        },
         Wire::RenamePlace {
             expected_revision: u64::MAX,
             key: "opaque-key".into(),
@@ -68,10 +76,40 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         }
     }
     for wire in commands {
-        let backend = Command::from_wire(&wire).unwrap();
-        let reconstructed: Wire = backend.try_into().unwrap();
+        let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
+        let reconstructed = tor_server::wire_adapter::encode_command(backend).unwrap();
         assert_eq!(reconstructed, wire);
     }
+}
+
+#[test]
+fn wire_gameplay_decodes_to_admission_and_developer_spelling_is_normalized() {
+    let wire = tor_protocol::Command::Act {
+        expected_revision: 7,
+        action: Action::Wait,
+    };
+    assert_eq!(
+        tor_server::wire_adapter::decode_command(&wire).unwrap(),
+        Command::AdmitIntention {
+            expected_revision: 7,
+            action: tor_server::journal::Action::Wait,
+        }
+    );
+    let operation = WizardOperation::SetGravity {
+        region: 2,
+        vector: [0, 0, -1],
+    };
+    let compact = serde_json::to_string(&operation).unwrap();
+    let pretty = serde_json::to_string_pretty(&operation).unwrap();
+    let decode = |operation| {
+        tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
+            expected_revision: 7,
+            operation,
+        })
+        .unwrap()
+    };
+    assert_ne!(compact, pretty);
+    assert_eq!(decode(compact), decode(pretty));
 }
 
 #[test]
@@ -83,14 +121,19 @@ fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
             vector: [0, 0, -1],
         },
     };
-    let wire = tor_protocol::Command::try_from(backend.clone()).unwrap();
-    assert_eq!(Command::from_wire(&wire).unwrap(), backend);
-    assert!(Command::from_wire(&tor_protocol::Command::Wizard {
-        expected_revision: 0,
-        operation: "invalid developer operation".into()
-    })
-    .is_err());
-    assert!(tor_protocol::Command::try_from(Command::PausePreparation).is_err());
+    let wire = tor_server::wire_adapter::encode_command(backend.clone()).unwrap();
+    assert_eq!(
+        tor_server::wire_adapter::decode_command(&wire).unwrap(),
+        backend
+    );
+    assert!(
+        tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
+            expected_revision: 0,
+            operation: "invalid developer operation".into()
+        })
+        .is_err()
+    );
+    assert!(tor_server::wire_adapter::encode_command(Command::PausePreparation).is_err());
 }
 
 #[test]
@@ -109,8 +152,11 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     let stored = serde_json::to_value(&command).unwrap();
     assert_eq!(stored["action"]["target"], serde_json::json!(u64::MAX));
     assert_eq!(serde_json::from_value::<Command>(stored).unwrap(), command);
-    let wire = tor_protocol::Command::try_from(command.clone()).unwrap();
-    assert_eq!(Command::from_wire(&wire).unwrap(), command);
+    let wire = tor_server::wire_adapter::encode_command(command.clone()).unwrap();
+    assert_eq!(
+        tor_server::wire_adapter::decode_command(&wire).unwrap(),
+        command
+    );
     assert_eq!(
         serde_json::to_value(wire).unwrap()["action"]["target"],
         u64::MAX.to_string()

@@ -512,7 +512,7 @@ impl Service {
                 branch,
                 command,
             } => {
-                let command = crate::journal::Command::from_wire(&command)?;
+                let command = crate::wire_adapter::decode_command(&command)?;
                 if let Some(previous) = self
                     .engine
                     .retry(&user, actor, request_id, &branch, &command)?

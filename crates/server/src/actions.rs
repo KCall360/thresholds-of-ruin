@@ -87,8 +87,14 @@ mod tests {
         ] {
             let action = Action::Move { direction: backend };
             assert_eq!(adapt::action(&action), sim::Action::Move(native));
-            assert_eq!(action.to_wire(), wire::Action::Move { direction: wire });
-            assert_eq!(Action::from_wire(&action.to_wire()), action);
+            assert_eq!(
+                crate::wire_adapter::encode_action(&action),
+                wire::Action::Move { direction: wire }
+            );
+            assert_eq!(
+                crate::wire_adapter::decode_action(&crate::wire_adapter::encode_action(&action)),
+                action
+            );
             assert_eq!(
                 adapt::recorded_action(sim::Action::Move(native)),
                 Some(action)
@@ -166,7 +172,10 @@ mod tests {
         for (action, native) in cases {
             assert_eq!(adapt::action(&action), native);
             assert_eq!(adapt::recorded_action(native), Some(action.clone()));
-            assert_eq!(Action::from_wire(&action.to_wire()), action);
+            assert_eq!(
+                crate::wire_adapter::decode_action(&crate::wire_adapter::encode_action(&action)),
+                action
+            );
         }
     }
 }

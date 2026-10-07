@@ -552,3 +552,17 @@ All 33 release validators and all scenario process cases passed. Final debug
 publication evidence and replacement exact-head CI are still required; failed CI
 is retained, not rerun as a substitute for a correction. All original work
 sequences remain in scope.
+
+**Command conversion ownership (2026-10-07).** Wire command/action conversion
+and developer parsing now live in the explicit `wire_adapter`, with journal
+conversion methods and the implicit command conversion trait removed. Workspace
+callers use the same exhaustive adapter. Admission, authority, receipt ordering,
+numeric save payloads and simulation execution retain their behavior. The
+expanded boundary tests passed before and after extraction; 197 server unit
+tests, 148 server integration tests, all-target server Clippy and 30 selected
+process/documentation checks passed. Opaque targets and observer-scoped history
+projection remain open; this increment does not complete domain/save separation.
+Broad publication verification and final-head CI are required before pushing
+and merging this follow-up. PR #75's preceding scenario checkpoint has separately
+passed its 294-Python/889-Rust local debug gate and is running replacement CI on
+`58081b3`. All six accepted sequences remain in scope.

@@ -3201,7 +3201,7 @@ mod scaling_tests {
                         let action = trace.secondary[secondary % trace.secondary.len()]
                             .resolve(&engine.state(actor).unwrap());
                         secondary += 1;
-                        Action::from_wire(&action)
+                        crate::wire_adapter::decode_action(&action)
                     } else {
                         Action::Wait
                     };
@@ -3209,7 +3209,12 @@ mod scaling_tests {
                     request += 1;
                 }
                 let action = step.resolve(&engine.state(ActorId(1)).unwrap());
-                checked_action(&mut engine, ActorId(1), Action::from_wire(&action), request);
+                checked_action(
+                    &mut engine,
+                    ActorId(1),
+                    crate::wire_adapter::decode_action(&action),
+                    request,
+                );
                 request += 1;
             }
         }
