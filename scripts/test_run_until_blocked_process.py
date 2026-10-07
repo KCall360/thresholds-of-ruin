@@ -6,6 +6,7 @@ import socket
 import sys
 import sqlite3
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import unittest
@@ -188,6 +189,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.addCleanup(relay.close)
         stalled = self.launch("tor-client-headless", ["--connect", relay.address], token=SPECTATOR_TOKEN)
         self.frame(stalled, lambda f: f["type"] == "ready")
+        if sys.platform.startswith("linux"):
+            self.assertTrue(relay.server_connection_open(server.child.pid),
+                            "socket ownership probe must identify the attached spectator")
         relay.gate.clear()
         player_relay.reset_traffic()
         # Wait for this actor's simulation effects before filling its one queue
@@ -217,8 +221,16 @@ class RunUntilBlockedProcesses(ProcessTestCase):
         self.assertEqual(relay.errors, [])
         tick = int(initial["state"]["observation"]["tick"]) + turns * 100
         self.assertEqual(int(final["state"]["observation"]["tick"]), tick)
-        # Released after the stall timeout, the spectator finds itself disconnected.
-        relay.gate.set()
+        if sys.platform.startswith("linux"):
+            # Crossing a byte budget is not itself proof that the server closed
+            # the stream. Keep pressure applied through its existing stall/I/O
+            # deadline, and distinguish server closure from later client drain.
+            deadline = time.monotonic() + STALL_SECONDS * 2
+            while relay.server_connection_open(server.child.pid):
+                if time.monotonic() >= deadline:
+                    self.fail("Server still owns the stalled spectator socket after pressure and stall deadline")
+                time.sleep(0.05)
+        relay.resume_reading()
         self.assertNotEqual(stalled.child.wait(timeout=STALL_SECONDS * 4), 0)
         # A replacement spectator starts at the committed state.
         watcher, watching = self.client(SPECTATOR_TOKEN)

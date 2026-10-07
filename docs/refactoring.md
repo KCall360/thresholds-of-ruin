@@ -2303,3 +2303,15 @@ recovery checks also passed. These are workload-sizing results on Windows,
 not proof of Linux runtime coverage or broader gameplay speedups.
 This repair changes test helpers only, so the production measurements above retain their original input
 provenance. Changed verification inputs require a new full gate before pushing.
+
+
+The shared-fact checkpoint passed Windows CI, but Linux failed both pressure
+cases: after 4,527 turns the released spectator did not exit within 20 seconds.
+That failure does not establish whether the server retained the connection or
+whether unread TCP output drained too slowly through the relay's small window.
+The revised fixture observes Linux server socket ownership before releasing
+pressure and restores the relay's normal receive buffer before draining.
+Endpoint/inode matching excludes orphaned TCP rows after descriptor closure.
+Production timeouts and the client-exit assertion remain unchanged. The new
+unit regressions failed first; actual Linux acceptance remains unverified until
+fresh final-head CI passes. No failing candidate is merged or activated.

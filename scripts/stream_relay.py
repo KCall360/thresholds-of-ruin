@@ -4,8 +4,11 @@ The real server and clients keep their normal protocol, queue sizes and clocks.
 Only one server frame is held, including a separately gated repair snapshot; no unbounded test queue hides backpressure.
 """
 import json
+import os
+from pathlib import Path
 import socket
 import struct
+import sys
 import threading
 
 
@@ -40,6 +43,17 @@ def actor_fact_bytes(message):
                for value in values)
 
 
+def tcp_socket_owned(rows, owned_inodes, local_port, remote_port):
+    """Match the server endpoint and its live fd, excluding orphaned TCP state."""
+    for row in rows.splitlines()[1:]:
+        fields = row.split()
+        if (len(fields) >= 10 and fields[9] in owned_inodes
+                and int(fields[1].rsplit(':', 1)[1], 16) == local_port
+                and int(fields[2].rsplit(':', 1)[1], 16) == remote_port):
+            return True
+    return False
+
+
 class StreamRelay:
     def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_actor_facts=False):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
@@ -53,6 +67,8 @@ class StreamRelay:
         self.large_retained_base = large_retained_base
         self.upstream = upstream
         self.receive_buffer = receive_buffer
+        self._server_socket = None
+        self._server_ports = None
         self.gate = threading.Event()
         self.gate.set()
         self.held = threading.Event()
@@ -90,6 +106,8 @@ class StreamRelay:
             upstream.settimeout(10)
             upstream.connect((host, int(port)))
             upstream.settimeout(None)
+            self._server_socket = upstream
+            self._server_ports = (int(port), upstream.getsockname()[1])
             self.sockets.append(upstream)
             sender = threading.Thread(target=self.forward, args=(downstream, upstream), daemon=True)
             sender.start()
@@ -157,6 +175,35 @@ class StreamRelay:
             self.errors.append(error)
         finally:
             self.close_sockets()
+
+    def resume_reading(self):
+        """End artificial receive pressure before draining buffered output."""
+        if self.receive_buffer:
+            self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+        self.gate.set()
+
+    def server_connection_open(self, server_pid):
+        """On Linux, observe whether the server still owns this exact TCP socket.
+
+        TCP rows alone can survive fd closure while unread data drains. This
+        checks both the endpoints and the server's fd ownership. Other hosts
+        return None and rely on the actual client's disconnect assertion.
+        """
+        if not sys.platform.startswith('linux'):
+            return None
+        if self._server_ports is None:
+            raise AssertionError('Relay connection has not been established')
+        process = Path('/proc') / str(server_pid)
+        owned = set()
+        for descriptor in (process / 'fd').iterdir():
+            try:
+                target = os.readlink(descriptor)
+            except FileNotFoundError:
+                continue  # A concurrent socket close removes its descriptor.
+            if target.startswith('socket:[') and target.endswith(']'):
+                owned.add(target[8:-1])
+        rows = (process / 'net' / 'tcp').read_text(encoding='utf-8')
+        return tcp_socket_owned(rows, owned, *self._server_ports)
 
     def reset_traffic(self):
         """Start a measurement window after the initial snapshot is delivered."""
