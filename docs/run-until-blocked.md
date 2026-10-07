@@ -185,7 +185,13 @@ steps before control acquisition; it never restarts a journey implicitly.
   send-buffer budget plus the bounded outgoing queue and in-flight allowance.
   It retains a minimum gameplay workload and a finite upper limit, so compact
   deltas cannot silently turn the pressure test into an ordinary playback test.
-  The stall timeout is unchanged. The small-byte-budget variant also verifies
+  On Linux, the test first identifies the spectator's exact server socket by
+  endpoint and process-owned inode, then keeps reads paused until the server
+  releases that socket within the existing stall/I/O deadline. This separates
+  server disconnection from draining unread TCP data. Before draining, the relay
+  restores a normal receive buffer; the artificial small window is needed only
+  while applying pressure. The actual client must still exit within its existing
+  deadline. The stall timeout is unchanged. The small-byte-budget variant also verifies
   durable save and restart recovery. The travel, adventure, dungeon and stream
   recovery suites also run against the new server.
 

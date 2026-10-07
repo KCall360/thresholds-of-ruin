@@ -439,7 +439,12 @@ CI's 35-minute job limit before completing Rust checks. The shared-fact counter
 now includes identically broadcast observation events and intention status,
 excluding replies, readiness and stream metadata. Both Windows 4 MiB cases
 passed at 4,527 turns each instead of 12,509, preserving pressure thresholds and
-stall/exit deadlines. The required full gate and final-head CI still apply.
+stall/exit deadlines. That checkpoint passed Windows CI but Linux failed both
+spectator child-exit checks. The test relay now separates server socket closure
+from client drain: Linux checks exact endpoint/process-owned inode while reads
+remain paused, then restores a normal receive buffer before draining. Unit
+regressions failed first; Linux acceptance remains unverified. The required
+full gate and final-head CI still apply; do not merge or activate a failing head.
 Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
 full observations independently of individual frame size, with failing-first
 regressions and real ASCII/text held-repair checks. Earlier pre-bound measurements
