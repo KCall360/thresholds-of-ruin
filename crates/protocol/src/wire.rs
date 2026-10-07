@@ -1,7 +1,7 @@
 use crate::{ActorId, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 27;
 /// Server-granted session authority; never selected by the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

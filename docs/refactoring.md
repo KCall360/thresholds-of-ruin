@@ -1823,7 +1823,7 @@ do not establish an improvement. Raw reports remain local and unpublished.
 The wire-integer prototype exposed a test-helper name collision: two standalone
 saved-action tests had selected the protocol Action serializer instead of the
 save-owned adapter. Explicitly qualifying the adapter corrected the tests. All
-five schema tests then passed with protocol-26 decimal-string wire encoding,
+five schema tests then passed with decimal-string wire encoding,
 including the already independent production nested-journal tests. The prototype
 is preserved separately; that checkpoint retains the preceding wire schema.
 The corrected checkpoint requires renewed verification and final-head CI before merging.
@@ -1881,7 +1881,7 @@ unpublished. Broader persistence and restoration tails remain open work.
 
 ## Lossless wire integers (merged, PR #71)
 
-Protocol 26 encodes every 64-bit wire integer as a canonical decimal string,
+The current protocol encodes every 64-bit wire integer as a canonical decimal string,
 including actor/item/door identities, ticks, revisions, stream counters,
 quantities, durations, travel steps and signed motion velocity components.
 Strict Serde adapters reject numeric tokens, noncanonical forms and overflow;
@@ -2148,3 +2148,126 @@ literals in three files. Measured production code and benchmark inputs remained
 unchanged; immutable measured copies retain provenance. The corrected source
 passed all 50 protocol tests. Full verification is still required on the final
 corrected source; earlier checks are not a substitute for that gate.
+
+
+### Ordered observation collection edits (in development)
+
+The current transport represents inventory, ground items, projected actors and
+remembered places as ordered edits against the exact original base vector.
+Unchanged vectors carry empty lists. Each edit retains explicit start/removal
+counts and complete inserted values; one forward merge validates ranges and
+computes the result length before allocation. There is no repeated tail shifting.
+Equal collections avoid an occurrence map. Changed collections retain equal
+occurrences in forward order through existing ordered keys; this is a deterministic
+exact candidate, not an optimal general-purpose diff. Complete envelope selection
+continues to decide whether the candidate is worth sending.
+
+Ground and actor keys include observer-relative position. Repeated underlying
+identities through portals stay distinct; place keys remain opaque. Arbitrary
+valid full-vector order, sparse edits, empty transitions and movement reconstruct
+exactly. Non-cell projections are not inferred from the cell translation. This
+adds no client access to private topology or authoritative spatial indexes.
+
+Failing-first regressions measured 15,302 / 237,121 / 3,821,580 bytes for the same
+small update with 16 / 256 / 4,096 retained entries per collection. Separated edits
+used 3,821,436 bytes; changing one repeated projected occurrence used 237,301 bytes.
+The new unchanged update stays under 2,048 bytes with identical sizes at all three
+counts; sparse edits stay under 8,192 bytes. Protocol/shared-client coverage checks
+exact order, checked spans and atomic rejection. Real ASCII/text recovery holds
+snapshot repair for malformed spans and zero-quantity insertions. Real item
+transfer, checkpoint, cold restart and rewind retain the reconstructed observation.
+A new diagnostic measures large individual observations independently from region
+count, using shared encoding, decoding, application and semantic validation.
+
+The wire shape changes independently of the numeric saved schemas. Archive records
+persist journal commands/effects and receipts; checkpoints persist simulation
+snapshots/revisions, not observation deltas. Further save DTO independence remains
+open. Release measurements, final full verification and both-platform CI remain
+required before publishing this checkpoint. Smaller payloads do not establish a
+latency or resident-memory gain. All six work sequences remain active.
+
+
+Final review found that individual fitting frames could accumulate a retained
+full state beyond the response ceiling. Failing-first shared-client and host
+encoder regressions proved that gap. Shared semantic validation now bounds the
+canonical encoded full state independently of each delta; host selection rejects
+oversized retained observations. The same constant-space serializer counter is
+reused, and ordinary fitting full responses already prove their state fits.
+Real ASCII/text tests seed a valid large snapshot, receive a separately fitting
+delta, reject the accumulated oversized state atomically, hold snapshot repair,
+and continue in the same process. This is a full-observation bound, not a cap on
+remembered map cells or history and not a resident-memory measurement.
+
+The first 24 interleaved release reports and 2,400 individual-collection samples
+validated, with exact measured input bytes and binaries retained locally. Those
+measurements precede this production validation change, so they cannot establish
+final timing costs. Refresh both diagnostics before full final-head verification;
+retain the earlier evidence and any regressions rather than presenting it as the
+final implementation. Other persistence/history/scenario/fairness/extension work
+remains in scope.
+
+
+### Bounded collection encoding release evidence
+
+The refreshed three-round interleaved comparison used the preceding complete
+encoding checkpoint on machine `cfb2fdc044dc`, with five workload cycles, one
+actor, 100 retained history actions and 8/256 regions in memory/durable modes.
+All 24 reports validated; all 12 focused repeat reports validated using identical
+binaries. No competing local jobs or failed runs occurred. All 532 measured input
+hashes were unchanged at measurement completion, and raw/binary hashes were
+verified. Operation, history, recovery and save counts matched and were stable
+across rounds. Each run selected 305 deltas: sent complete bytes fell from
+1,527,532 to 1,521,957; full reference bytes remained 7,111,372. Both region counts
+still expose the same observation workload.
+
+Authoritative command timings are milliseconds, n=915 per side/case:
+
+| Case | Base p50/p95/max | Candidate p50/p95/max |
+| --- | --- | --- |
+| 8 regions, memory | 0.5471 / 0.8013 / 1.7023 | 0.5477 / 0.8096 / 1.2318 |
+| 256 regions, memory | 0.6089 / 0.8632 / 2.5375 | 0.6334 / 0.9014 / 2.5353 |
+| 8 regions, durable | 0.5622 / 0.8037 / 1.5672 | 0.5648 / 0.8369 / 1.5742 |
+| 256 regions, durable | 0.6293 / 0.8857 / 2.5645 | 0.6475 / 0.8967 / 1.6676 |
+
+The focused repeat's large memory command p50/p95/max was
+0.6243/0.8828/1.9666 versus 0.6157/0.9006/1.8461 ms; small durable was
+0.5871/0.8632/1.9901 versus 0.5706/0.8195/2.2202 ms. The small durable p95
+shift reversed, while the large memory increase narrowed. Large memory restart
+p95 was initially 190.5592 versus 204.1517 ms, then 193.0299 versus 194.6388 ms.
+These persistence/restart groups have only three samples. Main durable flush
+p95 was 173.4141/107.4376 ms for 8 regions and 82.7714/56.1503 ms for 256 regions;
+repeat small durable flush was 38.2654/40.6580 ms. Restart and maximum tails remain
+unresolved. No broad engine/persistence speedup is established, and existing
+8 ms p95 / 33 ms maximum targets are unchanged.
+
+The separate same-build individual-collection diagnostic validated all 2,400
+samples (100 per method/case) across 16/256/4,096 entries in each of four
+collections. At 4,096 entries, unchanged complete responses were
+3,505,166 versus 516 bytes; sparse changes were 3,505,169 versus 3,489 bytes;
+projected movement was 3,505,162 versus 1,920,184 bytes; reorder was 3,505,166
+versus 1,743,005 bytes. An unchanged candidate inserts zero values; sparse edits
+insert 12, while movement/reorder insert 8,192. These are candidate-content
+counts, not counts of every allocation or retained client copy.
+
+At 4,096 entries, selected encoding p95 was 5.7987/8.6151/17.4399/17.4840 ms
+for unchanged/sparse/movement/reorder; full was
+16.9314/16.5266/16.4170/16.4431 ms. Selected application/validation p95 was
+7.9997/7.6033/6.9823/7.6518 ms versus full
+5.5703/5.5013/5.6164/6.3940 ms. Reconstructing retained values and checking the
+canonical full-state bound costs CPU even when wire payload is tiny.
+Per-sample encoding + decoding + reconstruction/validation p50/p95/max:
+
+| 4,096-entry case | Full response | Selected response |
+| --- | --- | --- |
+| Unchanged | 39.9484 / 42.5102 / 43.4337 | 12.6010 / 13.3838 / 13.8490 |
+| Sparse edits | 39.8267 / 41.4810 / 42.3272 | 15.2590 / 16.1470 / 16.8305 |
+| Projected movement | 39.4053 / 41.0209 / 41.9862 | 34.2401 / 35.5211 / 36.6291 |
+| Reorder | 39.7599 / 40.9896 / 42.7883 | 32.7018 / 34.1427 / 35.3415 |
+
+This is a synthetic same-build method comparison, not prior-version engine,
+network, rendering or physical-input latency evidence. It does not measure
+resident memory; current observations are bounded by canonical encoded bytes,
+while map/history retention and server sharing across readers remain separate
+work. Measured source copies retain the pre-bound and final bounded code, and
+later edits only document results. Full verification remains required on the
+final commit; raw samples remain local without release/upload authorization.

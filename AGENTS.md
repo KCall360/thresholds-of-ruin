@@ -408,11 +408,33 @@ ordinary engine benchmarks do not measure native JSON decoding. Text-client
 product fixes and scripting runtime implementation remain deferred. All six
 architecture sequences in the [refactor plan](docs/refactoring.md) remain active.
 
-**Complete observation encoding (in development).** Shared response selection
+**Complete observation encoding (merged, PR #73).** Shared response selection
 compares complete encoded envelopes and admits the selected bounded text once.
 Snapshot/update disclosure state commits after output admission and transfers
 owned full state into the next base. Focused Rust, real headless reset/restart,
 and streaming diagnostic checks passed. Wire measurement version 2 distinguishes
 shared encoding/decoding timings and complete sizes from historical partial DTO
-measurements. Release comparisons and full verification remain pending. Collection
-deltas and fair aggregate output pressure remain in the full refactor scope.
+measurements. Exact head `8cbc637` passed all eight full local stages and all
+five final-head Windows/Linux jobs. The three desktop launchers use its immutable
+verified build; 16 copied-build process checks passed and active binary/helper/
+backup/scenario hashes were verified. Collection deltas and fair aggregate output
+pressure remain in the full refactor scope.
+
+
+**Ordered observation collections (in development).** Protocol collection edits
+retain unchanged inventory, ground items, projected actors and opaque places.
+Original-base spans reconstruct exact order with checked ranges and a forward
+merge; projected occurrences remain distinct. Failing-first size regressions,
+shared atomic rejection, real item checkpoint/restart/rewind and held-repair
+ASCII/text process tests passed. Current wire samples were recorded from real
+processes. Individual collection diagnostics vary 16/256/4,096 entries; release
+measurements validated 24 interleaved reports, 12 focused repeats and 2,400
+individual samples with stable operation/save counts. Final-head full verification
+remains pending. Save/rules/scenario versions are unchanged. Shared validation and host selection now bound retained
+full observations independently of individual frame size, with failing-first
+regressions and real ASCII/text held-repair checks. Earlier pre-bound measurements
+are preserved separately; refreshed evidence
+includes production validation cost. Smaller wire payloads do not establish a
+broad engine, persistence or resident-memory gain.
+No scripting runtime or text-client product fix is added.
+Aggregate output fairness and the other six-sequence work remain active.

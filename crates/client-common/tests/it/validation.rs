@@ -892,3 +892,104 @@ fn reset_establishes_a_new_exact_observation_base_and_rejected_bases_are_atomic(
         }
     );
 }
+
+#[test]
+fn malformed_collection_edits_leave_every_client_boundary_unchanged() {
+    let initial = snapshot(0);
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    let next = snapshot(1);
+    let valid = StateDelta::between(client.state(), &next.state).unwrap();
+    let edit = |start, remove| CollectionEdit::<ItemView> {
+        start,
+        remove,
+        insert: Vec::new(),
+    };
+    for edits in [
+        vec![edit(2, 1)],
+        vec![edit(0, u32::MAX)],
+        vec![edit(0, 1), edit(0, 1)],
+        vec![edit(1, 0)],
+    ] {
+        let mut delta = valid.clone();
+        delta.inventory = edits;
+        let before = client.clone();
+        assert_eq!(
+            client.apply(StreamUpdate {
+                context: initial.context.clone(),
+                actor: initial.actor,
+                branch: initial.branch.clone(),
+                cursor: StreamCursor {
+                    sequence: 1,
+                    tick: 1
+                },
+                body: UpdateBody::ObservationDelta {
+                    base: client.observation_base(),
+                    state: Box::new(delta),
+                    event: None,
+                },
+            }),
+            Err(StreamError::InconsistentState)
+        );
+        assert_eq!(client, before);
+    }
+    // A rejected edit must neither consume its sequence nor alter the exact base.
+    client
+        .apply(StreamUpdate {
+            context: initial.context,
+            actor: initial.actor,
+            branch: initial.branch,
+            cursor: StreamCursor {
+                sequence: 1,
+                tick: 1,
+            },
+            body: UpdateBody::ObservationDelta {
+                base: client.observation_base(),
+                state: Box::new(valid),
+                event: None,
+            },
+        })
+        .unwrap();
+    assert_eq!(client.state(), &next.state);
+}
+
+#[test]
+fn a_fitting_delta_cannot_grow_retained_state_past_the_response_byte_ceiling() {
+    let mut initial = snapshot(0);
+    initial.state.observation.inventory[0].description = "x".repeat(MAX_RESPONSE_BYTES / 2);
+    let initial_message = ServerMessage::Snapshot {
+        request_id: "initial".into(),
+        snapshot: Box::new(initial.clone()),
+    };
+    assert!(serde_json::to_vec(&initial_message).unwrap().len() < MAX_RESPONSE_BYTES);
+    let mut client = ClientState::from_snapshot(initial.clone()).unwrap();
+    let before = client.clone();
+    let mut next = snapshot(1).state;
+    next.observation.inventory = initial.state.observation.inventory.clone();
+    next.observation.ground_items[0].item.description = "y".repeat(MAX_RESPONSE_BYTES / 2);
+    let delta = StateDelta::between(client.state(), &next).unwrap();
+    let update = StreamUpdate {
+        context: initial.context,
+        actor: initial.actor,
+        branch: initial.branch,
+        cursor: StreamCursor {
+            sequence: 1,
+            tick: 1,
+        },
+        body: UpdateBody::ObservationDelta {
+            base: client.observation_base(),
+            state: Box::new(delta),
+            event: None,
+        },
+    };
+    // The peer frame itself fits: the retained half is absent from the delta.
+    let text = serde_json::to_string(&ServerMessage::Update {
+        update: Box::new(update),
+    })
+    .unwrap();
+    assert!(text.len() < MAX_RESPONSE_BYTES);
+    let ServerMessage::Update { update } = decode_response(&text).unwrap() else {
+        panic!("update")
+    };
+    assert_eq!(client.apply(*update), Err(StreamError::InconsistentState));
+    assert_eq!(client, before);
+}

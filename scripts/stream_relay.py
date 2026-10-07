@@ -20,11 +20,12 @@ def exact(stream, size):
 
 
 class StreamRelay:
-    def __init__(self, upstream, receive_buffer=None):
+    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
         (bytes) on the relay's server connection keeps a paused relay from
         absorbing the server's output in socket buffers, which Linux grows to
         megabytes, so the server's own queue fills instead."""
+        self.large_retained_base = large_retained_base
         self.upstream = upstream
         self.receive_buffer = receive_buffer
         self.gate = threading.Event()
@@ -39,6 +40,8 @@ class StreamRelay:
         self.dropped = threading.Event()
         self.overflow_delta = threading.Event()
         self.invalid_inventory = threading.Event()
+        self.invalid_collection_range = threading.Event()
+        self.oversized_retained_state = threading.Event()
         self.overdeep = threading.Event()
         self.corrupted = threading.Event()
         self.listener = socket.socket()
@@ -96,6 +99,8 @@ class StreamRelay:
                 if message is not None and self.corrupt_observation(message):
                     payload = json.dumps(message, separators=(',', ':')).encode()
                     length = len(payload)
+                    if length > 16 * 1024 * 1024:
+                        raise ValueError('Corrupted test frame exceeds the frame ceiling')
                     if length < 126:
                         prefix, extra = bytes((0x81, length)), b''
                     elif length <= 65535:
@@ -122,6 +127,13 @@ class StreamRelay:
 
     def corrupt_observation(self, message):
         """Apply one requested test corruption while preserving its envelope."""
+        if (self.large_retained_base and message.get('type') == 'snapshot'
+                and message['request_id'] == 'attach'):
+            message['snapshot']['state']['observation']['inventory'].append({
+                'id':'18446744073709551614', 'quantity':'1', 'name':'retained test item',
+                'appearance':'stone', 'identified':False, 'description':'x' * (8 * 1024 * 1024)})
+            self.large_retained_base = False
+            return True
         if message.get('type') != 'update':
             return False
         body = message['update']['body']
@@ -138,11 +150,21 @@ class StreamRelay:
         elif self.overflow_delta.is_set():
             state['cells']['shift']['x'] = 2147483647
         elif self.invalid_inventory.is_set():
-            state['inventory'].append({'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False})
+            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False}]})
+        elif self.oversized_retained_state.is_set():
+            state['ground_items'].append({'start':0, 'remove':0, 'insert':[{
+                'reachable':False, 'position':{'x':0, 'y':0, 'z':0},
+                'item':{'id':'18446744073709551615', 'quantity':'1', 'name':'inserted test item',
+                        'appearance':'stone', 'identified':False,
+                        'description':'y' * (8 * 1024 * 1024)}}]})
+        elif self.invalid_collection_range.is_set():
+            state['places'].append({'start':4294967295, 'remove':1, 'insert':[]})
         else:
             return False
         self.overflow_delta.clear()
         self.invalid_inventory.clear()
+        self.invalid_collection_range.clear()
+        self.oversized_retained_state.clear()
         self.overdeep.clear()
         return True
 

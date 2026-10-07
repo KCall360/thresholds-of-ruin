@@ -114,9 +114,10 @@ class StreamRecoveryProcesses(ProcessTestCase):
     def exercise_invalid_state(self, kind, corruption):
         self.server()
         player, _ = self.client()
-        relay = StreamRelay(self.address)
+        relay = StreamRelay(self.address, large_retained_base=corruption == 'oversized_retained_state')
         self.addCleanup(relay.close)
         spectator, initial = self.playable(kind, relay.address)
+        relay.corrupted.clear()
         relay.repair_gate.clear()
         getattr(relay, corruption).set()
         final = self.act(player, {'type': 'wait'})
@@ -162,6 +163,18 @@ class StreamRecoveryProcesses(ProcessTestCase):
 
     def test_text_invalid_reconstructed_inventory_and_relaunch(self):
         self.exercise_invalid_state('text', 'invalid_inventory')
+
+    def test_ascii_invalid_collection_range_and_relaunch(self):
+        self.exercise_invalid_state('ascii', 'invalid_collection_range')
+
+    def test_text_invalid_collection_range_and_relaunch(self):
+        self.exercise_invalid_state('text', 'invalid_collection_range')
+
+    def test_ascii_fitting_delta_exceeds_retained_state_bound_and_repairs(self):
+        self.exercise_invalid_state('ascii', 'oversized_retained_state')
+
+    def test_text_fitting_delta_exceeds_retained_state_bound_and_repairs(self):
+        self.exercise_invalid_state('text', 'oversized_retained_state')
 
     def test_other_actor_door_changes_use_disclosed_narration_in_both_clients(self):
         self.server(scenario='semantic-narration', seed=None)

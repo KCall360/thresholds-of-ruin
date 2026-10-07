@@ -1799,7 +1799,7 @@ mod tests {
             revision: next.revision,
             combat: o.combat.clone(),
             motion: o.motion.clone(),
-            places: o.places.clone(),
+            places: Vec::new(),
             actor: o.actor,
             tick: o.tick,
             position: o.position,
@@ -1811,9 +1811,9 @@ mod tests {
                     .collect(),
                 changed: Vec::new(),
             },
-            ground_items: o.ground_items.clone(),
-            inventory: o.inventory.clone(),
-            visible_actors: o.visible_actors.clone(),
+            ground_items: Vec::new(),
+            inventory: Vec::new(),
+            visible_actors: Vec::new(),
             ready: o.ready,
         };
         assert_eq!(witness.clone().apply(&base).unwrap(), next);

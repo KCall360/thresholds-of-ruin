@@ -49,18 +49,55 @@ class ItemProcesses(ProcessTestCase):
         self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
                                 wizard=True, spectator=False)
         player, initial = self.client()
+
+        def collection_edits(start):
+            updates = []
+            for line in player.transcript[start:]:
+                if not line.startswith('{'):
+                    continue
+                frame = json.loads(line)
+                update = (frame.get('message') or {}).get('update') or {}
+                body = update.get('body') or {}
+                if body.get('type') != 'observation_delta':
+                    continue
+                self.assertTrue(frame['synchronized'])
+                for field in ['inventory', 'ground_items', 'visible_actors', 'places']:
+                    for edit in body['state'][field]:
+                        self.assertEqual(set(edit), {'start', 'remove', 'insert'})
+                updates.append(body['state'])
+            self.assertTrue(updates, 'Real item transfer must exercise a collection delta')
+            return updates[-1]
+
+        start = len(player.transcript)
         split = self.act(player, {'type': 'take', 'item': '10', 'quantity': '3'})
+        edits = collection_edits(start)
+        self.assertTrue(edits['inventory'])
+        self.assertTrue(edits['ground_items'])
+        self.assertEqual(edits['places'], [])
+        self.assertEqual(edits['visible_actors'], [])
         self.assertIsNone(split['error'])
         stack = split['state']['observation']['inventory'][0]
         self.assertEqual(stack['name'], 'arrow')
         self.assertEqual(stack['quantity'], '3')
+        start = len(player.transcript)
+        waited = self.act(player, {'type': 'wait'})
+        self.assertIsNone(waited['error'])
+        edits = collection_edits(start)
+        for field in ['inventory', 'ground_items', 'visible_actors', 'places']:
+            self.assertEqual(edits[field], [], f'Unchanged {field} was retransmitted')
+        # Save/restart must preserve the actual reconstructed observation.
+        split = waited
         self.assertIsNone(self.request(player, {'type': 'save'})['error'])
         player.stop(); self.game.stop()
         self.game = self.server('--checkpoint-interval', 1, scenario='items', seed=None,
                                 wizard=True, spectator=False)
         player, resumed = self.client()
         self.assertEqual(resumed['state']['observation'], split['state']['observation'])
+        start = len(player.transcript)
         dropped = self.act(player, {'type': 'drop', 'item': stack['id'], 'quantity': '1'})
+        edits = collection_edits(start)
+        self.assertTrue(edits['inventory'])
+        self.assertTrue(edits['ground_items'])
         self.assertIsNone(dropped['error'])
         self.assertEqual(dropped['state']['observation']['inventory'][0]['quantity'], '2')
         wizard = self.wizard()

@@ -6,6 +6,9 @@ use std::io::{self, Write};
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 /// Maximum UTF-8 bytes in one complete server message, including its envelope.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Ceiling for the canonical encoded full StateView retained by a stream,
+/// independently of whether an incoming observation is a full view or a delta.
+pub const MAX_STATE_BYTES: usize = MAX_RESPONSE_BYTES;
 
 struct Limited {
     bytes: Vec<u8>,
@@ -171,7 +174,7 @@ impl Write for Count {
 }
 
 // Overflow is an ineligible candidate; other serialization failures propagate.
-fn encoded_length(
+pub(crate) fn encoded_length(
     message: &impl Serialize,
     limit: usize,
 ) -> Result<Option<usize>, serde_json::Error> {
@@ -214,6 +217,14 @@ pub fn encode_response(
         });
     };
     let full_length = encoded_length(message, limit)?;
+    // A stream must not grow retained state without bound through small deltas.
+    // A fitting complete envelope already proves the state fits this ceiling.
+    if full_length.is_none() && encoded_length(state.as_ref(), MAX_STATE_BYTES)?.is_none() {
+        return Err(serde::ser::Error::custom(
+            "observation exceeds retained-state byte limit",
+        ));
+    }
+
     let delta = base.and_then(|(base, previous)| {
         if previous.revision != base.revision
             || previous.observation.tick != base.cursor.tick
@@ -291,7 +302,7 @@ mod tests {
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v27.json")).unwrap();
         let mut snapshot = samples["server"]
             .as_array()
             .unwrap()
@@ -435,7 +446,7 @@ mod tests {
     #[test]
     fn typed_decoders_preserve_all_recorded_message_kinds() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v26.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v27.json")).unwrap();
         for sample in samples["client"].as_array().unwrap() {
             let text = serde_json::to_string(sample).unwrap();
             assert_eq!(

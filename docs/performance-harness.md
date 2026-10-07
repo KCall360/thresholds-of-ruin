@@ -650,3 +650,23 @@ samples locally until publication is authorized. This is a same-build method
 comparison, not a historical commit comparison or an end-to-end latency claim.
 Pair it with the existing targeted release comparisons when publishing a
 protocol checkpoint; engine timings do not measure native JSON decoding.
+
+
+## Individual observation collection diagnostic
+
+Run `cargo run --release -p tor-protocol --example observation_wire_bench --locked -- 100`
+with no other local builds or tests running. It compares full and selected complete
+responses in the same executable, alternating order for identical observations.
+Each case contains four disclosed collections of 16, 256 or 4,096 entries, with
+unchanged contents, separated sparse edits, projected movement or reordered values.
+It records complete bytes, inserted candidate values and separate encoding,
+bounded decoding and reconstruction/validation timings. Every sample must reproduce
+the validated next full state through the shared codec and delta application.
+
+This synthetic diagnostic varies individual observations; the ordinary region-count
+benchmark can expose the same observation size at both region counts. It excludes
+transport, client context tracking, memory retention, rendering and engine work.
+Inserted values count encoded candidate contents, not all allocations or client
+copying. Full versus selected is a method comparison, not a prior-version latency
+claim. Keep raw samples local until publication is authorized, and retain the
+ordinary interleaved release engine comparison for scheduling and persistence tails.

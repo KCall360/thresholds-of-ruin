@@ -20,8 +20,17 @@ pub struct CellChanges {
     pub changed: Vec<CellView>,
 }
 
-/// A state view whose visible cells are sent as changes. Every other field is
-/// sent in full; together they are small next to the cells.
+/// An ordered edit against the original base collection. Ranges never refer to
+/// the partially edited result. Empty edit lists retain the whole collection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionEdit<T> {
+    pub start: u32,
+    pub remove: u32,
+    pub insert: Vec<T>,
+}
+
+/// A state view expressed as cell changes and exact ordered collection edits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
     /// Revision of the state this delta applies to.
@@ -34,15 +43,15 @@ pub struct StateDelta {
     pub combat: Option<CombatView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<MotionView>,
-    pub places: Vec<PlaceView>,
+    pub places: Vec<CollectionEdit<PlaceView>>,
     pub actor: ActorId,
     #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
     pub cells: CellChanges,
-    pub ground_items: Vec<GroundItemView>,
-    pub inventory: Vec<ItemView>,
-    pub visible_actors: Vec<ActorView>,
+    pub ground_items: Vec<CollectionEdit<GroundItemView>>,
+    pub inventory: Vec<CollectionEdit<ItemView>>,
+    pub visible_actors: Vec<CollectionEdit<ActorView>>,
     pub ready: bool,
 }
 
@@ -185,7 +194,9 @@ impl StateDelta {
             revision: next.revision,
             combat: observation.combat.clone(),
             motion: observation.motion.clone(),
-            places: observation.places.clone(),
+            places: collection_changes(&base.observation.places, &observation.places, |place| {
+                place.key.as_str()
+            })?,
             actor: observation.actor,
             tick: observation.tick,
             position: observation.position,
@@ -194,9 +205,21 @@ impl StateDelta {
                 removed,
                 changed,
             },
-            ground_items: observation.ground_items.clone(),
-            inventory: observation.inventory.clone(),
-            visible_actors: observation.visible_actors.clone(),
+            ground_items: collection_changes(
+                &base.observation.ground_items,
+                &observation.ground_items,
+                |item| (item.position, item.item.id),
+            )?,
+            inventory: collection_changes(
+                &base.observation.inventory,
+                &observation.inventory,
+                |item| item.id,
+            )?,
+            visible_actors: collection_changes(
+                &base.observation.visible_actors,
+                &observation.visible_actors,
+                |actor| (actor.position, actor.id),
+            )?,
             ready: observation.ready,
         })
     }
@@ -250,16 +273,106 @@ impl StateDelta {
             observation: Observation {
                 combat: self.combat,
                 motion: self.motion,
-                places: self.places,
+                places: apply_collection_changes(&base.observation.places, self.places)?,
                 actor: self.actor,
                 tick: self.tick,
                 position: self.position,
                 visible_cells: cells,
-                ground_items: self.ground_items,
-                inventory: self.inventory,
-                visible_actors: self.visible_actors,
+                ground_items: apply_collection_changes(
+                    &base.observation.ground_items,
+                    self.ground_items,
+                )?,
+                inventory: apply_collection_changes(&base.observation.inventory, self.inventory)?,
+                visible_actors: apply_collection_changes(
+                    &base.observation.visible_actors,
+                    self.visible_actors,
+                )?,
                 ready: self.ready,
             },
         })
     }
+}
+
+// Retain equal occurrences in forward order. This is deliberately not an
+// optimal general-purpose diff: exact reconstruction and bounded work matter
+// more than minimizing edit count. The complete envelope encoder chooses size.
+fn collection_changes<'a, T: Clone + Eq, K: Ord>(
+    base: &'a [T],
+    next: &'a [T],
+    key: impl Fn(&'a T) -> K,
+) -> Option<Vec<CollectionEdit<T>>> {
+    if base == next {
+        return Some(Vec::new());
+    }
+    let mut positions = BTreeMap::new();
+    for (index, value) in base.iter().enumerate() {
+        if positions.insert(key(value), index).is_some() {
+            return None;
+        }
+    }
+    let mut edits = Vec::new();
+    let (mut old_start, mut new_start) = (0, 0);
+    for (new_index, value) in next.iter().enumerate() {
+        let Some(&old_index) = positions.get(&key(value)) else {
+            continue;
+        };
+        if old_index < old_start || base[old_index] != *value {
+            continue;
+        }
+        if old_index != old_start || new_index != new_start {
+            edits.push(CollectionEdit {
+                start: u32::try_from(old_start).ok()?,
+                remove: u32::try_from(old_index - old_start).ok()?,
+                insert: next[new_start..new_index].to_vec(),
+            });
+        }
+        old_start = old_index + 1;
+        new_start = new_index + 1;
+    }
+    if old_start != base.len() || new_start != next.len() {
+        edits.push(CollectionEdit {
+            start: u32::try_from(old_start).ok()?,
+            remove: u32::try_from(base.len() - old_start).ok()?,
+            insert: next[new_start..].to_vec(),
+        });
+    }
+    Some(edits)
+}
+
+fn apply_collection_changes<T: Clone>(
+    base: &[T],
+    edits: Vec<CollectionEdit<T>>,
+) -> Result<Vec<T>, DeltaError> {
+    // Validate every original-base range and total output length before copying.
+    let mut length = base.len();
+    let mut previous = None;
+    for edit in &edits {
+        let start = usize::try_from(edit.start).map_err(|_| DeltaError::InvalidChange)?;
+        let remove = usize::try_from(edit.remove).map_err(|_| DeltaError::InvalidChange)?;
+        let end = start.checked_add(remove).ok_or(DeltaError::InvalidChange)?;
+        if end > base.len()
+            || (remove == 0 && edit.insert.is_empty())
+            || previous.is_some_and(|(before, before_end)| start <= before || start < before_end)
+        {
+            return Err(DeltaError::InvalidChange);
+        }
+        length = length
+            .checked_sub(remove)
+            .and_then(|n| n.checked_add(edit.insert.len()))
+            .ok_or(DeltaError::InvalidChange)?;
+        previous = Some((start, end));
+    }
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(length)
+        .map_err(|_| DeltaError::InvalidChange)?;
+    let mut cursor = 0;
+    for edit in edits {
+        let start = edit.start as usize;
+        result.extend_from_slice(&base[cursor..start]);
+        cursor = start + edit.remove as usize;
+        result.extend(edit.insert);
+    }
+    result.extend_from_slice(&base[cursor..]);
+    Ok(result)
 }
