@@ -462,7 +462,9 @@ string matching. Library/integration checks passed 457 tests and all-target
 Clippy passed; 59 selected process/tool tests passed. Aggregate allocation now
 reserves one maximum frame per connection with bounded borrowing and preserves
 reservations through outstanding output. Its quick gate passed, including 331
-Rust tests and actual-process acceptance. Protocol capabilities are next before
-publication; release/full/final-head CI remain pending. See the full
+Rust tests and 147 actual-process tests. Required typed welcome capabilities now
+advertise static limits; shared clients enforce request/response ceilings and
+capacity rejection uses resource_limit. Its unit/integration/actual-process checks
+passed; release/full/final-head CI remain pending before publication. See the full
 [refactor plan](docs/refactoring.md). The local
 native mouse waiver does not remove ordinary Windows/Linux CI coverage.

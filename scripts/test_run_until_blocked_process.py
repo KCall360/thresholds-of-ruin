@@ -40,13 +40,18 @@ STALL_SECONDS = 5
 
 class RunUntilBlockedProcesses(ProcessTestCase):
     def test_connection_guarantees_reject_excess_client_without_interrupting_play(self):
-        frame = 16 * 1024 * 1024
-        self.server("--outbound-client-bytes", frame, "--outbound-total-bytes", frame * 2)
-        player, _ = self.client()
-        observer, _ = self.client(SPECTATOR_TOKEN, observe=True)
+        frame = 65536
+        self.server("--outbound-frame-bytes", frame, "--outbound-client-bytes", frame,
+                    "--outbound-total-bytes", frame * 2)
+        player, ready = self.client()
+        self.assertEqual(ready["capabilities"]["max_connections"], 2)
+        self.assertEqual(ready["capabilities"]["max_response_bytes"], frame)
+        self.assertEqual(ready["capabilities"]["max_request_bytes"], 16 * 1024)
+        observer, observed = self.client(SPECTATOR_TOKEN, observe=True)
+        self.assertEqual(observed["capabilities"], ready["capabilities"])
         excess = self.launch("tor-client-headless", ["--connect", self.address], token=SPECTATOR_TOKEN)
         rejected = self.frame(excess, lambda value: value.get("type") == "fatal")
-        self.assertEqual(rejected["error"], "Authentication failed: InvalidRequest")
+        self.assertEqual(rejected["error"], "Connection rejected: ResourceLimit")
         self.assertNotIn(SPECTATOR_TOKEN, rejected["error"])
         self.assertNotEqual(excess.child.wait(timeout=15), 0)
         final = self.act(player, {"type": "wait"})

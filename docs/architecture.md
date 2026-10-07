@@ -206,7 +206,11 @@ separately. Closing a connection releases its allowance only after its senders,
 receiver and all in-flight frames are gone. The connection ceiling is the smaller
 of 128 and total/frame bytes (16 with default limits), and active borrowing can
 reduce capacity for new admissions. These host limits do not change simulation
-scheduling or durability. Protocol capability advertisement remains pending.
+scheduling or durability. The welcome advertises typed static limits, including
+the configured frame and connection ceilings. The shared client validates them
+before attaching, enforces request/response byte ceilings, and keeps this metadata
+separate from changing actor permissions. Capacity rejection uses resource_limit;
+malformed requests retain invalid_request.
 
 A single action or travel request can generate multiple updates. Clients do not
 poll to discover changes. Delivery and rendering are independent: a client may

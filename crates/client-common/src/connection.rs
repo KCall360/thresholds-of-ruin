@@ -47,6 +47,7 @@ impl PendingQuery {
         socket: &mut Socket,
         request: Request,
         expired: &'static str,
+        limit: usize,
     ) -> Result<(), ConnectionError> {
         if tokio::time::Instant::now() >= self.deadline {
             return Err(expired.into());
@@ -58,9 +59,7 @@ impl PendingQuery {
             };
             tokio::time::timeout_at(
                 self.deadline,
-                socket.feed(Message::Text(
-                    encode_bounded_json(&message, MAX_REQUEST_BYTES)?.into(),
-                )),
+                socket.feed(Message::Text(encode_bounded_json(&message, limit)?.into())),
             )
             .await
             .map_err(|_| expired)??;
@@ -84,6 +83,7 @@ pub struct Connection {
     /// The asset palette as last heard; [`Connection::next`] keeps it current.
     pub palette: Palette,
     role: AccessRole,
+    capabilities: ServerCapabilities,
     timing: bool,
     previous_timing_write_ms: f64,
     pace: Duration,
@@ -135,29 +135,43 @@ impl Connection {
                 token,
                 frontend: frontend.into(),
             },
+            MAX_REQUEST_BYTES,
         )
         .await?;
-        let role = match timeout(DEADLINE, receive(&mut socket)).await?? {
-            ServerMessage::Welcome {
-                protocol,
-                actors,
-                role,
-                ..
-            } if protocol == PROTOCOL_VERSION && actors.contains(&actor) => role,
-            ServerMessage::Error { code, .. } => {
-                return Err(format!("Authentication failed: {code:?}").into())
-            }
-            _ => return Err("Incompatible welcome or unauthorized actor".into()),
-        };
+        let (role, capabilities) =
+            match timeout(DEADLINE, receive(&mut socket, MAX_RESPONSE_BYTES)).await?? {
+                ServerMessage::Welcome {
+                    protocol,
+                    actors,
+                    role,
+                    capabilities,
+                    ..
+                } if protocol == PROTOCOL_VERSION
+                    && actors.contains(&actor)
+                    && capabilities.is_valid() =>
+                {
+                    (role, capabilities)
+                }
+                ServerMessage::Error { code, .. } => {
+                    return Err(format!("Connection rejected: {code:?}").into())
+                }
+                _ => return Err("Incompatible welcome or unauthorized actor".into()),
+            };
         send(
             &mut socket,
             ClientMessage::Request {
                 request_id: "attach".into(),
                 request: Request::Attach { actor },
             },
+            capabilities.max_request_bytes as usize,
         )
         .await?;
-        let snapshot = match timeout(DEADLINE, receive(&mut socket)).await?? {
+        let snapshot = match timeout(
+            DEADLINE,
+            receive(&mut socket, capabilities.max_response_bytes as usize),
+        )
+        .await??
+        {
             ServerMessage::Snapshot {
                 request_id,
                 snapshot,
@@ -171,6 +185,7 @@ impl Connection {
             state,
             palette: Palette::default(),
             role,
+            capabilities,
             timing: std::env::var_os("TOR_TIMING_DIAGNOSTICS").is_some(),
             previous_timing_write_ms: 0.,
             pace: Duration::ZERO,
@@ -186,6 +201,10 @@ impl Connection {
 
     pub fn role(&self) -> AccessRole {
         self.role
+    }
+
+    pub fn capabilities(&self) -> ServerCapabilities {
+        self.capabilities
     }
 
     /// The least time between two updates the player sees. The server runs
@@ -236,6 +255,7 @@ impl Connection {
                     &mut self.socket,
                     Request::Snapshot,
                     "Stream resynchronization timed out",
+                    self.capabilities.max_request_bytes as usize,
                 )
                 .await?;
         }
@@ -249,6 +269,7 @@ impl Connection {
                     &mut self.socket,
                     Request::Palette,
                     "Asset palette request timed out",
+                    self.capabilities.max_request_bytes as usize,
                 )
                 .await?;
             self.palette_request = None;
@@ -278,6 +299,7 @@ impl Connection {
                 request_id: request_id.clone(),
                 request,
             },
+            self.capabilities.max_request_bytes as usize,
         )
         .await?;
         if let Some(started) = started {
@@ -306,12 +328,22 @@ impl Connection {
             let mut message = match self.held.take() {
                 Some(message) => message,
                 None => match &self.recovery {
-                    Some(recovery) => {
-                        tokio::time::timeout_at(recovery.deadline, receive(&mut self.socket))
-                            .await
-                            .map_err(|_| "Stream resynchronization timed out")??
+                    Some(recovery) => tokio::time::timeout_at(
+                        recovery.deadline,
+                        receive(
+                            &mut self.socket,
+                            self.capabilities.max_response_bytes as usize,
+                        ),
+                    )
+                    .await
+                    .map_err(|_| "Stream resynchronization timed out")??,
+                    None => {
+                        receive(
+                            &mut self.socket,
+                            self.capabilities.max_response_bytes as usize,
+                        )
+                        .await?
                     }
-                    None => receive(&mut self.socket).await?,
                 },
             };
             if self.is_synchronized() && shown(&message) {
@@ -494,21 +526,28 @@ impl Connection {
     }
 }
 
-async fn send(socket: &mut Socket, message: ClientMessage) -> Result<(), ConnectionError> {
+async fn send(
+    socket: &mut Socket,
+    message: ClientMessage,
+    limit: usize,
+) -> Result<(), ConnectionError> {
     timeout(
         DEADLINE,
-        socket.send(Message::Text(
-            encode_bounded_json(&message, MAX_REQUEST_BYTES)?.into(),
-        )),
+        socket.send(Message::Text(encode_bounded_json(&message, limit)?.into())),
     )
     .await??;
     Ok(())
 }
 
-async fn receive(socket: &mut Socket) -> Result<ServerMessage, ConnectionError> {
+async fn receive(socket: &mut Socket, limit: usize) -> Result<ServerMessage, ConnectionError> {
     loop {
         match socket.next().await.ok_or("Server disconnected")?? {
-            Message::Text(text) => return Ok(decode_response(&text)?),
+            Message::Text(text) => {
+                if text.len() > limit {
+                    return Err(DecodeError::TooLarge { limit }.into());
+                }
+                return Ok(decode_response(&text)?);
+            }
             Message::Close(_) => return Err("Server disconnected".into()),
             Message::Ping(_) | Message::Pong(_) => {}
             _ => return Err("Unexpected non-text server frame".into()),

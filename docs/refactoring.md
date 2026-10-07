@@ -2364,3 +2364,23 @@ The preceding pressure-fixture full run retained one failed local native mouse
 check under the maintainer's mouse-verification waiver; it is recorded as a
 qualified local result, never an unqualified full pass. Ordinary CI keeps that
 test. All six original work sequences remain active.
+
+### Static server capabilities (in development)
+
+The welcome now requires typed static byte, retained-state, history-page and
+connection limits. Configured frame ceilings and the derived connection ceiling
+are advertised; borrowed capacity is not presented as currently available
+capacity. Actor permissions remain in readiness. Capacity rejection has its own
+resource_limit code and preserves client identity on rejection. Shared clients
+validate advertisements before attachment and enforce request/response ceilings;
+a locally rejected oversized command leaves its connection usable.
+
+This changes the protocol contract; save, gameplay and scenario axes are unchanged.
+The current wire fixture was recorded through real applications. Capability tests
+failed first, including accepting a response above its advertised ceiling. The
+checkpoint passed 25 shared-client unit tests, 186 server unit tests, 244 affected
+integration tests and all-target Clippy, plus 18 documentation/process checks
+covering configured limits, capacity rejection and native/text recovery. Full
+verification and final-head Windows/Linux CI remain pending before publication.
+Recovery-envelope feasibility, opaque interaction IDs, domain/save separation,
+scenario compilation/generation and the remaining persistence work stay active.

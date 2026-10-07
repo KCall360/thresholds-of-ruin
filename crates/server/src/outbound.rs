@@ -183,6 +183,14 @@ impl Pool {
         self.limits.connection_limit()
     }
 
+    pub(crate) fn capabilities(&self) -> tor_protocol::ServerCapabilities {
+        // Pool construction validates the frame ceiling; the host connection cap is 128.
+        tor_protocol::ServerCapabilities::new(
+            self.limits.frame_bytes as u32,
+            self.connection_limit() as u32,
+        )
+    }
+
     pub(crate) fn new(limits: OutboundLimits) -> Self {
         assert!(limits.is_valid());
         Self {

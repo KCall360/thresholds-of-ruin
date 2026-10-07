@@ -122,6 +122,7 @@ async fn a_connection_repairs_its_palette_after_a_gap_and_a_missing_asset() {
             &mut server,
             ServerMessage::Welcome {
                 protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                 user: "spectator".into(),
                 actors: vec![ActorId(1)],
                 role: AccessRole::Spectator,

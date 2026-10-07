@@ -35,6 +35,7 @@ async fn attach_scripted(server: &mut Server, initial: &Snapshot) {
         server,
         ServerMessage::Welcome {
             protocol: PROTOCOL_VERSION,
+            capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
             user: "test".into(),
             actors: vec![initial.actor],
             role: AccessRole::Player,
@@ -371,6 +372,7 @@ async fn a_sequence_gap_requests_a_snapshot_without_replaying_input_or_losing_pe
             &mut server,
             ServerMessage::Welcome {
                 protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                 user: "player".into(),
                 actors: vec![ActorId(1)],
                 role: AccessRole::Player,
@@ -527,6 +529,7 @@ async fn an_invalid_correlated_recovery_snapshot_fails_without_publishing_or_ret
                 &mut server,
                 ServerMessage::Welcome {
                     protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                     user: "observer".into(),
                     actors: vec![ActorId(1)],
                     role: AccessRole::Spectator,

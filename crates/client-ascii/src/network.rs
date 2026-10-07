@@ -305,6 +305,7 @@ mod tests {
                 &mut socket,
                 ServerMessage::Welcome {
                     protocol: PROTOCOL_VERSION,
+                    capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                     user: "test".into(),
                     actors: vec![ActorId(1)],
                     role: AccessRole::Player,
@@ -506,6 +507,7 @@ mod tests {
                     &mut socket,
                     ServerMessage::Welcome {
                         protocol: PROTOCOL_VERSION,
+                        capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
                         user: "test".into(),
                         actors: vec![initial.actor],
                         role: AccessRole::Player,

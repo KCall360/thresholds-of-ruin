@@ -227,9 +227,15 @@ impl Service {
         account: &Account,
         frontend: String,
     ) -> Result<Connection, Failure> {
-        if !valid_label(&frontend) || self.clients.len() >= self.outbound.connection_limit() {
+        if !valid_label(&frontend) {
             return Err(Failure::new(
                 ErrorCode::InvalidRequest,
+                "Connection is unavailable",
+            ));
+        }
+        if self.clients.len() >= self.outbound.connection_limit() {
+            return Err(Failure::new(
+                ErrorCode::ResourceLimit,
                 "Connection is unavailable",
             ));
         }
@@ -240,7 +246,7 @@ impl Service {
         let (messages, receiver) = self
             .outbound
             .channel(QUEUE)
-            .map_err(|_| Failure::new(ErrorCode::InvalidRequest, "Connection is unavailable"))?;
+            .map_err(|_| Failure::new(ErrorCode::ResourceLimit, "Connection is unavailable"))?;
         self.next_client = next;
         let (close, closing) = watch::channel(false);
         let actors: Vec<_> = self
@@ -273,6 +279,7 @@ impl Service {
             id,
             ServerMessage::Welcome {
                 protocol: PROTOCOL_VERSION,
+                capabilities: self.outbound.capabilities(),
                 user: account.user.clone(),
                 actors,
                 role: account.role,
@@ -2847,7 +2854,14 @@ mod tests {
         let connection = service.connect(&account, "first".into()).unwrap();
         service.disconnect(connection.id);
         let next = service.next_client;
-        assert!(service.connect(&account, "rejected".into()).is_err());
+        assert_eq!(
+            service
+                .connect(&account, "rejected".into())
+                .err()
+                .unwrap()
+                .code,
+            ErrorCode::ResourceLimit
+        );
         assert_eq!(service.next_client, next);
         drop(connection);
         let replacement = service.connect(&account, "replacement".into()).unwrap();

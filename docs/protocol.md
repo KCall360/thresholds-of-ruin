@@ -123,11 +123,21 @@ change the current save format or ruleset.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":27,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":28,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
-server-granted `role` (`player`, `spectator`, or `wizard`).
+server-granted `role` (`player`, `spectator`, or `wizard`), and required typed
+`capabilities`. These state `max_request_bytes`, `max_response_bytes`,
+`max_retained_state_bytes`, `max_connections` and `max_history_page_entries` as
+bounded numeric counts. Clients validate capabilities before attaching and obey
+the advertised request ceiling. The response ceiling follows the configured
+frame limit; the connection ceiling is min(128, total/frame), 16 by default.
+Existing borrowing may exhaust admission before that ceiling. Capacity rejection
+uses `resource_limit`, distinct from `invalid_request`, and consumes no client ID.
+Capabilities describe static limits, not available capacity or actor authority.
+The retained-state ceiling does not promise that a full recovery envelope fits;
+frame admission still checks the complete encoded response.
 It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 
