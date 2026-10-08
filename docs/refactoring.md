@@ -15,6 +15,28 @@ Client selection uses disclosed order rather than opaque-reference bytes.
 This increment remains unpublished pending final verification and targeted release
 comparisons; it does not complete the transport/persistence separation sequence.
 
+The initial opaque-reference comparison validated all eighteen reports from three
+interleaved release rounds on the Windows i7-9750H host with HDD-backed saves.
+Request-call measurements include rejected attempts; engine execution measurements
+exclude them. The 1,000-item client application interval increased, while request
+and transfer results were mixed. No broad speedup is established.
+
+| Interval | n per side | Before p50 / p95 / max (ms) | After p50 / p95 / max (ms) |
+| --- | --- | --- | --- |
+| Eight-region memory request call | 945 | 0.534 / 0.802 / 1.737 | 0.521 / 0.769 / 2.110 |
+| Eight-region durable request call | 945 | 0.533 / 0.779 / 0.917 | 0.531 / 0.787 / 1.460 |
+| 1,000-item client application | 1,200 | 0.920 / 1.047 / 2.141 | 1.137 / 1.254 / 2.994 |
+| 1,000-item transfer | 1,200 | 0.365 / 0.450 / 0.854 | 0.363 / 0.451 / 0.789 |
+
+Operation, observation and saved-byte counts matched. The 1,000-item workload's
+disclosed-byte sum per round grew from 3,745,020 to 5,008,820 bytes; its saved-byte
+sum stayed 18,513,920 bytes. The durable latency case retained 305 selected deltas
+per round, with selected complete-envelope bytes growing from 1,521,957 to
+1,613,572. Larger references have an explicit disclosure and client cost.
+These intervals omit disclosure projection, so a follow-up measurement adds
+identical projection timers to both sides before assessing handle derivation.
+Final publication verification and both-platform CI remain required.
+
 ## Contracts to preserve
 
 The server owns authority, world topology, scheduling, and disclosure. Gameplay

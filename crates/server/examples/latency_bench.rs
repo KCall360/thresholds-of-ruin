@@ -171,7 +171,9 @@ impl Runner {
             None => self.engine.advance_ai_profiled(actor),
         };
         let command_call_ms = start.elapsed().as_secs_f64() * 1000.;
+        let start = Instant::now();
         let after = self.engine.state(actor).unwrap();
+        let disclosure_projection_ms = start.elapsed().as_secs_f64() * 1000.;
         if let Err(error) = &result {
             if expected != "blocked" {
                 println!(
@@ -276,6 +278,7 @@ impl Runner {
             timings.insert("rendering".into(), start.elapsed().as_secs_f64() * 1000.);
         }
         timings.insert("command_call".into(), command_call_ms);
+        timings.insert("disclosure_projection".into(), disclosure_projection_ms);
         for (phase, value) in &timings {
             self.distributions
                 .entry((label.to_string(), phase.clone()))

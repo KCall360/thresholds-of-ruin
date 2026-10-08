@@ -152,7 +152,7 @@ def extract_latency(rows):
         elif kind == "sample":
             if row["expected"] != "blocked":
                 timings[case]["authoritative_total"].append(row["phases_ms"]["authoritative_total"])
-            for metric in ("wire_encoding", "wire_decoding"):
+            for metric in ("command_call", "disclosure_projection", "wire_encoding", "wire_decoding"):
                 if metric in row["phases_ms"]:
                     timings[case][metric].append(row["phases_ms"][metric])
             for name, value in (row.get("profile") or {}).items():

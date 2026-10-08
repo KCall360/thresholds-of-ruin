@@ -596,6 +596,17 @@ content and invalid-state recovery suites passed all 23 focused process tests.
 The tenth was the narrowly waived LockApp mouse overlay; retain ordinary CI
 coverage and do not describe that broad run as an unqualified pass. Fresh final
 publication verification, targeted release measurements and exact-head CI remain pending.
-This dirty work is unpublished and must not be deployed or treated
+This committed follow-up is unpublished and must not be deployed or treated
 as a completed protocol checkpoint. No text product fixes or scripting runtime
 were added. All six refactor sequences remain in scope.
+
+The initial targeted release comparison validated all eighteen reports with
+matching operation/save counts and larger wire payloads. The 1,000-item client
+application interval increased; no broad performance improvement is claimed.
+Its latency timers omitted disclosure projection. Identical benchmark-only
+projection instrumentation is now prepared on both baseline and current source;
+the comparator retains request-call and projection intervals without inventing
+missing historical measurements. The new extraction regression failed first,
+then all 26 tooling tests passed with task-owned temporary storage; the initial
+default-temp sandbox failures remain recorded. Example Clippy and documentation
+checks passed. Measure this missing boundary before final publication.
