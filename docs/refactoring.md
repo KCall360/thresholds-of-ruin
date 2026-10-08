@@ -2843,6 +2843,24 @@ samples remain local and no release assets or performance-ledger entries were
 published. The compared Rust and benchmark inputs precede only the documentation
 of these results.
 
+**Catalog reference provenance (in development).** Six failing-first actual-validator
+cases reproduced missing source locations for character/archetype/actor combat
+factions, faction enemies, asset-theme keys and the authored default character.
+The existing diagnostic owner now selects unique decoded array values and terminal
+table-key spans. Faction validation retains its sorted semantic order while source
+selection follows the authored occurrence. Ambiguous or stale values receive no
+invented coordinates. Combat attribute validation still precedes faction lookup,
+and diagnostic source is acquired only after a catalog failure. Explicit CLI
+character selection retains its own error without blaming the manifest default,
+even when both select the same invalid ID. No diagnostic state is persisted.
+
+Forty scenario/diagnostic units, seven scenario integrations and sixteen actual
+scenario cases passed, alongside workspace Clippy and Python lint. Controls retain
+empty faction catalogs and zone-local asset themes. The old generic faction-error
+assertion now requires its exact authored location and still checks that validation
+rewrites no files. Final combined validation checkpoint and both-platform CI remain
+required; this increment does not close the performance or completion audit.
+
 **Scenario reference paths (in development).** Nine failing-first actual-validator
 cases reproduced missing locations for portal destinations, character item
 identities, objective anchors/items, region zones, generator actor/item archetypes,
@@ -2871,7 +2889,72 @@ per-message drain loop fails the shared-deadline regression. Socket destruction
 still precedes release of in-flight byte leases. All 236 server units, seventeen
 WebSocket integrations and nineteen actual-client pressure/recovery cases passed
 on Windows before the final drain-bound cleanup; all eight final transport units
-passed. Full final local debug and exact-head Windows/Linux CI remain required.
-Earlier failures are retained, and the desktop candidate remains inactive.
+passed. The published transport checkpoint `1d59f3e` completed the remaining
+architecture, strict documentation and 949 Rust checks. Its local verification
+is qualified: 303 Python/application tests passed, while LockApp covered the
+native mouse target deferred by the maintainer. That failure is retained; no test
+is excluded from CI. Windows debug/release and Linux release passed on this head;
+Linux debug and final CI completion are still required. Earlier failures are
+retained, and the desktop candidate remains inactive.
 No format axis changed. Broader compiler ownership, measured performance and final
 requirements audit remain open; this increment does not close the entire refactor.
+
+**Disclosed occurrence validation (in development).** A failing-first key-work
+regression observed 3,271 ordering comparisons for 1,000 reversed opaque identities.
+Canonical ordered views already avoid allocation and retain that path. Unordered
+uniqueness and carried/ground conflict checks now use transient hash membership;
+the tables never determine observation, error or simulation ordering. Relative
+positions and entity identity still distinguish portal occurrences. Format bytes,
+target derivation, structural rejection and atomic client publication are unchanged.
+Both operation-count tests, all 72 protocol and 78 shared-client tests, fifteen
+actual-client recovery scenarios and workspace Clippy passed. Two added native/text
+process cases reject and repair a duplicate among 1,000 unordered inventory items.
+The release comparison below measures the original optimization commit; final
+publication verification remains pending.
+The existing 1,000-item benchmark primarily measures ground-item disclosure with
+single-item pickup/drop, so its timings are not a large-inventory timing claim.
+
+**Disclosed-validation release comparison.** Three interleaved ABAB rounds on the
+same Windows i7-9750H/HDD host compared `b246ac6` with `387f574`, with five cycles
+per run. All twelve runs validated; no competing builds were present. All 546
+source hashes were unchanged through measurement. Every reported operation,
+observation, candidate, recovery and byte count matched. The item workload retained
+5,008,820 disclosed bytes and 18,513,920 saved bytes per reported round; the durable
+case retained a 3,690,496-byte save. Values below are milliseconds, p50 / p95 / maximum.
+
+| Case | Interval | n per side | Before | After |
+| --- | --- | --- | --- | --- |
+| r8-a8-h100-durable | Authoritative execution | 7,500 | 0.0397 / 2.3613 / 5.7771 | 0.0387 / 2.3551 / 4.4941 |
+| r8-a8-h100-durable | Command call | 7,530 | 0.0409 / 2.3616 / 5.7799 | 0.0398 / 2.3562 / 4.4955 |
+| r8-a8-h100-durable | Disclosure projection | 7,530 | 0.2209 / 0.3450 / 0.8919 | 0.2212 / 0.3437 / 0.7018 |
+| r8-a8-h100-durable | Final flush | 3 | 346.7334 / 379.0796 / 379.0796 | 255.7082 / 340.6177 / 340.6177 |
+| r8-a8-h100-durable | Restart replay | 3 | 424.4503 / 427.9914 / 427.9914 | 426.3819 / 430.3762 / 430.3762 |
+| r8-a8-h100-durable | Wire decoding | 2,373 | 0.0210 / 0.0980 / 0.3289 | 0.0208 / 0.0968 / 0.2225 |
+| r8-a8-h100-durable | Wire encoding | 2,373 | 0.0879 / 0.1589 / 0.4750 | 0.0873 / 0.1496 / 0.3210 |
+| i1000-id256 | Client application | 1,200 | 1.1451 / 1.4479 / 2.6213 | 1.0751 / 1.3665 / 2.6134 |
+| i1000-id256 | Client rendering | 1,200 | 1.0492 / 1.3615 / 1.9961 | 1.0488 / 1.3862 / 3.0156 |
+| i1000-id256 | Construction | 60 | 8.3755 / 9.0548 / 9.4192 | 8.4140 / 9.1330 / 12.0927 |
+| i1000-id256 | Knowledge | 60 | 0.4486 / 0.5160 / 0.5362 | 0.4716 / 0.5582 / 1.0727 |
+| i1000-id256 | Resume | 60 | 39.7226 / 43.2900 / 43.8566 | 40.2043 / 43.8568 / 76.2165 |
+| i1000-id256 | Save | 60 | 116.6854 / 402.6533 / 578.4398 | 122.2099 / 424.8423 / 622.1923 |
+| i1000-id256 | Transfer | 1,200 | 0.4236 / 0.5369 / 2.5104 | 0.4179 / 0.5465 / 1.5940 |
+
+The measured 1,000-item disclosure's client-application p95 improved about 5.6%;
+every head round's p95 was below every base round's p95. This fixture primarily
+measures ground-item disclosure and single-item transfers, not a 1,000-item
+inventory. Rendering, construction, knowledge, resume and save tails increased;
+the resume maximum rose from 43.8566 to 76.2165 ms and save p95 rose from 402.6533
+to 424.8423 ms. Three durable flush/restart samples per side are weak tail evidence.
+This establishes a limited disclosure-application result and unchanged work,
+not a broad speedup or closure of the persistence/restore investigations. Direct
+engine execution is not end-to-end queued-client completion. Raw samples remain
+local; no release assets or performance-ledger entries were published.
+
+The preserved intermediate optimization commit `d2ae8e6` rebased the optimization
+onto the PR #81 fixed-capacity test-relay repair. At that intermediate commit, all
+491 Rust, Cargo, scenario and other script paths relevant to the comparison
+retained their exact measured Git blobs; documentation and three pressure-test
+files differed. Those Rust item/latency benchmark paths do not use the relay.
+The current combined boundary-validation checkpoint also contains later compiler
+and transport changes. Its inherited measurements remain bound to the actual
+`387f574` / `b246ac6` pair and do not measure the later server changes.

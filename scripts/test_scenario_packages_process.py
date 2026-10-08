@@ -278,7 +278,7 @@ class ScenarioPackageProcesses(ProcessTestCase):
     def test_validator_identifies_invalid_declarations_without_rewriting_package(self):
         cases = [
             ('faction', 'scenario.toml', '\nfactions = { guard = ["missing"] }\n',
-             'scenario.toml: faction "guard": Invalid faction relationship'),
+             'scenario.toml:{line}:{column}: faction "guard": Invalid faction relationship'),
             ('profile', 'scenario.toml', '\nai_profiles = { guard = { flee_percent = 101 } }\n',
              'scenario.toml: AI profile "guard": Invalid AI profile'),
             ('actor', 'regions/1.toml', '\nactors = [{ id = 9, at = [1,1,0], controller = "bad" }]\n',
@@ -292,6 +292,11 @@ class ScenarioPackageProcesses(ProcessTestCase):
                 shutil.copytree(ROOT / 'scenarios/two-room', package)
                 path = package / source
                 path.write_text(path.read_text() + edit)
+                if name == 'faction':
+                    reference_line = edit.strip()
+                    message = message.format(
+                        line=path.read_text().splitlines().index(reference_line) + 1,
+                        column=reference_line.index('"missing"') + 1)
                 before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
                 result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
                                         capture_output=True, text=True, timeout=15)
@@ -412,6 +417,91 @@ class ScenarioPackageProcesses(ProcessTestCase):
         error = json.loads(invalid.stderr)['error']
         self.assertEqual(error['code'], 'scenario_invalid')
         self.assertIn('anchor', error['message'])
+
+
+    def test_faction_and_asset_theme_references_keep_authored_source_identity(self):
+        cases = [
+            ('character-faction', 'tests/generated-filler', 'scenario.toml',
+             'faction = "delvers"', 'faction = "m\\u0069ssing"', '"m\\u0069ssing"', 'faction'),
+            ('archetype-faction', 'tests/generated-filler', 'scenario.toml',
+             'faction = "vermin"', 'faction = "missing"', '"missing"', 'faction'),
+            ('faction-enemy', 'tests/generated-filler', 'scenario.toml',
+             'delvers = []', 'delvers = ["zmissing", "amissing"]', '"amissing"', 'faction'),
+            ('asset-theme-key', 'tests/generated-filler', 'scenario.toml',
+             'caves = ["terrain.floor.cave",', '"m\\u0069ssing" = ["terrain.floor.cave",', '"m\\u0069ssing"', 'theme'),
+        ]
+        cases.extend([
+            ('actor-faction', 'tests/generated-filler', 'regions/1.toml',
+             'anchors = { start = [2, 2, 0], east = [11, 2, 0] }',
+             'anchors = { start = [2, 2, 0], east = [11, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], combat = { name = "guard", faction = "missing" } }]',
+             '"missing"', 'faction'),
+            ('default-character', 'tests/generated-filler', 'scenario.toml',
+             'default_character = 1', 'default_character = 99', '99', 'selected character'),
+        ])
+        for name, fixture, source, old, new, expected, diagnostic in cases:
+            with self.subTest(reference=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios' / fixture, package)
+                path = package / source
+                text = path.read_text(encoding='utf-8')
+                self.assertEqual(text.count(old), 1)
+                text = '# Écho: "missing", "amissing", and "zmissing" are decoys.\n' + text.replace(old, new)
+                path.write_bytes(text.encode('utf-8'))
+                reference_line = next(line for line in text.splitlines() if new.splitlines()[-1] in line)
+                line = text.splitlines().index(reference_line) + 1
+                column = reference_line.index(expected) + 1
+                error = self.validation_failure(package)
+                self.assertIn(diagnostic, error['message'].lower())
+                self.assertIn(f'{source}:{line}:{column}', error['message'])
+
+    def test_explicit_character_selection_has_no_invented_manifest_location(self):
+        package = self.directory / 'explicit-selection'
+        shutil.copytree(ROOT / 'scenarios/tests/generated-filler', package)
+        path = package / 'scenario.toml'
+        text = path.read_text(encoding='utf-8').replace('default_character = 1', 'default_character = 99')
+        path.write_bytes(text.encode('utf-8'))
+        before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
+        env = {k: v for k, v in os.environ.items() if k not in ('TOR_WIZARD_TOKEN', 'TOR_SPECTATOR_TOKEN')}
+        env['TOR_SERVER_TOKEN'] = TOKEN
+        for selected in ('99', '98'):
+            with self.subTest(selected=selected):
+                save = self.directory / f'explicit-{selected}.db'
+                result = subprocess.run([
+                    self.bin / ('tor-server' + self.suffix), '--scenario', package,
+                    '--allow-unvalidated', '--character', selected, '--save', save,
+                ], capture_output=True, text=True, encoding='utf-8', env=env, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                message = result.stderr
+                self.assertIn('Unknown selected character ID', message)
+                self.assertNotRegex(message, r'scenario\.toml:\d+:\d+')
+                self.assertFalse(save.exists())
+        self.assertEqual(before, {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()})
+
+    def test_invalid_combat_attributes_take_precedence_over_missing_faction(self):
+        package = self.directory / 'combat-priority'
+        shutil.copytree(ROOT / 'scenarios/tests/generated-filler', package)
+        path = package / 'scenario.toml'
+        text = path.read_text(encoding='utf-8').replace('max_hp = 20', 'max_hp = 0').replace('faction = "delvers"', 'faction = "missing"')
+        path.write_bytes(text.encode('utf-8'))
+        message = self.validation_failure(package)['message']
+        self.assertIn('character 1', message)
+        self.assertIn('combat attributes', message)
+        self.assertNotRegex(message, r'scenario\.toml:\d+:\d+')
+
+    def test_empty_faction_catalog_and_zone_local_asset_themes_remain_valid(self):
+        for name, old, new in [
+            ('zone-local-themes', 'factions = { delvers = [], vermin = [] }', 'factions = { delvers = [], vermin = [] }'),
+            ('empty-factions', 'factions = { delvers = [], vermin = [] }', 'factions = {}'),
+        ]:
+            with self.subTest(control=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / 'scenarios/tests/generated-filler', package)
+                path = package / 'scenario.toml'
+                text = path.read_text(encoding='utf-8')
+                self.assertEqual(text.count(old), 1)
+                path.write_bytes(text.replace(old, new).encode('utf-8'))
+                result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package], capture_output=True, text=True, encoding='utf-8', timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

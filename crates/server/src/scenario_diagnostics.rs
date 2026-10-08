@@ -8,6 +8,8 @@ use toml::de::{DeTable, DeValue, ValueDeserializer};
 
 #[derive(Clone, Copy)]
 pub(super) enum Origin<'a> {
+    Manifest,
+    Faction(&'a str),
     Character(u64),
     Objective,
     Archetype(&'a str),
@@ -27,6 +29,8 @@ impl Origin<'_> {
             None => file.into(),
         };
         let declaration = match self {
+            Self::Manifest => source("scenario.toml"),
+            Self::Faction(name) => format!("{}: faction {name:?}", source("scenario.toml")),
             Self::Archetype(name) => format!("{}: archetype {name:?}", source("scenario.toml")),
             Self::Objective => format!("{}: objective", source("scenario.toml")),
             Self::Character(id) => format!("{}: character {id}", source("scenario.toml")),
@@ -43,6 +47,8 @@ impl Origin<'_> {
 
     pub(super) fn names(self) -> (&'static str, &'static str) {
         match self {
+            Self::Manifest => ("Scenario", "scenario"),
+            Self::Faction(_) => ("Faction", "faction"),
             Self::Objective => ("Objective", "objective"),
             Self::Character(_) => ("Character", "character"),
             Self::Archetype(_) => ("Archetype", "archetype"),
@@ -75,7 +81,8 @@ impl Origin<'_> {
         expected: ReferenceValue<'_>,
     ) -> Failure {
         let selection = match self {
-            Self::Objective => Selection::Document,
+            Self::Manifest | Self::Objective => Selection::Document,
+            Self::Faction(name) => Selection::Declaration("factions", Declaration::Name(name)),
             Self::Region { id, .. } => Selection::Root(id),
             Self::Character(id) => Selection::Declaration("characters", Declaration::Id(id)),
             Self::Archetype(name) => Selection::Declaration("archetypes", Declaration::Name(name)),
@@ -115,12 +122,25 @@ pub(super) enum Declaration<'a> {
 pub(super) enum PathSegment<'a> {
     Field(&'a str),
     Index(usize),
+    UniqueValue(ReferenceValue<'a>),
+    Key(&'a str),
 }
 
 #[derive(Clone, Copy)]
 pub(super) enum ReferenceValue<'a> {
     Text(&'a str),
     Id(u64),
+}
+
+impl ReferenceValue<'_> {
+    fn matches(self, value: &toml::Spanned<DeValue<'_>>) -> bool {
+        match self {
+            Self::Text(expected) => value.get_ref().as_str() == Some(expected),
+            Self::Id(expected) => {
+                u64::deserialize(ValueDeserializer::from(value.clone())).ok() == Some(expected)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -172,22 +192,41 @@ fn value_location<'a>(
     };
     let mut value = declaration;
     let mut selected = None;
-    for segment in path {
+    for (position, segment) in path.iter().enumerate() {
         let child = match segment {
             PathSegment::Field(field) => value.get(*field)?,
             PathSegment::Index(index) => value.as_array()?.get(*index)?,
+            PathSegment::UniqueValue(expected) => {
+                let mut matching = value
+                    .as_array()?
+                    .iter()
+                    .filter(|entry| expected.matches(entry));
+                let child = matching.next()?;
+                if matching.next().is_some() {
+                    return None;
+                }
+                child
+            }
+            PathSegment::Key(name) => {
+                if position + 1 != path.len()
+                    || !matches!(expected, ReferenceValue::Text(expected) if expected == *name)
+                {
+                    return None;
+                }
+                let (key, _) = value
+                    .as_table()?
+                    .iter()
+                    .find(|(key, _)| key.get_ref().as_ref() == *name)?;
+                let span = key.span();
+                text.get(span.clone())?;
+                return Some(SourceLocation { span, text });
+            }
         };
         selected = Some(child);
         value = child.get_ref();
     }
     let selected = selected?;
-    let matches = match expected {
-        ReferenceValue::Text(expected) => value.as_str() == Some(expected),
-        ReferenceValue::Id(expected) => {
-            u64::deserialize(ValueDeserializer::from(selected.clone())).ok() == Some(expected)
-        }
-    };
-    if !matches {
+    if !expected.matches(selected) {
         return None;
     }
     let span = selected.span();
@@ -219,6 +258,104 @@ fn reference_location<'a>(
 mod tests {
     use super::super::fail;
     use super::*;
+
+    #[test]
+    fn unique_values_use_authored_occurrences_and_suppress_ambiguous_decodings() {
+        let text = "# amissing is a decoy\nfactions = { delvers = [\"zmissing\", \"amissing\"] }\n";
+        let path = [PathSegment::UniqueValue(ReferenceValue::Text("amissing"))];
+        let location = value_location(
+            text,
+            Selection::Declaration("factions", Declaration::Name("delvers")),
+            &path,
+            ReferenceValue::Text("amissing"),
+        )
+        .unwrap();
+        assert_eq!(&text[location.span.clone()], "\"amissing\"");
+        assert_eq!(location.span.start, text.rfind("\"amissing\"").unwrap());
+        let ambiguous = "factions = { delvers = [\"missing\", \"m\\u0069ssing\"] }";
+        assert!(value_location(
+            ambiguous,
+            Selection::Declaration("factions", Declaration::Name("delvers")),
+            &[PathSegment::UniqueValue(ReferenceValue::Text("missing"))],
+            ReferenceValue::Text("missing")
+        )
+        .is_none());
+        assert!(value_location(
+            text,
+            Selection::Declaration("factions", Declaration::Name("delvers")),
+            &path,
+            ReferenceValue::Text("stale")
+        )
+        .is_none());
+        assert!(value_location(
+            "refs=[2,0x2]",
+            Selection::Document,
+            &[
+                PathSegment::Field("refs"),
+                PathSegment::UniqueValue(ReferenceValue::Id(2))
+            ],
+            ReferenceValue::Id(2)
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn terminal_keys_keep_escaped_unicode_spans_and_reject_stale_paths() {
+        let text = "# Écho: cavés is a decoy\n[assets]\n\"c\\u0061vés\" = []\n";
+        let path = [PathSegment::Field("assets"), PathSegment::Key("cavés")];
+        let location = value_location(
+            text,
+            Selection::Document,
+            &path,
+            ReferenceValue::Text("cavés"),
+        )
+        .unwrap();
+        assert_eq!(&text[location.span.clone()], "\"c\\u0061vés\"");
+        assert_eq!(location.coordinates(), (3, 1));
+        assert!(value_location(
+            text,
+            Selection::Document,
+            &path,
+            ReferenceValue::Text("stale")
+        )
+        .is_none());
+        assert!(value_location(text, Selection::Document, &path, ReferenceValue::Id(0)).is_none());
+        assert!(value_location(
+            text,
+            Selection::Document,
+            &[
+                PathSegment::Field("assets"),
+                PathSegment::Key("cavés"),
+                PathSegment::Index(0)
+            ],
+            ReferenceValue::Text("cavés")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn unavailable_source_keeps_manifest_and_faction_failure_context() {
+        let failure = Origin::Manifest.reference_path(
+            fail("Unknown selected character ID"),
+            None,
+            &[PathSegment::Field("default_character")],
+            ReferenceValue::Id(99),
+        );
+        assert_eq!(
+            failure.message,
+            "scenario.toml: Unknown selected character ID"
+        );
+        let failure = Origin::Faction("delvers").reference_path(
+            fail("Invalid faction relationship"),
+            None,
+            &[PathSegment::UniqueValue(ReferenceValue::Text("missing"))],
+            ReferenceValue::Text("missing"),
+        );
+        assert_eq!(
+            failure.message,
+            "scenario.toml: faction \"delvers\": Invalid faction relationship"
+        );
+    }
 
     #[test]
     fn root_array_references_locate_the_requested_occurrence_and_verify_region_identity() {

@@ -244,7 +244,11 @@ copies. A bounded channel backpressures its dedicated connection worker; the
 native loop limits update work per turn before handling input. Every received
 observation still refreshes memory, including intermediate views in a burst.
 Shared-client validation finishes before mutation; snapshot branch boundaries
-control memory retention. Slow-server-stream failure still requires relaunch
+control memory retention. Canonically ordered occurrence lists keep an allocation-
+free uniqueness scan; unordered lists use transient hash membership. Those tables
+are never iterated to produce state, errors or effects. Identity conflict checks
+also use membership, preserving the supplied disclosure order and distinguishing
+portal occurrences by relative position. Slow-server-stream failure still requires relaunch
 and a fresh snapshot, rather than silently skipping missing state.
 
 Entity references are stable for disclosed entities. Names, properties, contents,

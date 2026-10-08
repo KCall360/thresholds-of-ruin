@@ -200,6 +200,12 @@ class StreamRecoveryProcesses(ProcessTestCase):
     def test_text_invalid_reconstructed_inventory_and_relaunch(self):
         self.exercise_invalid_state('text', 'invalid_inventory')
 
+    def test_ascii_duplicate_unordered_inventory_repairs_without_partial_publication(self):
+        self.exercise_invalid_state('ascii', 'duplicate_inventory')
+
+    def test_text_duplicate_unordered_inventory_repairs_without_partial_publication(self):
+        self.exercise_invalid_state('text', 'duplicate_inventory')
+
     def test_ascii_invalid_collection_range_and_relaunch(self):
         self.exercise_invalid_state('ascii', 'invalid_collection_range')
 
