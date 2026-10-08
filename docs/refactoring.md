@@ -2785,3 +2785,55 @@ integrations, 11 real scenario process cases and six item/palette process checks
 passed, along with workspace Clippy and changed Python lint. Final review is
 complete; the debug publication gate and publication remain pending.
 No format axis changed. The other original refactor obligations remain open.
+
+**Scenario reference ownership published and deployed (2026-10-08).**
+[PR #79](https://github.com/KCall360/thresholds-of-ruin/pull/79) merged as
+`9c3c847` after all nine [exact-head CI jobs](https://github.com/KCall360/thresholds-of-ruin/actions/runs/37730888414)
+passed on `76ff104`. Full local debug verification passed 304 Python/application
+and 931 Rust tests, formatting, Clippy, architecture and strict Rust documentation
+on 544 unchanged inputs, with no waiver. The inactive immutable desktop candidate
+passed 33 real-client/copied-validator checks without rebuilding. All three
+launchers now use it; post-activation source, binary, backup and shortcut hashes
+were verified. Earlier builds and saves remain preserved.
+
+**Save scenario ownership (in development).** Actual-process regressions proved
+that the stored package index accepted duplicate anchor-map keys and omitted
+canonical nullable fields. Save-owned schemas now explicitly map scenario,
+fixture actor/coordinate, streaming, package, nested manifest/certificate and
+indexed-region values. The index uses the same strict save decoder and sorted
+identity validation. Authoring JSON parsing remains a separate boundary.
+Encoding borrows definitions without copying archetypes or reading region files;
+decoding moves fields into runtime values and constructs containers directly.
+Four canonical fixtures captured from the pre-refactor writer pin existing save
+shapes. Golden-format and malformed-index unit checks passed, and all 28 actual
+save/scenario/streaming process checks passed, including the failing-first cases.
+Eight schema units, the borrowed-encoding check, five checkpoint, twelve package-
+pinning and seven scenario integrations, and workspace Clippy passed. Targeted
+release comparison passed; publication verification remains pending.
+Save 22 and all other format axes are unchanged. The portable export contract is
+[documented separately](checkpoints.md#portable-export-contract-design); its
+container, compression and commands are not implemented. Further compiler,
+measured performance and final requirements audit work remain in scope.
+
+**Save-schema release comparison.** On the same Windows machine, three interleaved
+ABAB rounds compared `76ff104` with `fa63a0e` in the ordinary durable fixture and
+16/256-region streamed packages, with five cycles per run. All 18 runs validated;
+no competing builds were present, and all 546 source hashes remained unchanged.
+Every reported operation/recovery/wire count matched. Final save sizes matched at
+3,690,496, 610,304 and 679,936 bytes respectively. Values below are milliseconds,
+base → new; each timing column shows p50 / p95 / maximum.
+
+| Case | Command call (n per side) | Restart (n=3 per side) | Final flush (n=3 per side) |
+| --- | --- | --- | --- |
+| `r8-a8-h100-durable` | 0.0400 / 2.3994 / 5.7457 → 0.0393 / 2.3882 / 6.2772 (7,530) | 430.3649 / 431.0764 / 431.0764 → 427.5381 / 430.3247 / 430.3247 | 338.7125 / 339.7808 / 339.7808 → 313.9381 / 325.4507 / 325.4507 |
+| `stream-r16-durable` | 0.2338 / 0.3986 / 0.6013 → 0.2372 / 0.4066 / 0.6509 (2,100) | 162.9365 / 162.9976 / 162.9976 → 162.0679 / 164.3002 / 164.3002 | 352.8775 / 512.0768 / 512.0768 → 107.4088 / 714.8498 / 714.8498 |
+| `stream-r256-durable` | 0.2356 / 0.4187 / 2.6254 → 0.2403 / 0.4004 / 1.4024 (2,100) | 164.9164 / 167.8028 / 167.8028 → 169.5077 / 174.3199 / 174.3199 | 384.8520 / 392.1537 / 392.1537 → 224.9687 / 547.4888 / 547.4888 |
+
+The streamed flush maxima rose substantially despite lower medians; three samples
+per side and variable batch timing do not establish a causal speedup or slowdown.
+The 256-region restart p95 rose about 3.9%. This comparison preserves counts and
+serialized sizes and reports the stricter decoder's observed costs; it does not
+close persistence/restore tails or claim a broad performance improvement. Raw
+samples remain local and no release assets or performance-ledger entries were
+published. The compared Rust and benchmark inputs precede only the documentation
+of these results.

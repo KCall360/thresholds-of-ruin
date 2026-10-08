@@ -685,8 +685,7 @@ fn attach_package(conn: &Connection, archive: &mut Archive) -> Result<BTreeSet<u
             Err(invalid_archive())
         };
     };
-    let index =
-        crate::scenario_package::RegionIndex::from_bytes(&bytes).map_err(|_| invalid_archive())?;
+    let index = schema::scenario::decode_index(&bytes)?;
     // Only identities are read here; source text stays lazy. Validate each
     // identity before inserting rather than collecting an unbounded list.
     let mut sources = BTreeSet::new();
@@ -787,7 +786,10 @@ impl Store {
             tx.execute("INSERT INTO journal VALUES (0,?1)", [bytes])
                 .map_err(|_| storage_failure())?;
             if let Some(package) = &initial.scenario.package {
-                for (chunk, bytes) in package.index.to_bytes()?.chunks(PACKAGE_CHUNK).enumerate() {
+                for (chunk, bytes) in schema::scenario::encode_index(&package.index)?
+                    .chunks(PACKAGE_CHUNK)
+                    .enumerate()
+                {
                     tx.execute(
                         "INSERT INTO package VALUES (?1,?2)",
                         params![chunk as i64, bytes],

@@ -5,6 +5,9 @@
 use serde::{Deserialize, Serialize};
 use tor_protocol as wire;
 
+#[path = "save_scenario.rs"]
+pub(crate) mod scenario;
+
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "wire::ActorId", transparent)]
 pub(crate) struct ActorId(pub u64);
