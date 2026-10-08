@@ -143,3 +143,51 @@ unit tests, seven package integration tests, 17 package process tests, three
 repository certificate/reference checks and seven documentation checks pass.
 The process regression validates CRLF sources, starts from an LF checkout and
 restarts a saved game with CRLF sources. Generated package text remains LF.
+
+## Closeout evidence
+
+The release comparison against PR #87 (`28c5932`) measured feature commit
+`98bc012` in three interleaved baseline/current rounds, with all 30 runs passing
+their respective validators. Item and client display tables were expanded from
+the SHA-verified retained samples to include their actual measured groups.
+The machine fingerprint is `6a1878811f37`: i7-9750H, 15.8 GiB RAM, Windows 11
+build 26200, NTFS on ST1000LM035 HDD, Rust 1.98.1. Timings are diagnostic;
+each row below uses the same machine and release profile. Intervals are ms.
+
+| Case and interval | n per side | Baseline p50 / p95 / max | Adapted p50 / p95 / max |
+| --- | ---: | --- | --- |
+| 8 regions, 1 actor: authoritative turn | 915 | 0.542 / 0.791 / 0.921 | 0.541 / 0.782 / 2.084 |
+| 64 regions, 8 actors: authoritative turn | 7,500 | 0.030 / 2.544 / 5.619 | 0.031 / 2.573 / 6.601 |
+| Combat, 8 actors, 1,000 history: AI decision | 576 | 0.0005 / 0.564 / 1.161 | 0.0004 / 0.558 / 0.813 |
+| 1,000 items, 256 identities: transfer | 1,200 | 0.402 / 0.531 / 1.083 | 0.394 / 0.527 / 1.053 |
+| Client, 20,956 cells, burst 64: render | 60 | 2.413 / 2.783 / 3.019 | 2.361 / 2.839 / 3.049 |
+
+Operation counts are unchanged. Wire/save byte counts change with physical
+classes, preparation and interaction data: ordinary sent-envelope totals rise
+by 11,625 bytes per round in each case; the large item case's disclosed total
+rises from 5,008,820 to 5,348,820 bytes and its saved total from 18,513,920 to
+21,053,440 bytes. Combat save totals also increase, while the small item case's
+saved total decreases. No timings or byte-size targets are relaxed. Raw samples
+remain outside Git pending maintainer approval for measurement publication.
+
+Release binaries for the server, scenario utility, text, ASCII and headless
+clients were rebuilt at `4d44627`. The existing three desktop shortcuts were
+updated from the old checkout to the current workspace. All three pass actual
+connection and output checks; ASCII reports presented frames, and the combined
+launcher confirms a read-only spectator with a separate credential. Each launch
+creates and retains a fresh save, preserves prior save hashes and cleans up its
+own processes. Credentials, saves and launcher helper scripts remain outside Git.
+The focused 16-region memory streaming comparison at `4d44627` also passes all
+six runs in three interleaved rounds. For 2,100 authoritative intervals per side,
+baseline p50/p95/max is 0.221/0.378/0.623 ms and adapted is
+0.217/0.376/0.602 ms. Operation counts are unchanged; sent-envelope totals rise
+from 1,250,079 to 1,252,254 bytes per round. An earlier unsupported 8-region
+invocation was rejected on both sides before measurements; its six failed runs
+are retained separately and excluded from these findings.
+Final CI is still pending in
+[PR #88](https://github.com/KCall360/thresholds-of-ruin/pull/88).
+The release CI run also identified an obsolete version-22 positive save-schema
+fixture. Current version-24 metadata is now captured from the production writer,
+including interaction and AI packages, and checked against its fixed golden
+fixture. The old package records remain rejection cases. All 251 server unit
+tests pass locally after this update; no compatibility reader was introduced.

@@ -421,6 +421,15 @@ tests that reject older versions. Don't add compatibility readers to keep old
 fixtures loading. `scripts/test_documentation.py` checks that the versions stated
 in the docs match the code.
 
+Saved scenario metadata has a golden fixture produced by the current storage
+writer. After an accepted save-schema change, set `TOR_RECORD_SCENARIO_FIXTURES`
+to the new fixture's absolute path and run
+`cargo test -p tor-server --lib current_writer_matches_golden_scenario_fixture`.
+Review the generated diff, unset the variable, and rerun the ordinary schema
+tests. Recording is an explicit fixture-update mode; normal tests compare the
+writer against the committed fixture and round-trip it through the strict reader.
+Obsolete package metadata remains covered by rejection tests.
+
 ## Performance testing
 
 Performance is an ongoing requirement, not a finished milestone. The provisional
