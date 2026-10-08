@@ -127,9 +127,9 @@ baseline p50/p95/max is 0.221/0.378/0.623 ms and adapted is
 from 1,250,079 to 1,252,254 bytes per round. An earlier unsupported 8-region
 invocation was rejected on both sides before measurements; its six failed runs
 are retained separately and excluded from these findings.
-Final Windows/Linux debug/release CI remains pending. Synthetic relay item
-fixtures include the current physical-class field, so recovery tests reach their
-intended quantity, uniqueness and retained-size checks. The focused text-client
+Windows/Linux debug/release CI is required on the final commit before merging.
+Synthetic relay item fixtures include the current physical-class field, so
+recovery tests reach their intended quantity, uniqueness and retained-size checks. The focused text-client
 process regression failed before this correction; all 20 affected stream recovery
 process and relay tests pass afterward, with their repair assertions intact.
 Current saved scenario metadata is captured from the production writer,
