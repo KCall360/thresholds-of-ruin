@@ -15,7 +15,10 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
-pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
+pub use authoring::{
+    AiProfile, AnatomySpec, AttackSpec, BodySpec, CombatSpec, ConsumableSpec, DamageType,
+    EffectSpec, EquipmentSlot, EquipmentSpec, ItemClass,
+};
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
@@ -23,8 +26,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v23";
-const VALIDATOR: &str = "tor-scenario-8";
+pub const RULESET: &str = "interactions-v25";
+const VALIDATOR: &str = "tor-scenario-10";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -126,6 +129,11 @@ pub struct AppearancePool {
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    pub anatomy: Option<AnatomySpec>,
+    pub equipment: Option<EquipmentSpec>,
+    pub consumable: Option<ConsumableSpec>,
+    #[serde(default)]
+    pub class: crate::scenario_package::ItemClass,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub identity: Option<String>,
@@ -148,6 +156,10 @@ impl Clone for Archetype {
     fn clone(&self) -> Self {
         ARCHETYPE_DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
         Self {
+            anatomy: self.anatomy.clone(),
+            equipment: self.equipment.clone(),
+            consumable: self.consumable.clone(),
+            class: self.class,
             combat: self.combat.clone(),
             body: self.body.clone(),
             identity: self.identity.clone(),
@@ -163,6 +175,7 @@ impl Clone for Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    pub anatomy: Option<AnatomySpec>,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
@@ -283,6 +296,8 @@ pub struct Door {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    pub equipped_slot: Option<u16>,
+    pub class: Option<crate::scenario_package::ItemClass>,
     #[serde(default = "unit_quantity")]
     pub quantity: u64,
     pub stackable: Option<bool>,
@@ -299,6 +314,9 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
+    pub anatomy: Option<AnatomySpec>,
+    #[serde(default)]
+    pub known_identities: Vec<String>,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
@@ -547,7 +565,7 @@ impl RegionSources {
             }
         }
         require(
-            digest(text.as_bytes()) == entry.hash,
+            source_digest(&text) == entry.hash,
             format!(
                 "{} changed since the package was validated; run tor-scenario validate",
                 entry.file
@@ -614,6 +632,16 @@ fn digest(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// Package source identities use repository LF bytes. Comments and all other
+/// edits still affect integrity; only CRLF/LF checkout differences are ignored.
+fn source_digest(text: &str) -> String {
+    if text.contains("\r\n") {
+        digest(text.replace("\r\n", "\n").as_bytes())
+    } else {
+        digest(text.as_bytes())
+    }
 }
 fn read_limited(root: &Path, relative: &str, limit: u64) -> Result<String, Failure> {
     require(
@@ -728,7 +756,7 @@ fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), F
                 region_file(def.id)
             ),
         )?;
-        regions.push(IndexedRegion::of(&def, file, digest(text.as_bytes())));
+        regions.push(IndexedRegion::of(&def, file, source_digest(&text)));
         texts.insert(def.id, Arc::from(text));
     }
     regions.sort_by_key(|r| r.id);
@@ -771,7 +799,7 @@ impl Package {
         directory: Option<&Path>,
     ) -> Result<Self, Failure> {
         let files = BTreeMap::from([
-            ("scenario.toml".into(), digest(manifest_text.as_bytes())),
+            ("scenario.toml".into(), source_digest(manifest_text)),
             ("index.json".into(), digest(&index.to_bytes()?)),
         ]);
         let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
@@ -809,7 +837,7 @@ impl Package {
             index.push(IndexedRegion::of(
                 def,
                 region_file(def.id),
-                digest(text.as_bytes()),
+                source_digest(&text),
             ));
             require(
                 texts.insert(def.id, Arc::<str>::from(text)).is_none(),
@@ -1293,6 +1321,13 @@ impl Package {
             })?;
         }
         for character in &self.manifest.characters {
+            require(
+                character
+                    .anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid character anatomy",
+            )?;
             if let Some(spec) = &character.combat {
                 self.check_combat(spec, Origin::Character(character.id), || {
                     self.manifest_text.clone()
@@ -1678,6 +1713,22 @@ impl Package {
             };
             let contextualize = |failure| origin.context(failure);
             require(
+                a.anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid actor anatomy",
+            )
+            .map_err(contextualize)?;
+            for identity in &a.known_identities {
+                require(
+                    self.manifest.archetypes.iter().any(|(key, archetype)| {
+                        archetype.identity.as_ref().unwrap_or(key) == identity
+                    }),
+                    "Unknown initial item identity",
+                )
+                .map_err(contextualize)?;
+            }
+            require(
                 matches!(a.controller.as_str(), "external" | "ai")
                     && (a.controller == "ai") == a.ai.is_some()
                     && a.ai.as_ref().is_none_or(|s| label(s)),
@@ -1694,13 +1745,39 @@ impl Package {
         let mut result = BTreeMap::new();
         let mut signatures = BTreeMap::new();
         for (key, a) in &self.manifest.archetypes {
+            require(
+                a.anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid anatomy",
+            )?;
+            require(
+                a.equipment.as_ref().is_none_or(|equipment| {
+                    let spec: tor_simulation::EquipmentSpec = equipment.clone().into();
+                    !a.stackable && a.consumable.is_none() && spec.valid(a.class.into())
+                }),
+                "Invalid equipment definition",
+            )?;
+            require(
+                a.consumable.as_ref().is_none_or(|consumable| {
+                    let spec: tor_simulation::ConsumableSpec = consumable.clone().into();
+                    a.class == ItemClass::Potion && spec.valid()
+                }),
+                "Invalid consumable definition",
+            )?;
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
-            let signature = (&a.name, &a.appearance_pool);
+            let signature = (
+                &a.name,
+                &a.appearance_pool,
+                a.class,
+                &a.equipment,
+                &a.consumable,
+            );
             if let Some(previous) = signatures.insert(identity, signature) {
                 require(
                     previous == signature,
-                    "One identity must have one name and appearance pool",
+                    "One identity must have one name, appearance pool, physical class and item effects",
                 )?;
             }
             if let Some(pool) = &a.appearance_pool {
@@ -1724,6 +1801,23 @@ impl Package {
             }
         }
         for (key, pool) in &self.manifest.appearance_pools {
+            let classes: BTreeSet<_> = self
+                .manifest
+                .archetypes
+                .values()
+                .filter(|a| a.appearance_pool.as_ref() == Some(key))
+                .map(|a| {
+                    (
+                        a.class,
+                        a.equipment.as_ref().map(|e| e.slot),
+                        a.consumable.is_some(),
+                    )
+                })
+                .collect();
+            require(
+                classes.len() <= 1,
+                "Appearance pool must have one physical class and interaction affordances",
+            )?;
             require(
                 label(key)
                     && !pool.appearances.is_empty()
@@ -2329,6 +2423,21 @@ impl Package {
                 spec,
             )
             .map_err(|e| contextualize(fail(format!("Item {}: {e:?}", i.id))))?;
+            if let Some(slot) = i.equipped_slot {
+                let owner = i
+                    .carried_by
+                    .ok_or_else(|| contextualize(fail("Starting equipment must be carried")))?;
+                game.equip_authored(
+                    tor_simulation::ActorId(owner),
+                    tor_simulation::ItemId(i.id),
+                    tor_simulation::EquipmentSlotId(slot),
+                )
+                .map_err(|_| {
+                    contextualize(fail(
+                        "Starting equipment does not fit anatomy or occupied slot",
+                    ))
+                })?;
+            }
         }
         for c in &definitions.characters {
             if c.creature.control.spawned() && homes.get(&c.id).is_some_and(|h| keep(h.region.0)) {
@@ -2524,6 +2633,42 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn appearance_pools_cannot_encode_hidden_identity_through_physical_class() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = super::read_package(&path).unwrap();
+        package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Weapon;
+        assert!(package.appearance_mapping(42).is_err());
+        package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Potion;
+        assert!(package.appearance_mapping(42).is_ok());
+    }
+
+    #[test]
+    fn appearance_pools_share_affordances_while_effects_remain_distinct() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = read_package(&path).unwrap();
+        package
+            .manifest
+            .archetypes
+            .get_mut("healing")
+            .unwrap()
+            .consumable = Some(ConsumableSpec {
+            effects: vec![EffectSpec::Heal { amount: 5 }],
+        });
+        assert!(package.appearance_mapping(42).is_err());
+        package
+            .manifest
+            .archetypes
+            .get_mut("poison")
+            .unwrap()
+            .consumable = Some(ConsumableSpec {
+            effects: vec![EffectSpec::Damage {
+                components: BTreeMap::from([(DamageType::Vital, 8)]),
+            }],
+        });
+        assert!(package.appearance_mapping(42).is_ok());
+    }
     use super::*;
 
     #[test]
@@ -2623,6 +2768,67 @@ mod tests {
             .actors
             .contains(&tor_simulation::ActorId(1)));
         package.start(42).unwrap();
+    }
+
+    #[test]
+    fn validation_and_loading_ignore_crlf_source_line_endings() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        write_package(
+            directory.path(),
+            &template.manifest,
+            &template.region_defs().unwrap(),
+        )
+        .unwrap();
+        let paths: Vec<_> = std::iter::once(directory.path().join("scenario.toml"))
+            .chain(
+                template
+                    .index
+                    .regions
+                    .iter()
+                    .map(|region| directory.path().join(&region.file)),
+            )
+            .collect();
+        let lf: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                let text = std::fs::read_to_string(path).unwrap();
+                assert!(!text.contains('\r'), "generated package source must use LF");
+                text
+            })
+            .collect();
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text.replace('\n', "\r\n")).unwrap();
+        }
+        let crlf_certificate = validate(directory.path()).unwrap();
+        assert_eq!(
+            crlf_certificate.files["scenario.toml"],
+            digest(lf[0].as_bytes())
+        );
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text).unwrap();
+        }
+        let lf_certificate = validate(directory.path()).unwrap();
+        assert_eq!(crlf_certificate, lf_certificate);
+        let expected = load(directory.path(), 42, None, false)
+            .unwrap()
+            .package
+            .unwrap()
+            .build(42, false)
+            .unwrap();
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text.replace('\n', "\r\n")).unwrap();
+        }
+        assert_eq!(
+            load(directory.path(), 42, None, false)
+                .unwrap()
+                .package
+                .unwrap()
+                .build(42, false)
+                .unwrap(),
+            expected
+        );
     }
 
     #[test]
@@ -2813,6 +3019,8 @@ mod tests {
         );
         regions[0].actors.extend([
             Actor {
+                anatomy: None,
+                known_identities: vec![],
                 id: 2,
                 at: [3, 1, 0],
                 archetype: Some("guard".into()),
@@ -2824,6 +3032,8 @@ mod tests {
                 velocity: None,
             },
             Actor {
+                anatomy: None,
+                known_identities: vec![],
                 id: 3,
                 at: [4, 1, 0],
                 archetype: Some("guard".into()),
@@ -2837,6 +3047,8 @@ mod tests {
         ]);
         regions[0].items.extend([
             Item {
+                equipped_slot: None,
+                class: None,
                 id: 3,
                 at: [1, 1, 0],
                 archetype: Some("guard".into()),
@@ -2848,6 +3060,8 @@ mod tests {
                 seed_names: vec![],
             },
             Item {
+                equipped_slot: None,
+                class: None,
                 id: 4,
                 at: [1, 1, 0],
                 archetype: Some("guard".into()),
@@ -3006,6 +3220,8 @@ mod tests {
         let value = serde_json::json!({
             "id": 9, "at": [1, 2, 3], "archetype": "guard", "turn_ticks": 73,
             "controller": "ai", "ai": "cautious", "velocity": [-1, 0, 2],
+            "anatomy": {"slots": ["ring", "ring", "head_armor"]},
+            "known_identities": ["healing"],
             "body": {"cells": [[0, 0, 0], [0, 0, 1]], "eye": [0, 0, 1], "mass": 91},
             "combat": {
                 "name": "guard", "max_hp": 41, "defense": -3, "faction": "guards",

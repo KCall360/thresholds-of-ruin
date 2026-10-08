@@ -313,8 +313,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
         "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -485,6 +485,60 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
         play(&mut link, &mut engine, "x it").await,
         "A weathered slab of stone."
     );
+}
+
+#[tokio::test]
+async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
+    let mut initial = state();
+    let mut ring = initial.observation.ground_items.remove(0).item;
+    ring.name = "silver ring".into();
+    ring.class = ItemClass::Ring;
+    let item = ring.id;
+    initial.observation.inventory.push(ring);
+    initial.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::Equip { item, slot: 0 }));
+        let mut after = now.clone();
+        after.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+        after
+            .observation
+            .interactions
+            .as_mut()
+            .unwrap()
+            .completed
+            .push(Action::Equip { item, slot: 0 });
+        vec![
+            Frame::View(
+                after,
+                Some(Event::ItemStarted {
+                    action: Action::Equip { item, slot: 0 },
+                }),
+            ),
+            Frame::Ack,
+        ]
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "wear silver ring").await,
+        "You begin to equip the silver ring. You finish equipping the silver ring."
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(
+        play(&mut link, &mut engine, "wear silver ring").await,
+        "That item is already equipped."
+    );
+    assert_eq!(link.sent.len(), 1, "refusal spends no turn");
 }
 
 #[tokio::test]
@@ -990,7 +1044,7 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
     for (line, answer) in [
-        ("wear the token", "You can't wear anything yet."),
+        ("wear the token", "You aren't carrying that item."),
         ("eat lamp", "You can't see any lamp here."),
         ("talk to me", "You can't talk with anyone yet."),
         ("jump", "You can't jump yet."),
@@ -1020,7 +1074,7 @@ async fn stacks_of_alike_things_are_counted_together() {
     let stack = |id: u64, name: &str, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": name, "description": ""}}))
         .unwrap()
     };
@@ -1324,7 +1378,7 @@ fn open_ground(find: usize) -> Scripted {
                 there.observation.ground_items.push(
                     serde_json::from_value(serde_json::json!({
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
-                        "item": {"quantity": "1", "appearance": "item", "identified": true,
+                        "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                             "id":super::item_target(7), "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
@@ -1426,7 +1480,7 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     let mut s = state();
     let arrows = |id: u64, quantity: u64| {
         serde_json::from_value::<ItemView>(serde_json::json!({
-            "quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
             "id": super::item_target(id), "name": "arrow", "description": ""}))
         .unwrap()
     };

@@ -23,6 +23,7 @@ authoritative until the guide is corrected.
 | Windowed play | [Graphical ASCII client](ascii-client.md), [remembered map](ascii-memory.md) |
 | Combat, AI, victory, and death | [Dungeon gameplay](dungeon.md) |
 | Items and identification | [Items and character knowledge](items.md) |
+| Recovery of unpublished interactions | [Interaction adaptation](interaction-adaptation.md) |
 | Travel | [Backend travel](travel.md) |
 | Place names | [Durable place knowledge](place-knowledge.md) |
 

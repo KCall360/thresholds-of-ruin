@@ -37,7 +37,7 @@ pub enum IntentionState {
 pub enum IntentionWork {
     Action(Action),
     AiDecision,
-    ResumeAttack { target: ActorId },
+    ResumePreparation { work: crate::Work },
 }
 
 /// Region-local movement meaning at admission, including portal frame changes.
@@ -134,7 +134,7 @@ pub struct IntentionControl {
 /// a second policy. Existing queue work never allocates another identity.
 enum ResumeIntention {
     Queue,
-    Preparation { target: ActorId },
+    Preparation { work: crate::Work },
 }
 
 enum CancelIntention {
@@ -383,7 +383,7 @@ impl Game {
             let action = match intention.work {
                 IntentionWork::Action(action) => Some(action),
                 IntentionWork::AiDecision => None,
-                IntentionWork::ResumeAttack { target } => Some(Action::Attack { target }),
+                IntentionWork::ResumePreparation { work } => Some(work.action()),
             };
             return Some(IntentionExecution {
                 intention,
@@ -411,11 +411,11 @@ impl Game {
                     Err(error) => (None, Err(error)),
                 }
             }
-            IntentionWork::ResumeAttack { target } => {
-                let action = Action::Attack { target };
+            IntentionWork::ResumePreparation { work } => {
+                let action = work.action();
                 let outcome = if self.preparation(actor).is_some_and(|preparation| {
                     preparation.intention == Some(intention.id)
-                        && preparation.target == target
+                        && preparation.work == work
                         && !preparation.active
                 }) {
                     self.act_with_context(actor, action, Some(intention.id), None)
@@ -441,6 +441,12 @@ impl Game {
         actor: ActorId,
         id: IntentionId,
     ) -> Result<CancelIntention, GameError> {
+        if self
+            .preparation(actor)
+            .is_some_and(|p| p.intention == Some(id) && p.work.item().is_some())
+        {
+            return Err(GameError::InvalidIntention);
+        }
         if self
             .pending_intention(actor)
             .is_some_and(|queued| queued.id == id)
@@ -471,14 +477,11 @@ impl Game {
         let Some(mut state) = self.actors.get_mut(&actor) else {
             return false;
         };
-        let Some(combat) = state.combat.as_mut() else {
-            return false;
-        };
-        let Some(preparation) = combat.pending.as_ref().filter(|p| p.intention == Some(id)) else {
+        let Some(preparation) = state.pending.as_ref().filter(|p| p.intention == Some(id)) else {
             return false;
         };
         let active = preparation.active;
-        combat.pending = None;
+        state.pending = None;
         if active {
             state.ready_at = self.tick;
         }
@@ -544,7 +547,7 @@ impl Game {
             return Err(GameError::QueueFull);
         }
         Ok(ResumeIntention::Preparation {
-            target: preparation.target,
+            work: preparation.work,
         })
     }
 
@@ -557,13 +560,13 @@ impl Game {
                     .expect("checked intention")
                     .state = IntentionState::Queued;
             }
-            ResumeIntention::Preparation { target } => {
+            ResumeIntention::Preparation { work } => {
                 self.intentions.entries.insert(
                     actor,
                     QueuedIntention {
                         id,
                         actor,
-                        work: IntentionWork::ResumeAttack { target },
+                        work: IntentionWork::ResumePreparation { work },
                         origin: IntentionOrigin::Human,
                         state: IntentionState::Queued,
                         movement_context: None,
@@ -606,19 +609,24 @@ impl Game {
                             target.0 != 0 && target != *actor
                         }
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
+                        IntentionWork::Action(Action::Equip { item, slot }) => {
+                            item.0 > 0 && slot.0 < 64
+                        }
+                        IntentionWork::Action(
+                            Action::Unequip { item } | Action::Drink { item },
+                        ) => item.0 > 0,
                         IntentionWork::Action(
                             Action::Take { item, quantity } | Action::Drop { item, quantity },
                         ) => item.0 != 0 && quantity.is_none_or(|quantity| quantity != 0),
                         IntentionWork::Action(Action::Move(_) | Action::Wait) => true,
                         IntentionWork::AiDecision => entry.origin == IntentionOrigin::Autonomous,
-                        IntentionWork::ResumeAttack { target } => {
-                            target.0 != 0
-                                && target != *actor
+                        IntentionWork::ResumePreparation { work } => {
+                            work.structural_valid(*actor)
                                 && entry.origin == IntentionOrigin::Human
                                 && if self.actors.contains_key(actor) {
                                     self.preparation(*actor).is_some_and(|preparation| {
                                         preparation.intention == Some(entry.id)
-                                            && preparation.target == target
+                                            && preparation.work == work
                                             && !preparation.active
                                     })
                                 } else {
@@ -630,9 +638,7 @@ impl Game {
             && self
                 .actors
                 .iter()
-                .filter_map(|(actor, state)| {
-                    Some((*actor, state.combat.as_ref()?.pending.as_ref()?))
-                })
+                .filter_map(|(actor, state)| Some((*actor, state.pending.as_ref()?)))
                 .all(|(actor, preparation)| {
                     preparation.intention.is_none_or(|id| {
                         id.0 != 0
@@ -641,8 +647,8 @@ impl Game {
                                 || self.pending_intention(actor).is_some_and(|queued| {
                                     queued.id == id
                                         && queued.work
-                                            == IntentionWork::ResumeAttack {
-                                                target: preparation.target,
+                                            == IntentionWork::ResumePreparation {
+                                                work: preparation.work,
                                             }
                                 }))
                     })
@@ -1030,7 +1036,7 @@ mod tests {
         execution.outcome.unwrap();
         if let Some(progress) = restored.preparation(actor) {
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.target, target);
+            assert_eq!(progress.work.target(), Some(target));
             assert!(progress.remaining <= preparation.remaining);
             assert!(progress.active);
         } else {
@@ -1161,8 +1167,7 @@ mod tests {
             let value = serde_json::to_value(&snapshot).unwrap();
             let mut pool = serde_json::to_value(&shared).unwrap();
             let actors = value["actors"].as_u64().unwrap() as usize;
-            pool["actors"][actors]["1"]["combat"]["pending"]["intention"] =
-                serde_json::json!(corrupt);
+            pool["actors"][actors]["1"]["pending"]["intention"] = serde_json::json!(corrupt);
             let invalid_shared = serde_json::from_value(pool).unwrap();
             assert!(Game::restore_checkpoint(
                 serde_json::from_value(value).unwrap(),

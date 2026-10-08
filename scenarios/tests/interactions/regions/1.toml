@@ -1,0 +1,12 @@
+id = 1
+name = "Interaction laboratory"
+size = [6, 3, 2]
+chamber = true
+anchors = { start = [1, 1, 0] }
+items = [
+  { id = 10, at = [1, 1, 0], archetype = "sword", carried_by = 1, equipped_slot = 0 },
+  { id = 11, at = [1, 1, 0], archetype = "mail", carried_by = 1 },
+  { id = 12, at = [1, 1, 0], archetype = "band", carried_by = 1, equipped_slot = 2 },
+  { id = 20, at = [1, 1, 0], archetype = "healing", quantity = 2, carried_by = 1 },
+  { id = 21, at = [1, 1, 0], archetype = "poison", quantity = 2, carried_by = 1 }
+]

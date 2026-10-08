@@ -31,6 +31,9 @@ pub(crate) enum Direction {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
     Attack { target: u64 },
+    Equip { item: u64, slot: u16 },
+    Unequip { item: u64 },
+    Drink { item: u64 },
     SetDoor { door: u64, open: bool },
     Move { direction: Direction },
     Take { item: u64, quantity: Option<u64> },
@@ -104,6 +107,12 @@ impl From<&crate::actions::Action> for Action {
                 item: *item,
                 quantity: *quantity,
             },
+            Backend::Equip { item, slot } => Self::Equip {
+                item: *item,
+                slot: *slot,
+            },
+            Backend::Unequip { item } => Self::Unequip { item: *item },
+            Backend::Drink { item } => Self::Drink { item: *item },
             Backend::Wait => Self::Wait,
         }
     }
@@ -120,6 +129,9 @@ impl From<Action> for crate::actions::Action {
             },
             Action::Take { item, quantity } => Self::Take { item, quantity },
             Action::Drop { item, quantity } => Self::Drop { item, quantity },
+            Action::Equip { item, slot } => Self::Equip { item, slot },
+            Action::Unequip { item } => Self::Unequip { item },
+            Action::Drink { item } => Self::Drink { item },
             Action::Wait => Self::Wait,
         }
     }
@@ -290,6 +302,21 @@ mod tests {
     #[test]
     fn stored_actions_keep_numeric_extremes_and_explicit_variant_shapes() {
         let cases = [
+            (
+                Action::Equip {
+                    item: u64::MAX,
+                    slot: u16::MAX,
+                },
+                r#"{"type":"equip","item":18446744073709551615,"slot":65535}"#,
+            ),
+            (
+                Action::Unequip { item: u64::MAX },
+                r#"{"type":"unequip","item":18446744073709551615}"#,
+            ),
+            (
+                Action::Drink { item: u64::MAX },
+                r#"{"type":"drink","item":18446744073709551615}"#,
+            ),
             (
                 Action::Attack {
                     target: ActorId(u64::MAX),

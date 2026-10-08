@@ -18,6 +18,9 @@ fn setup() -> (Game, ActorId) {
             None,
             10,
             ItemSpec {
+                equipment: None,
+                consumable: None,
+                class: Default::default(),
                 archetype: identity.into(),
                 identity: identity.into(),
                 name: identity.into(),
@@ -31,6 +34,42 @@ fn setup() -> (Game, ActorId) {
         .unwrap();
     }
     (game, actor)
+}
+
+#[test]
+fn physical_classes_survive_identification_transfer_and_checkpoint() {
+    let (mut game, actor) = setup();
+    let at = game.observe(actor).unwrap().location;
+    let mut potion = ItemSpec::ordinary("hidden healing".into());
+    potion.class = tor_simulation::ItemClass::Potion;
+    potion.concealed = true;
+    potion.appearance = "unmarked vial".into();
+    game.place_item_stack(200, at, None, 1, potion).unwrap();
+    let view = game.observe(actor).unwrap();
+    let unknown = view
+        .ground_items
+        .iter()
+        .find(|i| i.id == ItemId(200))
+        .unwrap();
+    assert_eq!(unknown.class, tor_simulation::ItemClass::Potion);
+    assert!(!unknown.identified);
+    assert_eq!(unknown.name, "unmarked vial");
+    game.act(
+        actor,
+        Action::Take {
+            item: ItemId(200),
+            quantity: None,
+        },
+    )
+    .unwrap();
+    game.identify_item(actor, ItemId(200)).unwrap();
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
+    let view = restored.observe(actor).unwrap();
+    let known = view.inventory.iter().find(|i| i.id == ItemId(200)).unwrap();
+    assert_eq!(known.class, tor_simulation::ItemClass::Potion);
+    assert!(known.identified);
+    assert_eq!(known.name, "hidden healing");
 }
 
 #[test]
@@ -189,6 +228,9 @@ fn overflow_ownership_and_distinct_properties_cannot_corrupt_stacks() {
         position: Position { x: 1, y: 1, z: 0 },
     };
     let spec = ItemSpec {
+        equipment: None,
+        consumable: None,
+        class: Default::default(),
         archetype: "arrow".into(),
         identity: "arrow".into(),
         name: "arrow".into(),

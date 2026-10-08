@@ -297,6 +297,13 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
         None => Step::Finish(End::Refused("You can't see a way to get there.".into())),
     };
     match goal {
+        Goal::UseItem { item, operation } => {
+            match tor_client_common::items::item_action(&scene.state.observation, *item, *operation)
+            {
+                Ok(action) => act(action),
+                Err(reason) => Step::Finish(End::Refused(reason)),
+            }
+        }
         Goal::Take { item, quantity } => match scene.get(Key::Item(*item)) {
             Some(r) if r.reachable => act(Action::Take {
                 item: *item,
@@ -361,6 +368,7 @@ fn object(goal: &Goal, scene: &Scene) -> String {
                 (None, _) => None,
             }
         }
+        Goal::UseItem { item, .. } => named(Key::Item(*item)),
         Goal::Door { door, .. } => named(Key::Door(*door)),
         Goal::Attack { target } => named(Key::Actor(*target)),
         Goal::Approach { target } => named(*target),
@@ -390,6 +398,7 @@ fn refusal(code: ErrorCode, goal: &Goal) -> String {
         ErrorCode::InvalidAction => match goal {
             Goal::Take { .. } => "You can't pick that up from here.",
             Goal::Drop { .. } => "You can't drop that here.",
+            Goal::UseItem { .. } => "You can't use that item right now.",
             Goal::Door { .. } => "You can't reach it from here.",
             Goal::Attack { .. } => "You can't reach it from here.",
             Goal::Step { .. } => "You can't go that way.",

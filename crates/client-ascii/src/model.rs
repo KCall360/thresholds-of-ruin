@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tor_client_common::items::{item_action, item_choices, ItemOperation};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
@@ -23,6 +24,9 @@ pub enum Key {
     Wait,
     Pickup,
     Drop,
+    Equip,
+    Unequip,
+    Drink,
     OpenDoor,
     CloseDoor,
     Control,
@@ -92,6 +96,7 @@ pub struct App {
     pub note: Option<NoteDraft>,
     pub pickup: Vec<ItemView>,
     pub dropping: bool,
+    pub item_operation: Option<ItemOperation>,
     pub quantity: String,
     pub door_direction: Option<bool>,
     pub selected: usize,
@@ -124,6 +129,7 @@ impl App {
             note: None,
             pickup: vec![],
             dropping: false,
+            item_operation: None,
             quantity: String::new(),
             door_direction: None,
             selected: 0,
@@ -188,6 +194,7 @@ impl App {
             self.travel_cursor = None;
             self.note = None;
             self.pickup.clear();
+            self.item_operation = None;
             self.attack_targets.clear();
             self.door_direction = None;
             self.places_open = false;
@@ -203,11 +210,14 @@ impl App {
                 .place_selected
                 .min(state.state().observation.places.len().saturating_sub(1));
             self.pickup.clear();
+            self.item_operation = None;
             self.attack_targets.clear();
             self.door_direction = None;
             self.travel_cursor = None;
         }
         if !state.has_control() {
+            self.pickup.clear();
+            self.item_operation = None;
             self.attack_targets.clear();
             self.place_name = None;
             self.door_direction = None;
@@ -255,6 +265,7 @@ impl App {
         self.busy = false;
         self.note = None;
         self.pickup.clear();
+        self.item_operation = None;
         self.attack_targets.clear();
         self.door_direction = None;
         self.status = message;
@@ -313,6 +324,9 @@ impl App {
         }
         if !self.pickup.is_empty() {
             if let Input::Text { text } = &input {
+                if self.item_operation.is_some() {
+                    return Effect::None;
+                }
                 for ch in text.chars().filter(char::is_ascii_digit) {
                     // Keep one overflow digit so an oversized request cannot
                     // silently become a smaller valid quantity.
@@ -341,6 +355,7 @@ impl App {
                 || self.door_direction.is_some()
             {
                 self.pickup.clear();
+                self.item_operation = None;
                 self.attack_targets.clear();
                 self.door_direction = None;
                 self.status = "Cancelled.".into();
@@ -549,6 +564,27 @@ impl App {
                 Key::Down => self.selected = (self.selected + 1).min(self.pickup.len() - 1),
                 Key::Enter => {
                     let item = self.pickup[self.selected].id;
+                    if let Some(operation) = self.item_operation.take() {
+                        let result = item_action(
+                            &self
+                                .state
+                                .as_ref()
+                                .expect("connected state")
+                                .state()
+                                .observation,
+                            item,
+                            operation,
+                        );
+                        self.pickup.clear();
+                        self.item_operation = None;
+                        return match result {
+                            Ok(action) => self.act(action),
+                            Err(reason) => {
+                                self.status = reason;
+                                Effect::None
+                            }
+                        };
+                    }
                     let quantity = if self.quantity.is_empty() {
                         None
                     } else {
@@ -561,6 +597,7 @@ impl App {
                         }
                     };
                     self.pickup.clear();
+                    self.item_operation = None;
                     self.attack_targets.clear();
                     self.door_direction = None;
                     return self.act(if self.dropping {
@@ -766,6 +803,7 @@ impl App {
                 Effect::None
             }
             Key::Pickup | Key::Drop => {
+                self.item_operation = None;
                 self.dropping = key == Key::Drop;
                 self.quantity.clear();
                 let Some(state) = &self.state else {
@@ -810,6 +848,44 @@ impl App {
                         self.selected = 0;
                         self.status =
                             "Up/Down select; type quantity (blank = all); Enter confirms.".into();
+                        Effect::None
+                    }
+                }
+            }
+            Key::Equip | Key::Unequip | Key::Drink => {
+                let operation = match key {
+                    Key::Equip => ItemOperation::Equip,
+                    Key::Unequip => ItemOperation::Unequip,
+                    _ => ItemOperation::Drink,
+                };
+                let Some(state) = &self.state else {
+                    return Effect::None;
+                };
+                let view = &state.state().observation;
+                let mut seen = std::collections::BTreeSet::new();
+                let items: Vec<_> = item_choices(view, operation)
+                    .filter(|item| seen.insert(item.id))
+                    .cloned()
+                    .collect();
+                self.quantity.clear();
+                match items.as_slice() {
+                    [] => {
+                        self.status = format!("You have no item to {}.", operation.verb());
+                        Effect::None
+                    }
+                    [item] => match item_action(view, item.id, operation) {
+                        Ok(action) => self.act(action),
+                        Err(reason) => {
+                            self.status = reason;
+                            Effect::None
+                        }
+                    },
+                    _ => {
+                        self.pickup = items;
+                        self.item_operation = Some(operation);
+                        self.selected = 0;
+                        self.status =
+                            format!("Up/Down select; Enter {}; Esc cancels.", operation.verb());
                         Effect::None
                     }
                 }
@@ -997,8 +1073,8 @@ pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
     if o.visible_actors.iter().any(|a| a.position == position) {
         return '&';
     }
-    if o.ground_items.iter().any(|i| i.position == position) {
-        return '!';
+    if let Some(item) = o.ground_items.iter().find(|i| i.position == position) {
+        return item_glyph(item.item.class);
     }
     if let Some(door) = &cell.door {
         return if door.open { '/' } else { '+' };
@@ -1031,6 +1107,12 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             Event::Waited => "Waited.".into(),
             Event::PreparationPaused => "Preparation paused.".into(),
             Event::AttackStarted { .. } => "Prepared an attack.".into(),
+            Event::ItemStarted { action } => match action {
+                tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
+                tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
+                tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
+                _ => "Began preparation.".into(),
+            },
         },
         HistoryContent::Annotation { text, category, .. } => {
             format!("{:?} {:?}: {text}", entry.audience, category)
@@ -1062,4 +1144,21 @@ pub fn history_lines(entries: &[HistoryEntry]) -> Vec<String> {
             lines
         })
         .collect()
+}
+
+pub fn item_glyph(class: ItemClass) -> char {
+    match class {
+        ItemClass::Weapon => ')',
+        ItemClass::Armor => '[',
+        ItemClass::Potion => '!',
+        ItemClass::Food | ItemClass::Corpse => '%',
+        ItemClass::Misc | ItemClass::Tool => '(',
+        ItemClass::Amulet => '"',
+        ItemClass::Ring => '=',
+        ItemClass::Scroll => '?',
+        ItemClass::Spellbook => '+',
+        ItemClass::Wand => '/',
+        ItemClass::Coin => '$',
+        ItemClass::Gem => '*',
+    }
 }

@@ -304,6 +304,8 @@ pub(crate) fn materialize(
         )?;
         for (n, &(x, y)) in floor.iter().step_by(2).take(count as usize).enumerate() {
             out.actors.push(Actor {
+                anatomy: None,
+                known_identities: vec![],
                 combat: None,
                 body: None,
                 velocity: None,
@@ -327,6 +329,8 @@ pub(crate) fn materialize(
             .enumerate()
         {
             out.items.push(Item {
+                equipped_slot: None,
+                class: None,
                 quantity: 1,
                 stackable: None,
                 properties: BTreeMap::new(),

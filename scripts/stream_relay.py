@@ -226,7 +226,8 @@ class StreamRelay:
                 and message['request_id'] == 'attach'):
             message['snapshot']['state']['observation']['inventory'].append({
                 'id':'i_' + 'e' * 64, 'quantity':'1', 'name':'retained test item',
-                'appearance':'stone', 'identified':False, 'description':'x' * (8 * 1024 * 1024)})
+                'appearance':'stone', 'class':'misc', 'identified':False,
+                'description':'x' * (8 * 1024 * 1024)})
             self.large_retained_base = False
             return True
         if message.get('type') != 'update':
@@ -245,13 +246,13 @@ class StreamRelay:
         elif self.overflow_delta.is_set():
             state['cells']['shift']['x'] = 2147483647
         elif self.invalid_inventory.is_set():
-            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'i_' + 'a' * 64, 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False}]})
+            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'i_' + 'a' * 64, 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'class':'misc', 'identified':False}]})
         elif self.duplicate_inventory.is_set():
             # Distinct noncanonical handles followed by one repeated identity.
             # Every item is otherwise valid, so only uniqueness may reject it.
             items = [{'id': 'i_' + format((index * 513) % 1009, '064x'),
                       'quantity': '1', 'name': 'duplicate inventory fixture',
-                      'appearance': 'stone', 'identified': False}
+                      'appearance': 'stone', 'class': 'misc', 'identified': False}
                      for index in range(1000)]
             items.append(dict(items[500]))
             state['inventory'].append({'start': 0, 'remove': 0, 'insert': items})
@@ -259,7 +260,7 @@ class StreamRelay:
             state['ground_items'].append({'start':0, 'remove':0, 'insert':[{
                 'reachable':False, 'position':{'x':0, 'y':0, 'z':0},
                 'item':{'id':'i_' + 'f' * 64, 'quantity':'1', 'name':'inserted test item',
-                        'appearance':'stone', 'identified':False,
+                        'appearance':'stone', 'class':'misc', 'identified':False,
                         'description':'y' * (8 * 1024 * 1024)}}]})
         elif self.invalid_collection_range.is_set():
             state['places'].append({'start':4294967295, 'remove':1, 'insert':[]})

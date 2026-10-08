@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn snapshot_batch_admission_is_atomic_and_leases_every_part() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../../protocol/tests/fixtures/wire-v30.json"))
+            serde_json::from_str(include_str!("../../protocol/tests/fixtures/wire-v32.json"))
                 .unwrap();
         let message: ServerMessage = serde_json::from_value(
             samples["server"]

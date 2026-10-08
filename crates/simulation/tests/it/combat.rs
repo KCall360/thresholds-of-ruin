@@ -86,7 +86,10 @@ fn paused_progress_checkpoint_and_rng_have_identical_continuation() {
     let mut game = duel();
     game.act(ActorId(1), Action::Attack { target: ActorId(2) })
         .unwrap();
-    assert_eq!(game.pause_preparation(ActorId(1)), Some(ActorId(2)));
+    assert_eq!(
+        game.pause_preparation(ActorId(1)),
+        Some(tor_simulation::Work::Attack { target: ActorId(2) })
+    );
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let mut restored = Game::restore_checkpoint(game.checkpoint(&mut shared), &shared).unwrap();
     for game in [&mut game, &mut restored] {

@@ -33,8 +33,6 @@ class ScenarioReferences(unittest.TestCase):
                 # .gitattributes requires LF. Verify the bytes a fresh checkout
                 # receives, even when a local editor accidentally wrote CRLF.
                 checkout = source.replace(b"\r\n", b"\n")
-                if source != checkout:
-                    mismatches.append(str((package / name).relative_to(ROOT)) + ": requires LF")
                 if hashlib.sha256(checkout).hexdigest() != digest:
                     mismatches.append(str((package / name).relative_to(ROOT)))
         self.assertEqual(mismatches, [],

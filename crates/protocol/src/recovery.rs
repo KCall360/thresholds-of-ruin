@@ -263,7 +263,7 @@ mod tests {
 
     fn snapshot() -> ServerMessage {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v30.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v32.json")).unwrap();
         serde_json::from_value(
             samples["server"]
                 .as_array()

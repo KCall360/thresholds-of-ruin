@@ -6,6 +6,7 @@
 mod actions;
 mod actor_store;
 pub mod ai;
+mod ai_items;
 pub mod combat;
 mod intention;
 pub use intention::{
@@ -16,7 +17,12 @@ mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
 mod items;
-pub use items::ItemSpec;
+pub use items::{ItemClass, ItemSpec};
+mod interactions;
+pub use interactions::{
+    AnatomySpec, ConsumableSpec, EffectSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
+    InteractionView, ItemInteractionView, PreparationView, Work,
+};
 pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;
@@ -60,6 +66,9 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
+    Equip { item: ItemId, slot: EquipmentSlotId },
+    Unequip { item: ItemId },
+    Drink { item: ItemId },
     Attack { target: ActorId },
     SetDoor { door: u64, open: bool },
     Move(Direction),
@@ -88,6 +97,9 @@ pub enum GameError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    ItemStarted {
+        work: Work,
+    },
     AttackStarted {
         target: ActorId,
     },
@@ -129,6 +141,9 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Actor {
+    anatomy: Shared<AnatomySpec>,
+    equipment: BTreeMap<EquipmentSlotId, ItemId>,
+    pending: Option<combat::Preparation>,
     combat: Option<combat::CombatState>,
     body: Shared<BodySpec>,
     motion: MotionState,
@@ -326,7 +341,10 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                anatomy: Shared::default(),
+                equipment: BTreeMap::new(),
                 combat: None,
+                pending: None,
                 body: Shared::default(),
                 motion: MotionState::default(),
                 location,
@@ -441,10 +459,8 @@ impl Game {
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
-        if let Some(combat) = &mut actor.combat {
-            if combat.pending.take().is_some() {
-                actor.ready_at = clock;
-            }
+        if actor.pending.take().is_some() {
+            actor.ready_at = clock;
         }
         actor.visited.insert(location.region);
         drop(actor);
@@ -547,9 +563,8 @@ impl Game {
         self.actors
             .iter()
             .filter(|(id, a)| {
-                a.combat
-                    .as_ref()
-                    .is_none_or(|c| c.hp > 0 && c.pending.as_ref().is_none_or(|p| !p.active))
+                a.alive()
+                    && a.pending.as_ref().is_none_or(|p| !p.active)
                     && !self.actor_frozen(**id)
             })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))

@@ -318,12 +318,20 @@ def entry_from_comparison(comparison, unit, group, metric, side, raw_url, raw_sh
     stats = measured["timings"][metric]
     counts = {name: value for name, value in measured["counts"].items() if type(value) is int}
     source = comparison["sides"][side]
+    workload = result["workload"][side]
+    # Streaming benchmarks report a versioned identifier rather than the
+    # ledger's separate name and numeric version. Keep validation strict for
+    # unknown identifiers and leave already structured workloads unchanged.
+    if isinstance(workload.get("version"), str):
+        identifier = re.fullmatch(r"([a-z][a-z0-9_]*)-v([1-9][0-9]*)", workload["version"])
+        if identifier:
+            workload = {"name": identifier.group(1), "version": int(identifier.group(2))}
     entry = {
         "schema": SCHEMA,
         "date": date or comparison["created"][:10],
         "commit": source["commit"],
         "dirty": source["dirty"],
-        "workload": result["workload"][side],
+        "workload": workload,
         "case": group,
         "metric": metric,
         "machine": comparison["machine"],

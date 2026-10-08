@@ -52,6 +52,9 @@ fn native_key(key: NativeKey) -> Option<Key> {
         NativeKey::Space | NativeKey::Period => Key::Wait,
         NativeKey::G => Key::Pickup,
         NativeKey::D => Key::Drop,
+        NativeKey::W => Key::Equip,
+        NativeKey::T => Key::Unequip,
+        NativeKey::Q => Key::Drink,
         NativeKey::O => Key::OpenDoor,
         NativeKey::C => Key::CloseDoor,
         NativeKey::F3 => Key::Control,
@@ -102,7 +105,7 @@ fn run() -> Result<(), Error> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
+                println!("tor-client-ascii [--connect 127.0.0.1:4000] [--actor 1] [--observe] [--pace 75]\nSet TOR_SERVER_TOKEN to the server token. A native graphical display is required.\nA: select attack target; --bump-attacks hostile|any|off (default hostile).\nArrows/HJKL/YUBN: move; </>: up/down; Space: wait; G: pickup; D: drop; W: equip; T: remove; Q: drink; O/C then direction: open/close adjacent door; _: select travel destination; left click: travel; F3/R: acquire/release control. F8/F9: resume/cancel queued work.\nF6/F7: browse disclosed height slices. F5: remembered places (Up/Down select, Enter rename); F4: note (Tab audience, Enter save, Esc cancel); F2: history (Up/Down scroll, PgUp older, PgDn live).\n[/]: show journey steps more slowly/quickly (--pace <ms>, default 75); any key during a journey shows the rest at once.\nEsc: cancel a selection, close modal, or quit. Relaunch to reconnect after a disconnect.\nProcess tests only: --automation reads JSON input events on stdin and reports presented frames.\n--report-frames reports frames while retaining native keyboard input.\n--capture <file.ppm> with either diagnostic option saves the last presented framebuffer.");
                 return Ok(());
             }
             "--connect" => address = args.next().ok_or("Missing --connect address")?.parse()?,
@@ -304,6 +307,11 @@ fn window_loop(
         let mut quit = false;
         for event in inputs {
             dirty = true;
+            if input.is_none() {
+                if let Input::Key { key } = &event {
+                    pending_input = Some(*key);
+                }
+            }
             match app.input(event) {
                 Effect::None => {}
                 Effect::Quit => {
@@ -429,6 +437,9 @@ mod tests {
         assert_eq!(native_key(NativeKey::F9), Some(Key::CancelIntention));
         assert_eq!(native_key(NativeKey::P), None);
         assert_eq!(native_key(NativeKey::G), Some(Key::Pickup));
+        assert_eq!(native_key(NativeKey::W), Some(Key::Equip));
+        assert_eq!(native_key(NativeKey::T), Some(Key::Unequip));
+        assert_eq!(native_key(NativeKey::Q), Some(Key::Drink));
         assert_eq!(native_key(NativeKey::N), Some(Key::SouthEast));
         assert_eq!(native_key(NativeKey::F4), Some(Key::Note));
         assert_eq!(native_key(NativeKey::F5), Some(Key::Places));

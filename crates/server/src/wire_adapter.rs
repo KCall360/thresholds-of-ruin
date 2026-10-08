@@ -71,6 +71,24 @@ pub fn decode_action(
                 quantity: *quantity,
             }
         }
+        p::Action::Equip { item, .. } | p::Action::Unequip { item } | p::Action::Drink { item } => {
+            let identity = observation
+                .inventory
+                .iter()
+                .find(|candidate| scope.item(candidate.id) == *item)
+                .ok_or_else(unavailable)?
+                .id
+                .0;
+            match action {
+                p::Action::Equip { slot, .. } => a::Action::Equip {
+                    item: identity,
+                    slot: *slot,
+                },
+                p::Action::Unequip { .. } => a::Action::Unequip { item: identity },
+                p::Action::Drink { .. } => a::Action::Drink { item: identity },
+                _ => unreachable!(),
+            }
+        }
         p::Action::Wait => a::Action::Wait,
     })
 }
@@ -95,6 +113,16 @@ pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
         a::Action::Drop { item, quantity } => p::Action::Drop {
             item: scope.item(s::ItemId(*item)),
             quantity: *quantity,
+        },
+        a::Action::Equip { item, slot } => p::Action::Equip {
+            item: scope.item(s::ItemId(*item)),
+            slot: *slot,
+        },
+        a::Action::Unequip { item } => p::Action::Unequip {
+            item: scope.item(s::ItemId(*item)),
+        },
+        a::Action::Drink { item } => p::Action::Drink {
+            item: scope.item(s::ItemId(*item)),
         },
         a::Action::Wait => p::Action::Wait,
     }
@@ -334,6 +362,9 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
+                Event::ItemStarted { action } => VisibleEvent::ItemStarted {
+                    action: encode_action(action, scope),
+                },
                 Event::PreparationPaused => VisibleEvent::PreparationPaused,
                 Event::AttackStarted { target } => VisibleEvent::AttackStarted {
                     target: scope.actor(s::ActorId(target.0)),

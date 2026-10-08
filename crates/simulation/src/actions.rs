@@ -145,21 +145,32 @@ impl Game {
         action: Action,
     ) -> Result<PreparedAction, GameError> {
         let (kind, duration) = match action {
-            Action::Attack { target } => {
-                if !self.attack_available(id, target) {
-                    return Err(GameError::InvalidLocation);
-                }
-                let c = actor.combat.as_ref().unwrap();
-                let duration = c
+            Action::Attack { .. }
+            | Action::Equip { .. }
+            | Action::Unequip { .. }
+            | Action::Drink { .. } => {
+                let work = match action {
+                    Action::Attack { target } => crate::Work::Attack { target },
+                    Action::Equip { item, slot } => crate::Work::Equip { item, slot },
+                    Action::Unequip { item } => crate::Work::Unequip { item },
+                    Action::Drink { item } => crate::Work::Drink { item },
+                    _ => unreachable!(),
+                };
+                let total = self.work_duration(id, work)?;
+                let duration = actor
                     .pending
                     .as_ref()
-                    .filter(|p| p.target == target)
-                    .map_or(c.spec.attack.wind_up, |p| p.remaining);
+                    .filter(|p| p.work == work)
+                    .map_or(total, |p| p.remaining);
                 self.tick
                     .checked_add(duration)
-                    .and_then(|t| t.checked_add(c.spec.attack.recovery))
+                    .and_then(|tick| tick.checked_add(self.work_recovery(id, work)))
                     .ok_or(GameError::TimeExhausted)?;
-                (OutcomeKind::AttackStarted { target }, duration)
+                let kind = match work {
+                    crate::Work::Attack { target } => OutcomeKind::AttackStarted { target },
+                    _ => OutcomeKind::ItemStarted { work },
+                };
+                (kind, duration)
             }
             Action::SetDoor { door, open } => {
                 let location = self
@@ -252,11 +263,11 @@ impl Game {
         actor.orientation = new_orientation;
         if !matches!(
             kind,
-            OutcomeKind::Waited | OutcomeKind::AttackStarted { .. }
+            OutcomeKind::Waited
+                | OutcomeKind::AttackStarted { .. }
+                | OutcomeKind::ItemStarted { .. }
         ) {
-            if let Some(c) = actor.combat.as_mut() {
-                c.pending = None;
-            }
+            actor.pending = None;
         }
         if let OutcomeKind::Moved { to, .. } = kind {
             actor.location = to;
@@ -265,8 +276,9 @@ impl Game {
         drop(actor);
         match kind {
             OutcomeKind::AttackStarted { target } => {
-                self.start_attack(id, target, prepared.intention)
+                self.start_work(id, crate::Work::Attack { target }, prepared.intention)
             }
+            OutcomeKind::ItemStarted { work } => self.start_work(id, work, prepared.intention),
             OutcomeKind::DoorChanged { door, open } => {
                 let location = self.world.door_location(door).expect("validated door");
                 self.world.set_door(location, open);

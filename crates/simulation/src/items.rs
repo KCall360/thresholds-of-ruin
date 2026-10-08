@@ -3,11 +3,34 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_world::Location;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemClass {
+    #[default]
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
+}
+
 /// Authoritative identity and physical stack properties. Never a client DTO.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct ItemSpec {
+    pub equipment: Option<crate::EquipmentSpec>,
+    pub consumable: Option<crate::ConsumableSpec>,
+    pub class: ItemClass,
     pub archetype: String,
     pub identity: String,
     pub name: String,
@@ -32,6 +55,9 @@ impl Clone for ItemSpec {
     fn clone(&self) -> Self {
         ITEM_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
         Self {
+            equipment: self.equipment.clone(),
+            consumable: self.consumable.clone(),
+            class: self.class,
             archetype: self.archetype.clone(),
             identity: self.identity.clone(),
             name: self.name.clone(),
@@ -47,6 +73,9 @@ impl Clone for ItemSpec {
 impl ItemSpec {
     pub fn ordinary(name: String) -> Self {
         Self {
+            equipment: None,
+            consumable: None,
+            class: ItemClass::Misc,
             archetype: name.clone(),
             identity: name.clone(),
             appearance: name.clone(),
@@ -58,14 +87,20 @@ impl ItemSpec {
         }
     }
     pub(crate) fn valid(&self) -> bool {
-        [
-            &self.archetype,
-            &self.identity,
-            &self.name,
-            &self.appearance,
-        ]
-        .iter()
-        .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
+        self.equipment.as_ref().is_none_or(|equipment| {
+            !self.stackable && self.consumable.is_none() && equipment.valid(self.class)
+        }) && self
+            .consumable
+            .as_ref()
+            .is_none_or(|consumable| self.class == ItemClass::Potion && consumable.valid())
+            && [
+                &self.archetype,
+                &self.identity,
+                &self.name,
+                &self.appearance,
+            ]
+            .iter()
+            .all(|s| !s.is_empty() && s.len() <= 80 && !s.chars().any(char::is_control))
             && self.properties.len() <= 32
             && self.properties.iter().all(|(k, v)| {
                 !k.is_empty()
@@ -130,6 +165,14 @@ impl Game {
         taking: bool,
     ) -> Result<OutcomeKind, GameError> {
         let at = self.actors[&actor].location;
+        if !taking
+            && self.actors[&actor]
+                .equipment
+                .values()
+                .any(|equipped| *equipped == item)
+        {
+            return Err(GameError::ItemUnavailable);
+        }
         let (from, to) = if taking {
             (ItemLocation::Ground(at), ItemLocation::Carried(actor))
         } else {

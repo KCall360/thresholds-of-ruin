@@ -33,6 +33,10 @@ writes the region index and binds SHA-256 hashes of the manifest and the index
 (which holds each region file's hash), the normalized model, exact ruleset and
 validator identity, and recorded coverage. Versions are
 author-controlled `major.minor`; changing a hash does not require a version bump.
+Manifest and region source hashes normalize CRLF to LF automatically, so
+validation on Windows survives an LF checkout and vice versa. Other source edits,
+including comments, still require validation. Generated TOML uses LF; source byte
+limits apply before normalization, and validation does not rewrite authored text.
 Validator failures produce a nonzero exit status and JSON diagnostics on stderr.
 Reference errors identify their authored declaration and, when its original
 source still matches, the exact line and column of the failing value. This

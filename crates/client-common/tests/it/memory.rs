@@ -157,6 +157,7 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
         .push(GroundItemView {
             reachable: false,
             item: ItemView {
+                class: Default::default(),
                 asset: None,
                 quantity: 1,
                 appearance: String::new(),
@@ -265,6 +266,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
         .push(GroundItemView {
             reachable: false,
             item: ItemView {
+                class: Default::default(),
                 asset: None,
                 quantity: 1,
                 appearance: String::new(),

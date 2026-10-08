@@ -1,5 +1,7 @@
 import copy
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,6 +96,33 @@ class EntryFormat(unittest.TestCase):
 
 
 class LedgerFormat(unittest.TestCase):
+    def test_streaming_comparison_can_be_recorded_by_actual_cli(self):
+        unit, group = "latency:stream-r16-memory", "stream-r16-memory"
+        comparison = {
+            "created": "2026-09-28T12:00:00+00:00", "machine": MACHINE, "rustc": "rustc 1.98.1",
+            "sides": {"head": {"commit": "e" * 40, "dirty": False}},
+            "units": {unit: {"command": ["latency_bench", "--case", group]}},
+            "results": {unit: {group: {
+                "workload": {"head": {"name": "performance", "version": "streaming-v1"}},
+                "head": {"timings": {"authoritative_total": {"n": 4, "p50_ms": 1, "p95_ms": 2, "max_ms": 3}},
+                         "counts": {"history_end": 4}}}}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, raw, output = root / "comparison.json", root / "raw.tar.gz", root / "ledger.jsonl"
+            source.write_text(json.dumps(comparison), encoding="utf-8")
+            raw.write_bytes(b"retained sample bundle")
+            result = subprocess.run([
+                sys.executable, ledger.__file__, "add", "--comparison", str(source),
+                "--unit", unit, "--group", group, "--metric", "authoritative_total",
+                "--raw-url", ENTRY["raw"]["url"], "--raw-file", str(raw), "--ledger", str(output),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            entry = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(entry["workload"], {"name": "streaming", "version": 1})
+            self.assertEqual([], ledger.validate_entry(entry))
+            self.assertEqual(entry["raw"]["sha256"], ledger.sha256_file(raw))
+
     def test_duplicates_order_and_blank_lines(self):
         later = dict(ENTRY, date="2026-09-29", commit="d" * 40)
         self.assertEqual([], ledger.validate_ledger(line(ENTRY) + line(later)))
@@ -133,6 +162,13 @@ class LedgerFormat(unittest.TestCase):
         self.assertEqual({"history_end": 110}, entry["counts"], "Counts that varied between rounds are omitted")
         self.assertEqual(("2026-09-28", True), (entry["date"], entry["dirty"]))
         self.assertEqual("latency_bench --case r8-a1-h100-memory", entry["command"])
+        for version in ("streaming-v0", "streaming-v01", "unknown", "streaming-v1-extra"):
+            with self.subTest(version=version):
+                comparison["results"]["latency:r8-a1-h100-memory"]["r8-a1-h100-memory"]["workload"]["head"]["version"] = version
+                invalid = ledger.entry_from_comparison(
+                    comparison, "latency:r8-a1-h100-memory", "r8-a1-h100-memory",
+                    "authoritative_total", "head", ENTRY["raw"]["url"], "f" * 64)
+                self.assertTrue(ledger.validate_entry(invalid))
 
 
 class MachineProbe(unittest.TestCase):

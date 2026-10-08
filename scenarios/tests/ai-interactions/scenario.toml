@@ -1,0 +1,51 @@
+format = 2
+id = "ai-interactions"
+version = "1.0"
+ruleset = "interactions-v25"
+default_character = 1
+factions = { delvers = ["ruin"], ruin = ["delvers"] }
+ai_profiles = { tactical = { memory_ticks = 1000, flee_percent = 25 } }
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 100, faction = "delvers", attack = { bonus = 1000, wind_up = 1, recovery = 99, damage = { vital = 15 } } } }]
+
+[archetypes.healing]
+class = "potion"
+name = "potion of healing"
+identity = "healing"
+appearance_pool = "potions"
+stackable = true
+consumable = { effects = [{ type = "heal", amount = 10 }] }
+
+[archetypes.old_mail]
+class = "armor"
+name = "old mail"
+equipment = { slot = "body_armor", defense = 1 }
+
+[archetypes.mail]
+class = "armor"
+name = "mail"
+equipment = { slot = "body_armor", defense = 3 }
+
+[archetypes.old_ring]
+class = "ring"
+name = "old ring"
+equipment = { slot = "ring", defense = 2 }
+
+[archetypes.ring]
+class = "ring"
+name = "ring"
+equipment = { slot = "ring", defense = 3 }
+
+[archetypes.hidden_ring]
+class = "ring"
+name = "ring of protection"
+identity = "protection"
+appearance_pool = "rings"
+equipment = { slot = "ring", defense = 5 }
+
+[appearance_pools.rings]
+appearances = ["silver ring"]
+confounding = true
+
+[appearance_pools.potions]
+appearances = ["red potion"]
+confounding = true

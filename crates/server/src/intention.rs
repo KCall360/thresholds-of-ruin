@@ -132,7 +132,7 @@ pub(super) fn derive_intention_ends(
             let cancelled_queue = matches!(&entry.content, JournalContent::IntentionChanged {
                 intention: id, change: IntentionChange::Cancelled, .. } if *id == intention)
                 && before.pending_intention(actor).is_some_and(|queued| {
-                    queued.id == intention && !matches!(queued.work, tor_simulation::IntentionWork::ResumeAttack { .. })
+                    queued.id == intention && !matches!(queued.work, tor_simulation::IntentionWork::ResumePreparation { .. })
                 }) && after.pending_intention(actor).is_none();
             if after.preparation(actor).is_some_and(|p| p.intention == Some(intention))
                 || (!cancelled_queue && !loaded.contains(&actor) && after.known_actor_region(actor).is_some()) {
@@ -140,9 +140,10 @@ pub(super) fn derive_intention_ends(
             }
             let resolved = after.combat_events().iter().any(|event| matches!(event,
                 tor_simulation::combat::CombatEvent::Resolved { actor: owner, intention: Some(id), .. }
+                | tor_simulation::combat::CombatEvent::ItemCompleted { actor: owner, intention: Some(id), .. }
                     if *owner == actor && *id == intention));
             let immediate = current == Some(intention) && matches!(&entry.content,
-                JournalContent::IntentionStarted { action, .. } if !matches!(action, Action::Attack { .. }));
+                JournalContent::IntentionStarted { action, .. } if !action.is_prepared());
             let replaced = current != Some(intention) && entry.actor.0 == actor.0
                 && matches!(&entry.content, JournalContent::Action { action, .. }
                     | JournalContent::IntentionStarted { action, .. } if !matches!(action, Action::Wait));
@@ -504,11 +505,14 @@ impl Engine {
                     && queued.origin == tor_simulation::IntentionOrigin::Human
                     && admitted_work_matches(queued.work, action)
             });
-        let preparation_matches = candidate.game.preparation(SimActor(actor.0)).is_some_and(|p| {
-            p.intention == Some(*intention)
-                && matches!(original, tor_simulation::Action::Attack { target } if p.target == target)
-                && !candidate.game.is_ai(SimActor(actor.0))
-        });
+        let preparation_matches = candidate
+            .game
+            .preparation(SimActor(actor.0))
+            .is_some_and(|p| {
+                p.intention == Some(*intention)
+                    && p.work.action() == original
+                    && !candidate.game.is_ai(SimActor(actor.0))
+            });
         if admitted.actor != actor || !(queued_matches || preparation_matches) {
             return Err(unavailable());
         }
@@ -708,7 +712,11 @@ impl Engine {
                     .find(|end| end.intention == *intention)
                 {
                     Self::end_phase(end.kind)
-                } else if matches!(event, crate::journal::Event::AttackStarted { .. }) {
+                } else if matches!(
+                    event,
+                    crate::journal::Event::AttackStarted { .. }
+                        | crate::journal::Event::ItemStarted { .. }
+                ) {
                     IntentionPhase::Started
                 } else {
                     IntentionPhase::Resolved
@@ -773,11 +781,15 @@ impl Engine {
                 .intention_resolution(&result.entry.branch, intention)
                 .map(|index| match self.archive.records[index].entry.content {
                     JournalContent::IntentionStarted {
-                        event: crate::journal::Event::AttackStarted { .. },
+                        event:
+                            crate::journal::Event::AttackStarted { .. }
+                            | crate::journal::Event::ItemStarted { .. },
                         ..
                     }
                     | JournalContent::IntentionContinued {
-                        event: crate::journal::Event::AttackStarted { .. },
+                        event:
+                            crate::journal::Event::AttackStarted { .. }
+                            | crate::journal::Event::ItemStarted { .. },
                         ..
                     } => IntentionPhase::Started,
                     JournalContent::IntentionStarted { .. } => IntentionPhase::Resolved,
@@ -856,7 +868,7 @@ impl Engine {
         let admission = admitted.id.clone();
         let continuation = matches!(
             execution.intention.work,
-            tor_simulation::IntentionWork::ResumeAttack { .. }
+            tor_simulation::IntentionWork::ResumePreparation { .. }
         );
         let content = match execution.outcome {
             Ok(outcome) => {

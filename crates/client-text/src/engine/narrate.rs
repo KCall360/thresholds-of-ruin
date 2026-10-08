@@ -143,6 +143,7 @@ fn told(beat: &Beat) -> bool {
             | Beat::SetDoor { .. }
             | Beat::Waited
             | Beat::AttackBegan
+            | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
@@ -668,6 +669,7 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
                 if *open { "open" } else { "close" }
             )),
             Beat::Waited => teller.say("time passes"),
+            Beat::ItemBegan(text) => teller.say(text.trim_end_matches('.')),
             Beat::AttackBegan => teller.say("you ready an attack"),
             _ => {}
         }
@@ -677,6 +679,13 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
 /// The beats after a goal's action; an attack with no blow yet still says
 /// what was done.
 fn done_beats(teller: &mut Teller, e: &Episode, after: &[Beat]) {
+    if matches!(e.goal, Goal::UseItem { .. }) {
+        for beat in after {
+            if let Beat::ItemBegan(text) = beat {
+                teller.say(text.trim_end_matches('.'));
+            }
+        }
+    }
     if matches!(e.goal, Goal::Attack { .. })
         && !after
             .iter()
@@ -693,6 +702,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
     while i < beats.len() {
         let next = beats.get(i + 1);
         match &beats[i] {
+            Beat::ItemFinished(text) => teller.say(text.trim_end_matches('.')),
             Beat::Blow {
                 attacker,
                 target,
@@ -787,6 +797,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::SetDoor { .. }
             | Beat::Waited
             | Beat::AttackBegan
+            | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)

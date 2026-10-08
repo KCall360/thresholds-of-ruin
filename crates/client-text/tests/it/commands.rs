@@ -2,6 +2,37 @@ use tor_client_text::{parse, Input};
 use tor_protocol::*;
 
 #[test]
+fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
+    let mut s = state();
+    let mut item = s.observation.ground_items[0].item.clone();
+    item.class = ItemClass::Ring;
+    item.name = "silver ring".into();
+    s.observation.inventory = vec![item.clone()];
+    s.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: item.id,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    assert!(
+        matches!(parse("equip silver ring", &s).unwrap(), Input::Command(Command::Act { action: Action::Equip { item: target, slot: 0 }, .. }) if target == item.id)
+    );
+    assert!(parse("drink silver ring", &s).is_err());
+    s.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+    assert!(
+        matches!(parse("remove silver ring", &s).unwrap(), Input::Command(Command::Act { action: Action::Unequip { item: target }, .. }) if target == item.id)
+    );
+    assert!(parse("equip silver ring", &s).is_err());
+    assert!(parse("drink potion of healing", &s).is_err());
+}
+
+#[test]
 fn quantity_commands_and_drop_use_disclosed_ids() {
     let mut s = state();
     s.observation
@@ -123,8 +154,8 @@ fn state() -> StateView {
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
-                {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
-                {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
+                {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
+                {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
             ], "inventory":[], "visible_actors":[], "exits":[],  "ready":true
         }
     }))

@@ -64,6 +64,7 @@ pub struct RestoreContext<'a> {
     bodies: BTreeSet<Shared<crate::BodySpec>>,
     item_definitions: BTreeSet<Shared<crate::ItemSpec>>,
     combat_definitions: BTreeSet<Shared<crate::combat::CombatSpec>>,
+    anatomies: BTreeSet<Shared<crate::AnatomySpec>>,
 }
 
 impl<'a> RestoreContext<'a> {
@@ -78,6 +79,7 @@ impl<'a> RestoreContext<'a> {
             bodies: BTreeSet::new(),
             item_definitions: BTreeSet::new(),
             combat_definitions: BTreeSet::new(),
+            anatomies: BTreeSet::new(),
         }
     }
 
@@ -129,6 +131,7 @@ impl<'a> RestoreContext<'a> {
 
     fn share_actor_definitions(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
         for actor in actors.values_mut() {
+            share_definition(&mut self.anatomies, &mut actor.anatomy);
             share_definition(&mut self.bodies, &mut actor.body);
             if let Some(combat) = &mut actor.combat {
                 share_definition(&mut self.combat_definitions, &mut combat.spec);
@@ -547,6 +550,8 @@ mod tests {
             position: Position { x: 1, y: 1, z: 0 },
         };
         let actor = game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+        game.configure_anatomy(actor, crate::AnatomySpec::humanoid())
+            .unwrap();
         game.configure_combat(actor, crate::combat::CombatSpec::default())
             .unwrap();
         let mut spec = crate::ItemSpec::ordinary("token".into());
@@ -572,6 +577,9 @@ mod tests {
             .map(|s| context.restore(s).unwrap())
             .collect();
         assert!(!restored[0].items.shares_storage(&restored[1].items));
+        assert!(restored[0].actors[&actor]
+            .anatomy
+            .shares_storage(&restored[1].actors[&actor].anatomy));
         assert!(restored[0].items[&item]
             .spec
             .shares_storage(&restored[1].items[&item].spec));

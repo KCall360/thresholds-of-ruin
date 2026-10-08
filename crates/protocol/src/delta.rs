@@ -33,6 +33,8 @@ pub struct CollectionEdit<T> {
 /// A state view expressed as cell changes and exact ordered collection edits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateDelta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactions: Option<InteractionView>,
     /// Revision of the state this delta applies to.
     #[serde(with = "crate::integers::unsigned")]
     pub base_revision: u64,
@@ -193,6 +195,7 @@ impl StateDelta {
         // Shifting preserves order, so the merge above saw both lists sorted.
         let observation = &next.observation;
         Some(Self {
+            interactions: observation.interactions.clone(),
             base_revision: base.revision,
             wizard_game: next.wizard_game,
             revision: next.revision,
@@ -279,6 +282,7 @@ impl StateDelta {
             wizard_game: self.wizard_game,
             revision: self.revision,
             observation: Observation {
+                interactions: self.interactions,
                 combat: self.combat,
                 motion: self.motion,
                 places: apply_collection_changes(&base.observation.places, self.places)?,

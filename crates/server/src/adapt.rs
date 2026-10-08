@@ -89,8 +89,35 @@ pub fn action(action: &a::Action) -> s::Action {
             item: s::ItemId(*item),
             quantity: *quantity,
         },
+        a::Action::Equip { item, slot } => s::Action::Equip {
+            item: s::ItemId(*item),
+            slot: s::EquipmentSlotId(*slot),
+        },
+        a::Action::Unequip { item } => s::Action::Unequip {
+            item: s::ItemId(*item),
+        },
+        a::Action::Drink { item } => s::Action::Drink {
+            item: s::ItemId(*item),
+        },
         a::Action::Wait => s::Action::Wait,
     }
+}
+
+pub fn work(action: &a::Action) -> Option<s::Work> {
+    Some(match action {
+        a::Action::Attack { target } => s::Work::Attack { target: *target },
+        a::Action::Equip { item, slot } => s::Work::Equip {
+            item: s::ItemId(*item),
+            slot: s::EquipmentSlotId(*slot),
+        },
+        a::Action::Unequip { item } => s::Work::Unequip {
+            item: s::ItemId(*item),
+        },
+        a::Action::Drink { item } => s::Work::Drink {
+            item: s::ItemId(*item),
+        },
+        _ => return None,
+    })
 }
 
 pub fn recorded_action(action: s::Action) -> Option<a::Action> {
@@ -127,6 +154,12 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
             item: item.0,
             quantity,
         },
+        s::Action::Equip { item, slot } => a::Action::Equip {
+            item: item.0,
+            slot: slot.0,
+        },
+        s::Action::Unequip { item } => a::Action::Unequip { item: item.0 },
+        s::Action::Drink { item } => a::Action::Drink { item: item.0 },
         s::Action::Wait => a::Action::Wait,
     })
 }
@@ -160,6 +193,9 @@ pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
             item: item.0,
             result: result.0,
             quantity,
+        },
+        s::OutcomeKind::ItemStarted { work } => crate::journal::Event::ItemStarted {
+            action: recorded_action(work.action()).unwrap(),
         },
         s::OutcomeKind::Waited => crate::journal::Event::Waited,
     }
@@ -232,6 +268,7 @@ pub fn observation(
         {
             ground_items.push(p::GroundItemView {
                 item: p::ItemView {
+                    class: item_class(item.class),
                     quantity: item.quantity,
                     appearance: item.appearance.clone(),
                     identified: item.identified,
@@ -268,6 +305,55 @@ pub fn observation(
         }
     }
     p::Observation {
+        interactions: view.interactions.map(|interaction| p::InteractionView {
+            completed: interaction
+                .completed
+                .into_iter()
+                .map(|work| {
+                    crate::wire_adapter::encode_action(
+                        &recorded_action(work.action()).expect("completed item action"),
+                        targets,
+                    )
+                })
+                .collect(),
+            slots: interaction.slots.into_iter().map(equipment_slot).collect(),
+            preparation: interaction.preparation.map(|progress| p::PreparationView {
+                action: crate::wire_adapter::encode_action(
+                    &recorded_action(progress.work.action()).unwrap(),
+                    targets,
+                ),
+                remaining: progress.remaining,
+                active: progress.active,
+            }),
+            inventory: interaction
+                .inventory
+                .into_iter()
+                .map(|item| p::ItemInteractionView {
+                    item: targets.item(item.item),
+                    slot: item.slot.map(equipment_slot),
+                    equipped_slot: item.equipped_slot.map(|slot| slot.0),
+                    known_equipment: item.known_equipment.map(|equipment| p::EquipmentView {
+                        attack: equipment.attack.map(|attack| p::AttackView {
+                            bonus: attack.bonus,
+                            wind_up: attack.wind_up,
+                            recovery: attack.recovery,
+                            damage: attack
+                                .damage
+                                .into_iter()
+                                .map(|(kind, amount)| (damage_type(kind), amount))
+                                .collect(),
+                        }),
+                        defense: equipment.defense,
+                        reductions: equipment
+                            .reductions
+                            .into_iter()
+                            .map(|(kind, amount)| (damage_type(kind), amount))
+                            .collect(),
+                    }),
+                    drinkable: item.drinkable,
+                })
+                .collect(),
+        }),
         combat: view.combat.map(|c| p::CombatView {
             hp: c.hp,
             max_hp: c.max_hp,
@@ -316,6 +402,7 @@ pub fn observation(
             .inventory
             .into_iter()
             .map(|item| p::ItemView {
+                class: item_class(item.class),
                 quantity: item.quantity,
                 appearance: item.appearance.clone(),
                 identified: item.identified,
@@ -325,6 +412,29 @@ pub fn observation(
                 asset: item.asset,
             })
             .collect(),
+    }
+}
+
+fn equipment_slot(slot: s::EquipmentSlot) -> p::EquipmentSlot {
+    match slot {
+        s::EquipmentSlot::Weapon => p::EquipmentSlot::Weapon,
+        s::EquipmentSlot::BodyArmor => p::EquipmentSlot::BodyArmor,
+        s::EquipmentSlot::Shield => p::EquipmentSlot::Shield,
+        s::EquipmentSlot::HeadArmor => p::EquipmentSlot::HeadArmor,
+        s::EquipmentSlot::HandsArmor => p::EquipmentSlot::HandsArmor,
+        s::EquipmentSlot::FeetArmor => p::EquipmentSlot::FeetArmor,
+        s::EquipmentSlot::Cloak => p::EquipmentSlot::Cloak,
+        s::EquipmentSlot::Ring => p::EquipmentSlot::Ring,
+        s::EquipmentSlot::Amulet => p::EquipmentSlot::Amulet,
+    }
+}
+fn damage_type(kind: s::combat::DamageType) -> p::DamageType {
+    match kind {
+        s::combat::DamageType::Energy => p::DamageType::Energy,
+        s::combat::DamageType::Impact => p::DamageType::Impact,
+        s::combat::DamageType::Keen => p::DamageType::Keen,
+        s::combat::DamageType::Spirit => p::DamageType::Spirit,
+        s::combat::DamageType::Vital => p::DamageType::Vital,
     }
 }
 
@@ -381,4 +491,23 @@ pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn item_class(class: s::ItemClass) -> p::ItemClass {
+    match class {
+        s::ItemClass::Misc => p::ItemClass::Misc,
+        s::ItemClass::Weapon => p::ItemClass::Weapon,
+        s::ItemClass::Armor => p::ItemClass::Armor,
+        s::ItemClass::Potion => p::ItemClass::Potion,
+        s::ItemClass::Food => p::ItemClass::Food,
+        s::ItemClass::Corpse => p::ItemClass::Corpse,
+        s::ItemClass::Tool => p::ItemClass::Tool,
+        s::ItemClass::Amulet => p::ItemClass::Amulet,
+        s::ItemClass::Ring => p::ItemClass::Ring,
+        s::ItemClass::Scroll => p::ItemClass::Scroll,
+        s::ItemClass::Spellbook => p::ItemClass::Spellbook,
+        s::ItemClass::Wand => p::ItemClass::Wand,
+        s::ItemClass::Coin => p::ItemClass::Coin,
+        s::ItemClass::Gem => p::ItemClass::Gem,
+    }
 }

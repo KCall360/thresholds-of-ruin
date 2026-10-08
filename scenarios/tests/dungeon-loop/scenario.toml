@@ -1,7 +1,7 @@
 format = 2
 id = "dungeon-loop"
 version = "1.0"
-ruleset = "dungeon-v23"
+ruleset = "interactions-v25"
 default_character = 1
 factions = { delvers = ["ruin"], ruin = ["delvers"] }
 ai_profiles = { tactical = { memory_ticks = 200, flee_percent = 0 } }

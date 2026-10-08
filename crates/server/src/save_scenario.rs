@@ -254,8 +254,38 @@ struct AppearancePool {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::scenario_package::ItemClass",
+    rename_all = "snake_case"
+)]
+enum ItemClass {
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
+    #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
+    #[serde(with = "mapped")]
+    equipment: Option<source::EquipmentSpec>,
+    #[serde(with = "mapped")]
+    consumable: Option<source::ConsumableSpec>,
+    #[serde(with = "mapped")]
+    class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
     combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
@@ -272,6 +302,8 @@ struct Archetype {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Character", deny_unknown_fields)]
 struct Character {
+    #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
     #[serde(with = "mapped")]
     combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
@@ -300,6 +332,59 @@ struct Objective {
 struct AiProfile {
     memory_ticks: u64,
     flee_percent: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EquipmentSlot", rename_all = "snake_case")]
+enum EquipmentSlot {
+    Weapon,
+    BodyArmor,
+    Shield,
+    HeadArmor,
+    HandsArmor,
+    FeetArmor,
+    Cloak,
+    Ring,
+    Amulet,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::AnatomySpec", deny_unknown_fields)]
+struct AnatomySpec {
+    #[serde(with = "mapped")]
+    slots: Vec<source::EquipmentSlot>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
+struct EquipmentSpec {
+    #[serde(with = "mapped")]
+    slot: source::EquipmentSlot,
+    #[serde(with = "mapped")]
+    attack: Option<source::AttackSpec>,
+    defense: i32,
+    #[serde(with = "mapped")]
+    reductions: BTreeMap<source::DamageType, u32>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::EffectSpec",
+    tag = "type",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum EffectSpec {
+    Heal {
+        amount: u32,
+    },
+    Damage {
+        #[serde(with = "mapped")]
+        components: BTreeMap<source::DamageType, u32>,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
+struct ConsumableSpec {
+    #[serde(with = "mapped")]
+    effects: Vec<source::EffectSpec>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -426,9 +511,15 @@ remote!(
     TerrainAssets => source::TerrainAssets,
     AppearancePool => source::AppearancePool,
     Archetype => source::Archetype,
+    ItemClass => crate::scenario_package::ItemClass,
     Character => source::Character,
     Objective => source::Objective,
     AiProfile => source::AiProfile,
+    AnatomySpec => source::AnatomySpec,
+    EquipmentSlot => source::EquipmentSlot,
+    EquipmentSpec => source::EquipmentSpec,
+    EffectSpec => source::EffectSpec,
+    ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
     AttackSpec => source::AttackSpec,
@@ -509,15 +600,63 @@ mod tests {
     use crate::storage::codec::strict;
     use serde_json::Value;
 
-    fn legacy_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the immutable PR79 writer, before these schemas existed.
-        // Only machine-specific package directories were normalized to null.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v22.json")).unwrap()
+    fn current_scenarios() -> BTreeMap<String, Value> {
+        // Captured from the current v24 writer. Only machine-specific package
+        // directories are normalized to null; this is not an old-save reader.
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v24.json")).unwrap()
     }
 
     #[test]
-    fn pre_refactor_scenarios_round_trip_without_changing_the_saved_schema() {
-        for (name, expected) in legacy_scenarios() {
+    fn current_writer_matches_golden_scenario_fixture() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios");
+        let mut actual = BTreeMap::new();
+        for (name, path) in [
+            ("two-room", "two-room"),
+            ("items", "tests/items"),
+            ("first-dungeon", "first-dungeon"),
+            ("interactions", "tests/interactions"),
+            ("ai-interactions", "tests/ai-interactions"),
+        ] {
+            let mut scenario = source::load(&root.join(path), 42, None, false).unwrap();
+            let mut package = (**scenario.package.as_ref().unwrap()).clone();
+            package.directory = None;
+            scenario.package = Some(Arc::new(package));
+            actual.insert(
+                name.to_owned(),
+                serde_json::to_value(Borrowed(&scenario)).unwrap(),
+            );
+        }
+        let diagnostic = crate::Scenario::performance(42, 8, 2).unwrap();
+        actual.insert(
+            "diagnostic".into(),
+            serde_json::to_value(Borrowed(&diagnostic)).unwrap(),
+        );
+        if let Some(output) = std::env::var_os("TOR_RECORD_SCENARIO_FIXTURES") {
+            let mut bytes = serde_json::to_vec_pretty(&actual).unwrap();
+            bytes.push(b'\n');
+            std::fs::write(output, bytes).unwrap();
+            return;
+        }
+        assert_eq!(actual, current_scenarios());
+    }
+
+    #[test]
+    fn obsolete_package_metadata_is_not_read_as_the_current_schema() {
+        let legacy: BTreeMap<String, Value> =
+            serde_json::from_str(include_str!("../fixtures/saved-scenarios-v22.json")).unwrap();
+        for (name, value) in legacy {
+            if !value["package"].is_null() {
+                assert!(
+                    strict::<Owned<crate::Scenario>>(&serde_json::to_vec(&value).unwrap()).is_err(),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn current_scenarios_round_trip_through_the_explicit_saved_schema() {
+        for (name, expected) in current_scenarios() {
             let bytes = serde_json::to_vec(&expected).unwrap();
             let Owned(actual) = strict::<Owned<crate::Scenario>>(&bytes).unwrap();
             assert_eq!(
@@ -541,7 +680,7 @@ mod tests {
 
     #[test]
     fn stored_scenario_coordinates_require_numbers_and_reject_unknown_fields() {
-        let original = &legacy_scenarios()["diagnostic"];
+        let original = &current_scenarios()["diagnostic"];
         for (field, bad) in [
             ("region", Value::String("1".into())),
             ("x", Value::from(i64::from(i32::MAX) + 1)),
@@ -558,7 +697,7 @@ mod tests {
 
     #[test]
     fn stored_metadata_rejects_unknown_nested_fields_at_each_owned_boundary() {
-        let original = &legacy_scenarios()["first-dungeon"];
+        let original = &current_scenarios()["first-dungeon"];
         for path in [
             "/streaming",
             "/package",

@@ -44,6 +44,14 @@ fn configure_inner(
     origin: Origin<'_>,
 ) -> Result<(), ConfigurationError> {
     let (name, kind) = origin.names();
+    if let Some(anatomy) = definition.anatomy {
+        game.configure_anatomy(id, anatomy.into_owned())
+            .map_err(|_| fail(format!("Invalid {kind} anatomy")))?;
+    }
+    for identity in &definition.known_identities {
+        game.learn_identity(id, identity)
+            .map_err(|_| fail("Invalid initial item identity"))?;
+    }
     if let Some(spec) = definition.combat {
         game.configure_combat(id, spec.into_owned())
             .map_err(|_| fail(format!("Invalid {kind} combat specification")))?;

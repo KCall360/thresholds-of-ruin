@@ -75,7 +75,7 @@ fn sample_state() -> StateView {
                         "name": "copper token",
                         "description": "A worn copper disc.",
                         "quantity": "1",
-                        "appearance": "token",
+                        "class":"misc","appearance": "token",
                         "identified": true
                     }
                 },
@@ -87,7 +87,7 @@ fn sample_state() -> StateView {
                         "name": "silver token",
                         "description": "A polished silver disc.",
                         "quantity": "1",
-                        "appearance": "token",
+                        "class":"misc","appearance": "token",
                         "identified": true
                     }
                 },
@@ -99,7 +99,7 @@ fn sample_state() -> StateView {
                         "name": "stone tablet",
                         "description": "An inscribed slab of granite.",
                         "quantity": "1",
-                        "appearance": "tablet",
+                        "class":"misc","appearance": "tablet",
                         "identified": true
                     }
                 }
@@ -110,7 +110,7 @@ fn sample_state() -> StateView {
                     "name": "iron sword",
                     "description": "A sharp iron shortsword.",
                     "quantity": "1",
-                    "appearance": "sword",
+                    "class":"misc","appearance": "sword",
                     "identified": true
                 },
                 {
@@ -118,7 +118,7 @@ fn sample_state() -> StateView {
                     "name": "brass key",
                     "description": "An ornate brass key.",
                     "quantity": "1",
-                    "appearance": "key",
+                    "class":"misc","appearance": "key",
                     "identified": true
                 }
             ],

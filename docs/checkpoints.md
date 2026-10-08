@@ -89,8 +89,8 @@ source reader before the engine validates and exposes the recovered scenario.
 The stored index uses the same strict JSON checks as other save payloads,
 including duplicate keys and canonical field presence, then requires unique
 increasing region identities. The generated-region flag retains its existing
-omission when false. These mappings preserve save format 22 and current writer
-shapes; they add no old-format importer.
+omission when false. These mappings preserve the current writer shapes, including physical item
+classes in item definitions and scenario metadata; they add no old-format importer.
 
 ## Portable export contract (design)
 

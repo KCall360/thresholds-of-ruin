@@ -23,9 +23,46 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
+}
+
+#[test]
+fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() {
+    let mut s = state();
+    carrying(&mut s);
+    let ring = super::item_target(12);
+    s.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: ring,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    assert_eq!(
+        goals("wear ring", &s),
+        [Goal::UseItem {
+            item: ring,
+            operation: tor_client_common::items::ItemOperation::Equip,
+        }]
+    );
+    assert_eq!(said("drink ring", &s), "You can't drink that item.");
+    assert_eq!(said("remove ring", &s), "That item isn't equipped.");
+    s.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+    assert_eq!(
+        goals("take off ring", &s),
+        [Goal::UseItem {
+            item: ring,
+            operation: tor_client_common::items::ItemOperation::Unequip,
+        }]
+    );
+    assert_eq!(said("wear ring", &s), "That item is already equipped.");
 }
 
 #[test]
@@ -219,6 +256,7 @@ fn carrying(s: &mut StateView) {
         (13, "iron sword", "A sharp steel blade."),
     ] {
         s.observation.inventory.push(ItemView {
+            class: Default::default(),
             id: super::item_target(id),
             name: name.into(),
             appearance: "item".into(),
@@ -518,11 +556,11 @@ fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
         "You can't carry the goblin sentry."
     );
     for (line, answer) in [
-        ("drink potion", "You can't drink anything yet."),
+        ("drink potion", "That item has no usable interaction."),
         ("eat ration", "You can't eat anything yet."),
-        ("wear ring", "You can't wear anything yet."),
-        ("wield sword", "You can't wield anything yet."),
-        ("take off ring", "You can't take anything off yet."),
+        ("wear ring", "That item has no usable interaction."),
+        ("wield sword", "That item has no usable interaction."),
+        ("take off ring", "That item has no usable interaction."),
         ("give ring to goblin", "You can't give anything away yet."),
         ("talk to goblin", "You can't talk with anyone yet."),
         ("ask goblin about key", "You can't ask anyone anything yet."),
@@ -673,7 +711,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
             }
             if ch == 'i' {
                 items.push(serde_json::json!({"reachable": x == 0 && y == 0,
-                    "item": {"quantity": "1", "appearance": "item", "identified": true,
+                    "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                         "id":super::item_target(1), "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
             }
@@ -849,7 +887,7 @@ fn things_and_figures_are_told_in_sentences() {
     let token = |id: u64, x: i32, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": "copper token", "description": ""}}))
         .unwrap()
     };

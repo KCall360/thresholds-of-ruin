@@ -10,6 +10,25 @@ from process_harness import ProcessTestCase, TOKEN, SPECTATOR_TOKEN
 class AsciiMemoryProcesses(ProcessTestCase):
     graphical = True
 
+    def test_native_physical_classes_hide_identity_and_draw_unknown_potions(self):
+        server = self.server(scenario="items")
+        window, frame = self.window()
+        items = [entry["item"] for entry in frame["state"]["observation"]["ground_items"]]
+        potions = [item for item in items if item["class"] == "potion"]
+        self.assertEqual(len(potions), 3)
+        self.assertTrue(all(not item["identified"] and item["name"] == "red potion" for item in potions))
+        self.assertNotIn("potion of healing", json.dumps(frame["state"]))
+        self.assertNotIn("potion of poison", json.dumps(frame["state"]))
+        self.assertEqual(self.tile(frame, 2)["glyph"], "!")
+        self.assertTrue(any(item["class"] == "weapon" for item in items))
+        self.flush_save()
+        window.stop()
+        server.stop()
+        self.server()
+        _, resumed = self.window()
+        self.assertEqual(resumed["state"]["observation"]["ground_items"], frame["state"]["observation"]["ground_items"])
+        self.assertEqual(self.tile(resumed, 2)["glyph"], "!")
+
     def window(self, token=TOKEN):
         self.capture = self.save.parent / "memory.ppm"
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--capture", self.capture], token=token)
@@ -26,7 +45,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.key(window,"close_door")
         closed = self.key(window,"right")
         remembered = self.tile(closed,4)
-        self.assertEqual(remembered["glyph"],"!")
+        self.assertEqual(remembered["glyph"],"(")
         self.assertTrue(remembered["remembered"])
         self.assertEqual(remembered["color"],0x626262)
         # Verify the actual presented pixels, not only the diagnostic model.
@@ -41,7 +60,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.assertEqual(self.request(observer,{"type":"snapshot"})["state"],closed["state"])
         shifted = self.key(window,"left")
         self.assertTrue(self.tile(shifted,5)["remembered"])
-        self.assertEqual(self.tile(shifted,5)["glyph"],"!")
+        self.assertEqual(self.tile(shifted,5)["glyph"],"(")
         self.key(window,"right")
         self.key(window,"open_door")
         opened = self.key(window,"right")
@@ -65,12 +84,12 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.server(wizard=True, scenario="ascii-memory-rotated")
         wizard = self.wizard()
         window, initial = self.window()
-        self.assertEqual(self.tile(initial,-1)["glyph"],"!")
+        self.assertEqual(self.tile(initial,-1)["glyph"],"(")
         self.key(window,"right")
         self.key(window,"right")
         self.key(window,"close_door")
         hidden = self.key(window,"left")
-        self.assertEqual(self.tile(hidden,-3)["glyph"],"!")
+        self.assertEqual(self.tile(hidden,-3)["glyph"],"(")
         self.assertTrue(self.tile(hidden,-3)["remembered"])
         self.wizard_command(wizard, "rewind initial")
         rewound = self.frame(window,lambda f:f.get("branch") != hidden["branch"])
@@ -83,7 +102,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         self.assertEqual(self.tile(initial,4)["glyph"],"&")
         self.wizard_command(wizard, "wall 3 2 0 0 closed")
         hidden = self.frame(window,lambda f:int(f.get("state",{}).get("revision","0"))>int(initial["state"]["revision"]))
-        self.assertEqual(self.tile(hidden,4)["glyph"],"!")
+        self.assertEqual(self.tile(hidden,4)["glyph"],"(")
         self.assertTrue(self.tile(hidden,4)["remembered"])
         self.assertFalse(any(t["glyph"] == "&" for t in hidden["map_tiles"]))
         self.wizard_command(wizard, "item token 3 3 0 0")
@@ -93,7 +112,7 @@ class AsciiMemoryProcesses(ProcessTestCase):
         # Snapshot refresh cannot disclose the hidden new token.
         self.wizard_command(wizard, "wall 3 2 0 0 open")
         seen = self.frame(window,lambda f:int(f.get("state",{}).get("revision","0"))>=int(hidden["state"]["revision"])+2)
-        self.assertEqual(self.tile(seen,3)["glyph"],"!")
+        self.assertEqual(self.tile(seen,3)["glyph"],"(")
         self.assertFalse(self.tile(seen,3)["remembered"])
         self.assertEqual(self.tile(seen,4)["glyph"],"&")
 

@@ -3,6 +3,7 @@
 //! Many verbs share one game action, and one verb chooses its action by what
 //! it acts on. Verbs the game has no rules for yet are recognized and refused
 //! plainly, so supporting one later is one more entry here.
+use tor_client_common::items::{item_action, ItemOperation};
 use tor_client_common::narration;
 use tor_protocol::*;
 
@@ -20,6 +21,10 @@ use crate::{
 /// actions; see [`super::turn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Goal {
+    UseItem {
+        item: ItemTarget,
+        operation: ItemOperation,
+    },
     Take {
         item: ItemTarget,
         quantity: Option<u64>,
@@ -97,17 +102,13 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 /// What the game can't do yet, as the refusal says it.
 fn unsupported(verb: Verb) -> Option<&'static str> {
     Some(match verb {
-        Verb::Wear => "wear anything",
-        Verb::Wield => "wield anything",
-        Verb::Remove => "take anything off",
         Verb::Eat => "eat anything",
-        Verb::Drink => "drink anything",
         Verb::Give => "give anything away",
         Verb::Show => "show anything to anyone",
         Verb::Throw => "throw anything",
@@ -488,6 +489,26 @@ fn transitive(
         (Verb::Drop, None | Some((Preposition::On | Preposition::In, _))) => {
             bind(direct, scene, referents, Domain::Carried, &|r| {
                 drop(r, quantity)
+            })
+        }
+        (Verb::Wear | Verb::Wield | Verb::Remove | Verb::Drink, _) => {
+            let operation = match verb {
+                Verb::Remove => ItemOperation::Unequip,
+                Verb::Drink => ItemOperation::Drink,
+                _ => ItemOperation::Equip,
+            };
+            bind(direct, scene, referents, Domain::Carried, &|r| {
+                if quantity.is_some_and(|q| q > 1) {
+                    return say("Use one item at a time.");
+                }
+                match r.key {
+                    Key::Item(item) => match item_action(&scene.state.observation, item, operation)
+                    {
+                        Ok(_) => goal(Goal::UseItem { item, operation }),
+                        Err(reason) => say(reason),
+                    },
+                    _ => say("You aren't carrying that item."),
+                }
             })
         }
         (Verb::Put, Some((Preposition::On | Preposition::In, place)))

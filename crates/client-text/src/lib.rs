@@ -6,7 +6,7 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: attack <actor>, places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: attack <actor>, places, name <place number> <new name>, look (l), inventory (i), north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -31,6 +31,40 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
         }))
     };
     match (verb.as_str(), rest) {
+        ("equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff", noun)
+            if !noun.is_empty() =>
+        {
+            let operation = match verb.as_str() {
+                "remove" | "unequip" => tor_client_common::items::ItemOperation::Unequip,
+                "drink" | "quaff" => tor_client_common::items::ItemOperation::Drink,
+                _ => tor_client_common::items::ItemOperation::Equip,
+            };
+            let noun = noun.to_lowercase();
+            let noun = noun.strip_prefix("the ").unwrap_or(&noun);
+            let matches: Vec<_> = state
+                .observation
+                .inventory
+                .iter()
+                .filter(|item| item_matches(noun, item))
+                .collect();
+            match matches.as_slice() {
+                [item] => action(tor_client_common::items::item_action(
+                    &state.observation,
+                    item.id,
+                    operation,
+                )?),
+                [] => Err("No carried item matches that name.".into()),
+                _ => Err(format!(
+                    "Which item? Use {} #id: {}",
+                    operation.verb(),
+                    matches
+                        .iter()
+                        .map(|item| format!("{} (#{})", safe(&item.name), item.id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            }
+        }
         ("attack" | "hit" | "fight", noun) => {
             let mut actors: Vec<_> = state
                 .observation
