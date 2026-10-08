@@ -797,7 +797,7 @@ fn slow_controller_during_start_cannot_resurrect_travel_on_observers() {
         service.handle(controller.id, format!("fill-{i}"), Request::Snapshot);
     }
     start(&mut service, &mut controller, 7);
-    assert!(*controller.close.borrow());
+    assert!(controller.close.borrow().is_some());
     let statuses: Vec<_> = drain(&mut observer)
         .into_iter()
         .filter_map(|m| match m {
@@ -829,7 +829,7 @@ fn controller_transport_loss_during_execution_keeps_committed_progress_without_r
     let closed = controller.close.clone();
     drop(controller);
     assert!(matches!(service.step(), Step::Progress));
-    assert!(*closed.borrow());
+    assert!(closed.borrow().is_some());
     assert!(!service.clients.contains_key(&controller_id));
     assert_eq!(service.engine.observation(actor).unwrap().tick, 100);
     assert_eq!(service.travel_status[&actor].completed_steps, 1);
@@ -900,7 +900,7 @@ fn slow_spectator_pauses_the_journey_until_dropped_and_reconnects_at_committed_s
     assert_eq!(service.travel_status[&ActorId(1)].completed_steps, 1);
     // The runner disconnects a client that stays full; the journey goes on.
     service.disconnect(slow.id);
-    assert!(*slow.close.borrow());
+    assert!(slow.close.borrow().is_some());
     assert_eq!(
         service.travel_status[&ActorId(1)].phase,
         TravelPhase::Active
@@ -968,7 +968,7 @@ async fn the_runner_drops_a_stalled_spectator_and_finishes_the_journey() {
         (finished.phase, finished.completed_steps),
         (TravelPhase::Arrived, 7)
     );
-    assert!(*slow.close.borrow());
+    assert!(slow.close.borrow().is_some());
     let (reply, stopped) = tokio::sync::oneshot::channel();
     mail.send(crate::runner::Mail::Shutdown(reply))
         .await

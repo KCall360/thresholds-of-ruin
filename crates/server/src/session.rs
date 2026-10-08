@@ -81,16 +81,24 @@ struct Client {
     /// The region that palette was forecast from.
     palette_region: Option<u64>,
     messages: crate::outbound::Sender,
-    close: watch::Sender<bool>,
+    close: watch::Sender<Option<DisconnectMode>>,
     /// What this client was last told play waits for, since its last update
     /// or snapshot; `None` once anything has changed.
     waiting: Option<Waiting>,
 }
 
+/// A resource failure discards stale output; an intentional detach may deliver
+/// its final explanation before closing. Neither changes simulation authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DisconnectMode {
+    Abort,
+    Drain,
+}
+
 pub(crate) struct Connection {
     pub id: u64,
     pub messages: crate::outbound::Receiver,
-    pub close: watch::Receiver<bool>,
+    pub close: watch::Receiver<Option<DisconnectMode>>,
 }
 
 /// Each client's outgoing queue. A client whose queue overflows is
@@ -248,7 +256,7 @@ impl Service {
             .channel(QUEUE)
             .map_err(|_| Failure::new(ErrorCode::ResourceLimit, "Connection is unavailable"))?;
         self.next_client = next;
-        let (close, closing) = watch::channel(false);
+        let (close, closing) = watch::channel(None);
         let actors: Vec<_> = self
             .engine
             .actors()
@@ -1667,14 +1675,18 @@ impl Service {
                     .into(),
             },
         );
-        self.disconnect(id);
+        self.disconnect_with(id, DisconnectMode::Drain);
     }
 
     pub(crate) fn disconnect(&mut self, id: u64) {
+        self.disconnect_with(id, DisconnectMode::Abort);
+    }
+
+    fn disconnect_with(&mut self, id: u64, mode: DisconnectMode) {
         let Some(client) = self.clients.remove(&id) else {
             return;
         };
-        let _ = client.close.send(true);
+        let _ = client.close.send(Some(mode));
         if let Some(actor) = client.actor {
             if self.controllers.get(&actor) == Some(&id) {
                 self.stop_travel(actor, TravelPhase::ControlLost);
@@ -1773,6 +1785,31 @@ mod tests {
     use super::*;
     use crate::Scenario;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn intentional_detach_drains_its_explanation_but_resource_disconnect_aborts() {
+        let mut service = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([ActorId(1)]),
+        };
+        let mut detached = service.connect(&account, "headless".into()).unwrap();
+        detached.messages.try_recv().unwrap();
+        service.detach_unloaded(detached.id);
+        assert_eq!(*detached.close.borrow(), Some(DisconnectMode::Drain));
+        assert!(matches!(
+            detached.messages.try_recv().unwrap(),
+            ServerMessage::Error {
+                code: ErrorCode::NotAttached,
+                ..
+            }
+        ));
+        let failed = service.connect(&account, "headless".into()).unwrap();
+        service.disconnect(failed.id);
+        assert_eq!(*failed.close.borrow(), Some(DisconnectMode::Abort));
+    }
 
     #[test]
     fn narrowing_a_view_chooses_the_smaller_complete_encoded_update() {
@@ -2595,7 +2632,7 @@ mod tests {
             }
             service.snapshot(id, "reset").unwrap();
             assert!(!service.clients.contains_key(&id));
-            assert!(*connection.close.borrow());
+            assert!(connection.close.borrow().is_some());
             assert_eq!(service.engine.state(actor).unwrap(), before);
             service.snapshot(healthy.id, "healthy-reset").unwrap();
             let ServerMessage::Snapshot {
@@ -2844,10 +2881,10 @@ mod tests {
             );
         }
         assert!(
-            *slow.close.borrow(),
+            slow.close.borrow().is_some(),
             "byte pressure must disconnect a slow stream"
         );
-        assert!(!*healthy.close.borrow());
+        assert!(healthy.close.borrow().is_none());
         service.handle(
             healthy.id,
             "attach".into(),
@@ -3154,7 +3191,7 @@ mod tests {
             },
         );
         assert!(!service.autonomous_enabled);
-        assert!(*controller.close.borrow());
+        assert!(controller.close.borrow().is_some());
         let ServerMessage::Snapshot { snapshot, .. } = observer.messages.try_recv().unwrap() else {
             panic!("snapshot must precede control transition")
         };
@@ -3212,7 +3249,7 @@ mod tests {
                 },
             },
         );
-        assert!(*controller.close.borrow());
+        assert!(controller.close.borrow().is_some());
         let ServerMessage::Update { update } = observer.messages.try_recv().unwrap() else {
             panic!("control update")
         };
@@ -3265,7 +3302,7 @@ mod tests {
         for i in 0..QUEUE + 1 {
             service.handle(connection.id, format!("snapshot-{i}"), Request::Snapshot);
         }
-        assert!(*connection.close.borrow());
+        assert!(connection.close.borrow().is_some());
         assert!(!service.clients.contains_key(&connection.id));
         assert!(!service.controllers.contains_key(&ActorId(1)));
         let mut replacement = service.connect(&account, "ascii".into()).unwrap();
@@ -3368,7 +3405,7 @@ mod tests {
             [client.id]
         );
         assert_eq!(service.engine.revision(ActorId(1)).unwrap(), before);
-        assert!(!*client.close.borrow());
+        assert!(client.close.borrow().is_none());
         while client.messages.try_recv().is_ok() {}
         service.run_until_blocked();
         assert_eq!(service.engine.next_actor(), Some(ActorId(1)));

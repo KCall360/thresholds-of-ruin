@@ -2854,13 +2854,24 @@ source has no invented coordinates. Objective anchor and item errors now identif
 the failing field separately. All 36 scenario unit tests, seven scenario
 integrations, twelve actual scenario process tests and workspace all-target Clippy
 passed. The full local debug gate passed 306 Python/application and 943 Rust
-tests on 546 unchanged inputs without a waiver. PR #81 remains open: Linux debug
-CI observed timely server socket closure but the stalled client failed to exit
-within the unchanged 20-second drain bound. A fixed, bounded 64 KiB relay receive
-buffer now replaces the tiny initial buffer and later Linux window adjustment;
-its capacity is included in the pressure workload. An actual-socket regression
-checks sender backpressure and delivery to natural EOF. This changes test setup,
-not production queue sizes or disconnect policy. The earlier CI failure remains
-retained; fresh local verification and both-platform CI are required before merge.
+tests on 546 unchanged inputs without a waiver. PR #81 remains open: the first
+Linux debug run and a later Linux release run observed timely server descriptor
+closure but exceeded the unchanged 20-second actual-client exit bound. The fixed,
+bounded 64 KiB relay receive capacity and actual-socket pressure/drain regression
+remain; changing the test buffer did not resolve the Linux release failure.
+
+Transport shutdown now has an explicit ownership policy. Resource disconnects,
+write failures and task cancellation abort upgraded TCP connections, discarding
+stale kernel output. Intentional actor detaches retain their final explanation,
+with one deadline for the complete queued drain. Successful HTTP upgrade
+rejection and authentication/protocol errors preserve their explanations. Two
+real-TCP regressions failed on ordinary EOF before reset-on-abandonment, then
+passed with the policy; a separate baseline probe confirms that the former
+per-message drain loop fails the shared-deadline regression. Socket destruction
+still precedes release of in-flight byte leases. All 236 server units, seventeen
+WebSocket integrations and nineteen actual-client pressure/recovery cases passed
+on Windows before the final drain-bound cleanup; all eight final transport units
+passed. Full final local debug and exact-head Windows/Linux CI remain required.
+Earlier failures are retained, and the desktop candidate remains inactive.
 No format axis changed. Broader compiler ownership, measured performance and final
 requirements audit remain open; this increment does not close the entire refactor.

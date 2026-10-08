@@ -101,6 +101,14 @@ so the server applies backpressure:
 - **A client that stays that full for five seconds is disconnected**, like a
   socket write that times out. A slow spectator can delay a journey but can't
   stop it.
+- Resource failures and cancelled transport tasks abort their upgraded TCP
+  connections, discarding stale OS send-buffer bytes as well as WebSocket
+  output. Releasing the server's descriptor alone does not guarantee prompt
+  client disconnection: a normal TCP close can keep draining queued data.
+  An intentional detach instead drains its final explanation under one shared
+  five-second deadline. Successful authentication rejection and normal protocol
+  closure preserve their output. In-flight byte leases remain owned until the
+  socket and its write buffer are destroyed, including reset and cancellation.
 - Slot exhaustion, byte exhaustion or frame encoding failure while handling a
   request disconnects that stream; it must reconnect for a fresh snapshot and
   never silently misses an update. The shared pool is an admission limit, not
