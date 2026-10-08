@@ -490,7 +490,11 @@ fn a_newly_seen_other_actor_interrupts_before_another_step() {
         .observation
         .visible_actors
         .iter()
-        .any(|actor| actor.id == ActorId(2)));
+        .any(|actor| actor.id
+            == service
+                .engine
+                .target_scope(ActorId(1))
+                .actor(tor_simulation::ActorId(2))));
     service.run_until_blocked();
     assert_eq!(service.engine.state(ActorId(1)).unwrap(), stopped);
 }
@@ -504,27 +508,36 @@ fn repeated_views_of_self_are_not_potential_hazards() {
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
-            id: ActorId(1),
+            id: observation.self_target,
             position: Position { x: 1, y: 0, z: 0 },
         },
         ActorView {
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
-            id: ActorId(2),
+            id: service
+                .engine
+                .target_scope(ActorId(1))
+                .actor(tor_simulation::ActorId(2)),
             position: Position { x: 2, y: 0, z: 0 },
         },
         ActorView {
             name: "figure".into(),
             description: "A figure.".into(),
             asset: None,
-            id: ActorId(2),
+            id: service
+                .engine
+                .target_scope(ActorId(1))
+                .actor(tor_simulation::ActorId(2)),
             position: Position { x: 3, y: 0, z: 0 },
         },
     ];
     assert_eq!(
         potential_hazards(&observation),
-        BTreeSet::from([ActorId(2)])
+        BTreeSet::from([service
+            .engine
+            .target_scope(ActorId(1))
+            .actor(tor_simulation::ActorId(2))])
     );
 }
 

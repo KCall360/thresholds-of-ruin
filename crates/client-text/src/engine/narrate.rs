@@ -81,10 +81,10 @@ impl Record {
 #[derive(Default)]
 struct Teller {
     sentences: Vec<String>,
-    named: BTreeSet<ActorId>,
-    last: Option<ActorId>,
-    next_last: Option<ActorId>,
-    dead: BTreeSet<ActorId>,
+    named: BTreeSet<ActorTarget>,
+    last: Option<ActorTarget>,
+    next_last: Option<ActorTarget>,
+    dead: BTreeSet<ActorTarget>,
 }
 
 impl Teller {
@@ -259,7 +259,7 @@ fn alike(objects: &[Object]) -> Vec<String> {
 fn settled(beats: &[Beat]) -> Vec<Beat> {
     // Per figure: whether it was in sight before the first sighting beat,
     // and the index of its last one.
-    let mut net: std::collections::BTreeMap<ActorId, (bool, usize)> = Default::default();
+    let mut net: std::collections::BTreeMap<ActorTarget, (bool, usize)> = Default::default();
     for (i, beat) in beats.iter().enumerate() {
         let (id, appeared) = match beat {
             Beat::Appeared { figure, .. } => (figure.id, true),
@@ -268,7 +268,7 @@ fn settled(beats: &[Beat]) -> Vec<Beat> {
         };
         net.entry(id).or_insert((!appeared, i)).1 = i;
     }
-    let died: BTreeSet<ActorId> = beats
+    let died: BTreeSet<ActorTarget> = beats
         .iter()
         .filter_map(|b| match b {
             Beat::Died(Who::Figure(f)) => Some(f.id),
@@ -803,7 +803,7 @@ mod tests {
 
     fn scout() -> Figure {
         Figure {
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "ruin scout".into(),
         }
     }
@@ -824,7 +824,7 @@ mod tests {
     }
 
     const TOKEN: Goal = Goal::Take {
-        item: 1,
+        item: tor_protocol::ItemTarget::from_digest([1; 32]),
         quantity: None,
     };
 
@@ -938,7 +938,7 @@ mod tests {
     #[test]
     fn a_figure_mentioned_again_is_it_unless_another_was_named() {
         let guardian = Figure {
-            id: ActorId(3),
+            id: tor_protocol::ActorTarget::from_digest([3; 32]),
             name: "stone guardian".into(),
         };
         let beats = vec![

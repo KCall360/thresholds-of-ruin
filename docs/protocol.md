@@ -103,7 +103,7 @@ Restarting requires supplying the desired credentials again.
 
 ## Integer representation
 
-All 64-bit wire values use canonical decimal strings: actor, item and door
+All 64-bit wire values use canonical decimal strings: authorized actor attachment
 identities, quantities, ticks, revisions, epochs, stream sequences, durations
 and completed travel steps. Unsigned values range from `"0"` through
 `"18446744073709551615"`. Signed motion velocity components range from
@@ -118,12 +118,45 @@ or calculations. This preserves values above JavaScript's exact Number range.
 Persistence owns its numeric schemas independently; this wire change does not
 change the current save format or ruleset.
 
+## Entity target references
+
+Disclosed actors, items and doors use opaque typed references: `a_`, `i_` or
+`d_` followed by exactly 64 lowercase hexadecimal digits. Numeric IDs, uppercase
+hexadecimal, extra whitespace and references of another entity kind are rejected.
+Clients copy the reference from the current observation into an action; they
+cannot derive it from an authored ID or infer allocation order from it.
+
+A reference identifies an entity within one save and observing actor. It stays
+stable through movement, inventory changes, restart and rewind in that scope.
+Other saves and observers have different references. Multiple portal-relative
+occurrences can share one entity reference while keeping distinct disclosed
+positions. These references do not expose region identities or a global frame.
+
+`observation.actor` remains the authorized actor attachment identity.
+`observation.self_target` identifies that actor's body among disclosed entity
+references, including repeated portal views. Delta observations require the
+same self target as their base; a different target scope requires a snapshot.
+
+References grant no authority. After authority and original receipt lookup,
+a fresh action resolves only against the cached observer disclosure: attack
+uses visible actors or self, doors use visible cells, take uses ground items,
+and drop uses inventory. The simulation still checks the admitted target when
+executing the queued action. Unavailable references produce the same generic
+rejection without revealing hidden entities.
+
+A duplicate request compares against references reconstructed from its saved
+backend command and original privacy scope before consulting current targets.
+A completed pickup can therefore return its original admission receipt even
+when the item is no longer on the ground. Reusing that request ID with different
+facts produces a conflict. Saves retain private numeric target facts independently
+of this wire representation.
+
 ## Connection and control
 
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":28,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":29,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

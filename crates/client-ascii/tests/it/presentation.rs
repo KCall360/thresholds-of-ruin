@@ -280,7 +280,7 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
         .item
         .quantity = 10;
     let mut carried = snapshot.state.observation.ground_items[0].item.clone();
-    carried.id = 4;
+    carried.id = super::item_target(4);
     Arc::make_mut(&mut snapshot.state)
         .observation
         .inventory
@@ -295,12 +295,12 @@ fn quantity_picker_submits_partial_pickup_and_drop() {
         let effect = app.input(Input::Key { key: Key::Enter });
         let expected = if key == Key::Pickup {
             Action::Take {
-                item: 3,
+                item: super::item_target(3),
                 quantity: Some(3),
             }
         } else {
             Action::Drop {
-                item: 4,
+                item: super::item_target(4),
                 quantity: Some(3),
             }
         };
@@ -415,7 +415,7 @@ fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     assert!(app.note.is_some());
     app.attack_targets.push(ActorView {
         asset: None,
-        id: ActorId(2),
+        id: super::actor_target(2),
         name: "guard".into(),
         description: String::new(),
         position: Position { x: 1, y: 0, z: 0 },
@@ -441,10 +441,10 @@ fn state() -> ClientState {
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"test","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":"3","observation":{
-            "actor":"1","tick":"0","position":{"x":1,"y":1,"z":0},
+            "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"3","name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -477,13 +477,13 @@ fn input_uses_current_revision_and_does_not_queue_actions_while_busy() {
         Effect::Request(Request::Command {
             command: Command::Act {
                 action: Action::Take {
-                    item: 3,
+                    item,
                     quantity: None
                 },
                 ..
             },
             ..
-        })
+        }) if item == super::item_target(3)
     ));
 }
 
@@ -582,7 +582,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
                 appearance: String::new(),
                 identified: true,
                 description: String::new(),
-                id: 4,
+                id: super::item_target(4),
                 name: "another token".into(),
             },
             position,
@@ -600,13 +600,13 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         Effect::Request(Request::Command {
             command: Command::Act {
                 action: Action::Take {
-                    item: 4,
+                    item,
                     quantity: None
                 },
                 ..
             },
             ..
-        })
+        }) if item == super::item_target(4)
     ));
     app.ready();
     app.input(Input::Key { key: Key::Pickup });
@@ -874,7 +874,7 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
         .as_array_mut()
         .unwrap();
     for (index, id) in [(7, 11), (5, 12)] {
-        cells[index]["door"] = serde_json::json!({"id":id.to_string(),"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
+        cells[index]["door"] = serde_json::json!({"id":super::door_target(id),"name":"wooden door","description":"wood", "open":false,"reachable":true,"approaches":[]});
     }
     let state = ClientState::from_snapshot(serde_json::from_value(snapshot).unwrap()).unwrap();
     assert_eq!(glyph_at(&state.state().observation, 2, 1), '+');
@@ -888,13 +888,13 @@ fn door_glyphs_and_explicit_selection_submit_actions_without_movement() {
         Effect::Request(Request::Command {
             command: Command::Act {
                 action: Action::SetDoor {
-                    door: 12,
+                    door,
                     open: true
                 },
                 ..
             },
             ..
-        })
+        }) if door == super::door_target(12)
     ));
 }
 
@@ -977,7 +977,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         let mut view = state().state().clone();
         view.observation.visible_actors.push(ActorView {
             asset: None,
-            id: ActorId(2),
+            id: super::actor_target(2),
             name: "guard".into(),
             description: String::new(),
             position: Position { x: 1, y: 0, z: 0 },
@@ -989,7 +989,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             preparation_active: false,
             recovery_remaining: 0,
             actors: vec![CombatActorView {
-                actor: ActorId(2),
+                actor: super::actor_target(2),
                 hostile,
                 injury: Injury::Healthy,
             }],
@@ -1016,7 +1016,9 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
         assert_eq!(
             action,
             if attacks {
-                Action::Attack { target: ActorId(2) }
+                Action::Attack {
+                    target: super::actor_target(2),
+                }
             } else {
                 Action::Move {
                     direction: Direction::East,

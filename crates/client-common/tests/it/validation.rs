@@ -9,15 +9,15 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
         "actor":"1","branch":"validation","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":false,"intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
-            "actor":"1","tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
+            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[{"key":"here","name":"Here","origin":"authored"}],
             "visible_cells":[
                 {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},
                 {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}
             ],
-            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":"8","quantity":"1","name":"stone","appearance":"stone","identified":true}}],
-            "inventory":[{"id":"7","quantity":"1","name":"stone","appearance":"stone","identified":true}],
-            "visible_actors":[{"id":"2","position":{"x":1,"y":0,"z":0}}],
+            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","appearance":"stone","identified":true}}],
+            "inventory":[{"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","appearance":"stone","identified":true}],
+            "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":1,"y":0,"z":0}}],
             "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
             "motion":{"velocity":["0","0","0"],"units_per_cell":65536,"displaced":false,"impacted":false},
             "ready":true

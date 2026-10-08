@@ -13,9 +13,13 @@ fn authored_dungeon_completes_retrieval_and_escape() {
         if state.observation.combat.as_ref().unwrap().victory {
             return;
         }
-        let returning = state.observation.inventory.iter().any(|i| i.id == 100);
+        let returning = state.observation.inventory.iter().any(|i| {
+            i.id == engine
+                .target_scope(ActorId(1))
+                .item(tor_simulation::ItemId(100))
+        });
         let nearby = state.observation.visible_actors.iter().find(|a| {
-            a.id != ActorId(1)
+            a.id != state.observation.self_target
                 && a.position.x.abs() <= 1
                 && a.position.y.abs() <= 1
                 && a.position.z == 0
@@ -28,16 +32,19 @@ fn authored_dungeon_completes_retrieval_and_escape() {
                     Direction::East
                 },
             },
-            |a| Action::Attack {
-                target: tor_simulation::ActorId(a.id.0),
+            |a| {
+                engine
+                    .decode_action(ActorId(1), &tor_protocol::Action::Attack { target: a.id })
+                    .unwrap()
             },
         );
-        let action = if state
-            .observation
-            .ground_items
-            .iter()
-            .any(|i| i.item.id == 100 && i.reachable)
-        {
+        let action = if state.observation.ground_items.iter().any(|i| {
+            i.item.id
+                == engine
+                    .target_scope(ActorId(1))
+                    .item(tor_simulation::ItemId(100))
+                && i.reachable
+        }) {
             Action::Take {
                 item: 100,
                 quantity: None,
@@ -172,7 +179,10 @@ fn optional_starting_ai_keeps_inventory_and_higher_id_human_gets_input_boundary(
         .observation
         .inventory
         .iter()
-        .any(|i| i.id == 100));
+        .any(|i| i.id
+            == engine
+                .target_scope(ActorId(1))
+                .item(tor_simulation::ItemId(100))));
     let view = engine.state(ActorId(7)).unwrap().observation;
     assert!(view.combat.as_ref().unwrap().victory);
     assert!(view.combat.as_ref().unwrap().objective.is_none());
@@ -224,9 +234,8 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         .preparation_remaining;
     let paused = engine.pause_preparation(ActorId(1)).unwrap().unwrap();
     assert!(matches!(
-        paused
-            .entry
-            .disclosed()
+        engine
+            .disclose_entry(&paused.entry)
             .expect("completed command has history")
             .content,
         tor_protocol::HistoryContent::Action {
@@ -273,11 +282,13 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
         .observation
         .visible_actors
         .iter()
-        .any(|a| a.id == ActorId(2)));
-    assert!(tor_server::wire_adapter::encode_command(
-        tor_server::journal::Command::PausePreparation
-    )
-    .is_err());
+        .any(|a| a.id
+            == engine
+                .target_scope(ActorId(1))
+                .actor(tor_simulation::ActorId(2))));
+    assert!(engine
+        .encode_command(ActorId(1), tor_server::journal::Command::PausePreparation)
+        .is_err());
 }
 
 #[test]

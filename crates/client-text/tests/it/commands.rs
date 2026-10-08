@@ -9,23 +9,23 @@ fn quantity_commands_and_drop_use_disclosed_ids() {
         .push(s.observation.ground_items[0].item.clone());
     for (text, expected) in [
         (
-            "take 3 #10",
+            "take 3 #i_0a00000000000000000000000000000000000000000000000000000000000000",
             Action::Take {
-                item: 10,
+                item: super::item_target(10),
                 quantity: Some(3),
             },
         ),
         (
-            "drop 2 #10",
+            "drop 2 #i_0a00000000000000000000000000000000000000000000000000000000000000",
             Action::Drop {
-                item: 10,
+                item: super::item_target(10),
                 quantity: Some(2),
             },
         ),
         (
-            "drop #10",
+            "drop #i_0a00000000000000000000000000000000000000000000000000000000000000",
             Action::Drop {
-                item: 10,
+                item: super::item_target(10),
                 quantity: None,
             },
         ),
@@ -34,8 +34,12 @@ fn quantity_commands_and_drop_use_disclosed_ids() {
             matches!(parse(text, &s).unwrap(), Input::Command(Command::Act { action, .. }) if action == expected)
         );
     }
-    assert!(parse("take 0 #10", &s).is_err());
-    assert!(parse("take 18446744073709551616 #10", &s).is_err());
+    assert!(parse(
+        "take 0 #i_0a00000000000000000000000000000000000000000000000000000000000000",
+        &s
+    )
+    .is_err());
+    assert!(parse("take 18446744073709551616 #i_0a00000000000000000000000000000000000000000000000000000000000000", &s).is_err());
 }
 
 #[test]
@@ -115,12 +119,12 @@ fn movement_queries_and_control_have_distinct_intents() {
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision": "7", "observation": {
-            "actor": "1", "tick": "100", "position": {"x":1,"y":1,"z":0},
+            "actor": "1", "self_target":super::actor_target(1),"tick": "100", "position": {"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
             "ground_items":[
-                {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"10","name":"copper token"},"position":{"x":1,"y":1,"z":0}},
-                {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"11","name":"silver token"},"position":{"x":2,"y":1,"z":0}}
+                {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(10),"name":"copper token"},"position":{"x":1,"y":1,"z":0}},
+                {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(11),"name":"silver token"},"position":{"x":2,"y":1,"z":0}}
             ], "inventory":[], "visible_actors":[], "exits":[],  "ready":true
         }
     }))
@@ -130,23 +134,29 @@ fn state() -> StateView {
 #[test]
 fn resolves_only_disclosed_nouns_and_requires_clarification() {
     let state = state();
-    assert!(parse("take token", &state).unwrap_err().contains("#10"));
+    assert!(parse("take token", &state)
+        .unwrap_err()
+        .contains("#i_0a00000000000000000000000000000000000000000000000000000000000000"));
     assert_eq!(
         parse("take the COPPER token", &state).unwrap(),
         Input::Command(Command::Act {
             expected_revision: 7,
             action: Action::Take {
-                item: 10,
+                item: super::item_target(10),
                 quantity: None
             }
         })
     );
     assert_eq!(
-        parse("take #11", &state).unwrap(),
+        parse(
+            "take #i_0b00000000000000000000000000000000000000000000000000000000000000",
+            &state
+        )
+        .unwrap(),
         Input::Command(Command::Act {
             expected_revision: 7,
             action: Action::Take {
-                item: 11,
+                item: super::item_target(11),
                 quantity: None
             }
         })

@@ -1,6 +1,6 @@
 //! One disclosed view, interpreted for language: what is here, what it is
 //! called, and where it is from the character's point of view.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tor_client_common::{surfaces, Palette};
 use tor_protocol::*;
@@ -10,9 +10,9 @@ use crate::{adventure, safe};
 /// A referent's identity, stable across views while the thing stays known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {
-    Item(u64),
-    Actor(ActorId),
-    Door(u64),
+    Item(ItemTarget),
+    Actor(ActorTarget),
+    Door(DoorTarget),
     Surface(Surface),
     Me,
 }
@@ -209,27 +209,32 @@ impl<'a> Scene<'a> {
         for item in &o.inventory {
             referents.push(thing(item, true, true, None));
         }
-        let mut ground: BTreeMap<u64, &GroundItemView> = BTreeMap::new();
+        let mut ground: Vec<&GroundItemView> = Vec::new();
+        let mut ground_indices = BTreeMap::new();
         for g in &o.ground_items {
+            // Preserve disclosure order: opaque references carry no ordering semantics.
             // A portal can show one item twice; the nearest view counts.
-            let entry = ground.entry(g.item.id).or_insert(g);
+            let index = *ground_indices.entry(g.item.id).or_insert_with(|| {
+                ground.push(g);
+                ground.len() - 1
+            });
+            let entry = &mut ground[index];
             if (!g.reachable, distance(g.position)) < (!entry.reachable, distance(entry.position)) {
                 *entry = g;
             }
         }
-        for g in ground.values() {
+        for g in ground {
             referents.push(thing(&g.item, false, g.reachable, Some(g.position)));
         }
         for figure in figures(o, palette) {
             referents.push(figure);
         }
-        let mut doors = BTreeMap::new();
+        let mut doors = BTreeSet::new();
         for cell in &o.visible_cells {
-            if let Some(door) = &cell.door {
-                doors.entry(door.id).or_insert((door, cell.position));
+            let Some(door) = &cell.door else { continue };
+            if !doors.insert(door.id) {
+                continue;
             }
-        }
-        for (door, position) in doors.values() {
             let name = if door.name.trim().is_empty() {
                 "door".to_owned()
             } else {
@@ -247,7 +252,7 @@ impl<'a> Scene<'a> {
                 quantity: 1,
                 carried: false,
                 reachable: door.reachable,
-                position: Some(*position),
+                position: Some(cell.position),
                 open: Some(door.open),
             });
         }
@@ -339,7 +344,7 @@ impl<'a> Scene<'a> {
     }
 
     /// Visible figures other than the character.
-    pub fn figure_ids(&self) -> std::collections::BTreeSet<ActorId> {
+    pub fn figure_ids(&self) -> std::collections::BTreeSet<ActorTarget> {
         self.referents
             .iter()
             .filter_map(|r| match r.key {
@@ -433,13 +438,19 @@ fn thing(item: &ItemView, carried: bool, reachable: bool, position: Option<Posit
 /// One referent per visible actor other than the character, however many
 /// cells its body covers. Its position is its lowest, nearest cell.
 fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
-    let mut bodies: BTreeMap<ActorId, Vec<&ActorView>> = BTreeMap::new();
-    for actor in o.visible_actors.iter().filter(|a| a.id != o.actor) {
-        bodies.entry(actor.id).or_default().push(actor);
+    let mut bodies: Vec<Vec<&ActorView>> = Vec::new();
+    let mut body_indices = BTreeMap::new();
+    for actor in o.visible_actors.iter().filter(|a| a.id != o.self_target) {
+        let index = *body_indices.entry(actor.id).or_insert_with(|| {
+            bodies.push(Vec::new());
+            bodies.len() - 1
+        });
+        bodies[index].push(actor);
     }
     let mut result: Vec<Referent> = bodies
         .into_iter()
-        .map(|(id, cells)| {
+        .map(|cells| {
+            let id = cells[0].id;
             let base = cells
                 .iter()
                 .min_by_key(|a| (a.position.z, distance(a.position)))
@@ -459,7 +470,7 @@ fn figures(o: &Observation, palette: &Palette) -> Vec<Referent> {
             Referent {
                 key: Key::Actor(id),
                 kind: Kind::Figure,
-                identity: format!("actor:{}", id.0),
+                identity: format!("actor:{id}"),
                 name,
                 words,
                 heads,

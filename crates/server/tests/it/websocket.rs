@@ -532,7 +532,7 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
                 command: Command::Act {
                     expected_revision: 0,
                     action: Action::SetDoor {
-                        door: 1,
+                        door: tor_protocol::DoorTarget::from_digest([0; 32]),
                         open: false,
                     },
                 },
@@ -594,6 +594,122 @@ async fn spectator_authority_denies_all_mutations_even_same_user_receipt_retries
         panic!()
     };
     assert_eq!(update.body, UpdateBody::Control { has_control: false });
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn reconnect_retries_a_taken_target_before_old_context_and_fresh_resolution() {
+    let (address, _, stop, server) = launch().await;
+    let mut player = connect(&address, "alice-test-token", "text").await;
+    let initial = attach(&mut player).await;
+    player.acquire_control("control").await;
+    let item = initial.state.observation.ground_items[0].item.id;
+    let original = Request::Command {
+        context: player.input_context(),
+        branch: initial.branch.clone(),
+        command: Command::Act {
+            expected_revision: initial.state.revision,
+            action: Action::Take {
+                item,
+                quantity: None,
+            },
+        },
+    };
+    player.request("original-take", original.clone()).await;
+    let mut state = Arc::unwrap_or_clone(initial.state.clone());
+    let mut admitted = None;
+    loop {
+        match receive(&mut player).await {
+            ServerMessage::Ack {
+                request_id,
+                receipt,
+                ..
+            } => {
+                assert_eq!(request_id, "original-take");
+                assert!(matches!(receipt, RequestReceipt::Admitted { .. }));
+                assert!(admitted.replace(receipt).is_none());
+            }
+            ServerMessage::Update { update } => match update.body {
+                body @ (UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }) => {
+                    assert!(admitted.is_some(), "admission precedes simulation effects");
+                    state = observation(body, &state).0;
+                }
+                UpdateBody::Intention { status } => {
+                    if status.phase == IntentionPhase::Resolved {
+                        break;
+                    }
+                    assert_eq!(status.phase, IntentionPhase::Queued);
+                }
+                other => panic!("unexpected update: {other:?}"),
+            },
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+    assert!(state
+        .observation
+        .ground_items
+        .iter()
+        .all(|ground| ground.item.id != item));
+    assert!(state
+        .observation
+        .inventory
+        .iter()
+        .any(|held| held.id == item));
+    player.close(None).await.unwrap();
+    let mut resumed = connect(&address, "alice-test-token", "ascii").await;
+    let snapshot = attach(&mut resumed).await;
+    assert_eq!(*snapshot.state, state);
+    assert_ne!(snapshot.context.stream, initial.context.stream);
+    assert!(!snapshot.has_control);
+    resumed.request("original-take", original).await;
+    let ServerMessage::Ack {
+        receipt, context, ..
+    } = receive(&mut resumed).await
+    else {
+        panic!("retry must return the original receipt without requiring control or resolving the item")
+    };
+    let RequestReceipt::Admitted { phase, .. } = admitted.as_mut().unwrap() else {
+        panic!("original gameplay receipt required")
+    };
+    assert_eq!(*phase, IntentionPhase::Queued);
+    *phase = IntentionPhase::Resolved;
+    assert_eq!(Some(receipt), admitted);
+    assert_eq!(context, snapshot.reply_context());
+
+    resumed.acquire_control("resume-control").await;
+    resumed
+        .request(
+            "fresh-take",
+            Request::Command {
+                context: resumed.input_context(),
+                branch: snapshot.branch.clone(),
+                command: Command::Act {
+                    expected_revision: state.revision,
+                    action: Action::Take {
+                        item,
+                        quantity: None,
+                    },
+                },
+            },
+        )
+        .await;
+    assert!(matches!(
+        receive(&mut resumed).await,
+        ServerMessage::Error {
+            code: ErrorCode::InvalidAction,
+            ..
+        }
+    ));
+    resumed.request("unchanged", Request::Snapshot).await;
+    let ServerMessage::Snapshot {
+        snapshot: after, ..
+    } = receive(&mut resumed).await
+    else {
+        panic!("fresh rejection must not publish an effect")
+    };
+    assert_eq!(*after.state, state);
+    assert_eq!(after.history, snapshot.history);
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
 }

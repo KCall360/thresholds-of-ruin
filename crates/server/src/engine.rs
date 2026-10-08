@@ -30,6 +30,8 @@ mod intention_lifecycle;
 #[cfg(test)]
 #[path = "intention_tests.rs"]
 mod intention_tests;
+#[path = "wire_request.rs"]
+mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
 const REWIND_BOUNDARIES: usize = 128;
 const MAX_RETAINED_BOUNDARIES: usize = REWIND_BOUNDARIES * 2;
@@ -1700,6 +1702,7 @@ impl Engine {
             &self.archive.view_salt,
             view.ready,
             &terrain,
+            &self.target_scope(actor),
         );
         observation.places = self
             .game
@@ -1827,7 +1830,7 @@ impl Engine {
         Ok(HistoryPage {
             entries: positions
                 .iter()
-                .filter_map(|&position| self.archive.records[position].entry.disclosed())
+                .filter_map(|&position| self.disclose_entry(&self.archive.records[position].entry))
                 .collect(),
             older_before: older.then(|| self.archive.records[positions[0]].entry.id.clone()),
         })
@@ -1842,6 +1845,19 @@ impl Engine {
         branch: &BranchId,
         command: &Command,
     ) -> Result<Option<CommandResult>, Failure> {
+        self.retry_matching(user, actor, request_id, branch, |original| {
+            original == command
+        })
+    }
+
+    fn retry_matching(
+        &self,
+        user: &str,
+        actor: ActorId,
+        request_id: &str,
+        branch: &BranchId,
+        matches: impl FnOnce(&Command) -> bool,
+    ) -> Result<Option<CommandResult>, Failure> {
         let Some(&index) = self.receipts.get(&(user.into(), request_id.into())) else {
             return Ok(None);
         };
@@ -1850,7 +1866,7 @@ impl Engine {
             .receipt
             .as_ref()
             .expect("receipt index only contains client records");
-        if receipt.actor != actor || &receipt.branch != branch || &receipt.command != command {
+        if receipt.actor != actor || &receipt.branch != branch || !matches(&receipt.command) {
             return Err(Failure::new(
                 ErrorCode::RequestConflict,
                 "Request ID was already used for another command",
@@ -3201,7 +3217,7 @@ mod scaling_tests {
                         let action = trace.secondary[secondary % trace.secondary.len()]
                             .resolve(&engine.state(actor).unwrap());
                         secondary += 1;
-                        crate::wire_adapter::decode_action(&action)
+                        engine.decode_action(actor, &action).unwrap()
                     } else {
                         Action::Wait
                     };
@@ -3209,12 +3225,8 @@ mod scaling_tests {
                     request += 1;
                 }
                 let action = step.resolve(&engine.state(ActorId(1)).unwrap());
-                checked_action(
-                    &mut engine,
-                    ActorId(1),
-                    crate::wire_adapter::decode_action(&action),
-                    request,
-                );
+                let action = engine.decode_action(ActorId(1), &action).unwrap();
+                checked_action(&mut engine, ActorId(1), action, request);
                 request += 1;
             }
         }

@@ -7,9 +7,17 @@
       "revision": 1
     },
     {
-      "command": "take #3",
+      "command": "take #{target_item}",
       "tick": 50,
-      "revision": 2
+      "revision": 2,
+      "target_item": {
+        "name": "stone tablet",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      }
     },
     {
       "command": "note Private abandoned future",

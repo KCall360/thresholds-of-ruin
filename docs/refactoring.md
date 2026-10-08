@@ -5,10 +5,15 @@ increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
 The command-boundary follow-up separates wire command/action conversion from
-journal types. The explicit adapter preserves developer normalization, original
-receipt facts and human intention admission. This is preparation for scoped
-opaque targets; target identifiers and history disclosure still require that
-follow-up. It does not complete the transport/persistence separation sequence.
+journal types. Typed actor, item and door interaction references are scoped to
+the observer and saved game. Fresh requests resolve only cached native disclosure;
+receipt retries reconstruct the original references from saved domain facts before
+consulting current targets, branch or revision. History uses the same disclosure
+boundary. Save payloads and simulation facts retain private numeric identities,
+and human gameplay still admits intentions for later simulation execution.
+Client selection uses disclosed order rather than opaque-reference bytes.
+This increment remains unpublished pending final verification and targeted release
+comparisons; it does not complete the transport/persistence separation sequence.
 
 ## Contracts to preserve
 
@@ -2517,7 +2522,8 @@ Lazy declarations now combine indexed character starts and generated inhabitants
 in one identity assembly, including item-carrier exclusions. This fixes a
 validated character starting in a generated region being rejected at run setup.
 The compatibility axes are rooms version 2, ruleset dungeon-v22 and validator
-tor-scenario-8; authoring format 2, save format 21 and protocol 28 are unchanged.
+tor-scenario-8; authoring format 2, save format 21 and the then-current protocol
+were unchanged.
 No migration or scripting runtime is introduced.
 
 Failing-first regressions established raw-comment coupling, actor-count effects

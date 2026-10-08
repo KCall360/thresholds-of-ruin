@@ -2,7 +2,7 @@
 //! same stream. Applying a delta to its base reproduces the full observation.
 
 use crate::wire::*;
-use crate::ActorId;
+use crate::{ActorId, ActorTarget};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -45,6 +45,7 @@ pub struct StateDelta {
     pub motion: Option<MotionView>,
     pub places: Vec<CollectionEdit<PlaceView>>,
     pub actor: ActorId,
+    pub self_target: ActorTarget,
     #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
@@ -128,6 +129,9 @@ impl StateDelta {
     /// Changes from `base` to `next`, or `None` when a delta cannot represent
     /// `next` exactly. Encoded-message size selection is a separate boundary.
     pub fn between(base: &StateView, next: &StateView) -> Option<Self> {
+        if base.observation.self_target != next.observation.self_target {
+            return None;
+        }
         let old = &base.observation.visible_cells;
         let new = &next.observation.visible_cells;
         if !sorted(old) || !sorted(new) {
@@ -198,6 +202,7 @@ impl StateDelta {
                 place.key.as_str()
             })?,
             actor: observation.actor,
+            self_target: observation.self_target,
             tick: observation.tick,
             position: observation.position,
             cells: CellChanges {
@@ -228,6 +233,9 @@ impl StateDelta {
     pub fn apply(self, base: &StateView) -> Result<StateView, DeltaError> {
         if base.revision != self.base_revision {
             return Err(DeltaError::WrongBase);
+        }
+        if self.self_target != base.observation.self_target {
+            return Err(DeltaError::InvalidChange);
         }
         let CellChanges {
             shift,
@@ -275,6 +283,7 @@ impl StateDelta {
                 motion: self.motion,
                 places: apply_collection_changes(&base.observation.places, self.places)?,
                 actor: self.actor,
+                self_target: self.self_target,
                 tick: self.tick,
                 position: self.position,
                 visible_cells: cells,

@@ -34,7 +34,8 @@ class SightProcesses(ProcessTestCase):
         self.assertIn({"x": -3, "y": -1, "z": 1}, [a["position"] for a in view["visible_actors"]])
         # Both cells of the door show the same closed door.
         doors = [self.cell(view, 1, 0, z)["door"] for z in (0, 1)]
-        self.assertEqual({d["id"] for d in doors}, {"1"})
+        self.assertEqual(doors[0]["id"], doors[1]["id"])
+        self.assertRegex(doors[0]["id"], r"^d_[0-9a-f]{64}$")
         self.assertFalse(any(d["open"] for d in doors))
         # Floor and ceiling are seen solid cells.
         for z in (-1, 2):

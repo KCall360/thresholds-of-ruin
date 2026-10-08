@@ -37,6 +37,8 @@ mod tests {
 
     #[test]
     fn every_requested_direction_maps_to_its_native_axis_and_wire_name() {
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let actor = wire::ActorId(1);
         for (backend, wire, native) in [
             (
                 Direction::North,
@@ -88,11 +90,13 @@ mod tests {
             let action = Action::Move { direction: backend };
             assert_eq!(adapt::action(&action), sim::Action::Move(native));
             assert_eq!(
-                crate::wire_adapter::encode_action(&action),
+                engine.encode_action(actor, &action),
                 wire::Action::Move { direction: wire }
             );
             assert_eq!(
-                crate::wire_adapter::decode_action(&crate::wire_adapter::encode_action(&action)),
+                engine
+                    .decode_action(actor, &engine.encode_action(actor, &action))
+                    .unwrap(),
                 action
             );
             assert_eq!(
@@ -116,6 +120,8 @@ mod tests {
 
     #[test]
     fn every_action_preserves_target_and_quantity_without_resolution() {
+        let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
+        let observer = wire::ActorId(1);
         let mut cases = vec![
             (
                 Action::Attack {
@@ -172,10 +178,13 @@ mod tests {
         for (action, native) in cases {
             assert_eq!(adapt::action(&action), native);
             assert_eq!(adapt::recorded_action(native), Some(action.clone()));
-            assert_eq!(
-                crate::wire_adapter::decode_action(&crate::wire_adapter::encode_action(&action)),
-                action
-            );
+            let command = crate::journal::Command::AdmitIntention {
+                expected_revision: u64::MAX,
+                action,
+            };
+            let wire = engine.encode_command(observer, command.clone()).unwrap();
+            let decoded = crate::wire_adapter::decode_command(&wire).unwrap();
+            assert!(decoded.matches(&command, &engine.target_scope(observer)));
         }
     }
 }

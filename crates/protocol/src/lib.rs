@@ -3,6 +3,8 @@
 mod codec;
 mod delta;
 mod integers;
+mod targets;
+pub use targets::{ActorTarget, DoorTarget, InvalidTarget, ItemTarget};
 mod validation;
 mod wire;
 pub use codec::*;

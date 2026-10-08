@@ -518,7 +518,7 @@ remain integrity identities. Default-zero salt is explicit, disjoint placement
 lanes preserve pool independence and infeasible minima fail instead of truncating
 silently. Lazy identity assembly now includes authored characters starting in
 generated regions. Ruleset dungeon-v22 and validator tor-scenario-8 changed;
-protocol 28, save 21 and authoring format 2 did not. Focused backend/validator and
+the then-current protocol, save 21 and authoring format 2 did not. Focused backend/validator and
 real-process regressions passed; final full, measurements and CI remain. The
 separate PR #74 checkpoint has passed Windows profiles, but Linux debug spectator
 drain failed its existing deadline; do not merge or activate it until corrected
@@ -564,5 +564,38 @@ process/documentation checks passed. Opaque targets and observer-scoped history
 projection remain open; this increment does not complete domain/save separation.
 Broad publication verification and final-head CI are required before pushing
 and merging this follow-up. PR #75's preceding scenario checkpoint has separately
-passed its 294-Python/889-Rust local debug gate and is running replacement CI on
-`58081b3`. All six accepted sequences remain in scope.
+passed its 294-Python/889-Rust local debug gate and all nine final-head CI checks
+on `58081b3`, and is merged. All six accepted sequences remain in scope.
+
+**Opaque interaction references (in progress).** The current wire schema uses
+observer/save-scoped actor, item and door references and an explicit self target.
+Fresh resolution uses cached native disclosure after metadata checks; receipt
+comparison reconstructs original references without live target lookup. The
+save schema, deterministic simulation and queued execution remain independent.
+The real wire samples were regenerated. Focused verification passed 201 server
+unit tests, then the expanded three scope/retry regressions; 11 protocol unit,
+50 protocol integration and two diagnostic-example tests; 25 shared-client unit
+and 52 integration tests; and 46 text-client unit and 80 integration tests.
+Server integration, ASCII, diagnostic examples and process fixtures are migrated.
+All workspace test targets compile, and workspace/all-target Clippy passed before
+the latest recovery/order regression additions. The first broad server integration
+run passed 145 tests and failed three fresh-save comparison tests; their scoped
+reference normalization correction passed all four focused preloading tests.
+The new real-WebSocket taken-target reconnect retry passed, as did six ASCII unit
+and 30 integration tests, 31 selected process tests and the corrected wizard-client
+scenario. Four wire-request tests now also prove drop receipt recovery across
+rewind/restart without inventory lookup. An opaque-byte ordering regression failed
+first; scene ground ordering now preserves disclosure order and nearest portal
+occurrences. Door and tied figure order and identical-item selection likewise
+use disclosure order instead of handle bytes, with failing-first regressions;
+all 46 text unit and 84 integration tests passed. The broad debug run passed all
+904 workspace Rust tests, formatting, workspace Clippy, architecture and strict
+rustdoc, but its Python stage had 288 passes and ten failures. Nine were remaining
+legacy fixture assumptions; the corrected dungeon, physics, sight, generated
+content and invalid-state recovery suites passed all 23 focused process tests.
+The tenth was the narrowly waived LockApp mouse overlay; retain ordinary CI
+coverage and do not describe that broad run as an unqualified pass. Fresh final
+publication verification, targeted release measurements and exact-head CI remain pending.
+This dirty work is unpublished and must not be deployed or treated
+as a completed protocol checkpoint. No text product fixes or scripting runtime
+were added. All six refactor sequences remain in scope.

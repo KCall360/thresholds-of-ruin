@@ -12,7 +12,7 @@ use super::scene::{whereabouts, Kind, Scene};
 /// A figure as it was known when the beat happened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Figure {
-    pub id: ActorId,
+    pub id: ActorTarget,
     pub name: String,
 }
 
@@ -93,7 +93,7 @@ pub enum Beat {
 /// Remembers names, so beats can name figures after they're gone.
 #[derive(Clone, Debug, Default)]
 pub struct Chronicler {
-    names: BTreeMap<ActorId, String>,
+    names: BTreeMap<ActorTarget, String>,
 }
 
 impl Chronicler {
@@ -106,7 +106,7 @@ impl Chronicler {
         }
     }
 
-    fn who(&self, actor: Option<ActorId>, me: ActorId) -> Who {
+    fn who(&self, actor: Option<ActorTarget>, me: ActorTarget) -> Who {
         match actor {
             Some(id) if id == me => Who::Me,
             Some(id) => Who::Figure(self.figure(id)),
@@ -114,7 +114,7 @@ impl Chronicler {
         }
     }
 
-    fn figure(&self, id: ActorId) -> Figure {
+    fn figure(&self, id: ActorTarget) -> Figure {
         Figure {
             id,
             name: self
@@ -198,13 +198,13 @@ impl Chronicler {
                             target,
                             outcome,
                         } => Beat::Blow {
-                            attacker: self.who(attacker, a.actor),
-                            target: self.who(target, a.actor),
+                            attacker: self.who(attacker, a.self_target),
+                            target: self.who(target, a.self_target),
                             outcome,
                         },
                         CombatEventView::Interrupted { .. } => Beat::Interrupted,
                         CombatEventView::Died { actor } => {
-                            Beat::Died(self.who(Some(actor), a.actor))
+                            Beat::Died(self.who(Some(actor), a.self_target))
                         }
                     });
                 }
@@ -230,7 +230,7 @@ impl Chronicler {
                 }
             }
         }
-        let figures = |scene: &Scene| -> BTreeMap<ActorId, String> {
+        let figures = |scene: &Scene| -> BTreeMap<ActorTarget, String> {
             scene
                 .of(Kind::Figure)
                 .filter_map(|r| match r.key {
@@ -253,7 +253,7 @@ impl Chronicler {
                 beats.push(Beat::Vanished(self.figure(*id)));
             }
         }
-        let doors = |o: &Observation| -> BTreeMap<u64, (bool, Position)> {
+        let doors = |o: &Observation| -> BTreeMap<DoorTarget, (bool, Position)> {
             o.visible_cells
                 .iter()
                 .filter_map(|c| c.door.as_ref().map(|d| (d.id, (d.open, c.position))))
@@ -277,7 +277,7 @@ impl Chronicler {
     }
 }
 
-fn item_name(items: &[ItemView], id: u64) -> String {
+fn item_name(items: &[ItemView], id: ItemTarget) -> String {
     items
         .iter()
         .find(|i| i.id == id)
@@ -285,7 +285,7 @@ fn item_name(items: &[ItemView], id: u64) -> String {
         .map_or_else(|| "thing".into(), |i| crate::safe(&i.name).to_lowercase())
 }
 
-fn door_name(o: &Observation, id: u64) -> String {
+fn door_name(o: &Observation, id: DoorTarget) -> String {
     o.visible_cells
         .iter()
         .filter_map(|c| c.door.as_ref())
@@ -301,14 +301,14 @@ mod tests {
     fn view() -> StateView {
         serde_json::from_value(serde_json::json!({
             "wizard_game":false,"revision":"1","observation":{
-            "actor":"1","tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
+            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"5","position":{"x":0,"y":0,"z":0},"ready":true,
             "places":[],"visible_cells":[{"key":"here","position":{"x":0,"y":0,"z":0},
                 "wall":false,"material":"stone","place_hint":false,
                 "stairs_up":false,"stairs_down":false,
-                "door":{"id":"7","name":"Oak Door","description":"","open":false,
+                "door":{"id":tor_protocol::DoorTarget::from_digest([7; 32]),"name":"Oak Door","description":"","open":false,
                     "reachable":true,"approaches":[]}}],
             "ground_items":[],"inventory":[],
-            "visible_actors":[{"id":"2","name":"ruin scout","description":"",
+            "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"name":"ruin scout","description":"",
                 "position":{"x":2,"y":0,"z":0}}],
             "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,
                 "preparation_active":false,"recovery_remaining":"0","actors":[],
@@ -344,14 +344,16 @@ mod tests {
         combat.hp = 44;
         combat.events = vec![
             CombatEventView::Attack {
-                attacker: Some(ActorId(1)),
-                target: Some(ActorId(2)),
+                attacker: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
+                target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
                 outcome: AttackOutcome::Hit,
             },
-            CombatEventView::Died { actor: ActorId(2) },
+            CombatEventView::Died {
+                actor: tor_protocol::ActorTarget::from_digest([2; 32]),
+            },
         ];
         let scout = Figure {
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "ruin scout".into(),
         };
         assert_eq!(
@@ -390,7 +392,7 @@ mod tests {
                 &before,
                 &after,
                 Some(&action(Event::DoorChanged {
-                    door: 7,
+                    door: tor_protocol::DoorTarget::from_digest([7; 32]),
                     open: true
                 })),
                 &palette

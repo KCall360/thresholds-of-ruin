@@ -9,7 +9,7 @@ fn snapshot(count: usize) -> Snapshot {
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":"0"},"actor":"1","branch":"client-bench","cursor":{"sequence":"0","tick":"0"},
         "intentions":[],"travel":null,"has_control":true,"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":"0","observation":{
-            "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},
+            "actor":"1","self_target":ActorTarget::from_digest([1; 32]),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..count).map(|i| serde_json::json!({
                 "key":i.to_string(),"position":{"x":(i%49) as i32-24,"y":((i/49)%25) as i32-12,"z":(i/1225) as i32},
                 "wall":i%7==0,"stairs_up":false,"stairs_down":false,"place_hint":false
@@ -112,7 +112,7 @@ fn main() {
             if narration {
                 view.observation.visible_cells[0].door = Some(DoorView {
                     asset: None,
-                    id: 1,
+                    id: DoorTarget::from_digest([1; 32]),
                     name: "wooden door".into(),
                     description: String::new(),
                     open: false,
@@ -137,7 +137,7 @@ fn main() {
                         view.observation.visible_actors = if open {
                             vec![ActorView {
                                 asset: None,
-                                id: ActorId(2),
+                                id: ActorTarget::from_digest([2; 32]),
                                 name: "figure".into(),
                                 description: String::new(),
                                 position: Position { x: 1, y: 0, z: 0 },

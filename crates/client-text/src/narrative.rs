@@ -243,7 +243,7 @@ pub fn listen(state: &StateView, palette: &Palette, places: &Places) -> String {
     let mut seen = std::collections::BTreeSet::new();
     let mut names: Vec<(String, u64)> = Vec::new();
     for a in &state.observation.visible_actors {
-        if a.id == state.observation.actor || !seen.insert(a.id) {
+        if a.id == state.observation.self_target || !seen.insert(a.id) {
             continue;
         }
         let name = safe(if a.name.is_empty() { "figure" } else { &a.name });

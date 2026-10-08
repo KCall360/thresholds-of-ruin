@@ -1,7 +1,6 @@
 use crate::support;
 use tempfile::tempdir;
 use tor_protocol::*;
-use tor_server::journal::Action;
 use tor_server::journal::{Command, Position, WizardItem, WizardOperation};
 use tor_server::{Engine, Scenario};
 
@@ -75,9 +74,8 @@ fn wizard_marker_rewind_and_retained_future_survive_restart() {
         .unwrap()
         .entries
         .contains(
-            &placed
-                .entry
-                .disclosed()
+            &engine
+                .disclose_entry(&placed.entry)
                 .expect("completed command has history")
         ));
     let state = engine.state(ActorId(1)).unwrap();
@@ -174,10 +172,15 @@ fn rewind_restores_inventory_knowledge_scheduler_and_identity_allocation() {
             &branch,
             Command::Act {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
-                action: Action::Take {
-                    item: initial.observation.ground_items[0].item.id,
-                    quantity: None,
-                },
+                action: engine
+                    .decode_action(
+                        ActorId(1),
+                        &tor_protocol::Action::Take {
+                            item: initial.observation.ground_items[0].item.id,
+                            quantity: None,
+                        },
+                    )
+                    .unwrap(),
             },
         )
         .unwrap();

@@ -60,7 +60,12 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
             },
         );
         let split = engine.state(ActorId(1)).unwrap().observation.inventory[0].id;
-        assert_eq!(split, 23);
+        assert_eq!(
+            split,
+            engine
+                .target_scope(ActorId(1))
+                .item(tor_simulation::ItemId(23))
+        );
         act(
             &mut engine,
             Action::Take {
@@ -68,13 +73,15 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
                 quantity: None,
             },
         );
-        act(
+        support::act_disclosed(
             &mut engine,
-            Action::Drop {
+            ActorId(1),
+            tor_protocol::Action::Drop {
                 item: split,
                 quantity: Some(2),
             },
-        );
+        )
+        .unwrap();
         assert_eq!(
             engine.state(ActorId(1)).unwrap().observation.inventory[0].quantity,
             6
@@ -102,7 +109,10 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
                 .observation
                 .ground_items
                 .iter()
-                .find(|i| i.item.id == 22)
+                .find(|i| i.item.id
+                    == engine
+                        .target_scope(ActorId(1))
+                        .item(tor_simulation::ItemId(22)))
                 .unwrap()
                 .item
                 .name,
@@ -113,7 +123,10 @@ fn quantities_disclosure_restart_and_rewind_use_ordinary_packages() {
                 .observation
                 .ground_items
                 .iter()
-                .find(|i| i.item.id == 21)
+                .find(|i| i.item.id
+                    == engine
+                        .target_scope(ActorId(1))
+                        .item(tor_simulation::ItemId(21)))
                 .unwrap()
                 .item
                 .name,
@@ -182,7 +195,10 @@ fn selected_character_knowledge_and_seed_mapping_are_deterministic() {
             .observation
             .ground_items
             .iter()
-            .find(|i| i.item.id == 20)
+            .find(|i| i.item.id
+                == unknown
+                    .target_scope(ActorId(1))
+                    .item(tor_simulation::ItemId(20)))
             .unwrap()
             .item
             .identified
@@ -194,7 +210,10 @@ fn selected_character_knowledge_and_seed_mapping_are_deterministic() {
             .observation
             .ground_items
             .iter()
-            .find(|i| i.item.id == 20)
+            .find(|i| i.item.id
+                == known
+                    .target_scope(ActorId(2))
+                    .item(tor_simulation::ItemId(20)))
             .unwrap()
             .item
             .identified
@@ -217,16 +236,41 @@ fn selected_character_knowledge_and_seed_mapping_are_deterministic() {
         let load = || {
             Engine::memory(scenario_package::load(dir.path(), seed, None, false).unwrap()).unwrap()
         };
-        let a = load().state(ActorId(1)).unwrap().observation;
-        let b = load().state(ActorId(1)).unwrap().observation;
-        // Per-game opaque cell keys intentionally use a fresh disclosure salt.
-        // Seed determinism concerns the item assignment, not those keys.
+        let a_engine = load();
+        let b_engine = load();
+        let a = a_engine.state(ActorId(1)).unwrap().observation;
+        let mut b = b_engine.state(ActorId(1)).unwrap().observation;
+        // Normalize only privacy references for these authored identities.
+        // All item data, collection order and projected positions remain compared.
+        for id in [10, 11, 12, 20, 21, 22] {
+            let a_target = a_engine
+                .target_scope(ActorId(1))
+                .item(tor_simulation::ItemId(id));
+            let b_target = b_engine
+                .target_scope(ActorId(1))
+                .item(tor_simulation::ItemId(id));
+            for ground in &mut b.ground_items {
+                if ground.item.id == b_target {
+                    ground.item.id = a_target;
+                }
+            }
+            for held in &mut b.inventory {
+                if held.id == b_target {
+                    held.id = a_target;
+                }
+            }
+        }
         assert_eq!(a.ground_items, b.ground_items);
         assert_eq!(a.inventory, b.inventory);
-        let appearance = |id| {
+        let appearance = |id: u64| {
             a.ground_items
                 .iter()
-                .find(|i| i.item.id == id)
+                .find(|i| {
+                    i.item.id
+                        == a_engine
+                            .target_scope(ActorId(1))
+                            .item(tor_simulation::ItemId(id))
+                })
                 .unwrap()
                 .item
                 .appearance
@@ -290,7 +334,10 @@ fn queued_take_retry_keeps_original_quantity_after_consumption_and_recovery() {
             .observation
             .ground_items
             .iter()
-            .any(|entry| entry.item.id == 10));
+            .any(|entry| entry.item.id
+                == engine
+                    .target_scope(ActorId(1))
+                    .item(tor_simulation::ItemId(10))));
         assert_eq!(after.observation.inventory[0].quantity, 10);
         let retry = engine
             .command(

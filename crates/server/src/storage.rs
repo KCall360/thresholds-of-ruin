@@ -1866,7 +1866,7 @@ mod tests {
             .history(ActorId(1), "p", None, 10)
             .unwrap()
             .entries
-            .contains(&executed.entry.disclosed().unwrap()));
+            .contains(&restored.disclose_entry(&executed.entry).unwrap()));
     }
 
     #[test]

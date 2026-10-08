@@ -87,16 +87,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             let observation = engine.observation(player)?;
                             let target = observation.visible_actors.iter().find(|a| {
-                                a.id != player
+                                a.id != observation.self_target
                                     && a.position.x.abs() <= 1
                                     && a.position.y.abs() <= 1
                                     && a.position.z == 0
                             });
                             (
                                 player,
-                                Some(target.map_or(Action::Wait, |a| Action::Attack {
-                                    target: tor_simulation::ActorId(a.id.0),
-                                })),
+                                Some(match target {
+                                    Some(a) => engine.decode_action(
+                                        player,
+                                        &tor_protocol::Action::Attack { target: a.id },
+                                    )?,
+                                    None => Action::Wait,
+                                }),
                             )
                         };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;

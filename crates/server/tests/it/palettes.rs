@@ -59,7 +59,8 @@ fn union(parts: &[BTreeSet<String>]) -> BTreeSet<String> {
 
 /// Act as the character after any AI turns due first.
 fn act(engine: &mut Engine, action: Action) -> Result<(), tor_server::Failure> {
-    support::play(engine, tor_server::wire_adapter::decode_action(&action)).map(|_| ())
+    support::run_ai_turns(engine);
+    support::act_disclosed(engine, ActorId(1), action).map(|_| ())
 }
 
 /// Step east along the caves' straight corridor, waiting for rats in the way.

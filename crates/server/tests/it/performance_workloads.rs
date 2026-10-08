@@ -99,13 +99,16 @@ fn performance_fixture_has_real_door_stairs_and_exact_region_counts() {
             )
             .is_err());
         assert_eq!(engine.state(ActorId(1)).unwrap(), before);
-        step(
-            &mut engine,
-            Action::SetDoor {
-                door: id,
-                open: true,
-            },
-        );
+        let action = engine
+            .decode_action(
+                ActorId(1),
+                &tor_protocol::Action::SetDoor {
+                    door: id,
+                    open: true,
+                },
+            )
+            .unwrap();
+        step(&mut engine, action);
         assert!(
             engine
                 .state(ActorId(1))
@@ -127,13 +130,16 @@ fn performance_fixture_has_real_door_stairs_and_exact_region_counts() {
                 direction: Direction::East,
             },
         );
-        step(
-            &mut engine,
-            Action::SetDoor {
-                door: id,
-                open: false,
-            },
-        );
+        let action = engine
+            .decode_action(
+                ActorId(1),
+                &tor_protocol::Action::SetDoor {
+                    door: id,
+                    open: false,
+                },
+            )
+            .unwrap();
+        step(&mut engine, action);
         assert!(
             !engine
                 .state(ActorId(1))
@@ -218,7 +224,7 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                         let action = trace.secondary[secondary % trace.secondary.len()]
                             .resolve(&engine.state(actor).unwrap());
                         secondary += 1;
-                        tor_server::wire_adapter::decode_action(&action)
+                        engine.decode_action(actor, &action).unwrap()
                     } else {
                         Action::Wait
                     };
@@ -252,7 +258,9 @@ fn mixed_trace_schedules_actors_changes_los_and_replays_identical_disclosure() {
                     accepted += 1;
                 }
                 let before = engine.state(ActorId(1)).unwrap();
-                let action = tor_server::wire_adapter::decode_action(&step.resolve(&before));
+                let action = engine
+                    .decode_action(ActorId(1), &step.resolve(&before))
+                    .unwrap();
                 let result = engine.command(
                     "trace",
                     "test",
@@ -332,10 +340,10 @@ fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
         for _ in 0..regions - 1 {
             for action in &trace.traversal {
                 let before = engine.state(ActorId(1)).unwrap();
-                step(
-                    &mut engine,
-                    tor_server::wire_adapter::decode_action(&action.resolve(&before)),
-                );
+                let resolved = engine
+                    .decode_action(ActorId(1), &action.resolve(&before))
+                    .unwrap();
+                step(&mut engine, resolved);
                 action.verify(&before, &engine.state(ActorId(1)).unwrap(), true);
             }
         }

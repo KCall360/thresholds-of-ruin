@@ -8,7 +8,7 @@ fn snapshot(cell_id: u64, tick: u64, revision: u64) -> Snapshot {
         "actor":"1","branch":"first","cursor":{"sequence":"0","tick":tick.to_string()},
         "has_control":false, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
-            "actor":"1","tick":tick.to_string(),"position":{"x":1,"y":1,"z":0},
+            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":tick.to_string(),"position":{"x":1,"y":1,"z":0},
             "places":[],"visible_cells":[{"key":cell_id.to_string(),"stairs_up":false,"stairs_down":false,"position":{"x":1,"y":1,"z":0},"wall":false,"place_hint":false}],"ground_items":[],"inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -162,7 +162,7 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
                 appearance: String::new(),
                 identified: true,
                 description: String::new(),
-                id: 7,
+                id: tor_protocol::ItemTarget::from_digest([7; 32]),
                 name: "token".into(),
             },
             position,
@@ -175,7 +175,10 @@ fn only_received_views_are_remembered_and_revisits_replace_stale_contents() {
     assert_eq!(client.state().observation.visible_cells[0].key, "2");
     assert!(client.state().observation.ground_items.is_empty());
     let remembered = client.memory().find(|view| view.key == "1").unwrap();
-    assert_eq!(remembered.ground_items[0].item.id, 7);
+    assert_eq!(
+        remembered.ground_items[0].item.id,
+        ItemTarget::from_digest([7; 32])
+    );
     assert_eq!(remembered.last_seen_tick, 0);
     assert_eq!(remembered.last_seen_revision, 0);
     client
@@ -267,7 +270,7 @@ fn partially_seen_rooms_retain_unseen_cells_but_clear_visible_empty_cells() {
                 appearance: String::new(),
                 identified: true,
                 description: String::new(),
-                id: 8,
+                id: tor_protocol::ItemTarget::from_digest([8; 32]),
                 name: "distant token".into(),
             },
             position: distant,
@@ -311,7 +314,7 @@ fn remembered_doors_stay_stale_until_seen_and_rewind_clears_them() {
     let mut first = snapshot(1, 0, 0);
     Arc::make_mut(&mut first.state).observation.visible_cells[0].door = Some(DoorView {
         asset: None,
-        id: 4,
+        id: tor_protocol::DoorTarget::from_digest([4; 32]),
         name: "wooden door".into(),
         description: "wood".into(),
         open: true,

@@ -225,7 +225,7 @@ class StreamRelay:
         if (self.large_retained_base and message.get('type') == 'snapshot'
                 and message['request_id'] == 'attach'):
             message['snapshot']['state']['observation']['inventory'].append({
-                'id':'18446744073709551614', 'quantity':'1', 'name':'retained test item',
+                'id':'i_' + 'e' * 64, 'quantity':'1', 'name':'retained test item',
                 'appearance':'stone', 'identified':False, 'description':'x' * (8 * 1024 * 1024)})
             self.large_retained_base = False
             return True
@@ -245,11 +245,11 @@ class StreamRelay:
         elif self.overflow_delta.is_set():
             state['cells']['shift']['x'] = 2147483647
         elif self.invalid_inventory.is_set():
-            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'123', 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False}]})
+            state['inventory'].append({'start':0, 'remove':0, 'insert':[{'id':'i_' + 'a' * 64, 'quantity':'0', 'name':'invalid test fixture', 'appearance':'stone', 'identified':False}]})
         elif self.oversized_retained_state.is_set():
             state['ground_items'].append({'start':0, 'remove':0, 'insert':[{
                 'reachable':False, 'position':{'x':0, 'y':0, 'z':0},
-                'item':{'id':'18446744073709551615', 'quantity':'1', 'name':'inserted test item',
+                'item':{'id':'i_' + 'f' * 64, 'quantity':'1', 'name':'inserted test item',
                         'appearance':'stone', 'identified':False,
                         'description':'y' * (8 * 1024 * 1024)}}]})
         elif self.invalid_collection_range.is_set():

@@ -497,7 +497,7 @@ impl Engine {
             // A `look` after the move already described where it ended.
             // The description says who is there; sightings on the way in
             // would say it twice.
-            let present: BTreeSet<ActorId> = link
+            let present: BTreeSet<ActorTarget> = link
                 .client()
                 .state()
                 .observation

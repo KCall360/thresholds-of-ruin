@@ -8,7 +8,7 @@ fn snapshot(cells: &[(&str, i32, i32)], revision: u64) -> Snapshot {
         "actor":"1","branch":"map","cursor":{"sequence":"0","tick":revision.to_string()},
         "has_control":true, "intentions":[],"history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":revision.to_string(),"observation":{
-            "actor":"1","tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
+            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":revision.to_string(),"position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":cells.iter().map(|(key,x,y)| serde_json::json!({
                 "key":key,"position":{"x":x,"y":y,"z":0},"wall":false,
                 "stairs_up":false,"stairs_down":false,"place_hint":false
@@ -46,7 +46,7 @@ fn narration_rejects_gaps_atomically_and_resets_on_snapshot() {
         .visible_actors
         .push(ActorView {
             asset: None,
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
             description: String::new(),
             position: Position { x: 1, y: 0, z: 0 },
@@ -90,7 +90,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
                 quantity: 1,
                 appearance: String::new(),
                 identified: true,
-                id: 7,
+                id: tor_protocol::ItemTarget::from_digest([7; 32]),
                 name: "token".into(),
                 description: String::new(),
             },
@@ -102,7 +102,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .visible_actors
         .push(ActorView {
             asset: None,
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             position: Position { x: 3, y: 0, z: 0 },
             name: "figure".into(),
             description: String::new(),

@@ -330,7 +330,7 @@ pub(crate) fn floor_material_with<'a>(
 }
 
 struct UnifiedActor<'a> {
-    id: ActorId,
+    id: ActorTarget,
     name: &'a str,
     asset: Option<&'a str>,
     base_position: Position,
@@ -338,7 +338,7 @@ struct UnifiedActor<'a> {
 }
 
 fn unified_actors<'a>(actors: &'a [ActorView]) -> Vec<UnifiedActor<'a>> {
-    let mut by_id: BTreeMap<ActorId, Vec<&'a ActorView>> = BTreeMap::new();
+    let mut by_id: BTreeMap<ActorTarget, Vec<&'a ActorView>> = BTreeMap::new();
     for actor in actors {
         by_id.entry(actor.id).or_default().push(actor);
     }
@@ -382,7 +382,7 @@ fn unified_actors<'a>(actors: &'a [ActorView]) -> Vec<UnifiedActor<'a>> {
             a.base_position.z,
             a.base_position.y,
             a.base_position.x,
-            a.id.0,
+            a.id,
         )
     });
     result
@@ -471,7 +471,7 @@ fn figures_sentence(state: &StateView, palette: &Palette) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut entries = Vec::new();
     for actor in unified_actors(&o.visible_actors) {
-        if actor.id == o.actor {
+        if actor.id == o.self_target {
             if !actor.cells.iter().any(|p| p.x == 0 && p.y == 0) {
                 sentences.push(format!(
                     "You can see yourself {}.",
@@ -579,7 +579,7 @@ fn things_sentences(state: &StateView, place: &Place) -> Vec<String> {
 
 /// Doors in sight that aren't ways out of this place.
 fn other_doors(state: &StateView, place: &Place) -> Option<String> {
-    let ways: BTreeSet<u64> = place
+    let ways: BTreeSet<DoorTarget> = place
         .ways
         .iter()
         .filter_map(|w| match w.kind {

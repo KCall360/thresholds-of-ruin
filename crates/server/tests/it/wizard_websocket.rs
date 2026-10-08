@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use tokio::{net::TcpListener, sync::oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tor_protocol::*;
-use tor_server::journal::{Command, Position, RegionView, WizardItem, WizardOperation};
+use tor_server::journal::{Position, RegionView, WizardItem, WizardOperation};
 use tor_server::{serve, Account, Engine, Scenario, Service, Simulation};
 
 use crate::wire_client::WireClient as Client;
@@ -228,11 +228,10 @@ fn wizard_request(
     Request::Command {
         context,
         branch: branch.clone(),
-        command: tor_server::wire_adapter::encode_command(Command::Wizard {
+        command: tor_protocol::Command::Wizard {
             expected_revision,
-            operation,
-        })
-        .unwrap(),
+            operation: serde_json::to_string(&operation).unwrap(),
+        },
     }
 }
 

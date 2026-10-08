@@ -37,10 +37,12 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 .visible_actors
                 .iter()
                 .filter(|a| {
-                    a.id != state.observation.actor
+                    a.id != state.observation.self_target
                         && (a.name.to_lowercase().contains(&noun.to_lowercase())
-                            || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok())
-                                == Some(a.id.0))
+                            || noun
+                                .strip_prefix('#')
+                                .and_then(|s| s.parse::<ActorTarget>().ok())
+                                == Some(a.id))
                 })
                 .collect();
             actors.sort_by_key(|a| a.id);
@@ -79,7 +81,10 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                     noun.is_empty()
                         || noun == "door"
                         || noun == d.name
-                        || noun.strip_prefix('#').and_then(|s| s.parse::<u64>().ok()) == Some(d.id)
+                        || noun
+                            .strip_prefix('#')
+                            .and_then(|s| s.parse::<DoorTarget>().ok())
+                            == Some(d.id)
                 })
                 .collect();
             doors.sort_by_key(|d| d.id);
@@ -312,7 +317,7 @@ pub fn describe(state: &StateView) -> String {
     for actor in &o.visible_actors {
         lines.push(format!(
             "You see actor #{} at offset ({}, {}, {}).",
-            actor.id.0, actor.position.x, actor.position.y, actor.position.z
+            actor.id, actor.position.x, actor.position.y, actor.position.z
         ));
     }
     for cell in &o.visible_cells {
@@ -373,7 +378,7 @@ pub fn item_quantity(noun: &str) -> Result<(Option<u64>, &str), String> {
 
 pub fn item_matches(noun: &str, item: &tor_protocol::ItemView) -> bool {
     if let Some(id) = noun.strip_prefix('#') {
-        return id.parse::<u64>() == Ok(item.id);
+        return id.parse::<ItemTarget>() == Ok(item.id);
     }
     let name = item.name.to_lowercase();
     let noun = noun.strip_prefix("the ").unwrap_or(noun);

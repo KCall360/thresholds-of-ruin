@@ -346,8 +346,10 @@ class StreamingProcesses(ProcessTestCase):
         self.assertEqual(now["state"]["observation"]["tick"], initial["state"]["observation"]["tick"])
         # A different future: take the pebble before leaving hall 1, so its
         # new record differs from the abandoned one still on disk.
-        self.walk(wizard, "east", 6)
-        taken = self.act(wizard, {"type": "take", "item": '10'})
+        near = self.walk(wizard, "east", 6)
+        pebble = next(ground['item']['id'] for ground in near['state']['observation']['ground_items']
+                      if ground['item']['name'] == 'pebble')
+        taken = self.act(wizard, {"type": "take", "item": pebble})
         self.assertIsNone(taken.get("error"), taken)
         far = self.walk(wizard, "east", TO_HALL_4 - 6)
         self.assertIsNone(self.request(wizard, {"type": "save"})["error"])

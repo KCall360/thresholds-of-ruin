@@ -17,24 +17,32 @@ class ItemProcesses(ProcessTestCase):
         self.game = self.server(scenario=package, seed=None, spectator=False)
 
     def test_direct_quantities_merge_drop_and_restart(self):
+        probe, disclosed = self.client(observe=True)
+        arrows = {ground['item']['quantity']: ground['item']['id']
+                  for ground in disclosed['state']['observation']['ground_items']
+                  if ground['item']['name'] == 'arrow'}
         p = self.launch('tor-client-text', ['--script', '--connect', self.address])
         initial = p.until(lambda s: s == 'Ready.')
         self.assertNotIn('potion of healing', initial)
         self.assertIn('Which item', p.command('take 3 arrows'))
-        self.assertIn('Taken', p.command('take 3 #10'))
-        self.assertIn('Taken', p.command('take #11'))
+        self.assertIn('Taken', p.command(f"take 3 #{arrows['10']}"))
+        self.assertIn('Taken', p.command(f"take #{arrows['5']}"))
         self.assertIn('8 x arrow', p.command('inventory'))
-        self.assertIn('Dropped', p.command('drop 2 #23'))
+        held = self.request(probe, {'type': 'snapshot'})['state']['observation']['inventory'][0]['id']
+        self.assertIn('Dropped', p.command(f'drop 2 #{held}'))
         self.assertIn('6 x arrow', p.command('inventory'))
-        self.assertIn('InvalidAction', p.command('drop 99 #23'))
-        p.command('save'); p.stop(); self.game.stop(); self.start()
+        self.assertIn('InvalidAction', p.command(f'drop 99 #{held}'))
+        p.command('save'); p.stop(); probe.stop(); self.game.stop(); self.start()
         resumed = self.launch('tor-client-text', ['--script', '--connect', self.address])
         resumed.until(lambda s: s == 'Ready.')
         self.assertIn('6 x arrow', resumed.command('inventory'))
 
     def test_saved_action_facts_preserve_original_quantity_and_execution(self):
-        player, _ = self.client()
-        for item, quantity in [("10", None), ("11", "2")]:
+        player, initial = self.client()
+        arrows = {ground['item']['quantity']: ground['item']['id']
+                  for ground in initial['state']['observation']['ground_items']
+                  if ground['item']['name'] == 'arrow'}
+        for item, quantity in [(arrows['10'], None), (arrows['5'], "2")]:
             taken = self.act(player, {"type": "take", "item": item, "quantity": quantity})
             self.assertIsNone(taken["error"])
         self.assertEqual(taken["state"]["observation"]["inventory"][0]["quantity"], "12")
@@ -99,7 +107,9 @@ class ItemProcesses(ProcessTestCase):
             return updates[-1]
 
         start = len(player.transcript)
-        split = self.act(player, {'type': 'take', 'item': '10', 'quantity': '3'})
+        target = next(ground['item']['id'] for ground in initial['state']['observation']['ground_items']
+                      if ground['item']['name'] == 'arrow' and ground['item']['quantity'] == '10')
+        split = self.act(player, {'type': 'take', 'item': target, 'quantity': '3'})
         edits = collection_edits(start)
         self.assertTrue(edits['inventory'])
         self.assertTrue(edits['ground_items'])

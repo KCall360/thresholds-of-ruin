@@ -4,9 +4,16 @@ use std::sync::Arc;
 use std::{hint::black_box, time::Instant};
 use tor_protocol::*;
 
+// Synthetic disclosed identities for wire-only tests; not server target derivation.
+fn synthetic_digest(index: u64) -> [u8; 32] {
+    let mut digest = [0; 32];
+    digest[..8].copy_from_slice(&index.to_le_bytes());
+    digest
+}
+
 fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        serde_json::from_str(include_str!("../tests/fixtures/wire-v29.json")).unwrap();
     assert_eq!(fixture["protocol"], PROTOCOL_VERSION);
     let message = fixture["server"]
         .as_array()
@@ -34,7 +41,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
             appearance: "disclosed appearance".repeat(4),
             identified: true,
             description: "disclosed description".repeat(4),
-            id: index as u64 + 1,
+            id: ItemTarget::from_digest(synthetic_digest(index as u64 + 1)),
             name: format!("item {index}"),
             asset: None,
         };
@@ -42,7 +49,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
         o.ground_items.push(GroundItemView {
             reachable: false,
             item: ItemView {
-                id: index as u64 + 10_000,
+                id: ItemTarget::from_digest(synthetic_digest(index as u64 + 10_000)),
                 ..item
             },
             position: Position {
@@ -54,7 +61,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
         o.visible_actors.push(ActorView {
             name: format!("actor {index}"),
             description: "disclosed actor".repeat(4),
-            id: ActorId(index as u64 + 10),
+            id: ActorTarget::from_digest(synthetic_digest(index as u64 + 10)),
             position: Position {
                 x: index as i32,
                 y: 2,

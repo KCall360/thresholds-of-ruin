@@ -83,10 +83,53 @@ fn step(engine: &mut Engine, direction: Direction, sequence: &mut usize) -> (usi
     )
 }
 
-/// What the actor sees, without cell keys: those are salted per game.
+/// Compare complete corridor disclosures across fresh games. Normalize only
+/// privacy references, checking each against the fixture's authored identities.
 fn seen(engine: &Engine) -> tor_protocol::Observation {
     let mut observation = engine.state(ActorId(1)).unwrap().observation;
+    let scope = engine.target_scope(ActorId(1));
+    let canonical =
+        tor_server::wire_adapter::TargetScope::new(uuid::Uuid::nil(), tor_simulation::ActorId(1));
+    let actor = |reference| {
+        let identity = [tor_simulation::ActorId(1), tor_simulation::ActorId(2)]
+            .into_iter()
+            .find(|id| scope.actor(*id) == reference)
+            .expect("a corridor disclosure must identify an authored actor in this scope");
+        canonical.actor(identity)
+    };
+    observation.self_target = actor(observation.self_target);
+    for figure in &mut observation.visible_actors {
+        figure.id = actor(figure.id);
+    }
+    if let Some(combat) = &mut observation.combat {
+        for figure in &mut combat.actors {
+            figure.actor = actor(figure.actor);
+        }
+        for event in &mut combat.events {
+            match event {
+                tor_protocol::CombatEventView::Attack {
+                    attacker, target, ..
+                } => {
+                    *attacker = attacker.map(actor);
+                    *target = target.map(actor);
+                }
+                tor_protocol::CombatEventView::Interrupted { actor: figure }
+                | tor_protocol::CombatEventView::Died { actor: figure } => *figure = actor(*figure),
+            }
+        }
+    }
+    let item = tor_simulation::ItemId(10);
+    for disclosed in observation
+        .ground_items
+        .iter_mut()
+        .map(|ground| &mut ground.item)
+        .chain(observation.inventory.iter_mut())
+    {
+        assert_eq!(disclosed.id, scope.item(item));
+        disclosed.id = canonical.item(item);
+    }
     for cell in &mut observation.visible_cells {
+        assert!(cell.door.is_none(), "the corridor has no authored doors");
         cell.key.clear();
     }
     observation

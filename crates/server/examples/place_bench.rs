@@ -23,6 +23,9 @@ fn wizard(engine: &mut Engine, id: &str, operation: String) -> tor_server::Comma
         operation,
     })
     .unwrap();
+    let command = engine
+        .resolve_command(ActorId(1), engine.branch(), command)
+        .unwrap();
     engine
         .command_profiled(
             "bench",
@@ -156,9 +159,8 @@ fn main() {
                 body: UpdateBody::Observation {
                     state: state.into(),
                     event: Some(Box::new(
-                        entry
-                            .entry
-                            .disclosed()
+                        engine
+                            .disclose_entry(&entry.entry)
                             .expect("completed command has history"),
                     )),
                 },

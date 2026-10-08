@@ -484,7 +484,9 @@ mod tests {
                         &engine.branch().clone(),
                         Command::Act {
                             expected_revision: before.revision,
-                            action: crate::wire_adapter::decode_action(&step.resolve(&before)),
+                            action: engine
+                                .decode_action(ActorId(1), &step.resolve(&before))
+                                .unwrap(),
                         },
                     )
                     .unwrap();

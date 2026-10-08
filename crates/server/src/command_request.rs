@@ -53,14 +53,18 @@ impl Engine {
         &self,
         receipt: &'a Receipt,
     ) -> Result<CheckedRequest<'a>, Failure> {
-        if &receipt.branch != self.branch() {
-            return Err(Failure::new(
-                ErrorCode::WrongBranch,
-                "Reconnect to the current branch",
-            ));
-        }
-        let revision = self.revision(receipt.actor)?;
-        let expected = match &receipt.command {
+        let revision = self.check_metadata(
+            receipt.actor,
+            &receipt.branch,
+            receipt.command.revision_requirement(),
+        )?;
+        Ok(CheckedRequest { receipt, revision })
+    }
+}
+
+impl Command {
+    pub(crate) fn revision_requirement(&self) -> Option<(u64, &'static str)> {
+        match self {
             Command::AdmitIntention {
                 expected_revision, ..
             }
@@ -83,12 +87,29 @@ impl Engine {
                 expected_revision, ..
             } => Some((*expected_revision, "Refresh before a wizard operation")),
             Command::Annotate { .. } | Command::PausePreparation => None,
-        };
+        }
+    }
+}
+
+impl Engine {
+    pub(super) fn check_metadata(
+        &self,
+        actor: tor_protocol::ActorId,
+        branch: &tor_protocol::BranchId,
+        expected: Option<(u64, &'static str)>,
+    ) -> Result<u64, Failure> {
+        if branch != self.branch() {
+            return Err(Failure::new(
+                ErrorCode::WrongBranch,
+                "Reconnect to the current branch",
+            ));
+        }
+        let revision = self.revision(actor)?;
         if let Some((expected, message)) = expected {
             if expected != revision {
                 return Err(Failure::new(ErrorCode::StaleRevision, message));
             }
         }
-        Ok(CheckedRequest { receipt, revision })
+        Ok(revision)
     }
 }

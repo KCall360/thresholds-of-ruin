@@ -115,11 +115,11 @@ pub(crate) enum Step {
 /// Until hostility and environmental danger are modeled, another perceived
 /// actor is conservatively a potential hazard. Never consult hidden actors,
 /// and do not classify another portal view of the observer as a threat.
-fn potential_hazards(observation: &Observation) -> BTreeSet<ActorId> {
+fn potential_hazards(observation: &Observation) -> BTreeSet<tor_protocol::ActorTarget> {
     observation
         .visible_actors
         .iter()
-        .filter(|other| other.id != observation.actor)
+        .filter(|other| other.id != observation.self_target)
         .map(|other| other.id)
         .collect()
 }
@@ -128,7 +128,7 @@ struct TravelJob {
     hp: Option<u32>,
     owner: u64,
     steps: VecDeque<tor_simulation::TravelStep>,
-    hazards: BTreeSet<ActorId>,
+    hazards: BTreeSet<tor_protocol::ActorTarget>,
     pending: Option<EntryId>,
 }
 
@@ -515,7 +515,7 @@ impl Service {
                 let command = crate::wire_adapter::decode_command(&command)?;
                 if let Some(previous) = self
                     .engine
-                    .retry(&user, actor, request_id, &branch, &command)?
+                    .retry_decoded(&user, &frontend, actor, request_id, &branch, &command)?
                 {
                     return Ok(ProcessedRequest::Reply(RequestReply::Receipt(
                         self.engine.request_receipt(&previous),
@@ -541,16 +541,7 @@ impl Service {
                         "Input context changed; use the current disclosed state",
                     ));
                 }
-                if matches!(
-                    command,
-                    crate::journal::Command::RenamePlace { .. }
-                        | crate::journal::Command::ResumeIntention { .. }
-                        | crate::journal::Command::CancelIntention { .. }
-                        | crate::journal::Command::Act { .. }
-                        | crate::journal::Command::AdmitIntention { .. }
-                        | crate::journal::Command::Travel { .. }
-                ) && self.controllers.get(&actor) != Some(&id)
-                {
+                if command.requires_control() && self.controllers.get(&actor) != Some(&id) {
                     return Err(Failure::new(
                         ErrorCode::NotController,
                         "Acquire control before acting",
@@ -560,34 +551,35 @@ impl Service {
                 // were published. Simulation still validates the action itself;
                 // session policy cannot be bypassed by a correctly stamped request.
                 match &command {
-                    crate::journal::Command::Act { .. }
-                    | crate::journal::Command::AdmitIntention { .. }
-                    | crate::journal::Command::Travel { .. }
-                        if !current.permissions.admission =>
-                    {
+                    crate::wire_adapter::DecodedCommand::Gameplay { .. }
+                    | crate::wire_adapter::DecodedCommand::Backend(
+                        crate::journal::Command::Travel { .. },
+                    ) if !current.permissions.admission => {
                         return Err(Failure::new(
                             ErrorCode::ActorBusy,
                             "New gameplay is unavailable in the current input state",
                         ));
                     }
-                    crate::journal::Command::ResumeIntention { admission, .. }
-                        if !current
-                            .permissions
-                            .resume
-                            .iter()
-                            .any(|id| id.0 == admission.0) =>
+                    crate::wire_adapter::DecodedCommand::Backend(
+                        crate::journal::Command::ResumeIntention { admission, .. },
+                    ) if !current
+                        .permissions
+                        .resume
+                        .iter()
+                        .any(|id| id.0 == admission.0) =>
                     {
                         return Err(Failure::new(
                             ErrorCode::InvalidAction,
                             "Intention cannot be resumed in the current input state",
                         ));
                     }
-                    crate::journal::Command::CancelIntention { admission, .. }
-                        if !current
-                            .permissions
-                            .cancel
-                            .iter()
-                            .any(|id| id.0 == admission.0) =>
+                    crate::wire_adapter::DecodedCommand::Backend(
+                        crate::journal::Command::CancelIntention { admission, .. },
+                    ) if !current
+                        .permissions
+                        .cancel
+                        .iter()
+                        .any(|id| id.0 == admission.0) =>
                     {
                         return Err(Failure::new(
                             ErrorCode::InvalidAction,
@@ -596,6 +588,7 @@ impl Service {
                     }
                     _ => {}
                 }
+                let command = self.engine.resolve_command(actor, &branch, command)?;
                 let revisions: BTreeMap<_, _> = self
                     .engine
                     .actors()
@@ -605,7 +598,7 @@ impl Service {
                 let result = self
                     .engine
                     .command(&user, &frontend, actor, request_id, &branch, command)?;
-                let Some(visible_entry) = result.entry.disclosed() else {
+                let Some(visible_entry) = self.engine.disclose_entry(&result.entry) else {
                     if matches!(
                         result.entry.content,
                         crate::journal::JournalContent::IntentionAdmitted { .. }
@@ -742,7 +735,7 @@ impl Service {
         revisions: &BTreeMap<ActorId, u64>,
         result: &crate::CommandResult,
     ) -> Result<(), Failure> {
-        let entry = result.entry.disclosed();
+        let entry = self.engine.disclose_entry(&result.entry);
         self.action_update(revisions, entry.as_ref())?;
         self.intention_update(result);
         Ok(())
@@ -1392,7 +1385,7 @@ impl Service {
         let entry = self
             .engine
             .annotate_backend(actor, component, anchor, category, text)?;
-        let entry = entry.disclosed().ok_or_else(|| {
+        let entry = self.engine.disclose_entry(&entry).ok_or_else(|| {
             Failure::new(
                 ErrorCode::InvalidRequest,
                 "Backend note has no disclosed event",
@@ -1796,7 +1789,7 @@ mod tests {
         assert_eq!(base.observation.visible_cells.len(), 5);
         base.observation.visible_cells[0].door = Some(DoorView {
             asset: None,
-            id: 77,
+            id: service.engine.target_scope(actor).door(77),
             name: "visible door".into(),
             description: "An already disclosed elaborate carving. ".repeat(128),
             open: false,
@@ -1834,6 +1827,7 @@ mod tests {
             motion: o.motion.clone(),
             places: Vec::new(),
             actor: o.actor,
+            self_target: o.self_target,
             tick: o.tick,
             position: o.position,
             cells: CellChanges {

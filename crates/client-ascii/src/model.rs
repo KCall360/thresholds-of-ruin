@@ -667,7 +667,7 @@ impl App {
                         .observation
                         .visible_actors
                         .iter()
-                        .filter(|a| a.id != state.state().observation.actor)
+                        .filter(|a| a.id != state.state().observation.self_target)
                         .cloned()
                         .collect();
                     self.attack_targets.sort_by_key(|a| a.id);
@@ -924,7 +924,7 @@ impl App {
             };
             let view = &state.state().observation;
             if let Some(target) = view.visible_actors.iter().find(|a| {
-                a.id != view.actor
+                a.id != view.self_target
                     && a.position == (Position { x, y, z })
                     && match self.bump_attacks {
                         BumpAttacks::Any => true,
