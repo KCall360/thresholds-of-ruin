@@ -133,3 +133,13 @@ checkpoint case preserves split quantities and avoids collecting spare healing.
 Next: finish performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.
+
+The first PR CI run exposed certificates generated from local CRLF manifest
+bytes. Source hashing now automatically normalizes CRLF to LF in validation,
+lazy region integrity checks and in-memory construction; other source edits
+remain significant. All 35 package certificates have been regenerated. The new
+CRLF/LF regression failed before the fix and passes afterward. All 44 package
+unit tests, seven package integration tests, 17 package process tests, three
+repository certificate/reference checks and seven documentation checks pass.
+The process regression validates CRLF sources, starts from an LF checkout and
+restarts a saved game with CRLF sources. Generated package text remains LF.

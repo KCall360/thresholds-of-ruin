@@ -10,6 +10,28 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_crlf_validation_survives_lf_checkout_and_crlf_saved_restart(self):
+        package = self.directory / "line-endings"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        sources = {path: path.read_bytes().replace(b"\r\n", b"\n") for path in package.rglob("*.toml")}
+        for path, source in sources.items():
+            path.write_bytes(source.replace(b"\n", b"\r\n"))
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path, source in sources.items():
+            path.write_bytes(source)
+        server = self.server(scenario=package)
+        player, initial = self.client()
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        for path, source in sources.items():
+            path.write_bytes(source.replace(b"\n", b"\r\n"))
+        self.server(scenario=package, seed=None)
+        _, restored = self.client()
+        self.assertEqual(restored["state"]["observation"], initial["state"]["observation"])
+
     def validation_failure(self, package):
         before = {p.relative_to(package): p.read_bytes()
                   for p in package.rglob("*") if p.is_file()}

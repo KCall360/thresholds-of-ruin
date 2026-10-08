@@ -237,7 +237,8 @@ are implemented with disclosure, memory and recovery tests; preparation has
 moved onto actors while retaining attack behavior. The simulation/server foundation
 now supports anatomy-based equipment, starting gear, timed consumption and shared
 healing/damage effects, with opaque targets and saved intention lineage. Client
-controls, completion narration and item-aware AI remain in progress. See [interaction adaptation](interaction-adaptation.md)
+controls, completion narration and item-aware AI are implemented. Performance,
+desktop launcher and CI closeout remain in progress. See [interaction adaptation](interaction-adaptation.md)
 for scope, retained work and focused verification.
 
 Equipment after items, then item effects and other selected interactions.

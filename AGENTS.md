@@ -79,6 +79,10 @@ On the maintainer's Windows machine:
 - Use `CARGO_BUILD_JOBS=2` and `CARGO_PROFILE_DEV_DEBUG=0`, UTF-8 Python, and
   temp files inside the workspace.
 - Don't edit Rust inputs while a build is running.
+- Scenario validation hashes manifest and region text with CRLF normalized to
+  LF automatically; generated TOML uses LF. After package edits, regenerate
+  certificates and run `python scripts/test_scenario_references.py` to verify
+  the hashes a fresh checkout receives. Keep `.gitattributes` LF rules intact.
 - Native mouse tests need interactive desktop permission. A sandbox denial
   (for example of `SetCursorPos` or temp-directory access) is an environment
   failure: rerun with the needed access and report it.

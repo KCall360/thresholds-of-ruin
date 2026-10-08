@@ -565,7 +565,7 @@ impl RegionSources {
             }
         }
         require(
-            digest(text.as_bytes()) == entry.hash,
+            source_digest(&text) == entry.hash,
             format!(
                 "{} changed since the package was validated; run tor-scenario validate",
                 entry.file
@@ -632,6 +632,16 @@ fn digest(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// Package source identities use repository LF bytes. Comments and all other
+/// edits still affect integrity; only CRLF/LF checkout differences are ignored.
+fn source_digest(text: &str) -> String {
+    if text.contains("\r\n") {
+        digest(text.replace("\r\n", "\n").as_bytes())
+    } else {
+        digest(text.as_bytes())
+    }
 }
 fn read_limited(root: &Path, relative: &str, limit: u64) -> Result<String, Failure> {
     require(
@@ -746,7 +756,7 @@ fn scan_regions(root: &Path) -> Result<(RegionIndex, BTreeMap<u64, Arc<str>>), F
                 region_file(def.id)
             ),
         )?;
-        regions.push(IndexedRegion::of(&def, file, digest(text.as_bytes())));
+        regions.push(IndexedRegion::of(&def, file, source_digest(&text)));
         texts.insert(def.id, Arc::from(text));
     }
     regions.sort_by_key(|r| r.id);
@@ -789,7 +799,7 @@ impl Package {
         directory: Option<&Path>,
     ) -> Result<Self, Failure> {
         let files = BTreeMap::from([
-            ("scenario.toml".into(), digest(manifest_text.as_bytes())),
+            ("scenario.toml".into(), source_digest(manifest_text)),
             ("index.json".into(), digest(&index.to_bytes()?)),
         ]);
         let content_hash = digest(&serde_json::to_vec(&files).map_err(|e| fail(e.to_string()))?);
@@ -827,7 +837,7 @@ impl Package {
             index.push(IndexedRegion::of(
                 def,
                 region_file(def.id),
-                digest(text.as_bytes()),
+                source_digest(&text),
             ));
             require(
                 texts.insert(def.id, Arc::<str>::from(text)).is_none(),
@@ -2761,6 +2771,67 @@ mod tests {
     }
 
     #[test]
+    fn validation_and_loading_ignore_crlf_source_line_endings() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two-room");
+        let template = read_package(&root).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        write_package(
+            directory.path(),
+            &template.manifest,
+            &template.region_defs().unwrap(),
+        )
+        .unwrap();
+        let paths: Vec<_> = std::iter::once(directory.path().join("scenario.toml"))
+            .chain(
+                template
+                    .index
+                    .regions
+                    .iter()
+                    .map(|region| directory.path().join(&region.file)),
+            )
+            .collect();
+        let lf: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                let text = std::fs::read_to_string(path).unwrap();
+                assert!(!text.contains('\r'), "generated package source must use LF");
+                text
+            })
+            .collect();
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text.replace('\n', "\r\n")).unwrap();
+        }
+        let crlf_certificate = validate(directory.path()).unwrap();
+        assert_eq!(
+            crlf_certificate.files["scenario.toml"],
+            digest(lf[0].as_bytes())
+        );
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text).unwrap();
+        }
+        let lf_certificate = validate(directory.path()).unwrap();
+        assert_eq!(crlf_certificate, lf_certificate);
+        let expected = load(directory.path(), 42, None, false)
+            .unwrap()
+            .package
+            .unwrap()
+            .build(42, false)
+            .unwrap();
+        for (path, text) in paths.iter().zip(&lf) {
+            std::fs::write(path, text.replace('\n', "\r\n")).unwrap();
+        }
+        assert_eq!(
+            load(directory.path(), 42, None, false)
+                .unwrap()
+                .package
+                .unwrap()
+                .build(42, false)
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
     fn generated_region_comments_change_integrity_hash_without_changing_content() {
         let root =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
@@ -3149,6 +3220,8 @@ mod tests {
         let value = serde_json::json!({
             "id": 9, "at": [1, 2, 3], "archetype": "guard", "turn_ticks": 73,
             "controller": "ai", "ai": "cautious", "velocity": [-1, 0, 2],
+            "anatomy": {"slots": ["ring", "ring", "head_armor"]},
+            "known_identities": ["healing"],
             "body": {"cells": [[0, 0, 0], [0, 0, 1]], "eye": [0, 0, 1], "mass": 91},
             "combat": {
                 "name": "guard", "max_hp": 41, "defense": -3, "faction": "guards",

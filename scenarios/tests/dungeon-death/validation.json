@@ -1,10 +1,10 @@
 {
   "validator": "tor-scenario-10",
   "ruleset": "interactions-v25",
-  "content_hash": "3e136d834e7f020a3baa950135ced6762b5a396d07e78dbdbb0bdf899924ec0a",
+  "content_hash": "6b7e37d4e50ef3986cef737dfbdbf2feb9af8c41d1abf0bd0a5dbc5e80e8fc84",
   "files": {
     "index.json": "04d09e9db459dc1975fadb011f1abd1d45d1ec535054d362dc554930c4cc011b",
-    "scenario.toml": "4e1e7943414152d46b972a8730afd660bca436eb96d995652c329ef7b52f7e69"
+    "scenario.toml": "389be518093413448160d58c3ea722734abb227fda5d61040ff861ecd7ef4ed2"
   },
   "regions": 1,
   "model_hash": "135b1af2055f8dc2bbd78d039bfb6e7e20e6cebb22226d1cd5d21962c133db66",
