@@ -338,8 +338,12 @@ fn shape(world: &World, eye: Location, frame: u8) -> Vec<(Position, bool)> {
 /// The far half of a 6x3x2 room stored in region 2 under cube rotation `r`,
 /// shifted so its storage starts at zero. Returns the local-to-storage map.
 fn rotated_half(r: u8) -> (World, impl Fn(i32, i32, i32) -> Location) {
+    rotated_half_height(r, 2)
+}
+
+fn rotated_half_height(r: u8, height: i32) -> (World, impl Fn(i32, i32, i32) -> Location) {
     use tor_world::{inverse_rotation, rotate_vector};
-    let dims = [3i64, 3, 2];
+    let dims = [3i64, 3, i64::from(height)];
     let corners: Vec<[i64; 3]> = (0..8)
         .map(|i| {
             rotate_vector(
@@ -360,7 +364,7 @@ fn rotated_half(r: u8) -> (World, impl Fn(i32, i32, i32) -> Location) {
         )
     };
     let mut world = World::new(vec![], vec![]).unwrap();
-    stone_room(&mut world, 1, (3, 3, 2));
+    stone_room(&mut world, 1, (3, 3, height));
     stone_room(&mut world, 2, (size[0], size[1], size[2]));
     world
         .connect_area(
@@ -371,12 +375,12 @@ fn rotated_half(r: u8) -> (World, impl Fn(i32, i32, i32) -> Location) {
             },
             r,
             3,
-            2,
+            height as u16,
         )
         .unwrap();
     // The reverse join is anchored at the face's minimum storage corner.
     let face: Vec<_> = (0..3)
-        .flat_map(|y| (0..2).map(move |z| (y, z)))
+        .flat_map(|y| (0..height).map(move |z| (y, z)))
         .map(|(y, z)| (remote(0, y, z), (y, z)))
         .collect();
     let (anchor, (y0, z0)) = *face.iter().min_by_key(|(l, _)| l.position).unwrap();
@@ -760,9 +764,13 @@ fn accelerated_scene_matches_the_reference_in_the_first_dungeon_layout() {
 
 /// Two 5x3x2 rooms joined by a one-wide, two-high doorway at (4, 1).
 fn doorway_rooms() -> World {
+    doorway_rooms_height(2)
+}
+
+fn doorway_rooms_height(height: i32) -> World {
     let mut world = World::new(vec![], vec![]).unwrap();
-    stone_room(&mut world, 1, (5, 3, 2));
-    stone_room(&mut world, 2, (5, 3, 2));
+    stone_room(&mut world, 1, (5, 3, height));
+    stone_room(&mut world, 2, (5, 3, height));
     for (from, direction, to) in [
         (at(1, 4, 1, 0), Direction::East, at(2, 0, 1, 0)),
         (at(2, 0, 1, 0), Direction::West, at(1, 4, 1, 0)),
@@ -776,13 +784,13 @@ fn doorway_rooms() -> World {
                 },
                 0,
                 1,
-                2,
+                height as u16,
             )
             .unwrap();
     }
     // Wall in the doorway's sides, so it is a one-wide, two-high gap.
     for y in [0, 2] {
-        for z in 0..2 {
+        for z in 0..height {
             world.set_wall(at(1, 4, y, z), true).unwrap();
         }
     }
@@ -985,4 +993,211 @@ fn blocks_touching_only_along_an_edge_let_sight_pass_between_them() {
     let world = corridor(5, 3, &[(1, 0), (2, 1)]);
     assert!(seen_plane(&world, (1, 1)).contains(&(2, 0)));
     assert!(seen_plane(&world, (2, 0)).contains(&(1, 1)));
+}
+
+#[test]
+fn tall_portal_rooms_match_the_reference_and_preserve_reciprocity_at_every_eye_height() {
+    let mut whole = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut whole, 1, (6, 3, 3));
+    for rotation in 0..24 {
+        let (split, remote) = rotated_half_height(rotation, 3);
+        for z in 0..3 {
+            let near = at(1, 1, 1, z);
+            let far = remote(1, 1, z);
+            for (eye, frame, unsplit) in
+                [(near, 0, at(1, 1, 1, z)), (far, rotation, at(1, 4, 1, z))]
+            {
+                assert_matches_reference(&split, eye, frame, 8, "tall rotated room");
+                assert_eq!(shape(&split, eye, frame), shape(&whole, unsplit, 0));
+            }
+            for other_z in 0..3 {
+                let other = remote(1, 1, other_z);
+                let sees = |eye, frame, target| {
+                    split
+                        .eye_scene(eye, frame, 8)
+                        .iter()
+                        .any(|c| c.location == target)
+                };
+                assert_eq!(sees(near, 0, other), sees(other, rotation, near));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_three_cell_door_blocks_and_opens_for_every_eye_height() {
+    let mut world = doorway_rooms_height(3);
+    let door = at(1, 4, 1, 0);
+    world.place_door(door, 1, false, 3).unwrap();
+    for open in [false, true] {
+        world.set_door(door, open);
+        for z in 0..3 {
+            let eye = at(1, 1, 1, z);
+            assert_matches_reference(&world, eye, 0, 8, "three-cell door");
+            assert_eq!(
+                world
+                    .eye_scene(eye, 0, 8)
+                    .iter()
+                    .any(|c| c.location.region == RegionId(2)),
+                open
+            );
+        }
+    }
+}
+
+#[test]
+fn pit_rims_low_lintels_and_diagonal_blockers_are_checked_at_every_eye_height() {
+    let floor: Vec<_> = (0..10)
+        .filter(|x| !(4..=6).contains(x))
+        .map(|x| (x, 0))
+        .collect();
+    let pit = corridor(10, 4, &floor);
+    let lintel = corridor(10, 3, &[(3, 1), (3, 2)]);
+    let mut diagonal = chamber(5, 5, 3);
+    for z in 0..3 {
+        diagonal.set_wall(at(1, 2, 1, z), true).unwrap();
+        diagonal.set_wall(at(1, 1, 2, z), true).unwrap();
+    }
+    for height in 1..=3 {
+        // The pit walkway is one cell above the room base.
+        let edge = seen_plane(&pit, (2, height));
+        assert!(edge.contains(&(6, -1)), "height {height}: far pit bottom");
+        let back = seen_plane(&pit, (0, height));
+        assert!(
+            !back.contains(&(4, -1)),
+            "height {height}: rim hides near bottom from a distance"
+        );
+        let eye = at(1, 0, 0, height - 1);
+        assert_matches_reference(&lintel, eye, 0, 8, "low lintel");
+        let view = seen(&lintel, eye);
+        assert!(view.contains(&(3, 0, 1)), "height {height}: lintel face");
+        if height > 1 {
+            assert!(
+                !view.contains(&(4, 0, height - 1)),
+                "height {height}: lintel shadow"
+            );
+        }
+        let eye = at(1, 1, 1, height - 1);
+        assert_matches_reference(&diagonal, eye, 0, 8, "diagonal blockers");
+        assert!(seen(&diagonal, eye).contains(&(2, 2, height - 1)));
+    }
+}
+
+#[test]
+fn stairs_cycles_and_one_sided_body_sight_are_checked_at_every_eye_height() {
+    let mut stairs = World::new(vec![], vec![]).unwrap();
+    stone_room(&mut stairs, 1, (3, 3, 3));
+    stone_room(&mut stairs, 2, (3, 3, 3));
+    stairs
+        .connect(
+            Passage {
+                from: at(1, 1, 1, 2),
+                direction: Direction::Up,
+                to: at(2, 1, 1, 0),
+            },
+            0,
+        )
+        .unwrap();
+    let mut cycle = World::new(
+        vec![Region {
+            id: RegionId(1),
+            name: "cycle".into(),
+            bounds: Extent::new(3, 3, 3).unwrap(),
+        }],
+        vec![],
+    )
+    .unwrap();
+    cycle
+        .connect_area(
+            Passage {
+                from: at(1, 2, 0, 0),
+                direction: Direction::East,
+                to: at(1, 0, 0, 0),
+            },
+            0,
+            3,
+            3,
+        )
+        .unwrap();
+    let mut shelf = chamber(6, 3, 3);
+    shelf.set_wall(at(1, 1, 1, 1), true).unwrap();
+    shelf.set_wall(at(1, 2, 1, 1), true).unwrap();
+    let rat = seen(&shelf, at(1, 3, 1, 0));
+    assert!(rat.contains(&(0, 1, 0)), "rat sees taller bodies' feet");
+    for z in 0..3 {
+        let eye = at(1, 1, 1, z);
+        assert_matches_reference(&stairs, eye, 0, 8, "tall stairs");
+        assert!(stairs
+            .eye_scene(eye, 0, 8)
+            .iter()
+            .all(|c| c.location.region == RegionId(1)));
+        for frame in 0..24 {
+            assert_matches_reference(&cycle, eye, frame, 8, "tall cycle");
+        }
+        assert!(
+            cycle
+                .eye_scene(eye, 0, 8)
+                .iter()
+                .filter(|c| c.location == eye)
+                .count()
+                > 1
+        );
+        let taller = seen(&shelf, at(1, 0, 1, z));
+        assert_matches_reference(&shelf, at(1, 0, 1, z), 0, 8, "one-sided body sight");
+        if z > 0 {
+            assert!(
+                !taller.contains(&(3, 1, 0)),
+                "eye height {z} cannot see the rat"
+            );
+        }
+        assert_eq!(
+            taller.contains(&(3, 1, 0)),
+            rat.contains(&(0, 1, z)),
+            "eye-to-eye reciprocity at height {z}"
+        );
+    }
+}
+
+#[test]
+fn every_three_by_three_blocker_pattern_has_reciprocal_3d_sight_at_every_eye_height() {
+    // Keep the legacy shadowcasting test as a reference, and run the same
+    // exhaustive 512 patterns through the actual 3D builder in a tall room.
+    for mask in 0..512 {
+        let mut world = chamber(5, 5, 3);
+        for bit in 0..9 {
+            if mask & (1 << bit) != 0 {
+                for z in 0..3 {
+                    world
+                        .set_wall(at(1, 1 + bit % 3, 1 + bit / 3, z), true)
+                        .unwrap();
+                }
+            }
+        }
+        for z in 0..3 {
+            let floors: Vec<_> = (0..5)
+                .flat_map(|x| (0..5).map(move |y| at(1, x, y, z)))
+                .filter(|p| world.walkable(*p))
+                .collect();
+            let views: Vec<BTreeSet<_>> = floors
+                .iter()
+                .map(|eye| {
+                    assert_matches_reference(&world, *eye, 0, 8, "exhaustive blocker patterns");
+                    world
+                        .eye_scene(*eye, 0, 8)
+                        .into_iter()
+                        .map(|c| c.location)
+                        .collect()
+                })
+                .collect();
+            for (i, a) in floors.iter().enumerate() {
+                for (j, b) in floors.iter().enumerate() {
+                    assert_eq!(
+                        views[i].contains(b),
+                        views[j].contains(a),
+                        "pattern {mask}, eye height {z}: {a:?} and {b:?}"
+                    );
+                }
+            }
+        }
+    }
 }

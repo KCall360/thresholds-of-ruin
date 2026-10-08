@@ -23,7 +23,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Saved gameplay intentions | Complete for current scope | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits, retained-state byte validation and bounded transport closure are published |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
-| Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
+| Perception | Complete (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations; backend action facts and numeric save DTO mappings are independent of wire action types |
 | Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
@@ -116,6 +116,25 @@ needs it, not as broad speculative machinery.
 The backend resolves every ordinary step. Clients never receive a planned route
 or future outcome, and ambiguity never consumes simulation time.
 
+### 3s — Three-dimensional sight
+
+Complete for the accepted scope. One exact 3D rule sees from
+body-declared eye cells across portal rotations; floors, ceilings and walls are
+ordinary disclosed solid cells. Shared surface classification, text examination,
+ASCII enclosure information and height browsing are implemented. View deltas,
+reference equivalence, reciprocal empty-cell sight and one-/two-/three-cell
+observer coverage are in the [sight guide](sight-3d.md#closeout-audit).
+
+The closeout audit adds exhaustive segment-predicate checks, missing height
+coverage and native presentation assertions without changing gameplay or format
+versions. An ASCII redesign and palette-based glyphs remain separate work;
+existing physics/save performance findings remain open under 3p.
+
+Local verification passed 965 debug Rust tests and 313 Python/application tests,
+with final formatting/lint and sight/documentation rechecks; optimized
+world/simulation coverage passed 236 tests and both sight process cases.
+Windows/Linux debug/release CI is required before merging the closeout.
+
 ### 4a — Authored scenario packages and offline validation
 
 Ordinary TOML packages describe the world and zones, region geometry, gravity
@@ -182,26 +201,6 @@ and regions, never the whole world, and existing play costs about the same as
 before 4e; see [region streaming](region-streaming.md#performance).
 
 ## In progress
-
-### 3s — Three-dimensional sight
-
-A separate effort from 4e, in progress. Gameplay now uses 3D sight from each
-body's declared eye cell; the protocol, save format, ruleset and validator were
-bumped for it. The separate floor and ceiling facts are gone; clients derive
-them from seen solid cells. Observation updates are view deltas.
-The remaining client changes remain. It
-replaces the plane shadowcasting, voxel height slices and floor/ceiling probes
-with a single 3D rule for every observer. Sight lines start at a declared eye
-cell. Floors, ceilings and walls are ordinary seen solid cells, and only their
-convex exposed edges are beveled. Observation updates become view deltas. This
-breaks the protocol and save format, which the maintainer has authorized. See
-the [three-dimensional sight design](sight-3d.md).
-
-**Acceptance:** an exact reference implementation; equivalence with today's
-shadowcasting on single-level maps, with every difference reviewed; reciprocity
-between empty cells; the scenario cases and existing suites listed in the
-design, each run with one-, two- and three-cell-tall observers; the 4d acceptance tests and performance requirements; and any
-accelerated layer proven identical to the reference.
 
 ### 3p — Performance and scalable persistence
 

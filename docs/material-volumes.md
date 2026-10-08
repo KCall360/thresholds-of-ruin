@@ -54,7 +54,7 @@ like any other cell, so remembered surfaces can be stale; headless output expose
 that memory. Revisiting refreshes them, and rewind clears abandoned-future memory.
 
 The older `material` cell field now describes solid terrain in chambers; empty
-chamber cells have an empty string. Floors and ceilings use their own fields.
+chamber cells have an empty string. Floors and ceilings are classified from the same disclosed solid-cell material.
 Legacy and raw diagnostic regions retain their cosmetic material description.
 No internal region identities, dimensions, material catalog, or undisclosed cells
 are transmitted.

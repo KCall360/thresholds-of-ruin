@@ -306,3 +306,120 @@ impl World {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Independent oracle: partition the segment at every surface crossing,
+    // then test a rational midpoint in each open interval. No clipping bounds
+    // or floating-point tolerances are shared with the reference predicate.
+    fn midpoint_oracle(from: [i64; 3], to: [i64; 3], planes: &[[i64; 3]]) -> bool {
+        let dot = |a: &[i64; 3], p: [i64; 3]| (0..3).map(|i| a[i] * p[i]).sum::<i64>();
+        let direction = [0, 1, 2].map(|i| to[i] - from[i]);
+        let mut times = vec![(0, 1), (1, 1)];
+        for plane in planes {
+            let mut numerator = 1 - dot(plane, from);
+            let mut denominator = dot(plane, direction);
+            if denominator == 0 {
+                continue;
+            }
+            if denominator < 0 {
+                numerator = -numerator;
+                denominator = -denominator;
+            }
+            if 0 < numerator && numerator < denominator {
+                times.push((numerator, denominator));
+            }
+        }
+        times.sort_by(|a, b| (a.0 * b.1).cmp(&(b.0 * a.1)));
+        times.windows(2).any(|pair| {
+            let [(an, ad), (bn, bd)] = [pair[0], pair[1]];
+            if an * bd == bn * ad {
+                return false;
+            }
+            let numerator = an * bd + bn * ad;
+            let denominator = 2 * ad * bd;
+            planes.iter().all(|plane| {
+                dot(plane, from) * denominator + dot(plane, direction) * numerator < denominator
+            })
+        })
+    }
+
+    #[test]
+    fn every_small_integer_segment_matches_an_independent_beveled_cube_oracle() {
+        use crate::{Extent, Region, RegionId};
+        let eye = Location {
+            region: RegionId(1),
+            position: Position { x: 2, y: 2, z: 2 },
+        };
+        let points: Vec<_> = (-2..=2)
+            .flat_map(|x| (-2..=2).flat_map(move |y| (-2..=2).map(move |z| [x, y, z])))
+            .collect();
+        // Every combination of exposed faces, including flat slabs, convex
+        // corners and an entirely enclosed cube; all endpoint pairs include
+        // face/edge/vertex contact and degenerate segments.
+        for mask in 0..64 {
+            let mut world = World::new(
+                vec![Region {
+                    id: RegionId(1),
+                    name: "predicate".into(),
+                    bounds: Extent::new(5, 5, 5).unwrap(),
+                }],
+                vec![],
+            )
+            .unwrap();
+            world.set_wall(eye, true).unwrap();
+            let mut planes = Vec::new();
+            for axis in 0..3 {
+                for (side, sign) in [-1, 1].into_iter().enumerate() {
+                    let mut normal = [0; 3];
+                    normal[axis] = sign;
+                    planes.push(normal);
+                    let mut p = [2, 2, 2];
+                    p[axis] += sign as i32;
+                    world
+                        .set_wall(
+                            Location {
+                                region: eye.region,
+                                position: Position {
+                                    x: p[0],
+                                    y: p[1],
+                                    z: p[2],
+                                },
+                            },
+                            mask & (1 << (axis * 2 + side)) == 0,
+                        )
+                        .unwrap();
+                }
+            }
+            for a in 0..6 {
+                for b in a + 1..6 {
+                    if a / 2 == b / 2 || mask & (1 << a) == 0 || mask & (1 << b) == 0 {
+                        continue;
+                    }
+                    let mut normal = [0; 3];
+                    normal[a / 2] = if a % 2 == 0 { -1 } else { 1 };
+                    normal[b / 2] = if b % 2 == 0 { -1 } else { 1 };
+                    planes.push(normal);
+                }
+            }
+            let mut volume = Volume {
+                world: &world,
+                eye,
+                frame: 0,
+                reach: 2,
+                cells: vec![None; 125],
+            };
+            for &from in &points {
+                for &to in &points {
+                    assert_eq!(
+                        volume.cuts([0; 3], from, to),
+                        midpoint_oracle(from, to, &planes),
+                        "exposure {mask:06b}, {from:?} -> {to:?}"
+                    );
+                }
+            }
+        }
+    }
+}
