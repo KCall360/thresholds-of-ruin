@@ -21,7 +21,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, full Windows/Linux CI in independent debug/release profile jobs |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
-| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits and retained-state byte validation are in development |
+| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits, retained-state byte validation and bounded transport closure are published |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
 | Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations; backend action facts and numeric save DTO mappings are independent of wire action types |
@@ -41,19 +41,18 @@ only; wizard history is bounded; generated regions are limited to rooms and
 corridors between authored ones; and the ASCII client doesn't draw from asset
 palettes yet.
 
-The [architecture refactor](refactoring.md) is active. Typed boundaries, shared observations, topology-aware indexes, queued gameplay,
-paused-preparation recovery and checkpoint pooling are implemented. Autonomous
-decisions use the published common queue path. Native travel integration is published.
-Stream contexts, observation bases, bounded recovery, readiness publication and
-mandatory originating command contexts, native/headless permission controls,
-current reply contexts and explicit error scopes are published. Lossless wire
-integers and independent numeric persistence schemas are published too. Shared
-typed decoding now has byte/depth preflight and failing-first fragmented-peer and
-actual-client acceptance coverage. Release measurements validated with matching
-engine counts and disclosed decode cost; full closeout remains in progress. Collection deltas, complete encoded selection, output fairness,
-scenario compiler follow-up, history scaling and measured latency/memory work
-remain; see the refactor plan for the full scope.
-Text-client fixes and scripting runtime selection remain deferred.
+The [architecture refactor](refactoring.md) is active. Typed boundaries, shared
+observations and route searches, backend-only portal-aware indexes, queued player,
+AI and native travel gameplay, preparation recovery, exact stream contexts and
+bounded recovery, opaque targets, safe wire integers, collection deltas, fair
+output accounting and bounded transport closure are published. Independent saved
+schemas, checkpoint sharing, atomic persistence, lazy prepared scenario content,
+source diagnostics and semantic named generation streams are implemented.
+Actual queued-action completion timing is published. A strict save-decoder
+optimization has passed focused recovery and release comparisons; final broad
+verification, CI, publication and the complete requirements audit remain.
+Measured save/physics tails remain unresolved; no broad speedup is claimed.
+Text-client product fixes and scripting implementation remain deferred.
 
 ## Completed milestones
 

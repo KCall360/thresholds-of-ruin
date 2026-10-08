@@ -4,7 +4,12 @@ use crate::{
     engine::{invalid_archive, storage_failure},
     Failure,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+#[cfg(test)]
+use serde::Deserialize;
+use serde::{
+    de::{DeserializeOwned, DeserializeSeed},
+    Serialize,
+};
 
 pub const MAX_PAYLOAD: usize = 1024 * 1024;
 /// A region record row may be larger than a journal record.
@@ -104,17 +109,107 @@ pub(super) fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failur
 }
 pub(super) fn strict<T: DeserializeOwned + Serialize>(bytes: &[u8]) -> Result<T, Failure> {
     let value: T = serde_json::from_slice(bytes).map_err(|_| invalid_archive())?;
-    let original = serde_json::from_slice::<UniqueJson>(bytes)
-        .map_err(|_| invalid_archive())?
-        .0;
-    if serde_json::to_value(&value).map_err(|_| invalid_archive())? != original {
-        return Err(invalid_archive());
-    }
+    // Keep one canonical tree, then compare the input without retaining a
+    // second tree. Canonical comparison also rejects serde aliases, skipped
+    // fields, missing serialized defaults and noncanonical numeric map keys.
+    let canonical = serde_json::to_value(&value).map_err(|_| invalid_archive())?;
+    let mut input = serde_json::Deserializer::from_slice(bytes);
+    SameJson(&canonical)
+        .deserialize(&mut input)
+        .map_err(|_| invalid_archive())?;
+    input.end().map_err(|_| invalid_archive())?;
     Ok(value)
 }
 
+/// Validate decoded keys and values against the canonical shape. Each object
+/// retains only its seen keys; nested input values are compared and discarded.
+struct SameJson<'a>(&'a serde_json::Value);
+
+impl SameJson<'_> {
+    fn scalar<E: serde::de::Error>(self, value: serde_json::Value) -> Result<(), E> {
+        if self.0 == &value {
+            Ok(())
+        } else {
+            Err(E::custom("noncanonical JSON value"))
+        }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for SameJson<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(self, input: D) -> Result<(), D::Error> {
+        input.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for SameJson<'_> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("the canonical JSON shape without duplicate keys")
+    }
+    fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<(), E> {
+        self.scalar(value.into())
+    }
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<(), E> {
+        self.scalar(value.into())
+    }
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<(), E> {
+        self.scalar(value.into())
+    }
+    fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<(), E> {
+        self.scalar(value.into())
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
+        self.scalar(serde_json::Value::Null)
+    }
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<(), E> {
+        if self.0.as_str() == Some(value) {
+            Ok(())
+        } else {
+            Err(E::custom("noncanonical JSON string"))
+        }
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut input: A) -> Result<(), A::Error> {
+        let values = self
+            .0
+            .as_array()
+            .ok_or_else(|| serde::de::Error::custom("noncanonical JSON array"))?;
+        for value in values {
+            if input.next_element_seed(SameJson(value))?.is_none() {
+                return Err(serde::de::Error::custom("missing JSON array element"));
+            }
+        }
+        if input.next_element::<serde::de::IgnoredAny>()?.is_some() {
+            return Err(serde::de::Error::custom("extra JSON array element"));
+        }
+        Ok(())
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut input: A) -> Result<(), A::Error> {
+        let values = self
+            .0
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("noncanonical JSON object"))?;
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(key) = input.next_key::<String>()? {
+            let value = values
+                .get(&key)
+                .ok_or_else(|| serde::de::Error::custom("noncanonical JSON key"))?;
+            if !seen.insert(key) {
+                return Err(serde::de::Error::custom("duplicate JSON key"));
+            }
+            input.next_value_seed(SameJson(value))?;
+        }
+        if seen.len() != values.len() {
+            return Err(serde::de::Error::custom("missing JSON key"));
+        }
+        Ok(())
+    }
+}
+
 // Typed maps otherwise silently retain the last duplicate key.
+#[cfg(test)]
 struct UniqueJson(serde_json::Value);
+#[cfg(test)]
 impl<'de> Deserialize<'de> for UniqueJson {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct Visitor;
@@ -177,6 +272,94 @@ mod tests {
     fn strict_json_rejects_nested_duplicate_keys() {
         assert!(strict::<serde_json::Value>(br#"{"map":{"a":1,"a":1}}"#).is_err());
         assert!(strict::<Marker>(br#"{"save_id":"id","generation":0}"#).is_err());
+    }
+
+    #[test]
+    fn strict_json_keeps_aliases_defaults_and_skipped_fields_canonical() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Fixture {
+            #[serde(alias = "old_name")]
+            name: String,
+            #[serde(default)]
+            count: u64,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            note: Option<String>,
+            #[serde(skip)]
+            transient: bool,
+        }
+        for (input, accepted) in [
+            (r#"{"name":"snow \u2603","count":0}"#, true),
+            (
+                r#"{"count":18446744073709551615,"name":"snow ☃","note":""}"#,
+                true,
+            ),
+            (r#"{"old_name":"snow ☃","count":0}"#, false),
+            (r#"{"name":"snow ☃"}"#, false),
+            (r#"{"name":"snow ☃","count":0,"note":null}"#, false),
+            (r#"{"name":"snow ☃","count":0,"transient":false}"#, false),
+            (r#"{"name":"snow ☃","count":0,"extra":{}}"#, false),
+            (r#"{"name":"snow ☃","count":0,"co\u0075nt":0}"#, false),
+        ] {
+            assert_eq!(
+                strict::<Fixture>(input.as_bytes()).is_ok(),
+                accepted,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_json_matches_legacy_validation_for_nested_scalar_collections() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Fixture {
+            signed: i64,
+            unsigned: u64,
+            fraction: f64,
+            strings: Vec<Option<String>>,
+            flags: std::collections::BTreeMap<String, Vec<bool>>,
+        }
+        for size in [0, 1, 32, 256] {
+            let fixture = Fixture {
+                signed: i64::MIN,
+                unsigned: u64::MAX,
+                fraction: -0.125,
+                strings: (0..size)
+                    .map(|n| (n % 2 == 0).then(|| format!("{n}\n\"☃")))
+                    .collect(),
+                flags: (0..size)
+                    .map(|n| (format!("key-{n}"), vec![true, false]))
+                    .collect(),
+            };
+            let canonical = serde_json::to_value(&fixture).unwrap();
+            let mut variants = vec![canonical.clone()];
+            for name in ["signed", "unsigned", "fraction", "strings", "flags"] {
+                let mut omitted = canonical.clone();
+                omitted.as_object_mut().unwrap().remove(name);
+                variants.push(omitted);
+                let mut wrong = canonical.clone();
+                wrong[name] = serde_json::json!({"wrong": []});
+                variants.push(wrong);
+            }
+            let mut unknown = canonical.clone();
+            unknown["unknown"] = serde_json::json!([null, 0, {}]);
+            variants.push(unknown);
+            let mut extra = canonical.clone();
+            extra["strings"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!("extra"));
+            variants.push(extra);
+            for input in variants {
+                let bytes = serde_json::to_vec(&input).unwrap();
+                let legacy = serde_json::from_slice::<Fixture>(&bytes)
+                    .ok()
+                    .and_then(|typed| {
+                        let original = serde_json::from_slice::<UniqueJson>(&bytes).ok()?.0;
+                        (serde_json::to_value(&typed).ok()? == original).then_some(typed)
+                    });
+                assert_eq!(strict::<Fixture>(&bytes).ok(), legacy);
+            }
+        }
     }
 
     #[test]
