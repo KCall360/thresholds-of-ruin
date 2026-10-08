@@ -79,7 +79,8 @@ This conservative heuristic can reject an approach when that candidate has no
 known route. It does not search undiscovered space or silently try other routes.
 Shared memory retains last-seen door facts, which can become stale. Door events
 enter the acting actor's saved history and spectator stream. Richer cross-actor
-semantic event narration remains future perception work.
+disclosed door-change narration is shared by the text and ASCII clients; see
+[narration](narration-and-recovery.md).
 
 ## Authoring and compatibility
 

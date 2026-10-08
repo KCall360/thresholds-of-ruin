@@ -1,5 +1,7 @@
 import re
 import unittest
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -27,7 +29,37 @@ def local_target(source: Path, raw_target: str) -> Path | None:
 
 
 def markdown_sources() -> list[Path]:
-    return sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").glob("*.md"))
+    return sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").rglob("*.md"))
+
+
+def current_guides() -> list[Path]:
+    """Historical checkpoints retain their own versions, but links still resolve."""
+    history = ROOT / "docs" / "history"
+    return [source for source in markdown_sources() if not source.is_relative_to(history)]
+
+
+def heading_anchors(source: Path) -> set[str]:
+    anchors = set()
+    counts = {}
+    fence = None
+    for line in source.read_text(encoding="utf-8").splitlines():
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if marker:
+            kind = marker.group(1)[0]
+            if fence is None:
+                fence = kind
+            elif fence == kind:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        heading = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", line)
+        if heading:
+            slug = re.sub(r"[^\w -]", "", heading.group(1).lower()).replace(" ", "-")
+            count = counts.get(slug, 0)
+            counts[slug] = count + 1
+            anchors.add(slug if count == 0 else f"{slug}-{count}")
+    return anchors
 
 
 def code_constant(relative: str, pattern: str) -> str:
@@ -47,6 +79,32 @@ def current_versions() -> dict[str, str]:
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_heading_anchors_ignore_code_and_disambiguate_duplicates(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "guide.md"
+            source.write_text(
+                "# A `code` heading\n## Repeat\n## Repeat\n```text\n# Hidden\n```\n"
+                "~~~text\n# Also hidden\n~~~\n",
+                encoding="utf-8",
+            )
+            self.assertEqual({"a-code-heading", "repeat", "repeat-1"}, heading_anchors(source))
+
+    def test_markdown_sources_include_nested_guides_and_history(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "docs" / "reference").mkdir(parents=True)
+            (root / "docs" / "history").mkdir()
+            expected = [
+                root / "README.md",
+                root / "docs" / "guide.md",
+                root / "docs" / "reference" / "rules.md",
+                root / "docs" / "history" / "review.md",
+            ]
+            for source in expected:
+                source.write_text("# Guide\n", encoding="utf-8")
+            with patch.dict(markdown_sources.__globals__, ROOT=root):
+                self.assertEqual(sorted(expected), sorted(markdown_sources()))
+
     def test_local_markdown_links_resolve(self):
         failures = []
         for source in markdown_sources():
@@ -54,6 +112,15 @@ class DocumentationTests(unittest.TestCase):
                 target = local_target(source, raw_target)
                 if target is not None and not target.exists():
                     failures.append(f"{source.relative_to(ROOT)} -> {raw_target}")
+                elif "#" in raw_target and "://" not in raw_target:
+                    fragment = raw_target.split("#", 1)[1]
+                    heading_source = target if target is not None else source
+                    if (
+                        fragment
+                        and heading_source.suffix == ".md"
+                        and fragment not in heading_anchors(heading_source)
+                    ):
+                        failures.append(f"{source.relative_to(ROOT)} -> {raw_target} (missing heading)")
         self.assertEqual([], failures, "Broken local Markdown links:\n" + "\n".join(failures))
 
     def test_every_guide_is_linked_from_the_index(self):
@@ -93,7 +160,7 @@ class DocumentationTests(unittest.TestCase):
         ]
         ruleset = re.compile(r"\b([a-z]+(?:-[a-z]+)*-v\d+)\b")
         failures = []
-        for source in markdown_sources():
+        for source in current_guides():
             text = source.read_text(encoding="utf-8")
             name = source.relative_to(ROOT)
             for label, pattern, current in checks:
@@ -110,7 +177,9 @@ class DocumentationTests(unittest.TestCase):
 
     def test_guides_do_not_cite_local_only_evidence(self):
         failures = []
-        for source in sorted((ROOT / "docs").glob("*.md")):
+        for source in current_guides():
+            if not source.is_relative_to(ROOT / "docs"):
+                continue
             for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
                 if re.search(r"(?<![\w-])\.local/[\w{*]", line):
                     failures.append(f"{source.relative_to(ROOT)}:{number}")

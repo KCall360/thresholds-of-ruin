@@ -1,8 +1,9 @@
 # Game design requirements and architectural considerations
 
 This is the forward-looking project plan consolidated from the September 2026
-design discussion. It records accepted requirements; many are now implemented
-(milestones 4a–4d), and others are still ahead. [The roadmap](milestones.md)
+design discussion and the Rogue interview of 2026-10-08. It records accepted
+requirements; many are now implemented (milestones 4a–4e), and others are still
+ahead. [The roadmap](milestones.md)
 says which, and owns sequencing and status; [architecture](architecture.md)
 owns system boundaries. Settled requirements below guide implementation without
 requiring every later feature in the first playable milestone. Open details are
@@ -11,7 +12,9 @@ deliberately retained as considerations, not silently selected defaults.
 ## Scenarios, content, and validation
 
 - Ship ordinary, self-contained scenario packages. Start with authored scenarios
-  and fully authored mob placements; support generated and hybrid worlds later.
+  and fully authored mob placements; support authored/generated hybrid worlds
+  through the current room generator.
+  General procedural recipes and floor groups are planned below.
   Wizard commands are not the scenario authoring format.
 - A world contains zones and regions. World theme pools provide defaults; a
   zone's theme replaces world pools. More elaborate layering is future scope.
@@ -155,9 +158,10 @@ deliberately retained as considerations, not silently selected defaults.
   rules or balance. Support multi-type damage, immunity, and flat reductions that
   can reduce damage to zero.
 - Leave resistance resolution flexible for separate, combined, or grouped damage
-  components. Exact policies, thresholds, criticals, range, numbers, and effect
-  ordering belong to the combat milestone. The discussion did not settle how a
-  combined multi-type amount chooses a resistance.
+  components. Further thresholds, criticals, ranges, numbers and effect ordering
+  require scoped combat design. Current combat resolves each component
+  independently; see
+  [dungeon gameplay](dungeon.md). Further resistance rules require explicit design.
 - Death is persistent. Inventory drops separately at the base cell; corpses are
   ordinary items with descriptive/history information, using ordinary object
   blocking rules rather than the former living body's occupancy rules.
@@ -180,7 +184,8 @@ deliberately retained as considerations, not silently selected defaults.
   deterministic per-game randomized appearance mappings. Identical descriptions
   normally imply identical effects, with room for confounding descriptions.
   Identification applies to matching effects, not blindly to everything with
-  the same appearance; exact NetHack-inspired rules remain revisable.
+  the same appearance; the accepted extensions below select the NetHack
+  knowledge pattern.
 - Knowledge belongs to the character, persists after transfer/consumption, and
   survives save/replay (rewind restores the knowledge of that earlier state).
   Never send undiscovered true identities or revealing properties to clients.
@@ -225,7 +230,121 @@ The authored TOML syntax and package layout are now defined in
 [scenario packages](scenario-packages.md). Future wire fields, generation
 validation heuristics, physics
 constants, damage formulas, animation, advanced AI, region-boundary effects,
-equipment slots, identification actions, sound, hunger, ranged combat, multiplayer,
+exact anatomy slot tables, identification actions, sound, hunger balance, ranged
+combat formulas, multiplayer,
 3D renderer selection, and historical-save migration await their milestones.
 These extension points guide architecture; they are not permission to expand the
 first implementation into all future systems.
+
+## Procedural recipes and connected region groups
+
+Accepted extensions from the 2026-10-08 interview. Existing per-region
+generation/streaming and semantic random streams are foundations; generalized
+recipes and floor groups are not yet implemented. The
+[Rogue scenario plan](rogue-scenario-plan.md) is the first consumer, not a separate
+Rogue combat ruleset.
+
+- Author procedural generation through declarative recipes composed of reusable,
+  fine-grained stages: partitioning, room selection and carving, maze generation,
+  connectivity selection, corridor carving, secrets, lighting, stairs, and
+  population. Do not reduce this to a monolithic `rogue` generator selection.
+  Reusable recipes may compose these stages; exact schema is still to be designed.
+- Consider scripting for generation stages where declarations become cumbersome.
+  Introducing a language or runtime is not yet decided and must not delay an
+  ordinary declarative floor-generation scenario. Generation extensions must
+  preserve seeded determinism, validation, and dependency pinning.
+- Support a generation group spanning multiple connected regions. Generate and
+  validate the whole group when it enters the region-loading horizon, before the
+  PC traverses into it. A floor is one such group. Generation is not deferred
+  until the actor uses its stairs. Loading and simulation activation policies
+  must distinguish a materialized group from regions currently being simulated.
+- Use independently derived random streams for generation stages, with stable
+  group/stage identities and pinned versions. Loot-stage changes should not
+  unexpectedly change room geometry. Persist generated state and relevant RNG
+  state; do not reconstruct visited floors from recipes on return.
+- Adopt stone-filled regions with carved rooms/corridors and broad connecting
+  portals as a general pattern. Region boundaries need not follow room walls.
+  Connections must support movement, perception and physics, with room for future
+  mining across initially solid boundaries. Validate matching boundaries without
+  treating solid stone as an impassable structural disconnection forever.
+- Connectivity policies may require discoverable secret routes. Validate both
+  structural connectivity after discovery and any separately requested visible
+  connectivity guarantee. Search and ordinary perception can discover secrets.
+- Standardize scenario stairs as explicit transport to a destination in another
+  region. Existing links already support cross-region traversal; the new floor
+  pattern uses paired destinations rather than local elevation changes. Support persistent paired stair anchors and
+  destination clearance. Physical falling through a portal remains physics,
+  distinct from using a stair. Stair costs and blocked-arrival policy remain open.
+
+## Shared creature builds, progression, and defenses
+
+- PCs and mobs use the same tracked build system, broadly inspired by D&D 3.5's
+  types, subtypes, racial Hit Dice, templates, and class levels. This is a TOR
+  design direction, not adoption of all external RPG rules.
+- The proposed standard attributes are STR, SPD, INT, WIL, AWA, PRE, inspired by
+  the Cosmere RPG/Plotweaver system. Attribute ranges, modifiers and advancement
+  formulas remain open; TOR retains its own combat and timed-action mechanics.
+- Types determine racial HD and HD benefits; subtypes supply additional traits;
+  templates can modify a build; class levels add progression. Record advancement
+  choices so progression/regression work for every creature, including mobs
+  created at higher levels. Species supply base anatomy and innate capabilities.
+- Racial HD and class levels contribute to ECL. Determine CR from the creature's
+  build; award kill XP as a function of the recipient's level and the mob's CR.
+  Use standard TOR rewards and thresholds, not scenario-specific Rogue XP tables.
+  CR derivation, template contributions to ECL/CR and XP attribution remain open.
+- Provisionally, level drain reverses the latest HD/class advancement, preserving
+  types, subtypes and templates. Racial HD may be removed. Zero remaining HD
+  causes death. Record enough build history to reverse granted benefits; define
+  restoration, dependent abilities and respec policies before implementation.
+- Defenses, saves, resistances and immunities can derive from attributes, build
+  components, equipment and effects. For example a Fire subtype can grant fire
+  immunity. Numerical formulas and combination/precedence rules remain open.
+
+## Shared effects, survival, equipment, and perception
+
+- Define reusable effects usable by monster abilities, items and traps. Sources
+  specify targeting, strength and activation. Effects use simulation time and
+  declare repeat behavior: extend duration, increase intensity, replace, or apply
+  independently. Persist active effects and their deterministic update state.
+- Implement nutrition, food, hunger, starvation and passive healing as standard
+  TOR systems. Scenarios configure food availability and item modifiers; formulas
+  and thresholds belong to TOR balance rather than copying Rogue's turn counters.
+- Anatomy determines equipment slots, including support for humanoid armor,
+  weapons, shields and two rings. Take inspiration from NetHack and D&D 3.5 for
+  anatomy-specific slot tables. Shared equipment supports curses/uncursing,
+  enchantment, rust/protection and hidden per-instance details/charges.
+- Carrying limits use TOR weight/capacity influenced by strength and build, rather
+  than Rogue's item-count limit. PCs and mobs share equipment and consumable
+  actions; AI choices respect actor knowledge and capabilities.
+- Follow the NetHack knowledge pattern: consistent randomized appearances within
+  a run, character-owned type identification, separate per-instance knowledge,
+  naming unknown types without identifying them, and learning through use or
+  identification. This refines the earlier item-core extension points.
+- Shared ranged actions cover throwing, ammunition launch and wand/ray use with
+  TOR targeting, range, collision, resources and timing. Bouncing is a configurable
+  attack property. Resource recovery and exact collision/effect order remain open.
+- Introduce lit cells and rooms using TOR spatial perception, not automatic
+  whole-room revelation. Blindness, invisibility, hallucination and disguise are
+  shared perception behaviors, disclosed consistently through every client.
+- Hallucination tracks persistent mistaken identities per observer, with random
+  shifts over time rather than each turn. Persist these beliefs and shift state.
+  Identity keys and shift distribution remain open. Never transmit hidden true
+  identities through hallucinated views.
+- Species behavior extends standard TOR AI, perception, knowledge and memory.
+  Item/gold pursuit requires actor knowledge, not access to hidden world contents.
+  Wandering populations advance while their floor is active, including revisits;
+  inactive regions freeze with no elapsed-time catch-up spawning.
+
+## Scenario event hooks and scripted objectives
+
+- Decide runtime scripting separately from generation scripting. Anticipate
+  author-visible hooks into authoritative events, including a PC perceiving a
+  particular mob, so a tutorial can present combat guidance.
+- Prefer a general event/query/outcome design over adding a built-in objective
+  variant for every scenario. A dungeon-escape handler could inspect the PC's
+  inventory for the Amulet and trigger victory. Hook-driven victory is the
+  intended extension direction; a scripting runtime is not selected yet.
+- Open design includes hook ordering, actor scope, repeat/once semantics,
+  permitted mutations, deterministic execution limits and save/replay state.
+  Tutorial events must follow actual actor perception. These decisions belong
+  to the runtime-hook design and are not prerequisites for exploration-only play.

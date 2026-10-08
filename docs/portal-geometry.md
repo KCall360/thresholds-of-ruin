@@ -31,7 +31,7 @@ broad region partitions invisible without inventing connections at narrow joins.
 Movement retains the observer's axes across rotated joins: repeated north input
 continues toward what appeared north in the view, even if backend axes rotate.
 
-Actors and items do not block sight in this slice. There is no lighting or sound
+Actors and items do not block sight. There is no lighting or sound
 propagation. Visibility uses discrete cells rather than continuous surface rendering. Up/down sight follows explicit
 stair links and reveals their landings, not an entire destination floor. Separate
 visible heights are displayed in adjacent ASCII panels. Gravity and falling/support physics are implemented in [4c](physics.md); continuous

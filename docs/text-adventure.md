@@ -33,10 +33,10 @@ The current protocol supplies an item `description`, actor `name` and `descripti
 and cells, including carried items. Shared cell memory retains these appearances
 as potentially stale sightings. No world-wide appearance catalog is sent.
 
-This is a deliberately small cosmetic foundation: all existing floor/wall cells
-use stone; the three token materials and stone tablet have authored examination
-text; other items and all actors have no authored description, and the client
-says so in its own words. The observing actor's own body, seen from another
+Materials currently use stone for floor/wall cells. Items and actors may have
+authored names/descriptions; the default dungeon supplies them. The two-room
+diagnostic tokens/tablet have their own examination text. Missing descriptions
+are reported without inventing authored details. The observing actor's own body, seen from another
 cell, is identified by its id, never listed as a figure in the room. These stubs add no item
 abilities, identification rules, hardness, digging, lighting, or material editing.
 Existing opaque wall terrain supplies the actual sight and movement obstruction.

@@ -1,4 +1,4 @@
-# Region streaming foundations
+# Region streaming
 
 Milestone 4e is complete. It implemented:
 
@@ -13,8 +13,10 @@ Milestone 4e is complete. It implemented:
   regions their characters need, move to the regions their reference points
   ask for after every command, and keep detached regions on disk.
 
-Generation, larger scenarios and client asset-palette delivery are
-[later slices](#later-slices).
+The current per-region generator and asset-palette delivery are also implemented;
+see [generated regions](scenario-packages.md#generated-regions) and
+[asset palettes](protocol.md#asset-palettes). General procedural recipes and
+multi-region generation groups are planned in the [Rogue scenario plan](rogue-scenario-plan.md).
 
 ## Inspect a horizon
 
@@ -46,8 +48,8 @@ closed doors and runtime occupants do not change structural preloading. Multiple
 links to one region are deduplicated. Cycles terminate, outputs are stable across
 source ordering, and unknown root/active IDs reject the entire query.
 
-The result describes transition candidates, not mutations. Future streaming must
-include body/effect dependencies in its roots or otherwise pin them before
+The result describes transition candidates, not mutations. Runtime streaming
+includes body/action dependencies through reference points and pins before
 applying transitions at committed simulation boundaries. A region outside this
 graph neighborhood is not automatically safe to freeze. No fixed runtime radius
 has been selected by this authoring interface.
@@ -78,8 +80,8 @@ The `structural-horizon-v1` workload reports 10,000 queries after 100 warmups fo
 dungeon neighborhood and adds disconnected metadata. It reports catalog-build
 time separately from query p50/p95/maximum and operation counts; file parsing,
 JSON reporting, and correctness assertions are outside query timing. This is a
-synthetic catalog scalability check, not support for runtime packages exceeding
-the current 256-region limit. There is no earlier query implementation for a
+synthetic catalog scalability check; its original fixture sizes do not set the
+current package limit of 65,536 regions. There is no earlier query implementation for a
 before/after comparison; the small/large cases establish the initial baseline.
 
 Initial Windows release measurements (2026-09-27, 10,000 samples per case):
@@ -95,15 +97,16 @@ query measurements include timer overhead and host scheduling noise; they are
 diagnostic, not timing assertions. The operation-count test is the stable scaling
 gate.
 
-The planner changes no formats or scenario certificates. Ordinary simulation, scheduling, persistence, and client behavior do
-not use the planner yet.
+The planner is read-only. Runtime streaming uses horizon planning through the
+reference-point and pin contracts below; the authoring command does not itself
+load, freeze or persist regions.
 
 ## Region lifecycle contract
 
 This is the contract that disk streaming is built on. The code is in
 `crates/simulation/src/streaming.rs` and `crates/world/src/region_slice.rs`.
-The engine doesn't call it yet, so ordinary games are unaffected: nothing
-freezes, and saves are byte-identical.
+The engine applies this lifecycle to package games after committed commands.
+Loaded, active and detached state is persisted; frozen regions do not advance.
 
 ### Region states
 

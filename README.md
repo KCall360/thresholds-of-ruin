@@ -30,8 +30,8 @@ Along the way you'll find:
 - places your character names as they discover them, which you can rename; and
 - a map that remembers what you've seen, greyed out once it's out of sight.
 
-This is an early development build: there's one authored dungeon, no
-procedural generation yet, and no packaged installer.
+This is an early development build: there's one authored dungeon, limited procedural room/corridor generation between authored regions, and no
+packaged installer. The full Rogue-style dungeon is planned.
 
 ## Play
 
