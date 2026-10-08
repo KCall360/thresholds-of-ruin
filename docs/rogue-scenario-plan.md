@@ -30,7 +30,7 @@ whole-room revelation are not goals of this scenario.
 | Generation trigger | Generate the complete floor group when it enters the region-loading horizon, before stair traversal |
 | Randomness | Independently derived stage streams, pinned inputs/versions and deterministic generated IDs/state |
 | Persistence | Preserve terrain, entities and changes on revisits; no floor regeneration |
-| Stairs | Extend existing traversal links with the paired cross-region floor pattern, arriving at the corresponding stair; allow backtracking provisionally |
+| Stairs | Use persistent named pairs with authored or independently generated endpoints, arriving at the corresponding stair; backtracking is generally allowed, with scenario-specific gates designed separately |
 | Secrets | Required routes may include hidden doors/passages; timed search and ordinary perception can discover them |
 | Doors | Ordinary entrances have no usable doors, matching Rogue; secret entrances require discovery |
 | Geometry | Generally reproduce the flat layout through TOR geometry; use 3D where appropriate, including physical trapdoor falls through portals |
@@ -80,9 +80,10 @@ Shared prerequisites:
    loading horizon generates all nine regions together. Do not generate the
    entire dungeon eagerly or wait until the PC descends. Persist committed group
    state and pin its recipe/dependencies.
-4. Implement paired cross-region stairs, destination validation, persistence and
-   supported-client traversal. Define blocked destinations and action timing
-   before coding; distinguish stair transport from falling.
+4. Integrate paired stairs with generated floor groups, destination validation,
+   persistence and supported-client traversal. Use ordinary movement timing;
+   reject blocked arrivals without consuming time. Keep stair transport separate
+   from falling; any scenario-specific backtracking gates need their own design.
 5. Author and validate the ordinary exploration scenario. Initial depth count,
    dimensions and stair locations are implementation choices still to resolve.
    This stage has no Amulet victory, hunger or combat requirement.

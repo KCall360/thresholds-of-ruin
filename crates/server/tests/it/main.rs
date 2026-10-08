@@ -14,6 +14,7 @@ mod invariants;
 mod items;
 mod materials;
 mod package_pin;
+mod paired_stairs;
 mod palettes;
 mod performance_contracts;
 mod performance_workloads;

@@ -40,6 +40,10 @@ or items, consume RNG, or mutate the package. Anchor resolution works without
 loading the destination region. Unknown zones, duplicate/zero region IDs, invalid
 bounds/anchors, and missing portal destinations fail catalog construction.
 Full portal geometry and entity validation remain the scenario validator's job.
+Paired stairs add outgoing links in both directions, including same-region
+links. Generated stair anchor names identify their regions before positions are
+chosen. `anchor_region` resolves that structural identity without generation;
+`resolve_anchor` continues to resolve only fixed authored coordinates.
 
 `RegionCatalog::plan` takes a nonempty set of root regions, a portal-hop radius,
 and the previous active set. Radius zero includes only the roots; higher radii

@@ -205,6 +205,8 @@ struct Streaming {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
+    stair_pairs: BTreeMap<String, source::StairPair>,
     factions: BTreeMap<String, BTreeSet<String>>,
     #[serde(with = "mapped")]
     ai_profiles: BTreeMap<String, source::AiProfile>,
@@ -227,6 +229,13 @@ struct Manifest {
     assets: BTreeMap<String, Vec<String>>,
     #[serde(with = "mapped")]
     terrain: Option<source::TerrainAssets>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::StairPair", deny_unknown_fields)]
+struct StairPair {
+    upper: String,
+    lower: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -460,6 +469,8 @@ struct IndexedRegion {
     chamber: bool,
     zone: Option<String>,
     anchors: BTreeMap<String, [i32; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    stair_anchors: Vec<String>,
     portals: Vec<String>,
     #[serde(with = "mapped")]
     actors: Vec<source::IndexedActor>,
@@ -507,6 +518,7 @@ remote!(
     Position => crate::journal::Position,
     Streaming => crate::Streaming,
     Manifest => source::Manifest,
+    StairPair => source::StairPair,
     Zone => source::Zone,
     TerrainAssets => source::TerrainAssets,
     AppearancePool => source::AppearancePool,
@@ -753,6 +765,28 @@ mod tests {
             br#"["unknown"]"#.as_slice(),
         ] {
             assert!(strict::<Owned<BTreeSet<source::DamageType>>>(bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn saved_stair_pair_metadata_and_generated_names_round_trip_strictly() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/paired-stairs");
+        let scenario = source::load(&root, 42, None, true).unwrap();
+        let bytes = serde_json::to_vec(&Borrowed(&scenario)).unwrap();
+        let restored = strict::<Owned<crate::Scenario>>(&bytes).unwrap().0;
+        assert_eq!(serde_json::to_vec(&Borrowed(&restored)).unwrap(), bytes);
+        let package = restored.package.unwrap();
+        assert_eq!(package.manifest.stair_pairs["first"].lower, "2/up");
+        // The index is stored separately from the scenario's manifest metadata.
+        let index = &scenario.package.as_ref().unwrap().index;
+        let restored_index = decode_index(&encode_index(index).unwrap()).unwrap();
+        assert_eq!(restored_index.regions[1].stair_anchors, ["up", "down"]);
+        for bad in [
+            br#"{"upper":"1/stair","lower":"2/up","lower":"2/down"}"#.as_slice(),
+            br#"{"upper":"1/stair","lower":"2/up","gate":true}"#.as_slice(),
+        ] {
+            assert!(strict::<Owned<source::StairPair>>(bad).is_err());
         }
     }
 

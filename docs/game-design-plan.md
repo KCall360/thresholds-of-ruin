@@ -274,7 +274,10 @@ Rogue combat ruleset.
   region. Existing links already support cross-region traversal; the new floor
   pattern uses paired destinations rather than local elevation changes. Support persistent paired stair anchors and
   destination clearance. Physical falling through a portal remains physics,
-  distinct from using a stair. Stair costs and blocked-arrival policy remain open.
+  distinct from using a stair. Paired stairs use ordinary movement recovery;
+  blocked arrivals are refused without consuming time. Backtracking is generally
+  allowed; scenario-specific gates remain a separate extension. Pairs may also
+  connect positions in the same region.
 
 ## Shared creature builds, progression, and defenses
 

@@ -78,6 +78,38 @@ Outgoing portals specify `at`, cardinal/vertical `direction`, destination anchor
 `to`, and optional `turns`, `width`, `height` (defaults 0, 1, 1). Reverse portals
 are explicit. The validator constructs every region before checking connections.
 
+### Paired stairs
+
+The manifest can declare named stair pairs once:
+
+```toml
+[stair_pairs.main]
+upper = "1/down"
+lower = "2/up"
+```
+
+Pair names are stable connection identities, independent of coordinates. Each
+endpoint names either an authored anchor or a generated stair anchor. A pair
+creates a down link at `upper` and an up link at `lower`, both with identity
+rotation. Regions may be the same, and one cell may have both an up and a down
+link. Duplicate exits in the same direction are rejected, including conflicts
+with existing authored links. Backtracking is allowed; scenario gates are not
+implemented by this declaration.
+
+Using stairs arrives exactly at the matching anchor, preserves facing and the
+existing movement velocity behavior, and uses ordinary movement recovery time.
+The actor's entire body must fit. A blocked arrival consumes no time and does
+not move the actor, displace occupants, or choose a nearby cell. Stairs remain
+transport links, separate from falling and physical see-through portals.
+
+Structural pair destinations are available to horizon planning before generation
+chooses their positions. Each endpoint is generated from its own region's pinned
+inputs, independently of destination coordinates and load order. Resolved links
+and terrain persist in region records; the saved manifest retains pair identities
+and the pinned region sources support deterministic replay. Revisits do not
+reroll positions. `scenarios/tests/paired-stairs` demonstrates generated endpoints,
+same-region traversal, and a cell with stairs in both directions.
+
 Actors, items, and doors have positive numeric IDs, unique within their entity
 kind. Array order does not assign identities. Doors specify `at`, `open`, and `height` (default 1). Validation rejects a door
 that doesn't fit, or that leaves its walled doorway open above it; see
@@ -136,12 +168,13 @@ generator = "rooms"
 version = 2
 salt = 0 # optional; omitted means zero
 rooms = [3, 6]
+stair_anchors = ["up", "down"] # optional generated named endpoints
 actors = { archetypes = ["rat"], ai = "wander", count = [1, 3] }
 items = { archetypes = ["coin"], count = [2, 4] }
 ```
 
 - `rooms` (the only generator, version 2) keeps a clearing two cells wide
-  around every anchor, places 1–16 rooms, and joins the anchors and rooms in
+  around every authored anchor, places 1–16 rooms, and joins the anchors and rooms in
   turn with corridors, so every entry reaches every other. Two entries on the
   same row are joined by a straight corridor along it. Actors (up to 64, each
   an archetype from the pool, run by the named AI profile) and items (up to
@@ -153,6 +186,15 @@ items = { archetypes = ["coin"], count = [2, 4] }
   Geometry and placement streams use bounds, ordered anchors and room ranges;
   population and loot each use their own pool. Changing one pool cannot reroll
   geometry or the other pool, and build order does not enter any stream.
+- Generated stair anchors use an independent stream per name and are placed on
+  distinct open floor cells, away from authored anchor cells. Population and
+  loot settings do not change stair placement or terrain. Spawned actors/items
+  avoid stair cells. Names must be unique and must not shadow authored anchors;
+  insufficient floor space is a construction error. Generated names can be used
+  by stair pairs and portal destinations, but character starts and objectives
+  still require authored anchors. Structural inspection resolves a generated
+  anchor's region, not its as-yet-unknown coordinates.
+  A generated region may have only generated stair anchors, without fixed entries.
 - Open floor outside entry clearings is shuffled deterministically and split
   into alternating actor/item placement lanes. These disjoint lanes keep their
   positions and capacities even when a pool is absent or its count changes.

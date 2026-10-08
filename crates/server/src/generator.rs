@@ -39,6 +39,9 @@ pub struct Generate {
     pub salt: u64,
     /// How many rooms, at least and at most.
     pub rooms: [u32; 2],
+    /// Stable names whose positions are selected from generated open floor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stair_anchors: Vec<String>,
     pub actors: Option<ActorPool>,
     pub items: Option<ItemPool>,
 }
@@ -81,6 +84,7 @@ enum RandomStream {
     Placement,
     Population,
     Loot,
+    Stairs,
 }
 
 #[derive(Serialize)]
@@ -199,9 +203,24 @@ pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure>
             "Region {id}: a generated region authors only its bounds, anchors and links"
         )));
     }
-    if def.anchors.is_empty() {
+    if def.anchors.is_empty() && generate.stair_anchors.is_empty() {
         return Err(fail(format!(
             "Region {id}: a generated region needs an entry anchor"
+        )));
+    }
+    let names: BTreeSet<_> = generate.stair_anchors.iter().collect();
+    if names.len() != generate.stair_anchors.len()
+        || names.len() > MAX_PLACED as usize
+        || names.iter().any(|name| {
+            name.is_empty()
+                || name.len() > 80
+                || name.contains('/')
+                || name.chars().any(char::is_control)
+                || def.anchors.contains_key(*name)
+        })
+    {
+        return Err(fail(format!(
+            "Region {id}: invalid or duplicate generated stair anchor"
         )));
     }
     Ok(())
@@ -275,6 +294,31 @@ pub(crate) fn materialize(
         .filter(|cell| !open.contains(cell))
         .flat_map(|(x, y)| (0..height).map(move |z| [x, y, z]))
         .collect();
+    // Each named endpoint has its own stream. Stable name order resolves
+    // collisions; endpoints never depend on population, loot or build order.
+    let mut stair_floor: Vec<_> = open
+        .iter()
+        .copied()
+        .filter(|&(x, y)| !def.anchors.values().any(|p| *p == [x, y, 0]))
+        .collect();
+    for name in generate.stair_anchors.iter().collect::<BTreeSet<_>>() {
+        if stair_floor.is_empty() {
+            return Err(fail(format!(
+                "Region {}: insufficient floor for stair anchor {name}",
+                def.id
+            )));
+        }
+        let mut stairs = stream_rng(
+            def,
+            generate,
+            seed,
+            RandomStream::Stairs,
+            &(&geometry, name),
+        )?;
+        let selected = (stairs.next() % stair_floor.len() as u64) as usize;
+        let (x, y) = stair_floor.remove(selected);
+        out.anchors.insert(name.clone(), [x, y, 0]);
+    }
     if generate.actors.is_none() && generate.items.is_none() {
         return Ok(out);
     }
@@ -284,7 +328,17 @@ pub(crate) fn materialize(
             .iter()
             .any(|(ex, ey)| (x - ex).abs() <= CLEARING && (y - ey).abs() <= CLEARING)
     };
-    let mut floor: Vec<Cell> = open.iter().copied().filter(|c| !near_entry(*c)).collect();
+    let mut floor: Vec<Cell> = open
+        .iter()
+        .copied()
+        .filter(|&(x, y)| {
+            !near_entry((x, y))
+                && !generate
+                    .stair_anchors
+                    .iter()
+                    .any(|name| out.anchors[name] == [x, y, 0])
+        })
+        .collect();
     // A shared deterministic permutation assigns disjoint alternating lanes.
     // Lane capacity and positions never depend on either pool's presence or
     // requested count; removing actors cannot move or crowd out loot.
@@ -394,6 +448,47 @@ mod tests {
 
     fn json(def: &RegionDef) -> String {
         serde_json::to_string(def).unwrap()
+    }
+
+    #[test]
+    fn generated_stair_anchors_are_connected_distinct_and_stream_isolated() {
+        let (mut def, _) = cave();
+        let mut recipe = serde_json::to_value(def.generate.as_ref().unwrap()).unwrap();
+        recipe["stair_anchors"] = serde_json::json!(["up", "down"]);
+        let generate: Generate = serde_json::from_value(recipe).unwrap();
+        def.generate = Some(generate.clone());
+        let first = materialize(&def, &generate, 42, 100, 200).unwrap();
+        assert_ne!(first.anchors["up"], first.anchors["down"]);
+        assert!(entries_connected(&first));
+        for anchor in ["up", "down"] {
+            assert!(!first.walls.contains(&first.anchors[anchor]));
+            assert!(first.actors.iter().all(|a| a.at != first.anchors[anchor]));
+            assert!(first.items.iter().all(|a| a.at != first.anchors[anchor]));
+        }
+        let mut changed = generate.clone();
+        changed.actors = None;
+        changed.items = None;
+        let second = materialize(&def, &changed, 42, 100, 200).unwrap();
+        assert_eq!(first.anchors, second.anchors);
+        assert_eq!(first.walls, second.walls);
+        let baseline = materialize(&def, def.generate.as_ref().unwrap(), 42, 100, 200).unwrap();
+        assert_eq!(json(&first), json(&baseline));
+    }
+
+    #[test]
+    fn generated_stair_names_and_capacity_are_validated() {
+        let (mut def, mut generate) = cave();
+        for names in [vec!["up", "up"], vec!["west"], vec!["bad/name"], vec![""]] {
+            generate.stair_anchors = names.into_iter().map(String::from).collect();
+            assert!(materialize(&def, &generate, 42, 100, 200).is_err());
+        }
+        def.size = [1, 1, 1];
+        def.anchors = BTreeMap::from([("entry".into(), [0; 3])]);
+        generate.stair_anchors = vec!["up".into()];
+        assert!(materialize(&def, &generate, 42, 100, 200)
+            .unwrap_err()
+            .message
+            .contains("insufficient floor"));
     }
 
     #[test]
