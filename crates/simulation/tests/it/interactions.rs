@@ -58,7 +58,7 @@ fn finish(game: &mut Game, actor: ActorId) {
 
 #[test]
 fn noncombat_armor_uses_anatomy_and_takes_three_turns_to_complete() {
-    let (mut game, actor, _) = fixture(false);
+    let (mut game, actor, observer) = fixture(false);
     armor(&mut game, actor);
     let id = game
         .admit_intention(
@@ -79,6 +79,18 @@ fn noncombat_armor_uses_anatomy_and_takes_three_turns_to_complete() {
     assert_eq!(interaction.preparation.unwrap().remaining, 300);
     assert_eq!(interaction.inventory[0].equipped_slot, None);
     finish(&mut game, actor);
+    assert_eq!(
+        game.observe(actor).unwrap().interactions.unwrap().completed,
+        vec![tor_simulation::Work::Equip {
+            item: ItemId(10),
+            slot: EquipmentSlotId(0)
+        }]
+    );
+    assert!(game
+        .observe(observer)
+        .unwrap()
+        .interactions
+        .is_none_or(|view| view.completed.is_empty()));
     assert_eq!(game.tick(), 300);
     assert_eq!(
         game.equipment(actor).unwrap()[&EquipmentSlotId(0)],
@@ -197,6 +209,10 @@ fn drinking_consumes_at_completion_and_identifies_only_observable_effects() {
     game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
     finish(&mut game, actor);
     assert!(game.observe(actor).unwrap().inventory.is_empty());
+    assert_eq!(
+        game.observe(actor).unwrap().interactions.unwrap().completed,
+        vec![tor_simulation::Work::Drink { item: ItemId(20) }]
+    );
     assert_eq!(game.health(actor).unwrap().0, 30);
     let mut replacement = ItemSpec::ordinary("healing".into());
     replacement.class = ItemClass::Potion;
@@ -266,6 +282,38 @@ fn invalid_effect_sequence_is_atomic_and_lethal_sequence_never_revives() {
     .unwrap();
     assert_eq!(game.health(actor).unwrap().0, 0);
     assert!(!game.alive(actor));
+}
+
+#[test]
+fn lethal_final_potion_reports_completion_without_anatomy_or_remaining_inventory() {
+    let (mut game, actor, observer) = fixture(true);
+    game.configure_anatomy(actor, AnatomySpec::default())
+        .unwrap();
+    let mut potion = ItemSpec::ordinary("poison".into());
+    potion.class = ItemClass::Potion;
+    potion.concealed = true;
+    potion.appearance = "red potion".into();
+    potion.consumable = Some(ConsumableSpec {
+        effects: vec![EffectSpec::Damage {
+            components: BTreeMap::from([(DamageType::Vital, 100)]),
+        }],
+    });
+    game.place_item_stack(20, at(1), Some(actor), 1, potion)
+        .unwrap();
+    game.act(actor, Action::Drink { item: ItemId(20) }).unwrap();
+    finish(&mut game, actor);
+    assert!(!game.alive(actor));
+    let view = game.observe(actor).unwrap();
+    assert!(view.inventory.is_empty());
+    assert_eq!(
+        view.interactions.unwrap().completed,
+        vec![tor_simulation::Work::Drink { item: ItemId(20) }]
+    );
+    assert!(game
+        .observe(observer)
+        .unwrap()
+        .interactions
+        .is_none_or(|view| view.completed.is_empty()));
 }
 
 #[test]

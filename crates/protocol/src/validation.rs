@@ -97,6 +97,14 @@ impl StateView {
                 o.inventory.iter().map(|item| (item.id, item)).collect();
             let mut equipped = HashSet::new();
             if interactions.slots.len() > 64
+                || interactions.completed.iter().any(|action| {
+                    !matches!(
+                        action,
+                        crate::Action::Equip { slot: 0..=63, .. }
+                            | crate::Action::Unequip { .. }
+                            | crate::Action::Drink { .. }
+                    )
+                })
                 || interactions.inventory.len() > inventory.len()
                 || !unique(interactions.inventory.iter().map(|item| item.item))
                 || interactions.inventory.iter().any(|interaction| {

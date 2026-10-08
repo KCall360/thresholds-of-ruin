@@ -155,6 +155,20 @@ fn item_preparation_preserves_admission_through_pause_resume_replay_and_completi
             ..
         }
     ));
+    assert_eq!(
+        engine
+            .observation(actor)
+            .unwrap()
+            .interactions
+            .unwrap()
+            .completed,
+        vec![engine.encode_action(actor, &Action::Equip { item: 10, slot: 0 })]
+    );
+    assert!(engine
+        .observation(ActorId(2))
+        .unwrap()
+        .interactions
+        .is_none_or(|view| view.completed.is_empty()));
 }
 
 #[test]

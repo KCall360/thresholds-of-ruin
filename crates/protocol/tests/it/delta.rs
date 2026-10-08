@@ -68,6 +68,9 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     let mut next = base.clone();
     next.revision = 2;
     next.observation.interactions = Some(InteractionView {
+        completed: vec![Action::Drink {
+            item: ItemTarget::from_digest(synthetic_digest(3)),
+        }],
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: Some(PreparationView {
             action: Action::Attack {
@@ -80,6 +83,18 @@ fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
     });
     assert!(next.validate().is_ok());
     round_trip(&base, &next);
+    let mut invalid = next.clone();
+    invalid
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .completed
+        .push(Action::Wait);
+    assert!(
+        invalid.validate().is_err(),
+        "completion must describe an item action"
+    );
     let mut cleared = next.clone();
     cleared.revision = 3;
     cleared.observation.interactions = None;

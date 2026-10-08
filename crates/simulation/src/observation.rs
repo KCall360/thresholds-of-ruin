@@ -204,11 +204,24 @@ impl Game {
                 _ => {}
             }
         }
+        let completed: Vec<_> = self
+            .combat
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                crate::combat::CombatEvent::ItemCompleted { actor, work, .. } if *actor == id => {
+                    Some(*work)
+                }
+                _ => None,
+            })
+            .collect();
         Ok(Observation {
             interactions: (!actor.anatomy.slots.is_empty()
                 || actor.pending.is_some()
-                || !item_interactions.is_empty())
+                || !item_interactions.is_empty()
+                || !completed.is_empty())
             .then(|| crate::interactions::InteractionView {
+                completed,
                 slots: actor.anatomy.slots.clone(),
                 preparation: actor.pending.as_ref().map(|progress| {
                     crate::interactions::PreparationView {

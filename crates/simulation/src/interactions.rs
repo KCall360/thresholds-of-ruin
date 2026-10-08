@@ -119,6 +119,7 @@ pub struct ConsumableSpec {
 /// remain absent until that actor knows the item's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractionView {
+    pub completed: Vec<Work>,
     pub slots: Vec<EquipmentSlot>,
     pub preparation: Option<PreparationView>,
     pub inventory: Vec<ItemInteractionView>,

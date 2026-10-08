@@ -103,7 +103,7 @@ class Recorder(ProcessTestCase):
         player.stop()
         watcher.stop()
         server.stop()
-        self.server("--outbound-frame-bytes", 512, "--outbound-client-bytes", 65536,
+        bounded = self.server("--outbound-frame-bytes", 512, "--outbound-client-bytes", 65536,
                     "--outbound-total-bytes", 262144, scenario="generated-filler", seed=5)
         captured = []
 
@@ -120,6 +120,18 @@ class Recorder(ProcessTestCase):
         relay.close()
         self.assertEqual(len(captured), 1, "record an actual bounded snapshot transfer part")
         server_samples["snapshot_part"] = captured[0]
+        bounded.stop()
+        self.save = self.save.parent / "item-samples.db"
+        self.server(scenario="interactions")
+        item_client, state = self.client()
+        potion = next(item for item in state["state"]["observation"]["inventory"] if item["class"] == "potion")
+        result = self.act(item_client, {"type": "drink", "item": potion["id"]})
+        self.assertEqual(result["state"]["observation"]["interactions"]["completed"], [{"type": "drink", "item": potion["id"]}])
+        self.request(item_client, {"type": "snapshot"})
+        messages = [json.loads(line).get("message") for line in item_client.transcript if line.startswith("{")]
+        server_samples["zz.item_completion"] = next(message for message in reversed(messages)
+            if message and message["type"] == "snapshot")
+        item_client.stop()
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

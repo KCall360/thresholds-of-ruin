@@ -15,6 +15,7 @@ fn carried_rings() -> Snapshot {
     second.id = super::item_target(1);
     view.inventory = vec![first, second];
     view.interactions = Some(InteractionView {
+        completed: Vec::new(),
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: None,
         inventory: view

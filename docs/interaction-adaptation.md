@@ -37,8 +37,8 @@ Physical classes and ASCII glyphs are implemented. Preparation now belongs to th
 actor rather than its combat state, preserving existing attack behavior and
 saved intention identity. Generalized preparation, anatomy-based equipment and
 shared immediate healing/damage effects are now implemented in the simulation,
-server, authoring and transport boundaries. Client controls and knowledge-limited
-AI item actions remain outstanding.
+server, authoring and transport boundaries. Text and ASCII controls now use shared
+client item checks. Knowledge-limited AI item actions remain outstanding.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -85,7 +85,20 @@ and the native-key mapping test pass. A native keyboard process test verifies
 equipment timing, removal, cancelled potion selection, one-unit consumption and
 a presented framebuffer. The shared candidate/socket test also passes.
 
-Next: finish completion narration, then add
+Completion is now exposed in the observer's interaction snapshot and narrated
+through `client-common`, including noncombat equipment and consumed final units.
+Only the owning actor receives these item completions. Consecutive unchanged
+observations do not repeat narration. A lethal final-unit potion without anatomy
+still reports completion, covered by a focused simulation test. Current wire
+samples include an actual item-completion snapshot. The affected integration
+suites pass (99 simulation, 51 protocol, 87 text and 37 ASCII), followed by all
+11 focused interaction simulation cases after adding the lethal final-unit case.
+Seven shared narration tests and two server interaction tests pass.
+All four actual-client interaction process tests pass, including native ASCII
+completion narration after the final potion unit disappears and checkpoint
+restart through the server/headless client.
+
+Next: add
 knowledge-limited AI item decisions and final performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.

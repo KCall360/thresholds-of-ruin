@@ -17,6 +17,7 @@ fn equipment_uses_free_anatomy_socket_without_knowledge_and_requires_removal() {
         ]
     })).unwrap();
     view.interactions = Some(InteractionView {
+        completed: Vec::new(),
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: None,
         inventory: vec![

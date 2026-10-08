@@ -45,6 +45,7 @@ pub enum Beat {
     Waited,
     AttackBegan,
     ItemBegan(String),
+    ItemFinished(String),
     Blow {
         attacker: Who,
         target: Who,
@@ -180,6 +181,11 @@ impl Chronicler {
                 Event::PreparationPaused => {}
             }
         }
+        beats.extend(
+            tor_client_common::narration::completed_items(b, a)
+                .into_iter()
+                .map(Beat::ItemFinished),
+        );
         if a.tick != b.tick {
             if let Some(motion) = &a.motion {
                 if motion.displaced {

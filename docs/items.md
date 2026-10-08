@@ -2,7 +2,7 @@
 
 Milestone 4b adds quantities, pickup/drop, compatible stacking and character-owned
 identity knowledge. The interaction adaptation adds anatomy-based equipment and
-timed potion effects to the simulation and server. Capacity, containers and
+timed potion effects to the simulation, server and clients. Capacity, containers and
 ordinary identification actions remain deferred. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 

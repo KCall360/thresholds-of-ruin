@@ -17,6 +17,40 @@ pub fn changes(before: &Observation, after: &Observation) -> Vec<String> {
     describe_changes(before, after, None)
 }
 
+/// Narrate the observer's completed item work from disclosed inventories only.
+pub fn completed_items(before: &Observation, after: &Observation) -> Vec<String> {
+    let Some(interactions) = &after.interactions else {
+        return Vec::new();
+    };
+    if before.tick == after.tick
+        && before
+            .interactions
+            .as_ref()
+            .is_some_and(|old| old.completed == interactions.completed)
+    {
+        return Vec::new();
+    }
+    interactions
+        .completed
+        .iter()
+        .filter_map(|action| {
+            let (verb, item) = match action {
+                tor_protocol::Action::Equip { item, .. } => ("equipping", item),
+                tor_protocol::Action::Unequip { item } => ("removing", item),
+                tor_protocol::Action::Drink { item } => ("drinking", item),
+                _ => return None,
+            };
+            let name = before
+                .inventory
+                .iter()
+                .chain(&after.inventory)
+                .find(|candidate| candidate.id == *item)
+                .map_or_else(|| "item".into(), |candidate| label(&candidate.name, "item"));
+            Some(format!("You finish {verb} the {name}."))
+        })
+        .collect()
+}
+
 /// Combine action results and sight changes without repeating a door action.
 pub fn observation(
     before: &Observation,
@@ -31,6 +65,7 @@ pub fn observation(
     if let Some(event) = event {
         lines.insert(0, action(event, after));
     }
+    lines.extend(completed_items(before, after));
     if let Some(combat) = &after.combat {
         if before.tick != after.tick || before.combat != after.combat {
             lines.extend(
@@ -339,8 +374,26 @@ mod tests {
             action: tor_protocol::Action::Drink { item },
         };
         assert_eq!(action(&event, &view), "You begin to drink the red potion.");
+        let carried = view.clone();
         view.inventory.clear();
         assert_eq!(action(&event, &view), "You begin to drink the item.");
+        let before = view.clone();
+        view.interactions = Some(tor_protocol::InteractionView {
+            completed: vec![tor_protocol::Action::Drink { item }],
+            slots: vec![],
+            preparation: None,
+            inventory: vec![],
+        });
+        view.tick = 100;
+        assert_eq!(
+            completed_items(&before, &view),
+            ["You finish drinking the item."]
+        );
+        assert!(completed_items(&view, &view).is_empty());
+        assert_eq!(
+            completed_items(&carried, &view),
+            ["You finish drinking the red potion."]
+        );
     }
 
     #[test]

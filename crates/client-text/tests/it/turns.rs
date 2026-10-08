@@ -496,6 +496,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     let item = ring.id;
     initial.observation.inventory.push(ring);
     initial.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: None,
         inventory: vec![ItemInteractionView {
@@ -510,6 +511,13 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
         assert!(is_act(request, &Action::Equip { item, slot: 0 }));
         let mut after = now.clone();
         after.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+        after
+            .observation
+            .interactions
+            .as_mut()
+            .unwrap()
+            .completed
+            .push(Action::Equip { item, slot: 0 });
         vec![
             Frame::View(
                 after,
@@ -523,7 +531,7 @@ async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
     let mut engine = Engine::default();
     assert_eq!(
         play(&mut link, &mut engine, "wear silver ring").await,
-        "You begin to equip the silver ring."
+        "You begin to equip the silver ring. You finish equipping the silver ring."
     );
     assert_eq!(link.sent.len(), 1);
     assert_eq!(

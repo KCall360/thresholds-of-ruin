@@ -34,6 +34,7 @@ fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() 
     carrying(&mut s);
     let ring = super::item_target(12);
     s.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: None,
         inventory: vec![ItemInteractionView {

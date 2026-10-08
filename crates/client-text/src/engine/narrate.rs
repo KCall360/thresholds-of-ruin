@@ -702,6 +702,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
     while i < beats.len() {
         let next = beats.get(i + 1);
         match &beats[i] {
+            Beat::ItemFinished(text) => teller.say(text.trim_end_matches('.')),
             Beat::Blow {
                 attacker,
                 target,

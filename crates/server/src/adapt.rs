@@ -306,6 +306,16 @@ pub fn observation(
     }
     p::Observation {
         interactions: view.interactions.map(|interaction| p::InteractionView {
+            completed: interaction
+                .completed
+                .into_iter()
+                .map(|work| {
+                    crate::wire_adapter::encode_action(
+                        &recorded_action(work.action()).expect("completed item action"),
+                        targets,
+                    )
+                })
+                .collect(),
             slots: interaction.slots.into_iter().map(equipment_slot).collect(),
             preparation: interaction.preparation.map(|progress| p::PreparationView {
                 action: crate::wire_adapter::encode_action(

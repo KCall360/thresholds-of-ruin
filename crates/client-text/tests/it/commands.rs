@@ -9,6 +9,7 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     item.name = "silver ring".into();
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
+        completed: Vec::new(),
         slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
         preparation: None,
         inventory: vec![ItemInteractionView {

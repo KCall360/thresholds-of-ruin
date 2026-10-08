@@ -777,3 +777,9 @@ Equipment statistics are absent for unidentified items. Consumable effect
 primitives stay in the backend. Deltas replace this optional snapshot, including
 removing it when no interaction facts remain. `equip`, `unequip` and `drink` use
 the same intention admission, authority and retry rules as other ordinary actions.
+The interaction snapshot also carries `completed`, a list of the observer's own
+completed item actions. These use opaque targets without item specifications;
+the target may refer to a consumed final unit absent from the current inventory.
+Clients resolve narration from their consecutive disclosed inventories. Other
+actors' equipment and consumption completions are not included. This also works
+for actors with anatomy and equipment but no combat state.

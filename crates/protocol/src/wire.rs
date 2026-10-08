@@ -406,6 +406,8 @@ pub struct PreparationView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionView {
+    /// This observer's completed item actions, including consumed final units.
+    pub completed: Vec<Action>,
     pub slots: Vec<EquipmentSlot>,
     pub preparation: Option<PreparationView>,
     pub inventory: Vec<ItemInteractionView>,

@@ -28,6 +28,7 @@ class AsciiInteractionProcesses(ProcessTestCase):
         equipped = press("w", "equip")
         self.assertEqual(next(item for item in view(equipped)["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
         self.assertEqual(int(view(equipped)["tick"]), 300)
+        self.assertIn("You finish equipping the mail.", equipped["narration"])
         selected = press("t", "unequip")
         self.assertEqual(view(selected), view(equipped), "opening a selection costs no turn")
         press("Down", "down")  # starting order: sword, mail, ring
@@ -45,6 +46,12 @@ class AsciiInteractionProcesses(ProcessTestCase):
         potions = [item for item in view(consumed)["inventory"] if item["class"] == "potion"]
         self.assertEqual(sorted(int(item["quantity"]) for item in potions), [1, 2])
         self.assertEqual(int(view(consumed)["tick"]), 700)
+        self.assertIn("You finish drinking the red potion.", consumed["narration"])
+        first_potion = potions[0]["id"]
+        press("q", "drink")
+        final_unit = press("Return", "enter")
+        self.assertFalse(any(item["id"] == first_potion for item in view(final_unit)["inventory"]))
+        self.assertIn("You finish drinking the red potion.", final_unit["narration"])
         pixels = capture.read_bytes().split(b"\n", 3)[3]
         self.assertEqual(len(pixels), 1200 * 800 * 3)
         self.assertGreater(len(set(pixels)), 8)

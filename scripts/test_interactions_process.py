@@ -27,7 +27,9 @@ class InteractionProcesses(ProcessTestCase):
         probe, _ = self.client(observe=True)
         player, welcome = self.adventure()
         self.assertNotIn("potion of healing", welcome)
-        self.assertIn("begin", self.say(player, "wear mail").lower())
+        passage = self.say(player, "wear mail").lower()
+        self.assertIn("begin", passage)
+        self.assertIn("finish equipping", passage)
         view = self.request(probe, {"type": "snapshot"})["state"]["observation"]
         mail = next(item["id"] for item in view["inventory"] if item["name"] == "mail")
         self.assertEqual(next(item for item in view["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
@@ -53,6 +55,7 @@ class InteractionProcesses(ProcessTestCase):
         equipped = self.act(player, {"type": "equip", "item": mail, "slot": 1})
         self.assertIsNone(equipped["error"])
         view = equipped["state"]["observation"]
+        self.assertEqual(view["interactions"]["completed"], [{"type": "equip", "item": mail, "slot": 1}])
         self.assertEqual(int(view["tick"]), 300)
         self.assertEqual(next(item for item in view["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
         denied = self.act(player, {"type": "drop", "item": mail})
