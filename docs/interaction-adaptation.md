@@ -1,9 +1,9 @@
 # Adapting the unpublished interaction work
 
-This work starts from PR #87 (`28c5932`), using its accepted shared TOR design.
-The complete September interaction checkout is retained in local archival commit
-`fc4f958` on `codex/milestone-4f-interactions`. That archive includes obsolete
-formats, fixtures and documentation; it is reference material, not a release.
+The retained interaction features use the accepted shared TOR architecture.
+The complete original checkout is preserved on the local archival branch
+`codex/milestone-4f-interactions`. It contains obsolete formats, fixtures and
+documentation and is retained as reference material.
 
 ## Scope and sequence
 
@@ -30,124 +30,63 @@ the full Windows/Linux debug/release suite is deferred to GitHub CI. Preserve
 recovery, disclosure and native-input assertions. Do not substitute historic
 September benchmark results for measurements of the adapted implementation.
 
-## Current progress
+## Retained behavior and verification
 
-The original dirty work is archived and the adaptation branch is based on PR #87.
-Physical classes and ASCII glyphs are implemented. Preparation now belongs to the
-actor rather than its combat state, preserving existing attack behavior and
-saved intention identity. Generalized preparation, anatomy-based equipment and
-shared immediate healing/damage effects are now implemented in the simulation,
-server, authoring and transport boundaries. Text and ASCII controls now use shared
-client item checks. AI known healing, gear replacement and safe nearby looting
-are implemented.
+Physical item classes and ASCII glyphs use disclosed data and stale item memory.
+Preparation belongs to the actor, preserving attack timing, saved intention
+identity and recovery lineage while supporting equipment and consumption.
+Anatomy defines matching sockets, including duplicate rings. Starting gear and
+completed equipment affect combat without mutating base rules; armor protects
+until removal completes, and death drops carried and equipped items once.
+Shared healing/damage effects run at consumption completion, consume one unit
+and identify it only when effects are observable. See [items and knowledge](items.md).
 
-Verified locally: workspace all-target compile check; 50 protocol integration
-tests; 33 ASCII model tests followed by four focused memory tests after expanding
-class coverage; five item simulation tests; two authoring/disclosure tests; a
-region-detachment round trip; seven documentation checks; all 33 package
-certificates; and four actual native ASCII process tests. Native acceptance covers
-hidden potion identities, category glyphs, save/restart and existing remembered
-map/rewind behavior. Current wire samples were recorded through real processes.
-The concealed-placement regression failed before its restriction was added.
-Full suites and targeted release profiling remain outstanding.
+Text, adventure and ASCII share carried-item affordance checks, candidate choices
+and anatomy validation through `client-common`. They choose free matching sockets
+from disclosed data and require removal before replacement. Direct text commands
+offer opaque choices for ambiguous items; adventure retains disclosed-order
+choices for indistinguishable stacks. ASCII uses W/T/Q for equip/remove/drink.
+Selection clears on cancellation, changed observations, control loss and
+disconnect. Shared completion narration handles noncombat equipment and the last
+consumed unit, belongs to the owning actor and does not repeat stale observations.
 
-The preparation ownership refactor passes 25 simulation intention tests, 14
-combat tests, 18 region-lifecycle tests and five server tests covering preparation
-identity, persistence rejection, paused recovery, independent admissions and
-rewind/recovery lineage. These are focused checks, not a full-suite claim.
+AI uses its own identity knowledge. At half health or below it prioritizes known
+restoratives whose effects are entirely positive healing. Known gear must strictly
+improve combat attributes without losing attack speed, damage kinds or typed
+protection. AI fills free matching sockets before replacing gear, removes old
+gear through ordinary timed work and recomputes the upgrade afterward. It avoids
+gear work while fleeing or adjacent to a visible hostile. Nearby looting considers
+visible, known useful gear or a restorative when none is carried, within three
+remembered route steps. Candidates are ordered by distance and item ID; both the
+destination and first step must avoid visible hostile reach. AI takes one unit
+and reuses its existing route search.
 
-The equipment/effect foundation has focused simulation and server tests for
-completion timing, damage interruption, same-admission continuation, concealed
-statistics, duplicate anatomy sockets, death drops, observable identification,
-consumed objectives, replay and checkpoint restoration. The affected simulation
-integration suite passes 99 tests, the protocol suite passes 51 tests, and focused
-server checks cover preparation recovery, action/save schemas and appearance
-pool affordances. Seven documentation checks pass. Anatomy definitions are
-shared after checkpoint decoding, matching the existing refactor architecture.
-A real server/headless-client process case passes for starting gear, equipment
-changes, equipped-drop rejection, consumption and checkpoint restart. All 34
-scenario certificates and current wire samples have been regenerated.
+Local tests cover preparation identity, interruption and resumption; concealed
+statistics, observable identification and atomic effect sequences; duplicate
+sockets, effective combat and death drops; action admission; and frozen/detached
+checkpoint restoration. Affected integration suites pass 99 simulation,
+51 protocol, 87 text and 37 ASCII tests at the client-completion checkpoint.
+Subsequent AI checks pass 24 focused unit tests and 14 affected integration tests,
+including the one-search-per-decision invariant.
 
-Text commands now support equip/wear/wield, remove/unequip and drink/quaff using
-carried-item affordances and free matching anatomy sockets. Adventure commands
-use the same decisions and narrate preparation. No hidden statistic chooses an
-item or socket, and replacement requires a separate removal. The text integration
-suite passes 87 tests, the shared socket-choice test passes, and three actual
-server/client cases cover both text interfaces plus checkpoint restart. Adventure
-retains its established disclosed-order choice for indistinguishable stacks;
-direct commands provide opaque-target choices for ambiguity.
+Actual text, headless and native ASCII process tests cover equipment timing,
+removal, opaque choices, cancellation, final-unit consumption, completion
+narration, presented frames and checkpoint restart. Five AI process cases cover
+known healing, actor-specific knowledge, armor replacement, duplicate rings and
+safe one-unit pickup with the remaining stack intact. Current wire samples were
+recorded through real processes.
 
-ASCII now uses W/T/Q for equip/remove/drink through the shared client item
-choices and action validation. Equipment choices stay selectable when sockets
-are occupied so selection explains the refusal. Selections preserve disclosed
-order, ignore quantity text, and clear on cancellation, observation changes,
-control loss and disconnect. All 37 ASCII integration tests, five renderer tests
-and the native-key mapping test pass. A native keyboard process test verifies
-equipment timing, removal, cancelled potion selection, one-unit consumption and
-a presented framebuffer. The shared candidate/socket test also passes.
-
-Completion is now exposed in the observer's interaction snapshot and narrated
-through `client-common`, including noncombat equipment and consumed final units.
-Only the owning actor receives these item completions. Consecutive unchanged
-observations do not repeat narration. A lethal final-unit potion without anatomy
-still reports completion, covered by a focused simulation test. Current wire
-samples include an actual item-completion snapshot. The affected integration
-suites pass (99 simulation, 51 protocol, 87 text and 37 ASCII), followed by all
-11 focused interaction simulation cases after adding the lethal final-unit case.
-Seven shared narration tests and two server interaction tests pass.
-All four actual-client interaction process tests pass, including native ASCII
-completion narration after the final potion unit disappears and checkpoint
-restart through the server/headless client.
-
-AI now prioritizes a carried known restorative at half health or below, using the
-AI actor's own identity knowledge and accepting only wholly positive healing
-sequences. Five focused AI tests pass, including human/AI knowledge isolation,
-mixed harmful effects and healing before flight. A checkpoint integration test
-passes for active autonomous consumption and one-unit completion. Two real-server
-process tests pass for known healing/restart and leaving an unknown potion
-untouched when only the human knows it. The new `ai-interactions` fixture has a
-current validation certificate.
-
-AI chooses known gear that strictly improves its combat attributes without
-trading away attack speed, damage kinds or typed protection. It uses the actor's
-anatomy, fills free matching sockets before replacing occupied ones, and removes
-old gear through ordinary timed work before recomputing an upgrade. It avoids
-gear work while fleeing or adjacent to a visible hostile. Eight AI decision tests
-pass for healing and gear, including duplicate rings and unknown equipped items.
-Three real-server process cases pass, including completed armor replacement,
-duplicate ring sockets, unidentified gear and equipment persistence after restart.
-A simulation checkpoint test passes midway through autonomous armor removal,
-then completes removal and equips the upgrade after restoration. The existing
-many-target test still verifies one topology search per AI decision.
-
-Nearby looting considers only visible, known useful gear or a known restorative
-when none is carried. It chooses a safe candidate within three remembered route
-steps, ordered by distance and item ID, and checks both the destination and next
-step against visible hostile reach. It takes one unit and reuses the decision's
-existing route search. Five real-server AI process tests pass, including travel
-to ground armor followed by timed replacement and one-unit healing pickup with
-the remaining stack intact. Focused simulation tests cover the range, unsafe
-first-step alternatives, own-actor knowledge and one-search invariant; a
-checkpoint case preserves split quantities and avoids collecting spare healing.
-
-Next: finish performance/desktop/CI closeout.
-Active item work and equipped gear already pass frozen and detached checkpoint
-round trips, including completion after reattachment.
-
-The first PR CI run exposed certificates generated from local CRLF manifest
-bytes. Source hashing now automatically normalizes CRLF to LF in validation,
-lazy region integrity checks and in-memory construction; other source edits
-remain significant. All 35 package certificates have been regenerated. The new
-CRLF/LF regression failed before the fix and passes afterward. All 44 package
-unit tests, seven package integration tests, 17 package process tests, three
-repository certificate/reference checks and seven documentation checks pass.
-The process regression validates CRLF sources, starts from an LF checkout and
-restarts a saved game with CRLF sources. Generated package text remains LF.
+Package source hashing automatically normalizes CRLF to LF during validation,
+lazy region checks and in-memory construction. Other edits, including comments,
+still invalidate certificates; generated text uses LF. All 35 packages have
+current certificates. The regression validates CRLF sources, starts from an LF
+checkout and restarts a saved game with CRLF sources. Local package checks pass
+44 unit, seven integration, 17 process and three certificate/reference tests.
 
 ## Closeout evidence
 
-The release comparison against PR #87 (`28c5932`) measured feature commit
-`98bc012` in three interleaved baseline/current rounds, with all 30 runs passing
+The release comparison against the accepted architecture baseline used three
+interleaved baseline/adapted rounds, with all 30 runs passing
 their respective validators. Item and client display tables were expanded from
 the SHA-verified retained samples to include their actual measured groups.
 The machine fingerprint is `6a1878811f37`: i7-9750H, 15.8 GiB RAM, Windows 11
@@ -168,26 +107,32 @@ by 11,625 bytes per round in each case; the large item case's disclosed total
 rises from 5,008,820 to 5,348,820 bytes and its saved total from 18,513,920 to
 21,053,440 bytes. Combat save totals also increase, while the small item case's
 saved total decreases. No timings or byte-size targets are relaxed. Raw samples
-remain outside Git pending maintainer approval for measurement publication.
+are published as [performance release assets](https://github.com/KCall360/thresholds-of-ruin/releases/tag/perf-4f-adaptation-20261008).
+Twelve baseline/adapted headline records are in the
+[performance ledger](performance-harness.md#performance-ledger), with exact asset
+hashes verified against downloaded copies. Raw samples remain outside Git.
 
 Release binaries for the server, scenario utility, text, ASCII and headless
-clients were rebuilt at `4d44627`. The existing three desktop shortcuts were
+clients were rebuilt for the current implementation. The existing three desktop shortcuts were
 updated from the old checkout to the current workspace. All three pass actual
 connection and output checks; ASCII reports presented frames, and the combined
 launcher confirms a read-only spectator with a separate credential. Each launch
 creates and retains a fresh save, preserves prior save hashes and cleans up its
 own processes. Credentials, saves and launcher helper scripts remain outside Git.
-The focused 16-region memory streaming comparison at `4d44627` also passes all
+The focused 16-region memory streaming comparison after source-hash normalization
+also passes all
 six runs in three interleaved rounds. For 2,100 authoritative intervals per side,
 baseline p50/p95/max is 0.221/0.378/0.623 ms and adapted is
 0.217/0.376/0.602 ms. Operation counts are unchanged; sent-envelope totals rise
 from 1,250,079 to 1,252,254 bytes per round. An earlier unsupported 8-region
 invocation was rejected on both sides before measurements; its six failed runs
 are retained separately and excluded from these findings.
-Final CI is still pending in
-[PR #88](https://github.com/KCall360/thresholds-of-ruin/pull/88).
-The release CI run also identified an obsolete version-22 positive save-schema
-fixture. Current version-24 metadata is now captured from the production writer,
+Final Windows/Linux debug/release CI remains pending. Synthetic relay item
+fixtures include the current physical-class field, so recovery tests reach their
+intended quantity, uniqueness and retained-size checks. The focused text-client
+process regression failed before this correction; all 20 affected stream recovery
+process and relay tests pass afterward, with their repair assertions intact.
+Current saved scenario metadata is captured from the production writer,
 including interaction and AI packages, and checked against its fixed golden
 fixture. The old package records remain rejection cases. All 251 server unit
 tests pass locally after this update; no compatibility reader was introduced.
