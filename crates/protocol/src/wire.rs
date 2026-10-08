@@ -235,7 +235,7 @@ pub enum Action {
 }
 
 /// Offset in the backend-resolved observer frame, never a world coordinate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct Position {
     pub x: i32,
     pub y: i32,

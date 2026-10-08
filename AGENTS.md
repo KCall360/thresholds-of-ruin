@@ -703,8 +703,26 @@ output, and byte leases survive until socket destruction. Two real-TCP behaviora
 regressions failed first, then passed; the old drain loop also fails the deadline
 regression. Final transport units passed; 236 server units, seventeen WebSocket
 integrations and nineteen actual-process cases passed before the last drain
-cleanup. Full final debug and both-platform CI are required before publication,
-merge or deployment. Original deadlines and pressure/recovery assertions remain.
+cleanup. The published 1d59f3e checkpoint completed architecture, strict docs and
+949 Rust tests; 303 Python/application tests passed and LockApp covered the one
+native mouse target. The maintainer's existing mouse waiver applies locally;
+the failure is retained and full CI still includes the test. Windows debug/release
+and Linux release have passed; Linux debug and final CI completion remain pending.
+Original deadlines and pressure/recovery assertions remain.
 PR #80 is merged and its separately verified immutable desktop build is active;
 the PR #81 candidate remains inactive. Broader compiler references, measured
 performance tails and the final requirements audit remain in scope.
+
+**Disclosed occurrence validation (in development).** Unordered occurrence checks
+use transient hash membership while canonical views retain the ordered scan.
+No table iteration determines public or simulation ordering. The ordering-work
+regression failed first, then both key-work tests, all 72 protocol and 78 shared-
+client tests, fifteen actual recovery process cases and workspace Clippy passed.
+The new actual-client cases cover duplicate1,000item inventories; the existing
+items performance workload primarily covers ground items. Twelve release runs
+validated unchanged counts and sizes, with about 5.6% lower client-application
+p95 in that disclosure workload; other tails increased. See the complete table
+and limits in the refactor plan. The measured commit is preserved. The combined boundary-validation checkpoint
+retains that protocol implementation and adds compiler and transport changes;
+recorded timings characterize the original comparison, not these later server
+changes. Final combined publication verification remains pending.

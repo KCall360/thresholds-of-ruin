@@ -1,6 +1,6 @@
 //! Structural invariants of a disclosed state, independent of world topology.
 use crate::StateView;
-use std::collections::BTreeSet;
+use std::{collections::HashSet, hash::Hash};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvalidState {
@@ -17,12 +17,13 @@ pub enum InvalidState {
 }
 
 // Canonically ordered collections need no allocation. Unordered full views
-// remain valid, but still require distinct occurrences.
-fn unique<T: Ord>(values: impl Iterator<Item = T> + Clone) -> bool {
+// remain valid, but still require distinct occurrences. Hash tables are used
+// only for membership; their iteration order never affects validation or state.
+fn unique<T: Ord + Hash>(values: impl Iterator<Item = T> + Clone) -> bool {
     let mut previous = None;
     for value in values.clone() {
         if previous.as_ref().is_some_and(|before| before >= &value) {
-            let mut seen = BTreeSet::new();
+            let mut seen = HashSet::with_capacity(values.size_hint().0);
             return values.into_iter().all(|value| seen.insert(value));
         }
         previous = Some(value);
@@ -68,7 +69,7 @@ impl StateView {
             return Err(InvalidState::InvalidItem);
         }
         if !o.inventory.is_empty() && !o.ground_items.is_empty() {
-            let carried: BTreeSet<_> = o.inventory.iter().map(|item| item.id).collect();
+            let carried: HashSet<_> = o.inventory.iter().map(|item| item.id).collect();
             if o.ground_items
                 .iter()
                 .any(|item| carried.contains(&item.item.id))
@@ -97,5 +98,88 @@ impl StateView {
             return Err(InvalidState::StateTooLarge);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique;
+    use crate::ItemTarget;
+    use std::{
+        cell::Cell,
+        cmp::Ordering,
+        hash::{Hash, Hasher},
+    };
+
+    #[derive(Clone, Copy)]
+    struct CountedKey<'a> {
+        id: ItemTarget,
+        comparisons: &'a Cell<usize>,
+        hashes: &'a Cell<usize>,
+    }
+
+    impl PartialEq for CountedKey<'_> {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
+        }
+    }
+    impl Eq for CountedKey<'_> {}
+    impl PartialOrd for CountedKey<'_> {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for CountedKey<'_> {
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.comparisons.set(self.comparisons.get() + 1);
+            self.id.cmp(&other.id)
+        }
+    }
+    impl Hash for CountedKey<'_> {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.hashes.set(self.hashes.get() + 1);
+            self.id.hash(state);
+        }
+    }
+
+    fn keys<'a>(comparisons: &'a Cell<usize>, hashes: &'a Cell<usize>) -> Vec<CountedKey<'a>> {
+        (0..1_000_u64)
+            .map(|id| {
+                let mut digest = [0; 32];
+                digest[24..].copy_from_slice(&id.to_be_bytes());
+                CountedKey {
+                    id: ItemTarget::from_digest(digest),
+                    comparisons,
+                    hashes,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unordered_opaque_uniqueness_does_linear_ordering_work() {
+        let comparisons = Cell::new(0);
+        let hashes = Cell::new(0);
+        let mut values = keys(&comparisons, &hashes);
+        values.reverse();
+        assert!(unique(values.iter().copied()));
+        assert!(
+            comparisons.get() <= values.len() * 2,
+            "unordered identities repeated ordering work: {} comparisons for {} keys",
+            comparisons.get(),
+            values.len()
+        );
+        values.push(values[values.len() / 2]);
+        assert!(!unique(values.iter().copied()));
+    }
+
+    #[test]
+    fn canonical_opaque_uniqueness_keeps_its_hash_free_fast_path() {
+        let comparisons = Cell::new(0);
+        let hashes = Cell::new(0);
+        let values = keys(&comparisons, &hashes);
+        assert!(unique(values.iter().copied()));
+        assert!(comparisons.get() <= values.len());
+        assert_eq!(hashes.get(), 0);
     }
 }
