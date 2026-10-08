@@ -38,8 +38,8 @@ actor rather than its combat state, preserving existing attack behavior and
 saved intention identity. Generalized preparation, anatomy-based equipment and
 shared immediate healing/damage effects are now implemented in the simulation,
 server, authoring and transport boundaries. Text and ASCII controls now use shared
-client item checks. AI known healing is implemented; gear replacement and nearby
-looting remain outstanding.
+client item checks. AI known healing and gear replacement are implemented;
+safe nearby looting remains outstanding.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -108,7 +108,19 @@ process tests pass for known healing/restart and leaving an unknown potion
 untouched when only the human knows it. The new `ai-interactions` fixture has a
 current validation certificate.
 
-Next: adapt AI gear replacement and safe nearby looting, then finish
+AI chooses known gear that strictly improves its combat attributes without
+trading away attack speed, damage kinds or typed protection. It uses the actor's
+anatomy, fills free matching sockets before replacing occupied ones, and removes
+old gear through ordinary timed work before recomputing an upgrade. It avoids
+gear work while fleeing or adjacent to a visible hostile. Eight AI decision tests
+pass for healing and gear, including duplicate rings and unknown equipped items.
+Three real-server process cases pass, including completed armor replacement,
+duplicate ring sockets, unidentified gear and equipment persistence after restart.
+A simulation checkpoint test passes midway through autonomous armor removal,
+then completes removal and equips the upgrade after restoration. The existing
+many-target test still verifies one topology search per AI decision.
+
+Next: adapt safe nearby looting, then finish
 performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.

@@ -139,6 +139,11 @@ impl Game {
                 return Some((Action::Drink { item: item.id }, ai));
             }
         }
+        if ai.state != State::Flee && !self.exposed_to_visible_hostile(id, view.location, &view) {
+            if let Some(action) = self.choose_gear(id, &view) {
+                return Some((action, ai));
+            }
+        }
         if ai.state == State::Flee {
             let (_, threat, _) = ai.target.unwrap();
             let current = route(threat).map_or(0, |r| r.len());
@@ -338,6 +343,110 @@ mod tests {
         let (action, ai) = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.state, State::Flee);
         assert_eq!(action, Action::Attack { target: ActorId(1) });
+    }
+
+    fn ring(game: &mut Game, item: u64, defense: i32, concealed: bool) {
+        let mut spec = crate::ItemSpec::ordinary(format!("ring-{item}"));
+        spec.class = crate::ItemClass::Ring;
+        spec.concealed = concealed;
+        spec.appearance = "silver ring".into();
+        spec.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::Ring,
+            attack: None,
+            defense,
+            reductions: BTreeMap::new(),
+        });
+        game.place_item_stack(item, at(1, 2, 1), Some(ActorId(2)), 1, spec)
+            .unwrap();
+    }
+
+    #[test]
+    fn equipment_uses_duplicate_anatomy_sockets_and_only_the_ais_known_stats() {
+        let mut game = fixture();
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.configure_anatomy(
+            ActorId(2),
+            crate::AnatomySpec {
+                slots: vec![crate::EquipmentSlot::Ring; 2],
+            },
+        )
+        .unwrap();
+        ring(&mut game, 10, 1, false);
+        ring(&mut game, 11, 2, false);
+        ring(&mut game, 12, 3, true);
+        game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
+            .unwrap();
+        let expected = Action::Equip {
+            item: crate::ItemId(11),
+            slot: crate::EquipmentSlotId(1),
+        };
+        assert_eq!(game.choose_ai(ActorId(2)).unwrap().0, expected);
+        game.identify_item(ActorId(1), crate::ItemId(12)).unwrap();
+        assert_eq!(game.choose_ai(ActorId(2)).unwrap().0, expected);
+        game.identify_item(ActorId(2), crate::ItemId(12)).unwrap();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::Equip {
+                item: crate::ItemId(12),
+                slot: crate::EquipmentSlotId(1)
+            }
+        );
+    }
+
+    #[test]
+    fn gear_removal_chooses_an_upgrade_and_does_not_reequip_the_dominated_old_item() {
+        let mut game = fixture();
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        game.configure_anatomy(
+            ActorId(2),
+            crate::AnatomySpec {
+                slots: vec![crate::EquipmentSlot::Ring],
+            },
+        )
+        .unwrap();
+        ring(&mut game, 10, 1, false);
+        ring(&mut game, 11, 2, false);
+        game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
+            .unwrap();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::Unequip {
+                item: crate::ItemId(10)
+            }
+        );
+        game.actors.get_mut(&ActorId(2)).unwrap().equipment.clear();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::Equip {
+                item: crate::ItemId(11),
+                slot: crate::EquipmentSlotId(0)
+            }
+        );
+    }
+
+    #[test]
+    fn gear_work_does_not_replace_unknown_equipment_or_start_beside_a_visible_hostile() {
+        let mut game = fixture();
+        game.configure_anatomy(
+            ActorId(2),
+            crate::AnatomySpec {
+                slots: vec![crate::EquipmentSlot::Ring],
+            },
+        )
+        .unwrap();
+        ring(&mut game, 10, 1, true);
+        ring(&mut game, 11, 2, false);
+        game.equip_authored(ActorId(2), crate::ItemId(10), crate::EquipmentSlotId(0))
+            .unwrap();
+        assert_eq!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        assert!(!matches!(
+            game.choose_ai(ActorId(2)).unwrap().0,
+            Action::Unequip { .. } | Action::Equip { .. }
+        ));
     }
 
     #[test]

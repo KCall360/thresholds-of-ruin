@@ -15,6 +15,37 @@ appearance_pool = "potions"
 stackable = true
 consumable = { effects = [{ type = "heal", amount = 10 }] }
 
+[archetypes.old_mail]
+class = "armor"
+name = "old mail"
+equipment = { slot = "body_armor", defense = 1 }
+
+[archetypes.mail]
+class = "armor"
+name = "mail"
+equipment = { slot = "body_armor", defense = 3 }
+
+[archetypes.old_ring]
+class = "ring"
+name = "old ring"
+equipment = { slot = "ring", defense = 2 }
+
+[archetypes.ring]
+class = "ring"
+name = "ring"
+equipment = { slot = "ring", defense = 3 }
+
+[archetypes.hidden_ring]
+class = "ring"
+name = "ring of protection"
+identity = "protection"
+appearance_pool = "rings"
+equipment = { slot = "ring", defense = 5 }
+
+[appearance_pools.rings]
+appearances = ["silver ring"]
+confounding = true
+
 [appearance_pools.potions]
 appearances = ["red potion"]
 confounding = true

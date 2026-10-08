@@ -6,6 +6,7 @@
 mod actions;
 mod actor_store;
 pub mod ai;
+mod ai_items;
 pub mod combat;
 mod intention;
 pub use intention::{

@@ -588,7 +588,7 @@ impl Game {
         })
     }
 
-    fn melee_neighbor(
+    pub(crate) fn melee_neighbor(
         &self,
         from: tor_world::Location,
         delta: [i64; 3],

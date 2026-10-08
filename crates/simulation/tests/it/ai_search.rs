@@ -71,6 +71,106 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
 }
 
 #[test]
+fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_upgrade() {
+    use tor_simulation::{
+        checkpoint::SharedState, AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
+        ItemClass, ItemId, ItemSpec,
+    };
+    let mut game = Game::two_room(42);
+    let at = |x| Location {
+        region: RegionId(1),
+        position: Position { x, y: 1, z: 0 },
+    };
+    let human = game
+        .spawn_actor(at(1), NonZeroU64::new(50).unwrap())
+        .unwrap();
+    let ai = game
+        .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    game.configure_ai(ai, AiProfile::default()).unwrap();
+    game.configure_anatomy(
+        ai,
+        AnatomySpec {
+            slots: vec![EquipmentSlot::BodyArmor],
+        },
+    )
+    .unwrap();
+    for (id, defense) in [(10, 1), (11, 3)] {
+        let mut item = ItemSpec::ordinary(format!("mail {id}"));
+        item.class = ItemClass::Armor;
+        item.equipment = Some(EquipmentSpec {
+            slot: EquipmentSlot::BodyArmor,
+            attack: None,
+            defense,
+            reductions: BTreeMap::new(),
+        });
+        game.place_item_stack(id, at(2), Some(ai), 1, item).unwrap();
+    }
+    game.equip_authored(ai, ItemId(10), EquipmentSlotId(0))
+        .unwrap();
+    game.refresh_navigation();
+    game.act(human, Action::Wait).unwrap();
+    assert_eq!(
+        game.next_ai_action(),
+        Some((ai, Action::Unequip { item: ItemId(10) }))
+    );
+    game.admit_ai_intention(ai).unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    assert!(game.preparation(ai).is_some());
+    assert_eq!(game.equipment(ai).unwrap()[&EquipmentSlotId(0)], ItemId(10));
+    let mut shared = SharedState::default();
+    let snapshot =
+        serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
+            .unwrap();
+    let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    assert_eq!(restored.preparation(ai), game.preparation(ai));
+    for _ in 0..16 {
+        if restored.preparation(ai).is_none() {
+            break;
+        }
+        restored
+            .act(restored.next_actor().unwrap(), Action::Wait)
+            .unwrap();
+    }
+    assert!(restored.preparation(ai).is_none());
+    assert!(restored.equipment(ai).unwrap().is_empty());
+    for _ in 0..4 {
+        if restored.next_actor() == Some(ai) {
+            break;
+        }
+        restored.act(human, Action::Wait).unwrap();
+    }
+    assert_eq!(
+        restored.next_ai_action(),
+        Some((
+            ai,
+            Action::Equip {
+                item: ItemId(11),
+                slot: EquipmentSlotId(0)
+            }
+        ))
+    );
+    restored.admit_ai_intention(ai).unwrap();
+    restored.execute_next_intention().unwrap().outcome.unwrap();
+    assert!(restored.equipment(ai).unwrap().is_empty());
+    for _ in 0..16 {
+        if restored.preparation(ai).is_none() {
+            break;
+        }
+        restored
+            .act(restored.next_actor().unwrap(), Action::Wait)
+            .unwrap();
+    }
+    assert!(restored.preparation(ai).is_none());
+    assert_eq!(
+        restored.equipment(ai).unwrap()[&EquipmentSlotId(0)],
+        ItemId(11)
+    );
+}
+
+#[test]
 fn a_many_target_decision_uses_one_remembered_topology_search() {
     let mut world = World::new(vec![], vec![]).unwrap();
     world
