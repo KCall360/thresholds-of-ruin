@@ -675,6 +675,18 @@ other format axes are unchanged. Portable export is documented as a future
 contract in [checkpoints](docs/checkpoints.md); no export or scripting runtime is
 implemented. All remaining compiler/performance/final-audit obligations stay open.
 
+**Catalog reference provenance (in development).** Six actual-validator cases
+failed first for combat factions, faction enemies, asset-theme keys and authored
+default character. Existing parser spans now cover unique decoded values and
+terminal keys; ambiguous/stale source has no guessed coordinates. Combat attribute
+precedence and failure-only source acquisition are tested. Explicit CLI selections
+are not attributed to the manifest default, including an identical invalid ID.
+Forty scenario/diagnostic units, seven integrations, sixteen actual scenario cases,
+workspace Clippy and Python lint passed. Empty faction catalogs and zone-local
+themes remain valid. Combine this with the preserved disclosure optimization for
+one final publication gate; transport PR #81 remains at its separately tested
+1d59f3e head under fresh CI. No format or scripting runtime change.
+
 **Scenario reference paths (in development).** Typed parser traversal now covers
 root/table fields, array entries and numeric references using the existing
 failure-only provenance owner. Nine actual-validator failures reproduced first;

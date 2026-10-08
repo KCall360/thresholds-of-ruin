@@ -997,7 +997,7 @@ pub fn load(
     };
     package.selected = selected.unwrap_or(package.manifest.default_character);
     // Cheap identity/capability checks; full geometry proof belongs to the utility.
-    package.check_identity()?;
+    package.check_identity_with_origin(selected.is_none().then_some(Origin::Manifest))?;
     package.supported()?;
     Ok(Scenario {
         seed,
@@ -1232,6 +1232,10 @@ impl Package {
     }
 
     pub(crate) fn check_identity(&self) -> Result<(), Failure> {
+        self.check_identity_with_origin(Some(Origin::Manifest))
+    }
+
+    fn check_identity_with_origin(&self, origin: Option<Origin<'_>>) -> Result<(), Failure> {
         require(
             self.manifest.ruleset == RULESET
                 && self.certificate.ruleset == RULESET
@@ -1249,19 +1253,35 @@ impl Package {
                 .any(|c| c.id == self.selected),
             "Unknown selected character ID",
         )
+        .map_err(|failure| match origin {
+            Some(origin) => origin.reference_path(
+                failure,
+                self.manifest_text.as_deref(),
+                &[PathSegment::Field("default_character")],
+                ReferenceValue::Id(self.selected),
+            ),
+            None => failure,
+        })
     }
     fn supported(&self) -> Result<(), Failure> {
         for (faction, enemies) in &self.manifest.factions {
-            require(
-                label(faction)
-                    && enemies
-                        .iter()
-                        .all(|e| self.manifest.factions.contains_key(e)),
-                "Invalid faction relationship",
-            )
-            .map_err(|failure| {
-                in_declaration(failure, format!("scenario.toml: faction {faction:?}"))
-            })?;
+            let origin = Origin::Faction(faction);
+            require(label(faction), "Invalid faction relationship")
+                .map_err(|failure| origin.context(failure))?;
+            for enemy in enemies {
+                require(
+                    self.manifest.factions.contains_key(enemy),
+                    "Invalid faction relationship",
+                )
+                .map_err(|failure| {
+                    origin.reference_path(
+                        failure,
+                        self.manifest_text.as_deref(),
+                        &[PathSegment::UniqueValue(ReferenceValue::Text(enemy))],
+                        ReferenceValue::Text(enemy),
+                    )
+                })?;
+            }
         }
         for (name, profile) in &self.manifest.ai_profiles {
             require(
@@ -1274,30 +1294,42 @@ impl Package {
         }
         for character in &self.manifest.characters {
             if let Some(spec) = &character.combat {
-                self.check_combat(spec).map_err(|failure| {
-                    in_declaration(
-                        failure,
-                        format!("scenario.toml: character {}", character.id),
-                    )
+                self.check_combat(spec, Origin::Character(character.id), || {
+                    self.manifest_text.clone()
                 })?;
             }
         }
         for (name, archetype) in &self.manifest.archetypes {
             if let Some(spec) = &archetype.combat {
-                self.check_combat(spec).map_err(|failure| {
-                    in_declaration(failure, format!("scenario.toml: archetype {name:?}"))
-                })?;
+                self.check_combat(spec, Origin::Archetype(name), || self.manifest_text.clone())?;
             }
         }
         Ok(())
     }
-    fn check_combat(&self, spec: &CombatSpec) -> Result<(), Failure> {
+    fn check_combat(
+        &self,
+        spec: &CombatSpec,
+        origin: Origin<'_>,
+        source: impl FnOnce() -> Option<Arc<str>>,
+    ) -> Result<(), Failure> {
         require(
-            tor_simulation::combat::CombatSpec::from(spec.clone()).valid()
-                && (self.manifest.factions.is_empty()
-                    || self.manifest.factions.contains_key(&spec.faction)),
+            tor_simulation::combat::CombatSpec::from(spec.clone()).valid(),
             "Invalid combat attributes or faction",
         )
+        .map_err(|failure| origin.context(failure))?;
+        require(
+            self.manifest.factions.is_empty() || self.manifest.factions.contains_key(&spec.faction),
+            "Invalid combat attributes or faction",
+        )
+        .map_err(|failure| {
+            let source = source();
+            origin.reference_path(
+                failure,
+                source.as_deref(),
+                &[PathSegment::Field("combat"), PathSegment::Field("faction")],
+                ReferenceValue::Text(&spec.faction),
+            )
+        })
     }
     fn anchors(&self) -> Result<BTreeMap<String, Location>, Failure> {
         let mut anchors = BTreeMap::new();
@@ -1381,7 +1413,15 @@ impl Package {
             require(
                 known_themes.contains(theme),
                 format!("Assets for unknown theme {theme}"),
-            )?;
+            )
+            .map_err(|failure| {
+                Origin::Manifest.reference_path(
+                    failure,
+                    self.manifest_text.as_deref(),
+                    &[PathSegment::Field("assets"), PathSegment::Key(theme)],
+                    ReferenceValue::Text(theme),
+                )
+            })?;
         }
         let identities: BTreeSet<_> = self
             .manifest
@@ -1625,19 +1665,18 @@ impl Package {
                 })?;
             }
         }
+        let actor_file = self
+            .index
+            .region(r.id)
+            .map(|entry| entry.file.as_str())
+            .unwrap_or("generated region");
         for a in &r.actors {
-            let contextualize = |failure| {
-                let file = self.index.region(r.id).map(|entry| entry.file.as_str());
-                in_declaration(
-                    failure,
-                    format!(
-                        "{}: region {}, actor {}",
-                        file.unwrap_or("generated region"),
-                        r.id,
-                        a.id
-                    ),
-                )
+            let origin = Origin::Actor {
+                file: actor_file,
+                region: r.id,
+                id: a.id,
             };
+            let contextualize = |failure| origin.context(failure);
             require(
                 matches!(a.controller.as_str(), "external" | "ai")
                     && (a.controller == "ai") == a.ai.is_some()
@@ -1646,7 +1685,7 @@ impl Package {
             )
             .map_err(contextualize)?;
             if let Some(spec) = &a.combat {
-                self.check_combat(spec).map_err(contextualize)?;
+                self.check_combat(spec, origin, || self.region_text(r.id).ok())?;
             }
         }
         Ok(())
@@ -2486,6 +2525,47 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combat_diagnostic_source_is_acquired_only_for_catalog_failure() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/generated-filler");
+        let package = read_package(&root).unwrap();
+        let spec = package.manifest.characters[0].combat.as_ref().unwrap();
+        let origin = Origin::Character(1);
+        package
+            .check_combat(spec, origin, || {
+                panic!("valid combat must not acquire source")
+            })
+            .unwrap();
+        let mut missing = spec.clone();
+        missing.faction = "missing".into();
+        let mut invalid = missing.clone();
+        invalid.max_hp = 0;
+        let failure = package
+            .check_combat(&invalid, origin, || {
+                panic!("attribute failure precedes source acquisition")
+            })
+            .unwrap_err();
+        assert!(failure.message.contains("combat attributes"));
+        let reads = std::cell::Cell::new(0);
+        let failure = package
+            .check_combat(&missing, origin, || {
+                reads.set(reads.get() + 1);
+                None
+            })
+            .unwrap_err();
+        assert_eq!(reads.get(), 1);
+        assert!(failure.message.contains("scenario.toml: character 1"));
+        assert!(failure.message.contains("combat attributes or faction"));
+        let mut empty = package.clone();
+        empty.manifest.factions.clear();
+        empty
+            .check_combat(&missing, origin, || {
+                panic!("empty faction catalog permits valid combat")
+            })
+            .unwrap();
+    }
 
     #[test]
     fn stored_scenario_encoding_borrows_definitions_without_region_acquisition() {

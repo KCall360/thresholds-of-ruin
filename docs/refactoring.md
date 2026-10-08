@@ -2843,6 +2843,24 @@ samples remain local and no release assets or performance-ledger entries were
 published. The compared Rust and benchmark inputs precede only the documentation
 of these results.
 
+**Catalog reference provenance (in development).** Six failing-first actual-validator
+cases reproduced missing source locations for character/archetype/actor combat
+factions, faction enemies, asset-theme keys and the authored default character.
+The existing diagnostic owner now selects unique decoded array values and terminal
+table-key spans. Faction validation retains its sorted semantic order while source
+selection follows the authored occurrence. Ambiguous or stale values receive no
+invented coordinates. Combat attribute validation still precedes faction lookup,
+and diagnostic source is acquired only after a catalog failure. Explicit CLI
+character selection retains its own error without blaming the manifest default,
+even when both select the same invalid ID. No diagnostic state is persisted.
+
+Forty scenario/diagnostic units, seven scenario integrations and sixteen actual
+scenario cases passed, alongside workspace Clippy and Python lint. Controls retain
+empty faction catalogs and zone-local asset themes. The old generic faction-error
+assertion now requires its exact authored location and still checks that validation
+rewrites no files. Final combined validation checkpoint and both-platform CI remain
+required; this increment does not close the performance or completion audit.
+
 **Scenario reference paths (in development).** Nine failing-first actual-validator
 cases reproduced missing locations for portal destinations, character item
 identities, objective anchors/items, region zones, generator actor/item archetypes,
