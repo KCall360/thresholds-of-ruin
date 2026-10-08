@@ -2,7 +2,8 @@
 //! Planning never reads current terrain or undiscovered topology.
 use crate::navigation_map::RegionMap;
 use crate::{movement_cost, ActorId, Game, GameError};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::hash::{BuildHasherDefault, DefaultHasher};
 use tor_world::{Direction, Location, Position};
 
 const DIRECTIONS: [Direction; 6] = [
@@ -184,7 +185,9 @@ impl Game {
         self.refresh_places(id, scene);
         let knowledge = self.navigation.entry(id).or_default();
         let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
-        let projected: BTreeSet<_> = scene
+        // Membership only: scene traversal and saved knowledge remain ordered.
+        // A fixed hasher avoids ambient seeds in deterministic simulation.
+        let projected: HashSet<_, BuildHasherDefault<DefaultHasher>> = scene
             .iter()
             .filter(|c| !c.wall)
             .map(|c| (c.location, c.offset, c.rotation))
@@ -428,6 +431,89 @@ mod refresh_tests {
     use crate::Action;
     use std::num::NonZeroU64;
     use tor_world::RegionId;
+
+    #[test]
+    fn dense_rotated_navigation_matches_full_scan_and_preserves_old_boundaries() {
+        for cells in [2, 8] {
+            let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+            world
+                .add_chamber(tor_world::Region {
+                    id: RegionId(1),
+                    name: "dense-navigation".into(),
+                    bounds: tor_world::Extent::new(32, 8, 8).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            let actors: Vec<_> = (0..8)
+                .map(|n| {
+                    let actor = game
+                        .spawn_actor(
+                            Location {
+                                region: RegionId(1),
+                                position: Position {
+                                    x: 2 + n * 3,
+                                    y: 3,
+                                    z: 3,
+                                },
+                            },
+                            NonZeroU64::new(100).unwrap(),
+                        )
+                        .unwrap();
+                    game.set_body(
+                        actor,
+                        crate::BodySpec {
+                            cells: if cells == 2 {
+                                vec![[0, 0, 0], [0, 0, 1]]
+                            } else {
+                                (0..2)
+                                    .flat_map(|x| {
+                                        (0..2).flat_map(move |y| (0..2).map(move |z| [x, y, z]))
+                                    })
+                                    .collect()
+                            },
+                            eye: [0, 0, 1],
+                            mass: 80,
+                        },
+                    )
+                    .unwrap();
+                    actor
+                })
+                .collect();
+            for frame in [0, 5, 12, 23] {
+                let old = game.clone();
+                let old_navigation = old.navigation.clone();
+                for &actor in &actors {
+                    game.actors.get_mut(&actor).unwrap().orientation = frame;
+                }
+                let mut reference = game.clone();
+                reference.reference_refresh_navigation();
+                game.refresh_navigation();
+                assert_eq!(
+                    game.navigation, reference.navigation,
+                    "cells {cells}, frame {frame}"
+                );
+                assert_eq!(old.navigation, old_navigation);
+                for &actor in &actors {
+                    let destinations: Vec<_> = game.known_cells(actor).collect();
+                    assert!(!destinations.is_empty());
+                    for index in [0, destinations.len() / 2, destinations.len() - 1] {
+                        let destination = destinations[index];
+                        assert_eq!(
+                            game.travel_route(actor, destination),
+                            reference.travel_route(actor, destination),
+                            "cells {cells}, frame {frame}, actor {actor:?}"
+                        );
+                    }
+                }
+                let before = game.navigation.clone();
+                game.refresh_navigation();
+                assert_eq!(
+                    game.navigation, before,
+                    "repeated refresh must be idempotent"
+                );
+            }
+        }
+    }
 
     #[test]
     fn shared_search_matches_fresh_routes_across_target_orders_and_frames() {
