@@ -2796,7 +2796,7 @@ passed 33 real-client/copied-validator checks without rebuilding. All three
 launchers now use it; post-activation source, binary, backup and shortcut hashes
 were verified. Earlier builds and saves remain preserved.
 
-**Save scenario ownership (in development).** Actual-process regressions proved
+**Save scenario ownership (merged, PR #80).** Actual-process regressions proved
 that the stored package index accepted duplicate anchor-map keys and omitted
 canonical nullable fields. Save-owned schemas now explicitly map scenario,
 fixture actor/coordinate, streaming, package, nested manifest/certificate and
@@ -2809,7 +2809,12 @@ shapes. Golden-format and malformed-index unit checks passed, and all 28 actual
 save/scenario/streaming process checks passed, including the failing-first cases.
 Eight schema units, the borrowed-encoding check, five checkpoint, twelve package-
 pinning and seven scenario integrations, and workspace Clippy passed. Targeted
-release comparison passed; publication verification remains pending.
+release comparison passed. [PR #80](https://github.com/KCall360/thresholds-of-ruin/pull/80)
+merged as `7da6393` after all nine exact-head Windows/Linux CI jobs passed on
+`a6ae97b`. The full local debug gate passed 305 Python/application and 940 Rust
+tests on 546 unchanged inputs, without a waiver. Its immutable desktop build
+passed 34 copied-binary checks before activation; source, binary, backup and
+shortcut hashes were independently verified afterward.
 Save 22 and all other format axes are unchanged. The portable export contract is
 [documented separately](checkpoints.md#portable-export-contract-design); its
 container, compression and commands are not implemented. Further compiler,
@@ -2848,6 +2853,14 @@ order and lazy source acquisition are retained; stale, unavailable or ambiguous
 source has no invented coordinates. Objective anchor and item errors now identify
 the failing field separately. All 36 scenario unit tests, seven scenario
 integrations, twelve actual scenario process tests and workspace all-target Clippy
-passed. Full publication verification remains pending. No format axis changed.
-Broader compiler ownership, measured performance and final requirements audit
-remain open; this increment does not close the entire refactor.
+passed. The full local debug gate passed 306 Python/application and 943 Rust
+tests on 546 unchanged inputs without a waiver. PR #81 remains open: Linux debug
+CI observed timely server socket closure but the stalled client failed to exit
+within the unchanged 20-second drain bound. A fixed, bounded 64 KiB relay receive
+buffer now replaces the tiny initial buffer and later Linux window adjustment;
+its capacity is included in the pressure workload. An actual-socket regression
+checks sender backpressure and delivery to natural EOF. This changes test setup,
+not production queue sizes or disconnect policy. The earlier CI failure remains
+retained; fresh local verification and both-platform CI are required before merge.
+No format axis changed. Broader compiler ownership, measured performance and final
+requirements audit remain open; this increment does not close the entire refactor.

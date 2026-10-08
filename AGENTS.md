@@ -680,6 +680,12 @@ root/table fields, array entries and numeric references using the existing
 failure-only provenance owner. Nine actual-validator failures reproduced first;
 36 scenario units, seven scenario integrations, twelve actual-process tests and
 workspace Clippy passed. Validation precedence, lazy acquisition and unavailable-
-source behavior remain intact. Full publication verification and both-platform CI
-remain pending. The preceding save-schema PR is separately under CI with an
-inactive verified desktop candidate; do not deploy this subsequent branch as it.
+source behavior remain intact. PR #81 passed the full local debug gate (306
+Python/application and 943 Rust tests), but Linux CI failed while the stalled
+client drained after timely server socket closure. The relay now uses one fixed,
+bounded receive capacity, counted in pressure workload, without changing TCP
+options during drain. Server/client deadlines and recovery assertions remain.
+Fresh verification and both-platform CI are required before merge or deployment.
+PR #80 is merged and its separately verified immutable desktop build is active;
+the PR #81 candidate remains inactive. Broader compiler references, measured
+performance tails and the final requirements audit remain in scope.

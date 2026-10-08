@@ -188,10 +188,13 @@ steps before control acquisition; it never restarts a journey implicitly.
   On Linux, the test first identifies the spectator's exact server socket by
   endpoint and process-owned inode, then keeps reads paused until the server
   releases that socket within the existing stall/I/O deadline. This separates
-  server disconnection from draining unread TCP data. Before draining, the relay
-  restores a normal receive buffer; the artificial small window is needed only
-  while applying pressure. The actual client must still exit within its existing
-  deadline. The stall timeout is unchanged. The small-byte-budget variant also verifies
+  server disconnection from draining unread TCP data. The relay uses a fixed,
+  bounded 64 KiB receive buffer throughout pressure and drain; that capacity is
+  included in the pressure byte bound. Releasing its read gate changes no TCP
+  options. Tiny pre-connect buffers can constrain Linux's initial receive
+  threshold even after a later buffer/window increase. A separate actual-socket
+  test proves both sender backpressure and complete delivery to natural EOF.
+  The actual client must still exit within its existing deadline. The stall timeout is unchanged. The small-byte-budget variant also verifies
   durable save and restart recovery. The travel, adventure, dungeon and stream
   recovery suites also run against the new server.
 
