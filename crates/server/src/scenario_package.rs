@@ -17,7 +17,7 @@ mod diagnostics;
 mod instantiation;
 pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
 use compiler::PreparedDefinitions;
-use instantiation::Origin;
+use diagnostics::Origin;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tor_simulation::Game;
@@ -1194,7 +1194,7 @@ impl Package {
                         key,
                     )
                 })?;
-                assets.extend(self.item_asset(archetype));
+                assets.extend(compiler::item_asset(archetype, &self.manifest).map(str::to_owned));
             }
         }
         for key in r
@@ -1202,17 +1202,12 @@ impl Package {
             .iter()
             .flat_map(|g| g.items.iter().flat_map(|p| &p.archetypes))
         {
-            assets.extend(self.item_asset(self.author_archetype(key)?));
+            assets.extend(
+                compiler::item_asset(self.author_archetype(key)?, &self.manifest)
+                    .map(str::to_owned),
+            );
         }
         Ok(assets)
-    }
-
-    /// The asset an actor or item of this archetype shows.
-    fn item_asset(&self, archetype: &Archetype) -> Option<String> {
-        match &archetype.appearance_pool {
-            Some(pool) => self.manifest.appearance_pools.get(pool)?.asset.clone(),
-            None => archetype.asset.clone(),
-        }
     }
 
     pub(crate) fn check_identity(&self) -> Result<(), Failure> {
@@ -1447,9 +1442,7 @@ impl Package {
         }
         let anchors = self.anchors()?;
         for c in &self.manifest.characters {
-            let at = anchors
-                .get(&c.anchor)
-                .ok_or_else(|| fail(format!("Character {}: missing anchor {}", c.id, c.anchor)))?;
+            let at = self.character_anchor(c.id, &c.anchor, &anchors)?;
             starts.insert(c.id, at.region.0);
         }
         // A carried item is authored in the region its carrier starts in,
@@ -1541,9 +1534,22 @@ impl Package {
             }
             if let Some(pool) = &a.appearance_pool {
                 require(
-                    a.name.is_some() && self.manifest.appearance_pools.contains_key(pool),
-                    "Unknown appearance pool or missing identity name",
-                )?;
+                    a.name.is_some(),
+                    "Missing identity name for appearance pool",
+                )
+                .map_err(|failure| Origin::Archetype(key).context(failure))?;
+                require(
+                    self.manifest.appearance_pools.contains_key(pool),
+                    format!("Unknown appearance pool {pool:?}"),
+                )
+                .map_err(|failure| {
+                    Origin::Archetype(key).reference(
+                        failure,
+                        self.manifest_text.as_deref(),
+                        "appearance_pool",
+                        pool,
+                    )
+                })?;
             }
         }
         for (key, pool) in &self.manifest.appearance_pools {
@@ -1628,6 +1634,22 @@ impl Package {
         Ok(game)
     }
 
+    fn character_anchor(
+        &self,
+        id: u64,
+        anchor: &str,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<Location, Failure> {
+        anchors.get(anchor).copied().ok_or_else(|| {
+            Origin::Character(id).reference(
+                fail(format!("Missing character anchor {anchor:?}")),
+                self.manifest_text.as_deref(),
+                "anchor",
+                anchor,
+            )
+        })
+    }
+
     /// Whole-package facts that building regions needs, computed once so
     /// building one region reads only that region and its neighbours.
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
@@ -1643,10 +1665,7 @@ impl Package {
         let mut spawns = BTreeMap::new();
         for c in &definitions.characters {
             if c.creature.control.spawned() {
-                let at = *anchors.get(&c.anchor).ok_or_else(|| {
-                    Origin::Character(c.id)
-                        .context(fail(format!("Missing character anchor {:?}", c.anchor)))
-                })?;
+                let at = self.character_anchor(c.id, &c.anchor, &anchors)?;
                 spawns.insert(c.id, (at, c.turn_ticks));
             }
         }
@@ -2320,6 +2339,18 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_identity_name_does_not_blame_a_valid_appearance_pool_reference() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = read_package(&root).unwrap();
+        package.manifest.archetypes.get_mut("healing").unwrap().name = None;
+        let error = package.appearance_mapping(0).unwrap_err();
+        assert_eq!(
+            error.message,
+            "scenario.toml: archetype \"healing\": Missing identity name for appearance pool"
+        );
+    }
     #[test]
     fn generated_regions_declare_authored_character_identities_before_lazy_start() {
         let root =

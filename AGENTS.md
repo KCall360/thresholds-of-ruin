@@ -640,20 +640,24 @@ changed Python lint. The complete local debug gate passed 301 Python/process and
 passed before merge. Desktop remains PR #76 until the next coherent update.
 Further reference normalization and all other original obligations remain open.
 
-**Bounded snapshot recovery (in development).** Wire 30 adds ordered, bounded
-snapshot parts while retaining the independent state ceiling. A single queue
-entry and whole-transfer leases prevent interleaving; persistent client assembly
-survives canceled reads and publishes only complete validated snapshots.
-Preparation counts escaped bytes and stops at remaining client quota before
-allocating another part. Focused failing-first budget, atomic admission,
-cancellation and real small-frame save/restart recovery checks passed. All 511
-affected Rust tests, workspace all-target Clippy, all 13 recovery process scenarios
-and targeted release recovery checks passed. Broad debug publication verification,
-exact-head CI and deployment remain pending. The initial broad debug gate passed
-302 Python/application and 925 Rust tests with 544 unchanged inputs and no waiver.
-Final review then found a per-part write deadline renewal: a paused-time regression
-failed first, and one absolute deadline now covers the complete leased transfer.
-All four transport tests, 16 WebSocket integrations, all 13 recovery process cases
-and workspace Clippy passed after that fix. Fresh broad publication evidence is
-required; the prior gate does not certify these changed inputs. All four targeted
-release transport checks passed. Do not edit Rust inputs during verification.
+**Bounded snapshot recovery (merged/deployed, PR #78).** Wire 30 transfers complete
+snapshots under independent state/frame/logical ceilings. One queue entry, whole
+byte leases and one absolute write deadline prevent interleaving and slow-reader
+renewal. Shared client assembly survives canceled reads and exposes only complete
+validated snapshots. Final debug verification passed 302 Python/application and
+926 Rust tests on 544 unchanged sources, without a waiver; all nine exact-head CI
+jobs passed before merge. All 31 copied-release real-client checks passed. The
+three desktop launchers use immutable `2f79b3d`; post-activation hashes verified
+sources, binaries, backups and shortcuts. Previous builds and saves remain intact.
+
+**Scenario reference ownership (in development).** Shared declaration provenance
+now lives in diagnostics, with numeric and named parser-backed selectors and no
+guessed stale locations. Both character-anchor checks share one lookup; missing
+identity names cannot blame a valid appearance-pool reference. Prepared compilation
+and palette discovery share the concealed-item asset rule. Failing-first actual
+validator and missing-name regressions passed; all 32 scenario units, 220 server
+units, nine scenario integrations, seven palette integrations, 11 scenario process
+cases and six item/palette process checks passed, along with workspace Clippy
+and changed Python lint. Final review is complete; the debug publication gate
+is next. Publication and broader compiler/save/performance obligations
+remain open; no scripting runtime, text-product changes or format advance added.

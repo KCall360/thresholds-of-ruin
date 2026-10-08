@@ -115,14 +115,17 @@ impl PreparedArchetype {
             name: author.name.clone(),
             turn_ticks: author.turn_ticks,
             actor_asset: author.asset.clone(),
-            item_asset: match &author.appearance_pool {
-                Some(pool) => manifest
-                    .appearance_pools
-                    .get(pool)
-                    .and_then(|p| p.asset.clone()),
-                None => author.asset.clone(),
-            },
+            item_asset: item_asset(author, manifest).map(str::to_owned),
         }
+    }
+}
+
+/// Concealed items use their appearance pool's asset, including an intentional
+/// absence. Never fall back to the identity-revealing archetype asset.
+pub(super) fn item_asset<'a>(author: &'a Archetype, manifest: &'a Manifest) -> Option<&'a str> {
+    match &author.appearance_pool {
+        Some(pool) => manifest.appearance_pools.get(pool)?.asset.as_deref(),
+        None => author.asset.as_deref(),
     }
 }
 
@@ -308,6 +311,35 @@ impl PreparedDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_item_assets_keep_pool_absence_and_do_not_reveal_identity_assets() {
+        let mut manifest: Manifest =
+            toml::from_str(include_str!("../../../scenarios/tests/items/scenario.toml")).unwrap();
+        manifest.archetypes.get_mut("arrow").unwrap().asset = Some("item.arrow".into());
+        manifest.archetypes.get_mut("healing").unwrap().asset = Some("identity.healing".into());
+        manifest.appearance_pools.get_mut("potions").unwrap().asset = Some("item.shared".into());
+        let arrow = &manifest.archetypes["arrow"];
+        assert_eq!(item_asset(arrow, &manifest), Some("item.arrow"));
+        assert_eq!(
+            PreparedArchetype::new(arrow, &manifest)
+                .item_asset
+                .as_deref(),
+            Some("item.arrow")
+        );
+        let hidden = &manifest.archetypes["healing"];
+        assert_eq!(item_asset(hidden, &manifest), Some("item.shared"));
+        assert_eq!(
+            PreparedArchetype::new(hidden, &manifest)
+                .item_asset
+                .as_deref(),
+            Some("item.shared")
+        );
+        manifest.appearance_pools.get_mut("potions").unwrap().asset = None;
+        let hidden = &manifest.archetypes["healing"];
+        assert_eq!(item_asset(hidden, &manifest), None);
+        assert_eq!(PreparedArchetype::new(hidden, &manifest).item_asset, None);
+    }
     use crate::scenario_package::{AiProfile, AppearancePool, BodySpec};
     use std::path::Path;
 
