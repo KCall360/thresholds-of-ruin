@@ -254,7 +254,7 @@ a new feature, driving actual server/frontend processes rather than only calling
 internal setup APIs. Assert both authoritative results and the observations shown
 to the client. These scenarios are part of the feature's completion criteria,
 along with focused behavior tests and updated documentation; see
-[testing policy](testing.md#scenario-packages-and-wizard-scripts).
+[testing policy](testing.md#scenario-packages-fixtures-and-wizard-commands).
 
 [Unnamed place hints](place-hints.md) add perceived cell anchors without labels
 or boundaries. Shared memory retains last-seen hints; ASCII doesn't render them;

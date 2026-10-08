@@ -20,8 +20,8 @@ Only the two room interiors have place hints, at local (2,1,0); the hall has non
 Start an actor at region 1, position (1,1,0), on the seeded token. The stone tablet
 is at region 2 (2,1,0), seven eastward steps away through the open hall. Closing
 the door blocks movement and sight through the hall. The seed chooses copper,
-silver, or iron for the token. Layout generation and random gameplay mechanics
-are deferred, so this fixture needs no PRNG state. The simpler `Game::two_room`
+silver, or iron for the token. This fixture chooses its token deterministically from the seed; it does not
+exercise the procedural generator or combat random stream. The simpler `Game::two_room`
 and `Game::two_room_with_place_hints` layouts remain as diagnostic fixtures for
 tests.
 
@@ -83,13 +83,12 @@ preconditions and timing overflow without changing game state. The prepared valu
 is consumed within the same uninterrupted call; no public API can retain it across
 world changes. Effect application and scheduling have no fallible operations.
 
-These are extension points for future timed actions, not implemented partial
-progress or interruption behavior. Current effects still happen at the action's
-starting tick, and all actors use the same deterministic recovery scheduler.
-Travel remains a server-managed sequence of ordinary moves. Attacks, added
-later, are the first timed action built on these extension points; see
-[dungeon gameplay](dungeon.md). The [architecture](architecture.md#time-and-actions)
-defines where future persistent progress and revalidation belong.
+Immediate actions apply their effects at execution and then incur recovery.
+Attacks implement saved preparation, interruption and resumption; see
+[dungeon gameplay](dungeon.md). The server admits player, AI and travel intentions
+to the shared simulation queue, which revalidates them when due. Admission is
+distinct from completion. See [queued execution](run-until-blocked.md) and
+[architecture](architecture.md#time-and-actions) for the current execution path.
 
 The action-boundary behavior tests cover immediate effects and exact recovery for
 both first and second actors, including diagonal movement, pickup and doors, and

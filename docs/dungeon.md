@@ -7,7 +7,8 @@ unique item, and escape.
 
 The first authored dungeon provides exploration, melee combat, retrieval of a
 unique item, and escape. Equipment, healing, ranged combat, item effects,
-opportunities/complications, and procedural generation are deferred.
+opportunities/complications are deferred. Limited procedural regions are
+supported; see [scenario generation](scenario-packages.md#generated-regions).
 
 Actors use one authored attack: d20 plus bonus meets physical defense. Natural
 1 and 20 have no automatic outcomes. Damage has independent energy, impact, keen,

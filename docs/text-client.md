@@ -4,8 +4,8 @@ The `tor-client-text` executable connects to the existing loopback WebSocket
 server. It only uses disclosed protocol observations; rules remain on the server.
 The default interface now supports prose, examination, conversational clarification,
 and text intentions backed by travel. See [the adventure slice](text-adventure.md)
-for commands, place heuristics, interruptions and limitations. It is not yet a full
-dungeon adventure.
+for commands, place inference, interruptions and limitations. The default authored
+dungeon supports the complete explore, fight, retrieve and escape loop.
 
 ## Start a game
 

@@ -31,7 +31,11 @@ engine:
 | Anything that runs every tick, scans many cells, or searches | Short handlers that run when something happens |
 | Validation of every change to the world | Requests for changes, as commands |
 
-Existing combat, items, and the objective rule stay in Rust. The engine grows a
+Existing combat, items, and objective support stay in Rust. Future scenario
+hooks may compose authoritative queries and the victory operation, rather than
+requiring a built-in objective variant for every scenario. The Rogue plan uses
+an escape event plus a carried-Amulet check; tutorials motivate actor-specific
+perception hooks. These APIs are planned, not executable package fields. The engine grows a
 new primitive only when many scenarios need it or the rule belongs to the
 simulation.
 
@@ -47,7 +51,8 @@ Candidate events come from facts the simulation already produces:
 - action outcomes: moved, door changed, item taken or dropped
 - combat events: attack resolved, interrupted, died
 - a character's first visit to a region
-- the objective being reached
+- the objective being reached or a character escaping a dungeon
+- an actor perceiving a particular mob, with first/repeat behavior explicitly defined
 - a timer firing
 - an archetype's own hooks, such as `on_use`
 
@@ -106,14 +111,21 @@ Saves store the handler name, never a function. Timers follow their owner when
 it is carried, dropped, or contained. When the owner is destroyed, its timers
 are removed or passed on by rule. Items stack only when their timers match.
 
-Timers in inactive regions are frozen. Like NetHack's timers on other levels,
-they are stored as time remaining and resume without catch-up when the region
-reactivates. This matches the 4e rule for scheduler and AI time, and depends on
+Timers in inactive regions are frozen. They are stored as time remaining and
+resume without catch-up when the region reactivates. This matches the 4e rule for scheduler and AI time, and depends on
 that contract being defined first.
 
 Ongoing effects, such as regeneration, use an engine primitive with a
 script-chosen rate, or a timer that re-arms itself at a coarse interval. No
 script runs every tick.
+
+## Generation versus runtime scripting
+
+Procedural world authoring starts with declarative recipes. Consider generation
+script extensions only where reusable stages cannot express the requirement
+clearly. Generation and runtime scripting are separate decisions; neither a VM
+nor event hooks are prerequisites for the exploration-only Rogue scenario.
+See the [procedural requirements](game-design-plan.md#procedural-recipes-and-connected-region-groups).
 
 ## Language selection (deferred)
 

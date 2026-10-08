@@ -114,12 +114,15 @@ barriers along their paths.
 geometry regions. A perceived space may span regions; a region can contain several
 anchors or none. Hints have no names, descriptions, or area boundaries. Clients
 may combine them with perceived geometry and contents to organize locations.
-The [text adventure slice](text-adventure.md) uses visible hints and object names
-for an initial place/direction heuristic. Characters also keep persistent names
+The [text adventure interface](text-adventure.md) derives places and directions
+from disclosed geometry, with visible hints and object names as semantic aids. Characters also keep persistent names
 for anchors they've seen (see [durable place knowledge](#durable-place-knowledge)).
-Richer grouping and offscreen waypoint navigation remain future work.
+The IF engine derives place extents and ways from disclosed geometry; offscreen
+named-place navigation remains future work. See [places and ways](if-engine.md#places-and-ways).
 
-Visibility follows portal paths with explicit range limits and cycle handling.
+Gameplay uses [three-dimensional sight](sight-3d.md) from declared eye cells,
+with explicit range limits and portal-path/cycle handling. Floors, ceilings and
+walls are disclosed solid cells, not separate inferred surface facts.
 The backend owns visibility, appearance facts, sound disclosure, and hidden
 information. Clients retain their own prior disclosed observations as remembered
 knowledge, separately from the backend's current world truth; that memory can be
@@ -393,7 +396,7 @@ eagerly loaded by checkpoint restoration.
 Wizard undo preserves abandoned branches and
 can rewind the last 128 decision boundaries; normal play exposes no undo.
 
-Future scenario games persist activated regions and their full simulation state,
+Scenario games persist activated regions and their full simulation state,
 while unactivated areas remain references to pinned scenario/generator inputs.
 Frozen activated regions can remain serialized outside memory; reload the saved
 active preload set first. Persist RNG, velocities, AI memory, action progress,
@@ -469,11 +472,13 @@ uses timed d20 attacks versus physical defense, typed HP damage, immunity/flat
 reductions, and search/attack/flee AI using perception and expiring memory.
 Death leaves an ordinary corpse item and separately dropped inventory.
 
-Later deterministic generation uses fixed neighboring structural metadata and
-activates within the preload horizon. Activated results persist permanently;
+Current per-region deterministic generation uses fixed neighboring structural
+metadata and activates within the preload horizon. Activated results persist permanently;
 distant regions freeze all actors/effects. Reactivation batches deferred updates
 deterministically before normal scheduling. Theme palettes describe possibilities
-even before content is instantiated. The [design plan](game-design-plan.md)
+even before content is instantiated. Generalized recipes and multi-region floor
+groups are planned in the [Rogue scenario plan](rogue-scenario-plan.md). The
+[design plan](game-design-plan.md)
 contains acceptance intent and open considerations. Equipment, containers,
 locks/keys, item use, and richer identification gameplay follow the item core;
 hunger, ranged combat, multiplayer, and the 3D frontend remain later work.

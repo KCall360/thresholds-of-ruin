@@ -107,41 +107,18 @@ for the shared demonstration driver.
 
 ## Current work
 
-**Architecture refactor (active).** The maintainer authorized the
-[refactor plan](docs/refactoring.md), format decisions, pushes and PR merges.
-Work stays isolated from the original dirty interactions checkout.
+Use [the roadmap](docs/milestones.md) for current scope and
+[the refactor guide](docs/refactoring.md) for the completed implementation review.
+The architecture refactor is published; performance follow-up remains open.
+Three-dimensional sight is complete for its accepted scope, with the closeout
+merged after the required CI passed.
 
-Merged work includes typed transport/domain/persistence and authoring/prepared
-boundaries; shared observations and AI decisions/routes; backend-only portal-local
-actor/item indexes and privacy-scoped history indexes; admitted intentions executed
-by simulation for players, AI and native travel; durable preparation recovery;
-exact stream/reset/observation and readiness contexts; opaque interaction references;
-JavaScript-safe wire integers; bounded typed decoding, collection deltas and complete
-snapshot assembly; fair output guarantees with queued/inflight byte ownership;
-bounded transport shutdown; immutable checkpoint sharing; atomic persistence and
-short worker-lock scope; lazy scenario compilation with source provenance, digest
-pinning, semantic generator seeds and named random streams; nonblocking diagnostics.
-Future scenario-extension contracts are documented without implementing a runtime.
+The accepted [Rogue plan](docs/rogue-scenario-plan.md) starts with exploration-only
+floor generation before the shared creature/item/survival features are complete.
+Planning approval does not by itself authorize starting a new implementation
+milestone. Runtime scripting and its language remain undecided.
 
-PR #84 is merged after all nine exact-head CI jobs passed. Its immutable desktop
-release is active, with 43 copied-executable checks and verified source, binary,
-backup and launcher identities. Previous builds and saves remain retained.
-It lowers strict-decoder restore peak memory without changing saved formats or
-validation semantics; timing changes were mixed and adverse samples remain.
-
-The integrated six-sequence review is recorded in `docs/refactoring.md`.
-A navigation projection hash-membership experiment passed affected semantic and
-process tests but failed to demonstrate a useful six-round release improvement;
-its production changes were removed and its dense rotated equivalence test kept.
-All 12 benchmark validators passed, with unchanged operation and byte counts.
-Final checkpoint debug verification, publication and exact-head Windows/Linux
-CI remain before goal completion. Existing performance targets remain unchanged;
-no broad speedup is claimed. Do not add speculative caches or reopen measured
-experiments without new evidence.
-
-Use the updated [testing policy](docs/testing.md): affected tests during development,
-one broad local debug gate before push, targeted release measurements/checks as
-needed, and complete Windows/Linux debug/release CI before merging. The maintainer
-waived only the local native mouse test; retain ordinary CI coverage and report
-qualified local evidence. Text-client product fixes and scripting implementation
-remain deferred. Portable save export remains a future design.
+Preserve the original dirty interactions checkout; it contains unpublished work
+that is not the published main baseline. Keep future work isolated where needed.
+Do not weaken native tests or infer a waiver from historical checkpoint notes.
+Desktop deployment remains separate from publishing documentation.

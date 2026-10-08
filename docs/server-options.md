@@ -1,7 +1,8 @@
 # Command-line reference
 
 Options and environment variables for the server, the scenario tool, and the
-three clients. Every executable also accepts `--help`.
+three clients. The server and clients accept `--help`; `tor-scenario` prints
+its usage when its command arguments are missing or invalid.
 
 ## `tor-server`
 
@@ -12,7 +13,7 @@ cargo run -p tor-server -- [options]
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--listen <addr>` | `127.0.0.1:4000` | Numeric loopback socket address. Non-loopback addresses are refused. Port 0 picks a free port. |
-| `--save <path>` | `saves/game.db` | Save database. If it exists, the game resumes from it and scenario/seed options are ignored. |
+| `--save <path>` | `saves/game.db` | Save database. If it exists, resume it; seed and character options do not replace saved state. `--scenario` may relocate its exact pinned package when needed. |
 | `--seed <n>` | `0` | Seed for a **new** game. |
 | `--scenario <dir>` | `scenarios/first-dungeon` | Authored [scenario package](scenario-packages.md) for a new game. |
 | `--character <id>` | package default | Starting character to play in a new authored game. |
@@ -23,6 +24,9 @@ cargo run -p tor-server -- [options]
 | `--save-idle-ms <ms>` | `750` | Quiet time before a target-age save. |
 | `--save-queue-bytes <n>` | `8388608` | Bound on encoded unsaved data. |
 | `--checkpoint-interval <n>` | `1024` | Journal entries between [checkpoints](checkpoints.md); `0` disables them (for diagnostics), maximum 1,000,000. |
+| `--outbound-frame-bytes <n>` | `16777216` | Maximum encoded response frame size; must not exceed the protocol response limit. |
+| `--outbound-client-bytes <n>` | `67108864` | Per-client queued/inflight output byte budget. |
+| `--outbound-total-bytes <n>` | `268435456` | Aggregate output byte budget; includes reserved client allowances. |
 | `--regions <1..=256>` | none | Use the diagnostic performance fixture instead of a scenario. Conflicts with `--scenario` and `--character`. |
 | `--actors <1..=8>` | `1` | Actor count for the diagnostic fixture; requires `--regions`. |
 
@@ -30,6 +34,9 @@ Save timing constraints: `--save-max-ms` must be at least the target and at most
 one day; `--save-idle-ms` can't exceed the maximum; the queue allows 1 byte to
 1 GiB. See [background saving](background-saving.md) for what each setting
 means for crash recovery.
+
+Output limits require `0 < frame <= client <= total`; total is capped by the
+implementation's integer/semaphore limits. See [output accounting](protocol.md#pushed-updates).
 
 On startup the server prints one JSON line with its address and protocol
 version. Ctrl+C shuts it down gracefully, waiting for pending saves.
@@ -52,7 +59,7 @@ cargo run -p tor-server --bin tor-scenario -- validate <package-dir>
 cargo run -p tor-server --bin tor-scenario -- horizon <package-dir> <region-id> <portal-hops>
 ```
 
-`validate` checks a package and writes its `validation.json` certificate. Run it
+`validate` checks a package and writes its `index.json` and `validation.json` certificate. Run it
 after every package edit. `horizon` prints the structural preload neighborhood
 of a region; see [region streaming](region-streaming.md). Errors are JSON on
 stderr with a nonzero exit status.
@@ -68,6 +75,7 @@ credential; the server decides the role.
 | `--actor <id>` | all | `1` | Actor to attach to. |
 | `--observe` | all | off | Attach without requesting control. This isn't an access restriction. |
 | `--script` | text | off | Original line-oriented diagnostic interface; see the [text client](text-client.md#development-scripting-interface). |
+| `--pace <ms>` | text, ASCII | text `0`, ASCII `75` | Client presentation delay; never changes simulation time. |
 | `--bump-attacks hostile\|any\|off` | ASCII | `hostile` | Whether moving into an actor attacks it. |
 | `--automation` | ASCII | off | Test-only: read JSON input events on stdin and report presented frames. |
 | `--report-frames` | ASCII | off | Test-only: report frames while keeping native keyboard input. |

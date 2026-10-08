@@ -41,7 +41,7 @@ only; wizard history is bounded; generated regions are limited to rooms and
 corridors between authored ones; and the ASCII client doesn't draw from asset
 palettes yet.
 
-The [architecture refactor](refactoring.md) is active. Typed boundaries, shared
+The [architecture refactor](refactoring.md) has completed its accepted implementation review. Typed boundaries, shared
 observations and route searches, backend-only portal-aware indexes, queued player,
 AI and native travel gameplay, preparation recovery, exact stream contexts and
 bounded recovery, opaque targets, safe wire integers, collection deltas, fair
@@ -52,8 +52,8 @@ Actual queued-action completion timing and the strict save-decoder memory
 improvement are published. The integrated requirement review found no further
 implementation gap in the accepted refactor scope. A navigation membership
 experiment showed no useful release improvement and was removed; its behavioral
-equivalence test remains. Final checkpoint verification and CI remain before
-closing the refactor. Save/physics tails and existing performance targets remain
+equivalence test remains. The published completion-review checkpoint passed the required verification and
+Windows/Linux CI. Separate performance follow-up remains open. Save/physics tails and existing performance targets remain
 in scope for the roadmap; no broad speedup is claimed.
 Text-client product fixes and scripting implementation remain deferred.
 
@@ -213,6 +213,23 @@ work.
 
 ## Planned milestones
 
+### Rogue scenario and shared TOR foundations
+
+The [Rogue scenario plan](rogue-scenario-plan.md) records the accepted interview
+and the [design plan](game-design-plan.md) owns shared requirements. First deliver
+an exploration-only scenario: nine rooms/corridors carved through nine broadly
+connected stone-filled regions, persistent floors and paired cross-region stairs.
+Generate a whole floor when it enters the loading horizon. Extend the existing
+streaming and semantic-stream generator foundations with reusable declarative
+recipes and coordinated floor groups; do not wait for all mobs/items/effects.
+
+Add omitted rooms, mazes, lighting, secrets, traps and content as shared support
+arrives. Standard TOR systems cover builds/progression/CR, effects/defenses,
+survival, anatomy equipment, knowledge and ranged/perception behavior. Rogue
+supplies its roster and distinctive abilities; TOR supplies mechanics. Runtime
+hooks and scripted victory are a separately designed extension. No new package
+or generalized recipe syntax is implemented by this plan update.
+
 ### 4f — Subsequent interaction extensions
 
 Equipment after items, then item effects and other selected interactions.
@@ -248,8 +265,9 @@ historical migration is optional later work.
 
 An immersive 3D frontend is deferred until ASCII and text gameplay validate the
 protocol and interaction model. Remote authentication, encrypted deployment,
-multiplayer input policy, hunger, and ranged combat are outside the current
-sequence. The [game design plan](game-design-plan.md) records accepted
+multiplayer input policy remain outside the current sequence. Hunger and ranged
+combat are accepted shared foundations for the staged Rogue work above. The
+[game design plan](game-design-plan.md) records accepted
 requirements for all of these.
 
 ## How the roadmap changes

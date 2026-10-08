@@ -1,15 +1,17 @@
 # Unnamed place hints
 
 A place hint is a boolean attribute of a map cell: this point may help a client
-organize perceived space into locations. It has no name, description, extent,
+organize perceived space into locations. The boolean alone has no name, description, extent,
 room membership, or prescribed presentation. It does not assert that the actor
 has explored the surrounding area. Clients may combine hints with perceived
 geometry and contents, infer locations without hints, or ignore them entirely.
 
-Map authors and future generators choose anchors explicitly. Hints are independent
+Map authors and generators choose anchors explicitly. Hints are independent
 of regions and portals: a region can contain several hints or none, and a perceived
 space can span internal joins. The `scenarios/two-room` package places a hint at
-each room's center. There is no procedural generator yet.
+each room's center. Procedural regions are supported, but the current room
+generator does not infer place hints; see
+[generated regions](scenario-packages.md#generated-regions).
 
 ## Disclosure and memory
 
@@ -25,7 +27,8 @@ stale until that cell is perceived again. A fresh observation replaces the value
 including `false`; rewind clears abandoned-future memory. Headless JSON exposes
 current hints and remembered hints. ASCII retains them without rendering markers.
 The [text adventure interface](text-adventure.md) uses visible hints for a
-conservative destination heuristic; [durable place knowledge](place-knowledge.md) retains character-owned names.
+geometry-derived places and ways, with hints as optional naming/navigation
+aids; [durable place knowledge](place-knowledge.md) retains character-owned names.
 
 ## Dynamic authoring
 
