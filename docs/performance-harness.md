@@ -320,6 +320,23 @@ finish at their ready response. It does not include a later attack impact after
 wind-up has begun. Spectator presentation follows the state checked after execution.
 Pacing, snapshot requests and progress annotations are outside these intervals.
 
+For a workload that can advance without another driver command, use
+`JsonProcess.send(..., wait_for_completion=True)` to wait through a multi-stage
+intention. The driver's `action_timing` record has its own `version: 1` and the
+admitted intention, actor, and branch. Its reader-arrival timestamps distinguish
+admission, first execution, the matching `resolved`, `failed`, `cancelled`, or
+`suspended` outcome, and the subsequent fresh readiness context. Report successful
+and unsuccessful outcomes separately; an action still at `started` has no outcome
+sample. Immediate requests have no intention timing record. Copy the record before
+sending another request, which replaces it.
+
+The default `send` endpoint and historical `request_to_ready_ms` stay unchanged.
+Completion waiting is opt-in: a workload with several controlled actors must keep
+driving the other actors instead of blocking their turns while waiting for one
+actor. The actual-process timing regression covers an attack through its final
+authoritative effect and proves that the returned context accepts the next command.
+
+
 ## Stable tests and verification
 
 Rust tests cover exact world sizes, ordinary and rotated joins, LOS, stairs,

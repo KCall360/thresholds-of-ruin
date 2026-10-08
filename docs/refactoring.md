@@ -4,6 +4,14 @@ This is the accepted refactor scope. Implementation proceeds in verified
 increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
+As of 2026-10-08, PR #82 (`fd68f43`) is merged, with all nine Windows/Linux CI
+jobs successful. Its immutable desktop release passed 43 copied-executable checks
+and is active; previous saves and builds remain retained. Action-completion timing
+is a separate follow-up. Restore peak memory, checkpoint/flush and physics tails,
+and the complete requirement-by-requirement audit remain unfinished. The detailed
+increment notes below retain historical evidence; earlier pending states do not
+override this current status.
+
 The command-boundary follow-up separates wire command/action conversion from
 journal types. Typed actor, item and door interaction references are scoped to
 the observer and saved game. Fresh requests resolve only cached native disclosure;
@@ -12,8 +20,8 @@ consulting current targets, branch or revision. History uses the same disclosure
 boundary. Save payloads and simulation facts retain private numeric identities,
 and human gameplay still admits intentions for later simulation execution.
 Client selection uses disclosed order rather than opaque-reference bytes.
-This increment remains unpublished pending final verification and targeted release
-comparisons; it does not complete the transport/persistence separation sequence.
+This command-boundary increment was subsequently published. Its historical
+comparisons below do not establish completion of the full refactor.
 
 The initial opaque-reference comparison validated all eighteen reports from three
 interleaved release rounds on the Windows i7-9750H host with HDD-backed saves.
@@ -42,7 +50,7 @@ counts remained equal. These eight-region cases show no material aggregate
 projection regression; they do not establish projection costs for every larger
 disclosure or end-to-end queued-client latency. The larger client application
 cost and wire sizes above remain part of the result.
-Final publication verification and both-platform CI remain required.
+Subsequent publication and both-platform CI are recorded in the increment notes.
 
 ## Contracts to preserve
 
@@ -146,6 +154,60 @@ region identities or authoritative occupancy.
    extension contracts around scoped queries, validated effects, deterministic RNG,
    named handlers, persistent typed state, scheduling, and region suspension.
    No language, VM, or package script support is added in this refactor.
+
+## Queued completion and restore-memory baseline (2026-10-08)
+
+These baseline measurements used the PR #82 release executables (`fd68f43`) and
+completion timing tooling at `93d7cbf`, on the Windows i7-9750H/HDD host with
+fingerprint `6a1878811f37`. Only Python tooling and documentation differ between
+those commits; the measured Rust executable sources are unchanged. Logs were
+bounded and deferred, and no other build, test suite or measurement ran concurrently.
+No before/after speedup is claimed, and raw data remains local.
+
+Sixty real server/headless-client actions validated across three rounds: thirty
+waits and thirty multi-stage attacks. All resolved with the expected authoritative
+effect and accepted the next command using the returned readiness context. Values
+are p50 / p95 / maximum milliseconds, using reader-arrival boundaries.
+
+| Action | n | Admission | First execution | Outcome | Fresh context |
+| --- | --- | --- | --- | --- | --- |
+| Wait | 30 | 4.930 / 5.217 / 5.374 | 8.920 / 9.347 / 9.502 | 8.920 / 9.347 / 9.502 | 10.636 / 11.552 / 12.782 |
+| Attack | 30 | 5.575 / 5.827 / 6.409 | 10.233 / 11.036 / 11.106 | 15.484 / 15.860 / 15.925 | 17.018 / 17.482 / 17.505 |
+
+The historical first-execution endpoint is preserved. Failed, cancelled and
+suspended outcomes have separate identities and timings; this baseline has zero
+samples of those outcomes, so it provides no latency estimate for them.
+
+Twelve real checkpoint restores, three per valid case, reproduced the exact
+client state and complete history. Peak and retained working-set figures below
+are the first round's MiB at server readiness, before connecting a client. Each
+case's three peak readings were consistent within about 0.1 MiB. Startup includes
+process launch, runtime, decoding and recovery; it is not a pure restore phase.
+The 50-actor case uses external actors and an immediate annotation checkpoint;
+its population measurement does not claim multi-actor gameplay timing.
+
+| Items / actors / item actions | Checkpoint MiB | Boundaries / item tables / actor tables | Peak / retained MiB | Startup range ms |
+| --- | --- | --- | --- | --- |
+| 1,000 / 1 / 8 | 1.67 | 17 / 5 / 9 | 71.6 / 15.3 | 131.9–134.1 |
+| 6,000 / 1 / 0 | 2.00 | 3 / 1 / 2 | 83.4 / 20.2 | 167.9–169.8 |
+| 6,000 / 1 / 8 | 9.97 | 17 / 5 / 9 | 372.3 / 29.3 | 657.5–731.6 |
+| 1,000 / 50 / 0 | 0.92 | 1 / 1 / 1 | 57.3 / 17.8 | 102.7–103.6 |
+
+Working-set and private-commit measurements follow
+[Microsoft's process memory counters](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex).
+Rejected fixtures exceeded region bounds or the 1 MiB source-file bound, or lacked
+an AI profile; a moving-AI fixture also encountered an authentic stale revision.
+Those failures remain retained and are excluded from the twelve valid samples.
+Valid completed cases were not rerun after an unrelated fixture failed.
+
+The large transient peak warrants focused validation/restore attribution.
+`save_codec::strict` currently retains the typed state and an original JSON tree
+while constructing a second normalized JSON tree. `RestoreContext` later clones
+raw actor/item maps into memoized runtime stores. These are source-backed candidate
+costs, not measured phase contributions. Optimize the dominant measured cost while
+preserving duplicate/unknown-field rejection, canonical schema validation, shared
+rewind state and exact recovery. Compression, pruning and format changes are not
+justified by these results alone.
 
 ## Future scenario extension contracts
 
@@ -2899,7 +2961,7 @@ retained, and the desktop candidate remains inactive.
 No format axis changed. Broader compiler ownership, measured performance and final
 requirements audit remain open; this increment does not close the entire refactor.
 
-**Disclosed occurrence validation (in development).** A failing-first key-work
+**Disclosed occurrence validation (merged in PR #82).** A failing-first key-work
 regression observed 3,271 ordering comparisons for 1,000 reversed opaque identities.
 Canonical ordered views already avoid allocation and retain that path. Unordered
 uniqueness and carried/ground conflict checks now use transient hash membership;
@@ -2909,8 +2971,9 @@ target derivation, structural rejection and atomic client publication are unchan
 Both operation-count tests, all 72 protocol and 78 shared-client tests, fifteen
 actual-client recovery scenarios and workspace Clippy passed. Two added native/text
 process cases reject and repair a duplicate among 1,000 unordered inventory items.
-The release comparison below measures the original optimization commit; final
-publication verification remains pending.
+The release comparison below measures the original optimization commit. The
+combined PR #82 checkpoint later passed 309 local Python/application and 955 Rust
+tests with the authorized local mouse omission; complete CI retained that test.
 The existing 1,000-item benchmark primarily measures ground-item disclosure with
 single-item pickup/drop, so its timings are not a large-inventory timing claim.
 

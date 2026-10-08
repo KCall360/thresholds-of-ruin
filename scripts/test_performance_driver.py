@@ -44,6 +44,64 @@ class DriverTiming(unittest.TestCase):
                 self.assertEqual(frame["input_context"], "fresh")
                 self.assertEqual(client.ack_line_received, 101.)
 
+    def test_completion_timing_distinguishes_execution_outcome_and_fresh_context(self):
+        for phase in ("resolved", "failed", "cancelled", "suspended"):
+            with self.subTest(phase=phase):
+                client = JsonProcess.__new__(JsonProcess)
+                client.lines = queue.Queue()
+                client.child = SimpleNamespace(stdin=io.StringIO())
+                receipt = dict(type="admitted", intention="original", actor="1",
+                               branch="branch", phase="queued")
+                client.lines.put(({"message": {"type": "ack", "receipt": receipt}}, 101.))
+                client.lines.put(({"type": "ready"}, 102.))
+                def update(outcome, actor="1", branch="branch", identity="original"):
+                    return {"message": {"type": "update", "update": {"body": {
+                        "type": "intention", "status": dict(intention=identity,
+                        actor=actor, branch=branch, phase=outcome)}}},
+                        "readiness": {"revision": "9"}}
+                client.lines.put((update("started"), 103.))
+                client.lines.put((update(phase, actor="2"), 104.))
+                client.lines.put((update(phase, branch="old"), 105.))
+                client.lines.put((update(phase, identity="other"), 106.))
+                client.lines.put((update(phase), 107.))
+                client.lines.put(({"readiness": {"revision": "9"}}, 108.))
+                client.lines.put(({"readiness": {"revision": "10"},
+                                  "input_context": "fresh"}, 109.))
+                with patch("performance_driver.time.perf_counter", return_value=100.):
+                    frame, start, ack, received = client.send(
+                        {"type": "act", "action": {"type": "wait"}},
+                        wait_for_completion=True)
+                self.assertEqual((start, ack, received), (100., 100., 109.))
+                self.assertEqual(frame["input_context"], "fresh")
+                self.assertEqual(client.action_timing, {
+                    "version": 1, "intention": "original", "actor": "1", "branch": "branch",
+                    "outcome": phase, "request_to_admission_ms": 1000.,
+                    "request_to_execution_ms": 3000., "request_to_outcome_ms": 7000.,
+                    "request_to_context_ms": 9000.})
+
+    def test_default_timing_stops_at_started_and_keeps_outcome_pending(self):
+        client = JsonProcess.__new__(JsonProcess)
+        client.lines = queue.Queue()
+        client.child = SimpleNamespace(stdin=io.StringIO())
+        receipt = dict(type="admitted", intention="original", actor="1",
+                       branch="branch", phase="queued")
+        client.lines.put(({"message": {"type": "ack", "receipt": receipt}}, 101.))
+        client.lines.put(({"type": "ready"}, 102.))
+        started = {"message": {"type": "update", "update": {"body": {
+            "type": "intention", "status": {**receipt, "phase": "started"}}}}}
+        client.lines.put((started, 103.))
+        terminal = {"message": {"type": "update", "update": {"body": {
+            "type": "intention", "status": {**receipt, "phase": "resolved"}}}}}
+        client.lines.put((terminal, 104.))
+        with patch("performance_driver.time.perf_counter", return_value=100.):
+            frame, _, _, received = client.send({"type": "act"})
+        self.assertEqual(frame, started)
+        self.assertEqual(received, 103.)
+        self.assertEqual(client.lines.qsize(), 1)
+        self.assertIsNone(client.action_timing["outcome"])
+        self.assertIsNone(client.action_timing["request_to_outcome_ms"])
+        self.assertIsNone(client.action_timing["request_to_context_ms"])
+
     def test_failed_log_cleanup_preserves_failure_and_stops_every_owned_child(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
@@ -77,9 +135,11 @@ class DriverTiming(unittest.TestCase):
         client = JsonProcess.__new__(JsonProcess)
         client.lines = queue.Queue()
         client.child = SimpleNamespace(stdin=io.StringIO())
+        client.action_timing = {"outcome": "resolved"}
         client.lines.put(({"message":{"type":"ack"}}, 101.))
         client.lines.put(({"type":"ready"}, 102.))
         with patch("performance_driver.time.perf_counter", side_effect=[100.,103.,105.,106.]):
             _, start, legacy_ack, ready = client.send({"type":"act"})
         self.assertEqual((start, legacy_ack, ready), (100.,105.,102.))
         self.assertEqual(client.ack_line_received, 101.)
+        self.assertIsNone(client.action_timing)
