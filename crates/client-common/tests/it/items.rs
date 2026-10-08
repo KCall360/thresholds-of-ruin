@@ -1,4 +1,4 @@
-use tor_client_common::items::{item_action, ItemOperation};
+use tor_client_common::items::{item_action, item_choices, ItemOperation};
 use tor_protocol::*;
 
 fn target(byte: u8) -> ItemTarget {
@@ -50,6 +50,12 @@ fn equipment_uses_free_anatomy_socket_without_knowledge_and_requires_removal() {
     assert!(item_action(&view, target(3), ItemOperation::Equip).is_err());
     assert!(item_action(&view, target(2), ItemOperation::Drink).is_err());
     view.interactions.as_mut().unwrap().slots.pop();
+    assert_eq!(
+        item_choices(&view, ItemOperation::Equip)
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        vec![target(2)]
+    );
     assert!(item_action(&view, target(2), ItemOperation::Equip)
         .unwrap_err()
         .contains("Remove"));

@@ -76,7 +76,16 @@ server/client cases cover both text interfaces plus checkpoint restart. Adventur
 retains its established disclosed-order choice for indistinguishable stacks;
 direct commands provide opaque-target choices for ambiguity.
 
-Next: finish ASCII interaction controls and completion narration, then add
+ASCII now uses W/T/Q for equip/remove/drink through the shared client item
+choices and action validation. Equipment choices stay selectable when sockets
+are occupied so selection explains the refusal. Selections preserve disclosed
+order, ignore quantity text, and clear on cancellation, observation changes,
+control loss and disconnect. All 37 ASCII integration tests, five renderer tests
+and the native-key mapping test pass. A native keyboard process test verifies
+equipment timing, removal, cancelled potion selection, one-unit consumption and
+a presented framebuffer. The shared candidate/socket test also passes.
+
+Next: finish completion narration, then add
 knowledge-limited AI item decisions and final performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.

@@ -3,6 +3,112 @@ use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
+fn carried_rings() -> Snapshot {
+    let mut snapshot = state().snapshot();
+    let view = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let mut first = view.ground_items[0].item.clone();
+    first.id = super::item_target(250);
+    first.name = "silver ring".into();
+    first.class = ItemClass::Ring;
+    first.identified = false;
+    let mut second = first.clone();
+    second.id = super::item_target(1);
+    view.inventory = vec![first, second];
+    view.interactions = Some(InteractionView {
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: view
+            .inventory
+            .iter()
+            .map(|item| ItemInteractionView {
+                item: item.id,
+                slot: Some(EquipmentSlot::Ring),
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+            })
+            .collect(),
+    });
+    snapshot
+}
+
+#[test]
+fn item_picker_preserves_disclosed_order_and_uses_free_socket_without_counts() {
+    let snapshot = carried_rings();
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Equip }), Effect::None);
+    assert_eq!(
+        app.pickup.iter().map(|item| item.id).collect::<Vec<_>>(),
+        vec![super::item_target(250), super::item_target(1)]
+    );
+    app.input(Input::Text { text: "99".into() });
+    assert!(app.quantity.is_empty(), "item work consumes one item");
+    app.input(Input::Key { key: Key::Down });
+    assert!(matches!(app.input(Input::Key { key: Key::Enter }),
+        Effect::Request(Request::Command { command: Command::Act {
+            action: Action::Equip { item, slot: 0 }, .. }, .. }) if item == super::item_target(1)));
+}
+
+#[test]
+fn item_selection_cancels_and_is_invalidated_by_state_or_control_changes() {
+    for change in ["escape", "revision", "control", "disconnect"] {
+        let mut snapshot = carried_rings();
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+        app.ready();
+        app.input(Input::Key { key: Key::Equip });
+        assert_eq!(app.pickup.len(), 2);
+        match change {
+            "escape" => {
+                assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+            }
+            "revision" => {
+                Arc::make_mut(&mut snapshot.state).revision += 1;
+                snapshot.readiness.revision = snapshot.state.revision;
+                app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+            }
+            "control" => {
+                snapshot.has_control = false;
+                snapshot.readiness.admission = false;
+                app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+            }
+            _ => app.disconnect("disconnected".into()),
+        }
+        assert!(app.pickup.is_empty(), "{change}");
+        assert!(app.item_operation.is_none(), "{change}");
+        assert_eq!(
+            app.input(Input::Key { key: Key::Enter }),
+            Effect::None,
+            "{change}"
+        );
+    }
+}
+
+#[test]
+fn equipment_picker_keeps_blocked_choices_and_explains_removal() {
+    let mut snapshot = carried_rings();
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .interactions
+        .as_mut()
+        .unwrap()
+        .slots
+        .clear();
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    assert_eq!(app.input(Input::Key { key: Key::Equip }), Effect::None);
+    assert_eq!(app.pickup.len(), 2);
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    assert!(app.status.contains("Remove"));
+    assert!(!app.busy);
+}
+
 #[test]
 fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
     for key in [Key::Pickup, Key::Drop] {

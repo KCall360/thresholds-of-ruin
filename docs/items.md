@@ -42,8 +42,15 @@ records source ID, result ID and transferred quantity. Rewind restores allocatio
 
 The server accepts `equip` (carried item plus anatomy slot index), `unequip`
 (carried equipped item) and `drink` (carried potion) through ordinary intention
-admission. Targets are opaque observer-scoped inventory references. Client menus
-and natural-language commands are the next adaptation checkpoint.
+admission. Targets are opaque observer-scoped inventory references. Text accepts
+`equip`/`wear`/`wield`, `remove`/`unequip`, and `drink`/`quaff` with a carried
+item name or opaque target. Adventure resolves disclosed nouns with its existing
+choice rules. ASCII uses W to equip, T to remove and Q to drink; Up/Down and Enter
+choose among items, and Escape cancels without spending a turn. These commands
+act on one item at a time and have no quantity editor. Clients choose the first free
+matching anatomy socket; replacing gear requires separate removal. Both clients
+use the shared `client-common` item checks, while the simulation validates the
+submitted action against authoritative state.
 
 Anatomy is an ordered slot list; duplicate kinds provide distinct sockets, such
 as two rings. Archetypes and actors can declare `anatomy = { slots = [...] }`.

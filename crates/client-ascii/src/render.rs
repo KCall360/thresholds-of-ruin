@@ -473,7 +473,7 @@ impl Canvas {
         let help = if app.role == tor_protocol::AccessRole::Spectator {
             "READ-ONLY   F6/F7 height   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
         } else {
-            intention_hint.as_deref().unwrap_or("F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit")
+            intention_hint.as_deref().unwrap_or("F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items W/T gear Q drink O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit")
         };
         self.text(28, 768, help, MUTED, 1, 142);
         if let Some(draft) = &app.note {
@@ -523,15 +523,19 @@ impl Canvas {
             self.text(
                 188,
                 239,
-                &format!(
-                    "UP/DOWN select  ENTER {}  Count: {}  ESC cancel",
-                    if app.dropping { "drop" } else { "take" },
-                    if app.quantity.is_empty() {
-                        "all"
-                    } else {
-                        &app.quantity
-                    }
-                ),
+                &if let Some(operation) = app.item_operation {
+                    format!("UP/DOWN select  ENTER {}  ESC cancel", operation.verb())
+                } else {
+                    format!(
+                        "UP/DOWN select  ENTER {}  Count: {}  ESC cancel",
+                        if app.dropping { "drop" } else { "take" },
+                        if app.quantity.is_empty() {
+                            "all"
+                        } else {
+                            &app.quantity
+                        }
+                    )
+                },
                 MUTED,
                 1,
                 80,

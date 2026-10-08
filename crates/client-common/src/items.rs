@@ -1,11 +1,34 @@
 //! Item choices derived solely from the current disclosed inventory and anatomy.
-use tor_protocol::{Action, EquipmentSlot, ItemTarget, Observation};
+use tor_protocol::{Action, EquipmentSlot, ItemTarget, ItemView, Observation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemOperation {
     Equip,
     Unequip,
     Drink,
+}
+
+/// Potential choices in disclosed inventory order. A choice may still be blocked
+/// by occupied anatomy; selecting it lets the client explain the current refusal.
+pub fn item_choices(
+    view: &Observation,
+    operation: ItemOperation,
+) -> impl Iterator<Item = &ItemView> {
+    view.inventory.iter().filter(move |item| {
+        let Some(affordance) = view.interactions.as_ref().and_then(|interactions| {
+            interactions
+                .inventory
+                .iter()
+                .find(|candidate| candidate.item == item.id)
+        }) else {
+            return false;
+        };
+        match operation {
+            ItemOperation::Equip => affordance.slot.is_some() && affordance.equipped_slot.is_none(),
+            ItemOperation::Unequip => affordance.equipped_slot.is_some(),
+            ItemOperation::Drink => affordance.drinkable,
+        }
+    })
 }
 impl ItemOperation {
     pub fn verb(self) -> &'static str {
