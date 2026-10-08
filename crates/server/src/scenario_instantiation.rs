@@ -1,64 +1,9 @@
 //! Install prepared creature definitions at the original construction boundary.
 //! Authoring defaults and symbolic references have already been resolved.
 use super::compiler::PreparedCreature;
-use super::{fail, in_declaration, Failure};
+use super::diagnostics::Origin;
+use super::{fail, Failure};
 use tor_simulation::{ActorId, Game};
-
-#[derive(Clone, Copy)]
-pub(super) enum Origin<'a> {
-    Character(u64),
-    Actor { file: &'a str, region: u64, id: u64 },
-    Item { file: &'a str, region: u64, id: u64 },
-}
-
-impl Origin<'_> {
-    pub fn context(self, failure: Failure) -> Failure {
-        self.context_at(failure, None)
-    }
-
-    fn context_at(self, failure: Failure, coordinates: Option<(usize, usize)>) -> Failure {
-        let source = |file: &str| match coordinates {
-            Some((line, column)) => format!("{file}:{line}:{column}"),
-            None => file.into(),
-        };
-        let declaration = match self {
-            Self::Character(id) => format!("{}: character {id}", source("scenario.toml")),
-            Self::Actor { file, region, id } => {
-                format!("{}: region {region}, actor {id}", source(file))
-            }
-            Self::Item { file, region, id } => {
-                format!("{}: region {region}, item {id}", source(file))
-            }
-        };
-        in_declaration(failure, declaration)
-    }
-
-    fn names(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Character(_) => ("Character", "character"),
-            Self::Actor { .. } => ("Actor", "actor"),
-            Self::Item { .. } => ("Item", "item"),
-        }
-    }
-
-    pub fn reference(
-        self,
-        failure: Failure,
-        source: Option<&str>,
-        field: &str,
-        expected: &str,
-    ) -> Failure {
-        let (collection, id) = match self {
-            Self::Character(id) => ("characters", id),
-            Self::Actor { id, .. } => ("actors", id),
-            Self::Item { id, .. } => ("items", id),
-        };
-        let location = source.and_then(|text| {
-            super::diagnostics::reference_location(text, collection, id, &[field], expected)
-        });
-        self.context_at(failure, location.map(|location| location.coordinates()))
-    }
-}
 
 enum ConfigurationError {
     Invalid(Failure),
@@ -127,60 +72,4 @@ fn configure_inner(
             .map_err(|_| fail(format!("Unknown {kind}")))?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reference_context_locates_each_declaration_kind_and_preserves_the_failure() {
-        for (origin, collection, context) in [
-            (
-                Origin::Character(3),
-                "characters",
-                "scenario.toml:3:11: character 3",
-            ),
-            (
-                Origin::Actor {
-                    file: "regions/2.toml",
-                    region: 2,
-                    id: 3,
-                },
-                "actors",
-                "regions/2.toml:3:11: region 2, actor 3",
-            ),
-            (
-                Origin::Item {
-                    file: "regions/2.toml",
-                    region: 2,
-                    id: 3,
-                },
-                "items",
-                "regions/2.toml:3:11: region 2, item 3",
-            ),
-        ] {
-            let text = format!("[[{collection}]]\nid=3\narchetype=\"missing\"\n");
-            let original = fail("Unknown archetype missing");
-            let code = original.code;
-            let failure = origin.reference(original, Some(&text), "archetype", "missing");
-            assert_eq!(failure.code, code);
-            assert_eq!(
-                failure.message,
-                format!("{context}: Unknown archetype missing")
-            );
-        }
-    }
-
-    #[test]
-    fn unavailable_or_changed_source_keeps_declaration_context_without_coordinates() {
-        let origin = Origin::Character(3);
-        for source in [None, Some("[[characters]]\nid=3\nai=\"old\"\n")] {
-            let failure = origin.reference(fail("Unknown AI profile"), source, "ai", "new");
-            assert_eq!(
-                failure.message,
-                "scenario.toml: character 3: Unknown AI profile"
-            );
-        }
-    }
 }

@@ -10,6 +10,53 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def validation_failure(self, package):
+        before = {p.relative_to(package): p.read_bytes()
+                  for p in package.rglob("*") if p.is_file()}
+        result = subprocess.run(
+            [self.bin / ("tor-scenario" + self.suffix), "validate", package],
+            capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                 for p in package.rglob("*") if p.is_file()})
+        error = json.loads(result.stderr)["error"]
+        self.assertEqual(error["code"], "scenario_invalid")
+        return error
+
+    def test_missing_identity_name_reports_its_declaration_without_blaming_a_valid_pool(self):
+        package = self.directory / "missing-identity-name"
+        shutil.copytree(ROOT / "scenarios/tests/items", package)
+        manifest = package / "scenario.toml"
+        text = manifest.read_text(encoding="utf-8")
+        self.assertIn('name = "potion of healing"', text)
+        manifest.write_bytes(text.replace('name = "potion of healing"', '# name is deliberately absent').encode("utf-8"))
+        error = self.validation_failure(package)
+        self.assertEqual(error["message"], 'scenario.toml: archetype "healing": Missing identity name for appearance pool')
+
+    def test_manifest_references_report_the_exact_character_or_named_archetype_field(self):
+        cases = [
+            ("character-anchor", "two-room", '"anchor" = "1/start"',
+             '"anchor" = "1/missing"', '"anchor" = ', "character 1", "anchor"),
+            ("appearance-pool", "tests/items", 'appearance_pool = "potions"',
+             'appearance_pool = "missing"', 'appearance_pool = ', "healing", "appearance pool"),
+        ]
+        for name, fixture, old, new, field, declaration, diagnostic in cases:
+            with self.subTest(reference=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / "scenarios" / fixture, package)
+                manifest = package / "scenario.toml"
+                text = manifest.read_text(encoding="utf-8")
+                self.assertIn(old, text)
+                text = '# Écho: "1/missing" and "missing" are decoys.\n' + text.replace(old, new)
+                manifest.write_bytes(text.encode("utf-8"))
+                reference_line = next(line for line in text.splitlines() if new in line)
+                line = text.splitlines().index(reference_line) + 1
+                column = reference_line.index(new) + len(field) + 1
+                error = self.validation_failure(package)
+                self.assertIn(diagnostic, error["message"].lower())
+                self.assertIn(declaration, error["message"].lower())
+                self.assertIn(f"scenario.toml:{line}:{column}", error["message"])
+
     def test_semantic_reference_diagnostic_locates_the_field_among_repeated_values(self):
         package = self.directory / "source-locations"
         shutil.copytree(ROOT / "scenarios/two-room", package)

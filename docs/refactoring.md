@@ -2756,3 +2756,32 @@ passed. The prior gate is retained as evidence for its original sources; a fresh
 broad debug gate is required for this correction before publication.
 All four targeted release transport tests also passed; no broad local release
 suite was run. Full debug/release CI on Windows and Linux remains the merge gate.
+
+**Bounded snapshot recovery published and deployed (2026-10-08).**
+[PR #78](https://github.com/KCall360/thresholds-of-ruin/pull/78) merged as
+`ef60672` after all nine [exact-head CI jobs](https://github.com/KCall360/thresholds-of-ruin/actions/runs/37726969174)
+passed on `2f79b3d`. Final unchanged-input local debug verification passed all
+302 Python/application and 926 Rust tests, formatting, Clippy, architecture and
+strict Rust documentation, with 544 source hashes and no waiver. Seven targeted
+release recovery codec tests and four release transport tests passed; broad
+release coverage ran in CI. The immutable desktop candidate passed 31 real-client
+copied-binary checks without rebuilding, including complete small-frame recovery
+across reset, spectator attachment, save/restart and continued play. All three
+desktop launchers now use it. Post-activation checks verified 544 source files,
+five binaries, eight preserved helper/config backups and all three shortcuts.
+Previous builds and saves remain available.
+
+**Scenario reference ownership (in development).** Actual-validator regressions
+failed first for character anchors and named archetype appearance-pool references.
+Declaration provenance now belongs to diagnostics, with typed numeric and named
+selectors and shared decoded-value/span checks. Creature installation consumes
+that context. Both character-anchor validation paths share one lookup. Missing
+identity names and unknown pools have separate diagnostics; a further regression
+failed first when a missing name misleadingly blamed a valid pool reference.
+Item asset resolution now has one compiler-owned rule shared with palette
+discovery, preserving concealed pools' intentional absence of an asset. All 32
+scenario unit tests, 220 server units, nine scenario integrations, seven palette
+integrations, 11 real scenario process cases and six item/palette process checks
+passed, along with workspace Clippy and changed Python lint. Final review is
+complete; the debug publication gate and publication remain pending.
+No format axis changed. The other original refactor obligations remain open.
