@@ -36,6 +36,16 @@ dependencies. The protocol owns DTOs independent of internal simulation state.
 The server translates authoritative state into actor-specific observations.
 The client crates cannot depend on world or simulation crates.
 
+The server's `wire_adapter` owns exhaustive command and action conversions.
+Journal command types do not parse developer input or implement wire conversion
+methods. Decoding preserves human gameplay as unresolved typed wire facts; it
+neither authorizes a request nor resolves a live target. Session authority
+checks and durable receipt lookup precede fresh context, branch and revision
+validation. Fresh target resolution uses the cached native observer disclosure
+and produces a backend intention admission. Opaque entity references are keyed
+by saved privacy salt, observer and entity kind; receipt comparison reconstructs
+them without consulting current target availability. Simulation remains the owner of queued execution.
+
 Server diagnostic examples/tests have explicitly reviewed development edges to
 client-common, client-ascii, and test-support. Those edges are not permitted as
 runtime/build dependencies; other server development dependencies receive the

@@ -1,6 +1,6 @@
 format = 2
 id = "physics-portal-acceptance"
 version = "1.0"
-ruleset = "dungeon-v22"
+ruleset = "dungeon-v23"
 default_character = 1
 characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, body = { cells = [[0,0,0],[0,0,1]], eye = [0,0,1], mass = 80 }, velocity = [4096,0,0] }]

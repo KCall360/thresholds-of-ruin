@@ -16,15 +16,15 @@ use tor_protocol::*;
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":"0","observation":{
-        "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
+        "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"2","name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -71,14 +71,14 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add player's own multi-cell body (ActorId(1), height 2, cells (0,0,0) and (0,0,1))
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
             position: Position { x: 0, y: 0, z: 0 },
             asset: Some("creature.delver".into()),
         },
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own physical body.".into(),
             position: Position { x: 0, y: 0, z: 1 },
@@ -88,14 +88,14 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 2-cell humanoid (ActorId(2), height 2, cells (3,0,0) and (3,0,1))
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(2),
+            id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
             position: Position { x: 3, y: 0, z: 0 },
             asset: Some("creature.scout".into()),
         },
         ActorView {
-            id: ActorId(2),
+            id: super::actor_target(2),
             name: "scout".into(),
             description: "A nimble scout.".into(),
             position: Position { x: 3, y: 0, z: 1 },
@@ -105,21 +105,21 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 3-cell high giant (ActorId(3), height 3, cells at (5,0,0), (5,0,1), (5,0,2))
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(3),
+            id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
             position: Position { x: 5, y: 0, z: 0 },
             asset: Some("creature.giant".into()),
         },
         ActorView {
-            id: ActorId(3),
+            id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
             position: Position { x: 5, y: 0, z: 1 },
             asset: Some("creature.giant".into()),
         },
         ActorView {
-            id: ActorId(3),
+            id: super::actor_target(3),
             name: "giant".into(),
             description: "A huge giant.".into(),
             position: Position { x: 5, y: 0, z: 2 },
@@ -129,14 +129,14 @@ fn actors_occupying_several_cells_are_described_once_by_size() {
     // Add 2-cell wide beast (ActorId(4), width 2, height 1, cells at (0,3,0) and (1,3,0))
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(4),
+            id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
             position: Position { x: 0, y: 3, z: 0 },
             asset: Some("creature.beast".into()),
         },
         ActorView {
-            id: ActorId(4),
+            id: super::actor_target(4),
             name: "beast".into(),
             description: "A wide beast.".into(),
             position: Position { x: 1, y: 3, z: 0 },
@@ -164,14 +164,14 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     // Player local body cells at (0,0,0) and (0,0,1)
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
             position: Position { x: 0, y: 0, z: 0 },
             asset: Some("creature.delver".into()),
         },
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "Your own body.".into(),
             position: Position { x: 0, y: 0, z: 1 },
@@ -181,14 +181,14 @@ fn your_own_body_is_omitted_but_seen_through_a_portal() {
     // Portal self-observation cells seen at (4, 0, 0) and (4, 0, 1)
     s.observation.visible_actors.extend([
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
             position: Position { x: 4, y: 0, z: 0 },
             asset: Some("creature.delver".into()),
         },
         ActorView {
-            id: ActorId(1),
+            id: super::actor_target(1),
             name: "delver".into(),
             description: "You recognize your own appearance from another angle.".into(),
             position: Position { x: 4, y: 0, z: 1 },
@@ -219,7 +219,7 @@ fn carrying(s: &mut StateView) {
         (13, "iron sword", "A sharp steel blade."),
     ] {
         s.observation.inventory.push(ItemView {
-            id,
+            id: super::item_target(id),
             name: name.into(),
             appearance: "item".into(),
             identified: true,
@@ -232,7 +232,7 @@ fn carrying(s: &mut StateView) {
 
 fn goblin(s: &mut StateView) {
     s.observation.visible_actors.push(ActorView {
-        id: ActorId(42),
+        id: super::actor_target(42),
         name: "goblin sentry".into(),
         position: Position { x: 1, y: 0, z: 0 },
         description: "A small, snarling goblin.".into(),
@@ -275,7 +275,7 @@ fn question(line: &str, s: &StateView) -> Vec<String> {
 
 fn take(item: u64) -> Goal {
     Goal::Take {
-        item,
+        item: super::item_target(item),
         quantity: None,
     }
 }
@@ -342,7 +342,7 @@ fn doors_open_and_close_and_say_when_they_already_are() {
     let mut s = state();
     s.observation.visible_cells[3].door = Some(DoorView {
         asset: None,
-        id: 7,
+        id: super::door_target(7),
         name: "wooden door".into(),
         description: "An iron handle.".into(),
         open: false,
@@ -354,7 +354,7 @@ fn doors_open_and_close_and_say_when_they_already_are() {
     assert_eq!(
         goals("open door", &s),
         [Goal::Door {
-            door: 7,
+            door: super::door_target(7),
             open: true
         }]
     );
@@ -364,7 +364,7 @@ fn doors_open_and_close_and_say_when_they_already_are() {
     );
     assert_eq!(said("take door", &s), "You can't take the wooden door.");
     let mut second = s.observation.visible_cells[3].door.clone().unwrap();
-    second.id = 8;
+    second.id = super::door_target(8);
     s.observation.visible_cells[5].door = Some(second);
     assert_eq!(
         question("open door", &s),
@@ -378,7 +378,7 @@ fn attacks_choose_figures_and_never_an_unseen_id() {
     for id in [2, 3] {
         s.observation.visible_actors.push(ActorView {
             asset: None,
-            id: ActorId(id),
+            id: super::actor_target(id),
             name: "ruin guard".into(),
             description: String::new(),
             position: Position {
@@ -391,7 +391,9 @@ fn attacks_choose_figures_and_never_an_unseen_id() {
     assert_eq!(question("attack guard", &s).len(), 2);
     assert_eq!(
         goals("attack the second guard", &s),
-        [Goal::Attack { target: ActorId(3) }]
+        [Goal::Attack {
+            target: super::actor_target(3)
+        }]
     );
     assert_eq!(said("attack #99", &s), "You can't see any #99 here.");
     assert_eq!(
@@ -434,7 +436,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
     s.observation.visible_actors.push(ActorView {
         name: String::new(),
         description: String::new(),
-        id: ActorId(2),
+        id: super::actor_target(2),
         position: Position {
             x: 3,
             ..here.position
@@ -475,7 +477,7 @@ fn surfaces_and_unnamed_figures_use_asset_words_the_palette_holds() {
 fn chains_split_into_sentences_and_lists_into_goals() {
     let mut s = state();
     let mut second = s.observation.ground_items[0].clone();
-    second.item.id = 5;
+    second.item.id = super::item_target(5);
     second.item.name = "silver coin".into();
     s.observation.ground_items.push(second);
     assert_eq!(
@@ -497,7 +499,7 @@ fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
     carrying(&mut s);
     goblin(&mut s);
     let drop_sword = [Goal::Drop {
-        item: 13,
+        item: super::item_target(13),
         quantity: None,
     }];
     assert_eq!(goals("drop the sword", &s), drop_sword);
@@ -537,7 +539,7 @@ fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
     assert_eq!(
         goals("attack goblin with sword", &s),
         [Goal::Attack {
-            target: ActorId(42)
+            target: super::actor_target(42)
         }]
     );
     assert_eq!(
@@ -665,14 +667,14 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
             }
             if ch == 'r' {
                 actors.push(
-                    serde_json::json!({"id": (50 + actors.len()).to_string(), "name": "rat",
+                    serde_json::json!({"id": super::actor_target(50 + actors.len() as u64), "name": "rat",
                     "description": "", "position": {"x": x, "y": y, "z": 0}}),
                 );
             }
             if ch == 'i' {
                 items.push(serde_json::json!({"reachable": x == 0 && y == 0,
                     "item": {"quantity": "1", "appearance": "item", "identified": true,
-                        "id": "1", "name": "copper token", "description": ""},
+                        "id":super::item_target(1), "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
             }
             for z in [-1, 0, 1] {
@@ -684,7 +686,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
                     "material": "stone",
                     "place_hint": false, "stairs_up": false, "stairs_down": false,
                     "door": (matches!(ch, '+' | '\'') && z == 0).then(|| serde_json::json!({
-                        "id": "9", "name": "oak door", "description": "",
+                        "id":super::door_target(9), "name": "oak door", "description": "",
                         "open": ch == '\'', "reachable": false, "approaches": []
                     })),
                 }));
@@ -693,7 +695,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
     }
     serde_json::from_value(serde_json::json!({
         "wizard_game": false, "revision": "0", "observation": {
-            "actor": "1", "tick": "0", "position": {"x": 0, "y": 0, "z": 0},
+            "actor": "1", "self_target":super::actor_target(1),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
             "ready": true, "places": [], "visible_cells": cells,
             "ground_items": items, "inventory": [], "visible_actors": actors
         }
@@ -848,7 +850,7 @@ fn things_and_figures_are_told_in_sentences() {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
             "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
-                "id": id.to_string(), "name": "copper token", "description": ""}}))
+                "id": super::item_target(id), "name": "copper token", "description": ""}}))
         .unwrap()
     };
     s.observation.ground_items = vec![token(1, 0, 1), token(2, 0, 2), token(3, 3, 1)];
@@ -871,7 +873,7 @@ fn things_and_figures_are_told_in_sentences() {
             "hp": 10, "max_hp": 10, "dead": false, "victory": false, "terminal": false,
             "preparation_remaining": null, "preparation_active": false,
             "recovery_remaining": "0", "events": [], "objective": null,
-            "actors": [{"actor": "50", "hostile": true, "injury": "badly_wounded"}]
+            "actors": [{"actor": super::actor_target(50), "hostile": true, "injury": "badly_wounded"}]
         }))
         .unwrap(),
     );
@@ -932,7 +934,10 @@ fn a_carried_thing_and_its_twin_on_the_floor_are_told_apart_by_where_they_are() 
     // can't know they're identical: ask which, by where each is.
     let mut s = state();
     let token = s.observation.ground_items[0].item.clone();
-    s.observation.inventory.push(ItemView { id: 9, ..token });
+    s.observation.inventory.push(ItemView {
+        id: super::item_target(9),
+        ..token
+    });
     assert_eq!(
         question("examine token", &s),
         [
@@ -944,7 +949,7 @@ fn a_carried_thing_and_its_twin_on_the_floor_are_told_apart_by_where_they_are() 
     assert_eq!(
         goals("take token", &s),
         [Goal::Take {
-            item: 1,
+            item: super::item_target(1),
             quantity: None
         }]
     );
@@ -1193,12 +1198,12 @@ fn things_can_be_named_by_where_they_lie() {
     for cell in &mut s.observation.visible_cells {
         if let Some(door) = &mut cell.door {
             if cell.position.x < 0 {
-                door.id = 8;
+                door.id = super::door_target(8);
             }
         }
     }
     let door = |id| Goal::Door {
-        door: id,
+        door: super::door_target(id),
         open: true,
     };
     assert_eq!(goals("open the east door", &s), [door(9)]);

@@ -51,7 +51,7 @@ pub fn observation(
 
 /// A disclosed actor's name from either view, for an actor that may have
 /// just died or moved out of sight.
-fn actor_name(actor: ActorId, before: &Observation, after: &Observation) -> String {
+fn actor_name(actor: ActorTarget, before: &Observation, after: &Observation) -> String {
     after
         .visible_actors
         .iter()
@@ -62,13 +62,13 @@ fn actor_name(actor: ActorId, before: &Observation, after: &Observation) -> Stri
 
 /// One line for a combat event, written from the observer's point of view.
 pub fn combat_event(event: &CombatEventView, before: &Observation, after: &Observation) -> String {
-    let observer = after.actor;
-    let subject = |actor: Option<ActorId>| match actor {
+    let observer = after.self_target;
+    let subject = |actor: Option<ActorTarget>| match actor {
         Some(id) if id == observer => "You".to_owned(),
         Some(id) => format!("The {}", actor_name(id, before, after)),
         None => "Something".into(),
     };
-    let object = |actor: Option<ActorId>| match actor {
+    let object = |actor: Option<ActorTarget>| match actor {
         Some(id) if id == observer => "you".to_owned(),
         Some(id) => format!("the {}", actor_name(id, before, after)),
         None => "something".into(),
@@ -140,12 +140,12 @@ pub fn combat_status(c: &CombatView) -> String {
 fn describe_changes(
     before: &Observation,
     after: &Observation,
-    acted_door: Option<u64>,
+    acted_door: Option<DoorTarget>,
 ) -> Vec<String> {
-    let actors = |view: &Observation| -> BTreeMap<ActorId, String> {
+    let actors = |view: &Observation| -> BTreeMap<ActorTarget, String> {
         view.visible_actors
             .iter()
-            .filter(|a| a.id != view.actor)
+            .filter(|a| a.id != view.self_target)
             .map(|a| (a.id, label(&a.name, "figure")))
             .collect()
     };
@@ -177,7 +177,7 @@ fn describe_changes(
             lines.push(format!("You can no longer see the {name}."));
         }
     }
-    let doors = |view: &Observation| -> BTreeMap<u64, (bool, String)> {
+    let doors = |view: &Observation| -> BTreeMap<DoorTarget, (bool, String)> {
         view.visible_cells
             .iter()
             .filter_map(|c| c.door.as_ref())
@@ -271,6 +271,7 @@ mod tests {
             motion: None,
             places: Vec::new(),
             actor: ActorId(1),
+            self_target: tor_protocol::ActorTarget::from_digest([1; 32]),
             tick: 0,
             position: Position { x: 0, y: 0, z: 0 },
             visible_cells: Vec::new(),
@@ -287,7 +288,7 @@ mod tests {
         let mut after = before.clone();
         let actor = ActorView {
             asset: None,
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "figure".into(),
             description: String::new(),
             position: Position { x: 1, y: 0, z: 0 },
@@ -299,7 +300,7 @@ mod tests {
             changes(&after, &before),
             ["You can no longer see the figure."]
         );
-        after.visible_actors[0].id = ActorId(1);
+        after.visible_actors[0].id = after.self_target;
         after.visible_actors.pop();
         assert!(changes(&before, &after).is_empty());
     }
@@ -317,7 +318,7 @@ mod tests {
             stairs_down: false,
             asset: None,
             door: Some(DoorView {
-                id: 3,
+                id: tor_protocol::DoorTarget::from_digest([3; 32]),
                 name: "iron gate".into(),
                 description: String::new(),
                 open: false,
@@ -336,7 +337,7 @@ mod tests {
                 &before,
                 &after,
                 Some(&Event::DoorChanged {
-                    door: 3,
+                    door: tor_protocol::DoorTarget::from_digest([3; 32]),
                     open: true
                 })
             ),
@@ -350,8 +351,8 @@ mod tests {
         assert_eq!(
             action(
                 &Event::Taken {
-                    item: 9,
-                    result: 9,
+                    item: tor_protocol::ItemTarget::from_digest([9; 32]),
+                    result: tor_protocol::ItemTarget::from_digest([9; 32]),
                     quantity: 1
                 },
                 &view
@@ -363,15 +364,15 @@ mod tests {
             quantity: 1,
             appearance: String::new(),
             identified: true,
-            id: 9,
+            id: tor_protocol::ItemTarget::from_digest([9; 32]),
             name: "copper\ntoken".into(),
             description: String::new(),
         });
         assert_eq!(
             action(
                 &Event::Taken {
-                    item: 9,
-                    result: 9,
+                    item: tor_protocol::ItemTarget::from_digest([9; 32]),
+                    result: tor_protocol::ItemTarget::from_digest([9; 32]),
                     quantity: 1
                 },
                 &view
@@ -381,7 +382,7 @@ mod tests {
         assert_eq!(
             action(
                 &Event::DoorChanged {
-                    door: 77,
+                    door: tor_protocol::DoorTarget::from_digest([77; 32]),
                     open: false
                 },
                 &view
@@ -395,7 +396,7 @@ mod tests {
         let mut view = observation();
         view.visible_actors.push(ActorView {
             asset: None,
-            id: ActorId(2),
+            id: tor_protocol::ActorTarget::from_digest([2; 32]),
             name: "ruin scout".into(),
             description: String::new(),
             position: Position { x: 1, y: 0, z: 0 },
@@ -404,8 +405,8 @@ mod tests {
         let line = |event| combat_event(&event, &view, &after);
         assert_eq!(
             line(CombatEventView::Attack {
-                attacker: Some(ActorId(1)),
-                target: Some(ActorId(2)),
+                attacker: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
+                target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
                 outcome: AttackOutcome::Hit,
             }),
             "You struck the ruin scout."
@@ -413,13 +414,15 @@ mod tests {
         assert_eq!(
             line(CombatEventView::Attack {
                 attacker: None,
-                target: Some(ActorId(1)),
+                target: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
                 outcome: AttackOutcome::Miss,
             }),
             "Something missed you."
         );
         assert_eq!(
-            line(CombatEventView::Died { actor: ActorId(2) }),
+            line(CombatEventView::Died {
+                actor: tor_protocol::ActorTarget::from_digest([2; 32])
+            }),
             "The ruin scout died."
         );
         assert_eq!(objective(ObjectiveKind::ReachExit), "Reach the exit.");

@@ -4,6 +4,46 @@ This is the accepted refactor scope. Implementation proceeds in verified
 increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
+The command-boundary follow-up separates wire command/action conversion from
+journal types. Typed actor, item and door interaction references are scoped to
+the observer and saved game. Fresh requests resolve only cached native disclosure;
+receipt retries reconstruct the original references from saved domain facts before
+consulting current targets, branch or revision. History uses the same disclosure
+boundary. Save payloads and simulation facts retain private numeric identities,
+and human gameplay still admits intentions for later simulation execution.
+Client selection uses disclosed order rather than opaque-reference bytes.
+This increment remains unpublished pending final verification and targeted release
+comparisons; it does not complete the transport/persistence separation sequence.
+
+The initial opaque-reference comparison validated all eighteen reports from three
+interleaved release rounds on the Windows i7-9750H host with HDD-backed saves.
+Request-call measurements include rejected attempts; engine execution measurements
+exclude them. The 1,000-item client application interval increased, while request
+and transfer results were mixed. No broad speedup is established.
+
+| Interval | n per side | Before p50 / p95 / max (ms) | After p50 / p95 / max (ms) |
+| --- | --- | --- | --- |
+| Eight-region memory request call | 945 | 0.534 / 0.802 / 1.737 | 0.521 / 0.769 / 2.110 |
+| Eight-region durable request call | 945 | 0.533 / 0.779 / 0.917 | 0.531 / 0.787 / 1.460 |
+| 1,000-item client application | 1,200 | 0.920 / 1.047 / 2.141 | 1.137 / 1.254 / 2.994 |
+| 1,000-item transfer | 1,200 | 0.365 / 0.450 / 0.854 | 0.363 / 0.451 / 0.789 |
+
+Operation, observation and saved-byte counts matched. The 1,000-item workload's
+disclosed-byte sum per round grew from 3,745,020 to 5,008,820 bytes; its saved-byte
+sum stayed 18,513,920 bytes. The durable latency case retained 305 selected deltas
+per round, with selected complete-envelope bytes growing from 1,521,957 to
+1,613,572. Larger references have an explicit disclosure and client cost.
+These initial intervals omit disclosure projection. A follow-up comparison with
+identical projection timers on both sides validated all twelve reports from three
+interleaved rounds. At 945 samples per side, memory projection p50/p95/max was
+0.310/0.405/1.908 ms before and 0.310/0.392/1.036 ms after; durable projection was
+0.300/0.376/0.698 ms before and 0.301/0.381/0.793 ms after. Operation and save
+counts remained equal. These eight-region cases show no material aggregate
+projection regression; they do not establish projection costs for every larger
+disclosure or end-to-end queued-client latency. The larger client application
+cost and wire sizes above remain part of the result.
+Final publication verification and both-platform CI remain required.
+
 ## Contracts to preserve
 
 The server owns authority, world topology, scheduling, and disclosure. Gameplay
@@ -2510,8 +2550,9 @@ seeds and does not claim a proof over every possible seed.
 Lazy declarations now combine indexed character starts and generated inhabitants
 in one identity assembly, including item-carrier exclusions. This fixes a
 validated character starting in a generated region being rejected at run setup.
-The compatibility axes are rooms version 2, ruleset dungeon-v22 and validator
-tor-scenario-8; authoring format 2, save format 21 and protocol 28 are unchanged.
+That checkpoint advanced the rooms generator, gameplay and validator identities;
+authoring format 2, the then-current save format and protocol
+were unchanged.
 No migration or scripting runtime is introduced.
 
 Failing-first regressions established raw-comment coupling, actor-count effects
@@ -2567,3 +2608,45 @@ All 33 release validators and all scenario process cases passed. Final debug
 publication evidence and replacement exact-head CI are still required; failed CI
 is retained, not rerun as a substitute for a correction. All original work
 sequences remain in scope.
+
+
+**Opaque interaction identity follow-up (2026-10-07, unpublished).** Final
+local debug verification passed 904 Rust tests and 297 of 299 Python tests.
+The native quantity-picker failure exposed sorting by opaque handle bytes;
+choices now preserve disclosure order and deduplicate repeated portal/body
+occurrences. Both new model regressions failed first; all 38 native Rust tests
+and the original quantity-picker process case subsequently passed. The remaining
+native mouse failure is the previously documented LockApp limitation, expressly
+waived locally; ordinary complete native CI remains required.
+
+Three failing-first rewind regressions then exposed dynamic actor, item and door
+identity reuse. A single simulation-owned continuation operation now retains all
+allocation watermarks alongside record/intention watermarks when restoring an
+older boundary. The durable regressions cover checkpoints and restart before
+and after replacement creation. All seven scoped-request tests passed. A real
+server/client regression confirms an abandoned handle rejects without admitting
+work while the replacement can be taken and recovered exactly after restart;
+all five opaque-target process cases passed. Its first attempt placed the new
+item away from the actor's feet and correctly failed pickup validation; the
+fixture was corrected without relaxing gameplay rules.
+
+Save format 22 and dungeon-v23 identify the new rewind replay behavior. Wire
+protocol 29, authoring format 2 and tor-scenario-8 remain unchanged. All 33 package
+manifests are LF and their certificates were regenerated using the new validator
+binary. The explicit version-21 rejection regression failed before the version
+advance. Expanded server/simulation/persistence checks and final publication
+verification remain pending. Previous measurement results describe their exact
+recorded heads and do not certify these later changes. All six refactor sequences
+remain active; this increment is not deployed or merged.
+
+
+Follow-up compatibility checks passed all 206 server unit tests and 163
+simulation tests. Server integration passed 148 of 149 cases; the remaining
+case expected the obsolete actor-ID reuse behavior. It now asserts restored
+inventory/knowledge/scheduling and a fresh replacement actor ID, and passes.
+The explicit version-21 archive rejection case passed without overwriting its
+input. All 23 affected real-application cases passed under the new versions;
+the eight documentation/certificate checks passed after historical version
+notes were clarified. Formatting, workspace all-target Clippy and changed
+Python lint passed. A final coherent debug publication gate and complete
+final-head Windows/Linux CI remain required. Earlier failed runs are retained.

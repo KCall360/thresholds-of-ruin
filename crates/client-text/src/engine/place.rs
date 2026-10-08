@@ -80,7 +80,7 @@ impl<'a> Columns<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Door {
-        id: u64,
+        id: DoorTarget,
         name: String,
         open: bool,
     },
@@ -530,7 +530,7 @@ mod tests {
                         "stairs_up": false,
                         "stairs_down": false,
                         "door": door.then(|| serde_json::json!({
-                            "id": "9", "name": "oak door", "description": "",
+                            "id":tor_protocol::DoorTarget::from_digest([9; 32]), "name": "oak door", "description": "",
                             "open": ch == '\'', "reachable": false, "approaches": []
                         })),
                     }));
@@ -539,7 +539,7 @@ mod tests {
         }
         serde_json::from_value(serde_json::json!({
             "wizard_game": false, "revision": "0", "observation": {
-                "actor": "1", "tick": "0", "position": {"x": 0, "y": 0, "z": 0},
+                "actor": "1", "self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick": "0", "position": {"x": 0, "y": 0, "z": 0},
                 "ready": true, "places": [], "visible_cells": cells,
                 "ground_items": [], "inventory": [], "visible_actors": []
             }

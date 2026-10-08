@@ -49,9 +49,11 @@ class DungeonProcesses(ProcessTestCase):
         player, _ = self.adventure()
         observer, initial = self.native(True)
         self.assertEqual(initial['state']['observation']['combat']['hp'],20)
+        guard = next(actor['id'] for actor in initial['state']['observation']['visible_actors']
+                     if actor['name'] == 'ruin guard')
         self.say(player,'attack ruin guard')
         after = self.settled(observer,0)
-        self.assertFalse(any(a['id']=='2' for a in after['state']['observation']['visible_actors']))
+        self.assertFalse(any(a['id']==guard for a in after['state']['observation']['visible_actors']))
         for command in ['step east','step east','step east','get dawn seal','step west','step west','step west']:
             tick = after['state']['observation']['tick']
             self.say(player,command)
@@ -80,11 +82,11 @@ class DungeonProcesses(ProcessTestCase):
             view=current['state']['observation']
             self.assertFalse(view['combat']['dead'])
             if view['combat']['victory']: return
-            nearby=next((a for a in view['visible_actors'] if a['id']!='1' and a['position']['z']==0 and (a['position']['x'],a['position']['y']) in directions),None)
+            nearby=next((a for a in view['visible_actors'] if a['id']!=view['self_target'] and a['position']['z']==0 and (a['position']['x'],a['position']['y']) in directions),None)
             if nearby:
                 key=directions[(nearby['position']['x'],nearby['position']['y'])]
-            elif any(i['item']['id']=='100' and i['reachable'] for i in view['ground_items']): key='pickup'
-            else: key='left' if any(i['id']=='100' for i in view['inventory']) else 'right'
+            elif any(i['item']['name']=='dawn seal' and i['reachable'] for i in view['ground_items']): key='pickup'
+            else: key='left' if any(i['name']=='dawn seal' for i in view['inventory']) else 'right'
             result=self.key(player,key)
             if result['state']['observation']['ready'] and result['state']['revision']==current['state']['revision']:
                 result=self.key(player,'wait')

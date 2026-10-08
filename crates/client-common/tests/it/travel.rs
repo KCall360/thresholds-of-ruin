@@ -6,7 +6,7 @@ fn state() -> ClientState {
         "readiness":{"revision":"0","admission":false,"resume":[],"cancel":[]},"context":super::stream_context(0),
         "actor":"1","branch":"branch","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],"travel":null,
         "history":{"entries":[],"older_before":null},
-        "state":{"wizard_game":false,"revision":"0","observation":{"actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"places":[],"visible_cells":[],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true}}
+        "state":{"wizard_game":false,"revision":"0","observation":{"actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"0","position":{"x":0,"y":0,"z":0},"places":[],"visible_cells":[],"ground_items":[],"inventory":[],"visible_actors":[],"ready":true}}
     })).unwrap()).unwrap()
 }
 fn update(sequence: u64, steps: u64, phase: TravelPhase, entry: bool) -> StreamUpdate {

@@ -100,10 +100,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         quantity: Some(1),
                     }
                 } else {
-                    Action::Drop {
-                        item: engine.state(actor)?.observation.inventory[0].id,
-                        quantity: None,
-                    }
+                    engine.decode_action(
+                        actor,
+                        &tor_protocol::Action::Drop {
+                            item: engine.state(actor)?.observation.inventory[0].id,
+                            quantity: None,
+                        },
+                    )?
                 };
                 let revision = engine.revision(actor).unwrap();
                 let branch = engine.branch().clone();
@@ -132,9 +135,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     body: tor_protocol::UpdateBody::Observation {
                         state: state.into(),
                         event: Some(Box::new(
-                            result
-                                .entry
-                                .disclosed()
+                            engine
+                                .disclose_entry(&result.entry)
                                 .expect("completed command has history"),
                         )),
                     },

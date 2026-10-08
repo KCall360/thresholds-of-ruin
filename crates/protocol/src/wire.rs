@@ -1,8 +1,8 @@
-use crate::{ActorId, StreamContext, StreamCursor};
+use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamCursor};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 28;
+pub const PROTOCOL_VERSION: u32 = 29;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,25 +208,22 @@ pub enum Direction {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     Attack {
-        target: ActorId,
+        target: ActorTarget,
     },
     SetDoor {
-        #[serde(with = "crate::integers::unsigned")]
-        door: u64,
+        door: DoorTarget,
         open: bool,
     },
     Move {
         direction: Direction,
     },
     Take {
-        #[serde(with = "crate::integers::unsigned")]
-        item: u64,
+        item: ItemTarget,
         #[serde(default, with = "crate::integers::optional_unsigned")]
         quantity: Option<u64>,
     },
     Drop {
-        #[serde(with = "crate::integers::unsigned")]
-        item: u64,
+        item: ItemTarget,
         #[serde(default, with = "crate::integers::optional_unsigned")]
         quantity: Option<u64>,
     },
@@ -250,8 +247,7 @@ pub struct ItemView {
     /// Perceived appearance only; never hidden properties.
     #[serde(default)]
     pub description: String,
-    #[serde(with = "crate::integers::unsigned")]
-    pub id: u64,
+    pub id: ItemTarget,
     pub name: String,
     /// The asset a client draws it with, from its palette. Absent when the
     /// scenario names none; clients then fall back to their own look.
@@ -269,13 +265,13 @@ pub struct GroundItemView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorView {
     /// Empty when nothing names it. The observer's own body is the actor
-    /// whose id is `Observation::actor`; clients say who that is.
+    /// whose id is `Observation::self_target`; clients say who that is.
     #[serde(default)]
     pub name: String,
     /// Authored appearance; empty when none is authored.
     #[serde(default)]
     pub description: String,
-    pub id: ActorId,
+    pub id: ActorTarget,
     pub position: Position,
     /// The asset a client draws it with, from its palette. Absent when the
     /// scenario names none; clients then fall back to their own look.
@@ -322,6 +318,8 @@ pub struct Observation {
     pub motion: Option<MotionView>,
     pub places: Vec<PlaceView>,
     pub actor: ActorId,
+    /// Own-body entity reference; attachment actor IDs are routing identities.
+    pub self_target: ActorTarget,
     #[serde(with = "crate::integers::unsigned")]
     pub tick: u64,
     pub position: Position,
@@ -357,7 +355,7 @@ pub struct CombatView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CombatActorView {
-    pub actor: ActorId,
+    pub actor: ActorTarget,
     pub hostile: bool,
     pub injury: Injury,
 }
@@ -390,21 +388,21 @@ pub enum AttackOutcome {
 }
 
 /// A combat event as the observer knows it. An absent participant is one
-/// it couldn't see; the observer itself is `Observation::actor`.
+/// it couldn't see; the observer itself is `Observation::self_target`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CombatEventView {
     Attack {
-        attacker: Option<ActorId>,
-        target: Option<ActorId>,
+        attacker: Option<ActorTarget>,
+        target: Option<ActorTarget>,
         outcome: AttackOutcome,
     },
     /// The observer's own attack preparation was interrupted.
     Interrupted {
-        actor: ActorId,
+        actor: ActorTarget,
     },
     Died {
-        actor: ActorId,
+        actor: ActorTarget,
     },
 }
 
@@ -431,8 +429,7 @@ pub struct CellView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DoorView {
-    #[serde(with = "crate::integers::unsigned")]
-    pub id: u64,
+    pub id: DoorTarget,
     pub name: String,
     pub description: String,
     pub open: bool,
@@ -551,29 +548,24 @@ pub enum Command {
 pub enum Event {
     PreparationPaused,
     AttackStarted {
-        target: ActorId,
+        target: ActorTarget,
     },
     DoorChanged {
-        #[serde(with = "crate::integers::unsigned")]
-        door: u64,
+        door: DoorTarget,
         open: bool,
     },
     Moved {
         direction: Direction,
     },
     Taken {
-        #[serde(with = "crate::integers::unsigned")]
-        item: u64,
-        #[serde(with = "crate::integers::unsigned")]
-        result: u64,
+        item: ItemTarget,
+        result: ItemTarget,
         #[serde(with = "crate::integers::unsigned")]
         quantity: u64,
     },
     Dropped {
-        #[serde(with = "crate::integers::unsigned")]
-        item: u64,
-        #[serde(with = "crate::integers::unsigned")]
-        result: u64,
+        item: ItemTarget,
+        result: ItemTarget,
         #[serde(with = "crate::integers::unsigned")]
         quantity: u64,
     },

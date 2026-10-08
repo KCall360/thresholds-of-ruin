@@ -25,15 +25,27 @@ fn act(engine: &mut Engine, id: &str, action: Action) -> tor_server::CommandResu
     };
     send(engine, id, command).unwrap()
 }
+fn act_wire(
+    engine: &mut Engine,
+    id: &str,
+    action: tor_protocol::Action,
+) -> tor_server::CommandResult {
+    let action = engine.decode_action(ActorId(1), &action).unwrap();
+    act(engine, id, action)
+}
 fn wizard(
     engine: &mut Engine,
     id: &str,
     operation: &str,
 ) -> Result<tor_server::CommandResult, tor_server::Failure> {
-    let command = Command::from_wire(&tor_protocol::Command::Wizard {
-        expected_revision: engine.revision(ActorId(1)).unwrap(),
-        operation: operation.into(),
-    })?;
+    let command = crate::support::decode_command(
+        engine,
+        ActorId(1),
+        &tor_protocol::Command::Wizard {
+            expected_revision: engine.revision(ActorId(1)).unwrap(),
+            operation: operation.into(),
+        },
+    )?;
     send(engine, id, command)
 }
 
@@ -70,7 +82,12 @@ fn doors_replay_retry_and_rewind_with_disclosed_reach_and_approaches() {
     let before_close = engine.state(ActorId(1)).unwrap();
     let command = Command::Act {
         expected_revision: before_close.revision,
-        action: Action::SetDoor { door, open: false },
+        action: engine
+            .decode_action(
+                ActorId(1),
+                &tor_protocol::Action::SetDoor { door, open: false },
+            )
+            .unwrap(),
     };
     let closed = send(&mut engine, "close", command.clone()).unwrap();
     let expected = engine.state(ActorId(1)).unwrap();
@@ -90,7 +107,11 @@ fn doors_replay_retry_and_rewind_with_disclosed_reach_and_approaches() {
     assert!(send(&mut engine, "close", command).unwrap().duplicate);
     assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
     engine.enable_wizard().unwrap();
-    act(&mut engine, "open", Action::SetDoor { door, open: true });
+    act_wire(
+        &mut engine,
+        "open",
+        tor_protocol::Action::SetDoor { door, open: true },
+    );
     wizard(
         &mut engine,
         "rewind",
@@ -140,10 +161,10 @@ fn wizard_interior_door_hides_contents_and_does_not_reveal_topology() {
     for hidden in ["Secret", "region", "portal", "stone tablet"] {
         assert!(!encoded.contains(hidden));
     }
-    act(
+    act_wire(
         &mut engine,
         "open",
-        Action::SetDoor {
+        tor_protocol::Action::SetDoor {
             door: door.id,
             open: true,
         },
@@ -158,10 +179,10 @@ fn wizard_interior_door_hides_contents_and_does_not_reveal_topology() {
         .key
         .clone();
     assert!(engine.travel_route(ActorId(1), &destination).is_ok());
-    act(
+    act_wire(
         &mut engine,
         "close",
-        Action::SetDoor {
+        tor_protocol::Action::SetDoor {
             door: door.id,
             open: false,
         },

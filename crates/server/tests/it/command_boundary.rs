@@ -2,11 +2,22 @@ use tor_protocol::{
     Action, ActorId, Anchor, AnnotationCategory, Audience, ClientSource, Direction,
 };
 use tor_server::journal::{Command, WizardOperation};
+use tor_server::{wire_adapter::DecodedCommand, Engine, Scenario};
 
 #[test]
 fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
     use tor_protocol::Command as Wire;
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+    let scope = engine.target_scope(ActorId(1));
     let mut commands = vec![
+        Wire::ResumeIntention {
+            expected_revision: u64::MAX,
+            intention: tor_protocol::IntentionId("original-admission".into()),
+        },
+        Wire::CancelIntention {
+            expected_revision: u64::MAX,
+            intention: tor_protocol::IntentionId("original-admission".into()),
+        },
         Wire::RenamePlace {
             expected_revision: u64::MAX,
             key: "opaque-key".into(),
@@ -19,21 +30,21 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
     ];
     for action in [
         Action::Attack {
-            target: ActorId(u64::MAX),
+            target: scope.actor(tor_simulation::ActorId(u64::MAX)),
         },
         Action::SetDoor {
-            door: u64::MAX,
+            door: scope.door(u64::MAX),
             open: true,
         },
         Action::Move {
             direction: Direction::North,
         },
         Action::Take {
-            item: u64::MAX,
+            item: scope.item(tor_simulation::ItemId(u64::MAX)),
             quantity: Some(u64::MAX),
         },
         Action::Drop {
-            item: u64::MAX,
+            item: scope.item(tor_simulation::ItemId(u64::MAX)),
             quantity: None,
         },
         Action::Wait,
@@ -68,14 +79,61 @@ fn ordinary_commands_preserve_every_payload_at_the_wire_boundary() {
         }
     }
     for wire in commands {
-        let backend = Command::from_wire(&wire).unwrap();
-        let reconstructed: Wire = backend.try_into().unwrap();
+        let backend = tor_server::wire_adapter::decode_command(&wire).unwrap();
+        let reconstructed = match backend {
+            DecodedCommand::Backend(command) => engine.encode_command(ActorId(1), command).unwrap(),
+            DecodedCommand::Gameplay {
+                expected_revision,
+                action,
+            } => Wire::Act {
+                expected_revision,
+                action,
+            },
+        };
         assert_eq!(reconstructed, wire);
     }
 }
 
 #[test]
+fn fresh_gameplay_resolves_to_admission_and_developer_spelling_is_normalized() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
+    let wire = tor_protocol::Command::Act {
+        expected_revision: 0,
+        action: Action::Wait,
+    };
+    assert_eq!(
+        engine
+            .resolve_command(
+                ActorId(1),
+                engine.branch(),
+                tor_server::wire_adapter::decode_command(&wire).unwrap()
+            )
+            .unwrap(),
+        Command::AdmitIntention {
+            expected_revision: 0,
+            action: tor_server::journal::Action::Wait,
+        }
+    );
+    let operation = WizardOperation::SetGravity {
+        region: 2,
+        vector: [0, 0, -1],
+    };
+    let compact = serde_json::to_string(&operation).unwrap();
+    let pretty = serde_json::to_string_pretty(&operation).unwrap();
+    let decode = |operation| {
+        tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
+            expected_revision: 7,
+            operation,
+        })
+        .unwrap()
+    };
+    assert_ne!(compact, pretty);
+    assert_eq!(decode(compact), decode(pretty));
+}
+
+#[test]
 fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     let backend = Command::Wizard {
         expected_revision: u64::MAX,
         operation: WizardOperation::SetGravity {
@@ -83,18 +141,26 @@ fn developer_commands_are_parsed_and_backend_only_commands_stay_private() {
             vector: [0, 0, -1],
         },
     };
-    let wire = tor_protocol::Command::try_from(backend.clone()).unwrap();
-    assert_eq!(Command::from_wire(&wire).unwrap(), backend);
-    assert!(Command::from_wire(&tor_protocol::Command::Wizard {
-        expected_revision: 0,
-        operation: "invalid developer operation".into()
-    })
-    .is_err());
-    assert!(tor_protocol::Command::try_from(Command::PausePreparation).is_err());
+    let wire = engine.encode_command(ActorId(1), backend.clone()).unwrap();
+    assert_eq!(
+        tor_server::wire_adapter::decode_command(&wire).unwrap(),
+        DecodedCommand::Backend(backend)
+    );
+    assert!(
+        tor_server::wire_adapter::decode_command(&tor_protocol::Command::Wizard {
+            expected_revision: 0,
+            operation: "invalid developer operation".into()
+        })
+        .is_err()
+    );
+    assert!(engine
+        .encode_command(ActorId(1), Command::PausePreparation)
+        .is_err());
 }
 
 #[test]
 fn backend_actions_use_independent_types_and_numeric_save_payloads() {
+    let engine = Engine::memory(Scenario::two_room(42)).unwrap();
     use std::any::TypeId;
     use tor_server::journal::{Action as BackendAction, Direction as BackendDirection};
     assert_ne!(TypeId::of::<BackendAction>(), TypeId::of::<Action>());
@@ -109,10 +175,15 @@ fn backend_actions_use_independent_types_and_numeric_save_payloads() {
     let stored = serde_json::to_value(&command).unwrap();
     assert_eq!(stored["action"]["target"], serde_json::json!(u64::MAX));
     assert_eq!(serde_json::from_value::<Command>(stored).unwrap(), command);
-    let wire = tor_protocol::Command::try_from(command.clone()).unwrap();
-    assert_eq!(Command::from_wire(&wire).unwrap(), command);
+    let wire = engine.encode_command(ActorId(1), command.clone()).unwrap();
+    assert!(tor_server::wire_adapter::decode_command(&wire)
+        .unwrap()
+        .matches(&command, &engine.target_scope(ActorId(1))));
     assert_eq!(
         serde_json::to_value(wire).unwrap()["action"]["target"],
-        u64::MAX.to_string()
+        engine
+            .target_scope(ActorId(1))
+            .actor(tor_simulation::ActorId(u64::MAX))
+            .to_string()
     );
 }

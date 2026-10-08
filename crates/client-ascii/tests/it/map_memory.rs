@@ -8,13 +8,13 @@ fn snapshot(hidden: bool) -> Snapshot {
         "readiness":{"revision":"0","admission":true,"resume":[],"cancel":[]},"context":{"stream":"fixture-attachment","epoch":if hidden {"1"} else {"0"}},"actor":"1","branch":"map","cursor":{"sequence":"0","tick":"0"},"has_control":true, "intentions":[],
         "history":{"entries":[],"older_before":null},
         "state":{"wizard_game":false,"revision":if hidden {"1"} else {"0"},"observation":{
-            "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},
+            "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},
             "places":[],"visible_cells":(0..if hidden {1} else {4}).map(|x|serde_json::json!({
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
                 "stairs_up":x==2,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
-            "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":"2","position":{"x":2,"y":0,"z":0}})]},
+            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
+            "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":super::actor_target(2),"position":{"x":2,"y":0,"z":0}})]},
             "inventory":[],"ready":true
         }}
     })).unwrap()

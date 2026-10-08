@@ -217,6 +217,15 @@ counted full state/selected update DTOs without their response envelopes. The
 comparison tool keeps those historical byte metrics under distinct legacy names;
 they cannot establish a like-for-like change in complete-message sizes or CPU cost.
 
+The latency diagnostic also reports `command_call`, covering the complete trusted
+driver call including fresh wire-target resolution, and `disclosure_projection`,
+covering the subsequent `Engine::state` call including opaque-reference derivation.
+These are separate boundaries: projection is outside command execution, and
+`command_call` overlaps its internal engine phases. Do not sum overlapping timers
+or interpret these trusted-driver measurements as end-to-end queued client latency.
+The comparator retains these fields when present; older reports are not treated
+as having measured them. Comparisons need identical timer boundaries on both sides.
+
 Top-level measured command phases are exclusive: candidate capture, checkpoint capture, simulation,
 navigation refresh, revision-view perception, revision comparison, rewind
 snapshot, serialization, underlying write/flush, file sync, replacement, and

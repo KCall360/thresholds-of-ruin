@@ -1,6 +1,13 @@
 use std::sync::Arc;
 use tor_protocol::*;
 
+// Synthetic disclosed identities for wire-only tests; not server target derivation.
+fn synthetic_digest(index: u64) -> [u8; 32] {
+    let mut digest = [0; 32];
+    digest[..8].copy_from_slice(&index.to_le_bytes());
+    digest
+}
+
 fn cell(x: i32, y: i32, z: i32, key: &str) -> CellView {
     CellView {
         asset: None,
@@ -35,6 +42,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
             motion: None,
             places: Vec::new(),
             actor: ActorId(1),
+            self_target: ActorTarget::from_digest(synthetic_digest(1)),
             tick: revision,
             position: Position { x: 0, y: 0, z: 0 },
             visible_cells: cells,
@@ -54,6 +62,18 @@ fn round_trip(base: &StateView, next: &StateView) -> StateDelta {
 }
 
 #[test]
+fn a_delta_cannot_cross_an_observers_entity_target_scope() {
+    let base = room(15, 15, 1);
+    let mut next = room(15, 15, 2);
+    next.observation.self_target = ActorTarget::from_digest([42; 32]);
+    assert!(StateDelta::between(&base, &next).is_none());
+    next.observation.self_target = base.observation.self_target;
+    let mut delta = round_trip(&base, &next);
+    delta.self_target = ActorTarget::from_digest([42; 32]);
+    assert!(delta.apply(&base).is_err());
+}
+
+#[test]
 fn a_step_shifts_retained_cells_and_sends_only_the_edge() {
     let base = room(15, 15, 1);
     let next = room(16, 15, 2);
@@ -69,7 +89,7 @@ fn changed_cells_are_resent_in_place() {
     let mut next = room(15, 15, 2);
     next.observation.visible_cells[3].door = Some(DoorView {
         asset: None,
-        id: 1,
+        id: DoorTarget::from_digest(synthetic_digest(1)),
         name: "wooden door".into(),
         description: String::new(),
         open: true,
@@ -401,7 +421,7 @@ fn collection_view(count: usize) -> StateView {
             appearance: "disclosed appearance".repeat(4),
             identified: true,
             description: "disclosed description".repeat(4),
-            id: index as u64 + 1,
+            id: ItemTarget::from_digest(synthetic_digest(index as u64 + 1)),
             name: format!("carried item {index}"),
             asset: None,
         };
@@ -409,7 +429,7 @@ fn collection_view(count: usize) -> StateView {
         state.observation.ground_items.push(GroundItemView {
             reachable: false,
             item: ItemView {
-                id: index as u64 + 10_000,
+                id: ItemTarget::from_digest(synthetic_digest(index as u64 + 10_000)),
                 ..item
             },
             position: Position {
@@ -421,7 +441,7 @@ fn collection_view(count: usize) -> StateView {
         state.observation.visible_actors.push(ActorView {
             name: format!("actor {index}"),
             description: "disclosed actor appearance".repeat(4),
-            id: ActorId(index as u64 + 10),
+            id: ActorTarget::from_digest(synthetic_digest(index as u64 + 10)),
             position: Position {
                 x: index as i32,
                 y: 2,
@@ -554,7 +574,7 @@ fn ordered_collection_edits_reconstruct_reorders_insertions_and_empty_transition
             }
             4 => {
                 let mut extra = next.observation.inventory[0].clone();
-                extra.id = 100_000;
+                extra.id = ItemTarget::from_digest(synthetic_digest(100_000));
                 next.observation.inventory.insert(8, extra);
                 let mut extra = next.observation.ground_items[0].clone();
                 extra.position.z = 3;

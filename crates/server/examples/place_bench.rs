@@ -18,11 +18,14 @@ struct Spec {
     checkpoint_interval: u64,
 }
 fn wizard(engine: &mut Engine, id: &str, operation: String) -> tor_server::CommandProfile {
-    let command = journal::Command::from_wire(&Command::Wizard {
+    let command = tor_server::wire_adapter::decode_command(&Command::Wizard {
         expected_revision: engine.revision(ActorId(1)).unwrap(),
         operation,
     })
     .unwrap();
+    let command = engine
+        .resolve_command(ActorId(1), engine.branch(), command)
+        .unwrap();
     engine
         .command_profiled(
             "bench",
@@ -156,9 +159,8 @@ fn main() {
                 body: UpdateBody::Observation {
                     state: state.into(),
                     event: Some(Box::new(
-                        entry
-                            .entry
-                            .disclosed()
+                        engine
+                            .disclose_entry(&entry.entry)
                             .expect("completed command has history"),
                     )),
                 },

@@ -21,19 +21,19 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Goal {
     Take {
-        item: u64,
+        item: ItemTarget,
         quantity: Option<u64>,
     },
     Drop {
-        item: u64,
+        item: ItemTarget,
         quantity: Option<u64>,
     },
     Door {
-        door: u64,
+        door: DoorTarget,
         open: bool,
     },
     Attack {
-        target: ActorId,
+        target: ActorTarget,
     },
     Approach {
         target: Key,

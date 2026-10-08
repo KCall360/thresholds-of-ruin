@@ -44,8 +44,8 @@ fn autonomous_execution_preserves_disclosures_and_both_restore_paths() {
         let old = crate::support::act_as(&mut reference, actor, action).unwrap();
         let new = engine.advance_ai(actor).unwrap();
         assert_eq!(
-            new.entry.disclosed().unwrap().content,
-            old.entry.disclosed().unwrap().content
+            engine.disclose_entry(&new.entry).unwrap().content,
+            reference.disclose_entry(&old.entry).unwrap().content
         );
         assert_eq!(new.entry.tick, old.entry.tick);
         let expected: Vec<_> = engine

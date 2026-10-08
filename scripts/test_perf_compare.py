@@ -87,6 +87,18 @@ class Scheduling(unittest.TestCase):
 
 
 class Extraction(unittest.TestCase):
+    def test_request_and_disclosure_times_include_rejections_without_relabeling(self):
+        rows = latency_rows(times=(1.0,))
+        rows[1]["phases_ms"].update(command_call=1.2, disclosure_projection=0.4)
+        rows[2]["phases_ms"].update(command_call=0.1, disclosure_projection=0.3)
+        timings, _, _ = compare.extract_latency(rows)
+        phases = timings["r8-a1-h100-memory"]
+        self.assertEqual(phases["authoritative_total"], [1.0])
+        self.assertEqual(phases["command_call"], [1.2, 0.1])
+        self.assertEqual(phases["disclosure_projection"], [0.4, 0.3])
+        legacy, _, _ = compare.extract_latency(latency_rows())
+        self.assertNotIn("disclosure_projection", legacy["r8-a1-h100-memory"])
+
     def test_complete_wire_timings_and_bytes_keep_distinct_measurement_names(self):
         case = "r8-a1-h100-memory"
         rows = latency_rows()

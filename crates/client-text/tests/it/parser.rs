@@ -16,7 +16,7 @@ fn sample_state() -> StateView {
         "revision": "1",
         "observation": {
             "actor": "1",
-            "tick": "10",
+            "self_target":super::actor_target(1),"tick": "10",
             "position": {"x": 0, "y": 0, "z": 0},
             "ready": true,
             "places": [],
@@ -40,7 +40,7 @@ fn sample_state() -> StateView {
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {
-                        "id": "101",
+                        "id":super::door_target(101),
                         "name": "oak door",
                         "description": "A heavy wooden door with iron hinges.",
                         "open": false,
@@ -57,7 +57,7 @@ fn sample_state() -> StateView {
                     "stairs_up": false,
                     "stairs_down": false,
                     "door": {
-                        "id": "102",
+                        "id":super::door_target(102),
                         "name": "iron gate",
                         "description": "A barred iron portcullis.",
                         "open": true,
@@ -71,7 +71,7 @@ fn sample_state() -> StateView {
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {
-                        "id": "1",
+                        "id":super::item_target(1),
                         "name": "copper token",
                         "description": "A worn copper disc.",
                         "quantity": "1",
@@ -83,7 +83,7 @@ fn sample_state() -> StateView {
                     "reachable": true,
                     "position": {"x": 0, "y": 0, "z": 0},
                     "item": {
-                        "id": "2",
+                        "id":super::item_target(2),
                         "name": "silver token",
                         "description": "A polished silver disc.",
                         "quantity": "1",
@@ -95,7 +95,7 @@ fn sample_state() -> StateView {
                     "reachable": false,
                     "position": {"x": 1, "y": 0, "z": 0},
                     "item": {
-                        "id": "3",
+                        "id":super::item_target(3),
                         "name": "stone tablet",
                         "description": "An inscribed slab of granite.",
                         "quantity": "1",
@@ -106,7 +106,7 @@ fn sample_state() -> StateView {
             ],
             "inventory": [
                 {
-                    "id": "10",
+                    "id":super::item_target(10),
                     "name": "iron sword",
                     "description": "A sharp iron shortsword.",
                     "quantity": "1",
@@ -114,7 +114,7 @@ fn sample_state() -> StateView {
                     "identified": true
                 },
                 {
-                    "id": "11",
+                    "id":super::item_target(11),
                     "name": "brass key",
                     "description": "An ornate brass key.",
                     "quantity": "1",
@@ -124,7 +124,7 @@ fn sample_state() -> StateView {
             ],
             "visible_actors": [
                 {
-                    "id": "2",
+                    "id":super::actor_target(2),
                     "name": "goblin scout",
                     "description": "A snarling creature clad in scavenged leather.",
                     "position": {"x": 1, "y": 0, "z": 0}
@@ -133,6 +133,96 @@ fn sample_state() -> StateView {
         }
     }))
     .unwrap()
+}
+
+#[test]
+fn disclosed_ground_order_does_not_depend_on_opaque_handle_bytes() {
+    let mut state = sample_state();
+    state.observation.ground_items[0].item.id = super::item_target(250);
+    state.observation.ground_items[1].item.id = super::item_target(1);
+    let expected: Vec<_> = state
+        .observation
+        .ground_items
+        .iter()
+        .map(|ground| Key::Item(ground.item.id))
+        .collect();
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let actual: Vec<_> = scene
+        .referents
+        .iter()
+        .filter(|referent| referent.kind == Kind::Thing && !referent.carried)
+        .map(|referent| referent.key)
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn disclosed_door_order_does_not_depend_on_opaque_handle_bytes() {
+    let mut state = sample_state();
+    state.observation.visible_cells[1].door.as_mut().unwrap().id = super::door_target(250);
+    state.observation.visible_cells[2].door.as_mut().unwrap().id = super::door_target(1);
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let actual: Vec<_> = scene
+        .referents
+        .iter()
+        .filter(|r| r.kind == Kind::Door)
+        .map(|r| r.key)
+        .collect();
+    assert_eq!(
+        actual,
+        vec![
+            Key::Door(super::door_target(250)),
+            Key::Door(super::door_target(1))
+        ]
+    );
+}
+
+#[test]
+fn equally_near_identical_items_are_selected_in_disclosed_order() {
+    let mut state = sample_state();
+    let mut first = state.observation.ground_items[0].clone();
+    first.item.id = super::item_target(250);
+    let mut second = first.clone();
+    second.item.id = super::item_target(1);
+    state.observation.ground_items = vec![first, second];
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    assert_eq!(
+        resolve(
+            &object("take copper token"),
+            &scene,
+            &Referents::default(),
+            Domain::Ground
+        ),
+        Resolution::One(Key::Item(super::item_target(250)))
+    );
+}
+
+#[test]
+fn equally_near_figures_keep_disclosed_order_independent_of_handle_bytes() {
+    let mut state = sample_state();
+    let mut first = state.observation.visible_actors[0].clone();
+    first.id = super::actor_target(250);
+    let mut second = first.clone();
+    second.id = super::actor_target(2);
+    state.observation.visible_actors = vec![first, second];
+    let palette = Palette::default();
+    let scene = Scene::new(&state, &palette);
+    let actual: Vec<_> = scene
+        .referents
+        .iter()
+        .filter(|r| r.kind == Kind::Figure)
+        .map(|r| r.key)
+        .collect();
+    assert_eq!(
+        actual,
+        vec![
+            Key::Actor(super::actor_target(250)),
+            Key::Actor(super::actor_target(2))
+        ]
+    );
 }
 
 #[test]
@@ -187,9 +277,9 @@ fn the_scene_lists_what_the_state_discloses() {
     assert_eq!(count(Kind::Figure), 1);
     assert_eq!(count(Kind::Me), 1);
     // A portcullis is a kind of door, and a scout a creature.
-    let gate = scene.get(Key::Door(102)).unwrap();
+    let gate = scene.get(Key::Door(super::door_target(102))).unwrap();
     assert!(gate.heads.contains(&"door".to_owned()));
-    let goblin = scene.get(Key::Actor(ActorId(2))).unwrap();
+    let goblin = scene.get(Key::Actor(super::actor_target(2))).unwrap();
     assert!(goblin.words.contains(&"creature".to_owned()));
 }
 
@@ -201,7 +291,10 @@ fn distinguishable_things_need_a_choice_and_alike_ones_dont() {
     let scene = Scene::new(&state, &palette);
     assert_eq!(
         resolve(&object("take token"), &scene, &referents, Domain::Ground),
-        Resolution::Ask(vec![Key::Item(1), Key::Item(2)])
+        Resolution::Ask(vec![
+            Key::Item(super::item_target(1)),
+            Key::Item(super::item_target(2))
+        ])
     );
     assert_eq!(
         resolve(
@@ -210,23 +303,26 @@ fn distinguishable_things_need_a_choice_and_alike_ones_dont() {
             &referents,
             Domain::Ground
         ),
-        Resolution::One(Key::Item(2))
+        Resolution::One(Key::Item(super::item_target(2)))
     );
     assert_eq!(
         resolve(&object("take tokens"), &scene, &referents, Domain::Ground),
-        Resolution::Many(vec![Key::Item(1), Key::Item(2)])
+        Resolution::Many(vec![
+            Key::Item(super::item_target(1)),
+            Key::Item(super::item_target(2))
+        ])
     );
     // Two copper tokens can't be told apart, so either will do: the one in
     // reach.
     let mut twin = state.observation.ground_items[0].clone();
-    twin.item.id = 4;
+    twin.item.id = super::item_target(4);
     twin.reachable = false;
     twin.position.x = 1;
     state.observation.ground_items[1] = twin;
     let scene = Scene::new(&state, &palette);
     assert_eq!(
         resolve(&object("take token"), &scene, &referents, Domain::Ground),
-        Resolution::One(Key::Item(1))
+        Resolution::One(Key::Item(super::item_target(1)))
     );
     // "The second token" still counts them both.
     assert_eq!(
@@ -236,7 +332,7 @@ fn distinguishable_things_need_a_choice_and_alike_ones_dont() {
             &referents,
             Domain::Ground
         ),
-        Resolution::One(Key::Item(4))
+        Resolution::One(Key::Item(super::item_target(4)))
     );
 }
 
@@ -251,23 +347,23 @@ fn verbs_prefer_what_they_can_act_on() {
     // Taking means the corpse; attacking and examining, the living scout.
     assert_eq!(
         resolve(&scout, &scene, &referents, Domain::Ground),
-        Resolution::One(Key::Item(3))
+        Resolution::One(Key::Item(super::item_target(3)))
     );
     assert_eq!(
         resolve(&scout, &scene, &referents, Domain::Figures),
-        Resolution::One(Key::Actor(ActorId(2)))
+        Resolution::One(Key::Actor(super::actor_target(2)))
     );
     assert_eq!(
         resolve(&scout, &scene, &referents, Domain::Any),
-        Resolution::One(Key::Actor(ActorId(2)))
+        Resolution::One(Key::Actor(super::actor_target(2)))
     );
     assert_eq!(
         resolve(&object("take body"), &scene, &referents, Domain::Ground),
-        Resolution::One(Key::Item(3))
+        Resolution::One(Key::Item(super::item_target(3)))
     );
     assert_eq!(
         resolve(&object("drop sword"), &scene, &referents, Domain::Carried),
-        Resolution::One(Key::Item(10))
+        Resolution::One(Key::Item(super::item_target(10)))
     );
     assert_eq!(
         resolve(&object("examine me"), &scene, &referents, Domain::Any),
@@ -289,15 +385,15 @@ fn it_is_the_last_thing_mentioned() {
         resolve(&object("take it"), &scene, &referents, Domain::Ground),
         Resolution::Missing("I'm not sure what \"it\" refers to.".into())
     );
-    referents.mention(scene.get(Key::Item(3)).unwrap());
+    referents.mention(scene.get(Key::Item(super::item_target(3))).unwrap());
     assert_eq!(
         resolve(&object("take it"), &scene, &referents, Domain::Ground),
-        Resolution::One(Key::Item(3))
+        Resolution::One(Key::Item(super::item_target(3)))
     );
-    referents.mention(scene.get(Key::Actor(ActorId(2))).unwrap());
+    referents.mention(scene.get(Key::Actor(super::actor_target(2))).unwrap());
     assert_eq!(
         resolve(&object("attack him"), &scene, &referents, Domain::Figures),
-        Resolution::One(Key::Actor(ActorId(2)))
+        Resolution::One(Key::Actor(super::actor_target(2)))
     );
     // Gone from view, it can't be acted on.
     let mut later = state.clone();
@@ -329,11 +425,11 @@ fn ditransitive_commands_bind_both_objects() {
     assert_eq!((verb, preposition), (Verb::Attack, Preposition::With));
     assert_eq!(
         resolve(&direct, &scene, &referents, Domain::Figures),
-        Resolution::One(Key::Actor(ActorId(2)))
+        Resolution::One(Key::Actor(super::actor_target(2)))
     );
     assert_eq!(
         resolve(&indirect, &scene, &referents, Domain::Carried),
-        Resolution::One(Key::Item(10))
+        Resolution::One(Key::Item(super::item_target(10)))
     );
 }
 
@@ -341,7 +437,7 @@ fn ditransitive_commands_bind_both_objects() {
 fn all_except_leaves_out_everything_it_names() {
     let mut state = sample_state();
     let mut twin = state.observation.ground_items[0].clone();
-    twin.item.id = 4;
+    twin.item.id = super::item_target(4);
     state.observation.ground_items.push(twin);
     let palette = Palette::default();
     let scene = Scene::new(&state, &palette);
@@ -354,7 +450,10 @@ fn all_except_leaves_out_everything_it_names() {
             Domain::Ground
         ),
         // In reach first, then the nearest.
-        Resolution::Many(vec![Key::Item(2), Key::Item(3)])
+        Resolution::Many(vec![
+            Key::Item(super::item_target(2)),
+            Key::Item(super::item_target(3))
+        ])
     );
     assert_eq!(
         resolve(
@@ -363,7 +462,7 @@ fn all_except_leaves_out_everything_it_names() {
             &referents,
             Domain::Carried
         ),
-        Resolution::Many(vec![Key::Item(10)])
+        Resolution::Many(vec![Key::Item(super::item_target(10))])
     );
     assert_eq!(
         resolve(
@@ -372,6 +471,10 @@ fn all_except_leaves_out_everything_it_names() {
             &referents,
             Domain::Ground
         ),
-        Resolution::Many(vec![Key::Item(1), Key::Item(2), Key::Item(4)])
+        Resolution::Many(vec![
+            Key::Item(super::item_target(1)),
+            Key::Item(super::item_target(2)),
+            Key::Item(super::item_target(4))
+        ])
     );
 }

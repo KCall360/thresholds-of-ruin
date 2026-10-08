@@ -53,6 +53,30 @@ pub fn submit(
     engine.command("player", "test", actor, &request, &branch, command)
 }
 
+/// Decode fresh wire input for a trusted Engine test driver. Session authority
+/// remains covered by the actual Service/WebSocket tests.
+pub fn decode_command(
+    engine: &Engine,
+    actor: ActorId,
+    command: &tor_protocol::Command,
+) -> Result<Command, Failure> {
+    engine.resolve_command(
+        actor,
+        engine.branch(),
+        tor_server::wire_adapter::decode_command(command)?,
+    )
+}
+
+/// Drive the existing immediate simulation test path using a disclosed target.
+pub fn act_disclosed(
+    engine: &mut Engine,
+    actor: ActorId,
+    action: tor_protocol::Action,
+) -> Result<CommandResult, Failure> {
+    let action = engine.decode_action(actor, &action)?;
+    act_as(engine, actor, action)
+}
+
 /// Act for `actor` at its current revision.
 pub fn act_as(
     engine: &mut Engine,
@@ -82,10 +106,14 @@ pub fn wizard(
     actor: ActorId,
     operation: &str,
 ) -> Result<CommandResult, Failure> {
-    let command = Command::from_wire(&tor_protocol::Command::Wizard {
-        expected_revision: engine.revision(actor)?,
-        operation: operation.into(),
-    })?;
+    let command = decode_command(
+        engine,
+        actor,
+        &tor_protocol::Command::Wizard {
+            expected_revision: engine.revision(actor)?,
+            operation: operation.into(),
+        },
+    )?;
     submit(engine, actor, command)
 }
 

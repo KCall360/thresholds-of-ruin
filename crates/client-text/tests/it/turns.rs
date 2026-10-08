@@ -306,15 +306,15 @@ impl Link for Scripted {
 fn state() -> StateView {
     serde_json::from_value(serde_json::json!({
         "wizard_game":false,"revision":"0","observation":{
-        "actor":"1","tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
+        "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
         "places":[],"visible_cells":(0..7).map(|x| serde_json::json!({
             "key":format!("cell-{x}"),"position":{"x":x,"y":0,"z":0},
             "wall":false,"material":"stone","place_hint":x==1 || x==6,
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":"1","name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":"2","name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
         "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -341,13 +341,13 @@ fn figure(id: u64, name: &str, x: i32) -> ActorView {
     ActorView {
         name: name.into(),
         description: String::new(),
-        id: ActorId(id),
+        id: super::actor_target(id),
         position: Position { x, y: 0, z: 0 },
         asset: None,
     }
 }
 
-fn take(mut s: StateView, item: u64) -> StateView {
+fn take(mut s: StateView, item: ItemTarget) -> StateView {
     let index = s
         .observation
         .ground_items
@@ -476,7 +476,7 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
     assert!(is_act(
         &link.sent[1],
         &Action::Take {
-            item: 2,
+            item: super::item_target(2),
             quantity: None
         }
     ));
@@ -616,7 +616,9 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
             vec![
                 Frame::View(
                     not_ready(now.clone()),
-                    Some(Event::AttackStarted { target: ActorId(2) }),
+                    Some(Event::AttackStarted {
+                        target: super::actor_target(2),
+                    }),
                 ),
                 Frame::Ack,
                 Frame::View(
@@ -625,11 +627,13 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                         46,
                         vec![
                             CombatEventView::Attack {
-                                attacker: Some(ActorId(2)),
-                                target: Some(ActorId(1)),
+                                attacker: Some(super::actor_target(2)),
+                                target: Some(super::actor_target(1)),
                                 outcome: AttackOutcome::Hit,
                             },
-                            CombatEventView::Interrupted { actor: ActorId(1) },
+                            CombatEventView::Interrupted {
+                                actor: super::actor_target(1),
+                            },
                         ],
                     ),
                     None,
@@ -641,17 +645,24 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
                 46,
                 vec![
                     CombatEventView::Attack {
-                        attacker: Some(ActorId(1)),
-                        target: Some(ActorId(2)),
+                        attacker: Some(super::actor_target(1)),
+                        target: Some(super::actor_target(2)),
                         outcome: AttackOutcome::Hit,
                     },
-                    CombatEventView::Died { actor: ActorId(2) },
+                    CombatEventView::Died {
+                        actor: super::actor_target(2),
+                    },
                 ],
             );
             after.observation.visible_actors.clear();
             vec![
                 Frame::Ack,
-                Frame::View(after, Some(Event::AttackStarted { target: ActorId(2) })),
+                Frame::View(
+                    after,
+                    Some(Event::AttackStarted {
+                        target: super::actor_target(2),
+                    }),
+                ),
             ]
         }
     });
@@ -674,7 +685,7 @@ async fn an_exchange_of_blows_is_told_in_order_and_a_death_ends_it() {
 async fn a_question_pauses_the_chain_and_its_answer_resumes_it() {
     let mut start = state();
     let mut silver = start.observation.ground_items[0].clone();
-    silver.item.id = 3;
+    silver.item.id = super::item_target(3);
     silver.item.name = "silver token".into();
     silver.item.description = "A polished silver disc.".into();
     start.observation.ground_items.push(silver);
@@ -781,21 +792,21 @@ async fn gameplay_chains_wait_for_disclosed_permissions_after_action_and_travel(
                     request,
                     Request::Command {
                         command: Command::Act {
-                            action: Action::Take { item: 1, .. },
+                            action: Action::Take { item, .. },
                             ..
                         },
                         ..
-                    }
+                    } if *item == super::item_target(1)
                 ));
                 vec![
                     Frame::Intention(IntentionPhase::Queued),
                     disabled,
                     Frame::Admitted,
                     Frame::View(
-                        take(now.clone(), 1),
+                        take(now.clone(), super::item_target(1)),
                         Some(Event::Taken {
-                            item: 1,
-                            result: 1,
+                            item: super::item_target(1),
+                            result: super::item_target(1),
                             quantity: 1,
                         }),
                     ),
@@ -918,7 +929,7 @@ async fn execution_failure_after_admission_stops_the_command_chain() {
 async fn simple_pickups_in_a_row_are_one_sentence_and_again_repeats() {
     let mut start = state();
     let mut twin = start.observation.ground_items[0].clone();
-    twin.item.id = 3;
+    twin.item.id = super::item_target(3);
     start.observation.ground_items.push(twin);
     let mut link = Scripted::new(start, obliging);
     let mut engine = Engine::default();
@@ -1010,7 +1021,7 @@ async fn stacks_of_alike_things_are_counted_together() {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
             "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
-                "id": id.to_string(), "name": name, "description": ""}}))
+                "id": super::item_target(id), "name": name, "description": ""}}))
         .unwrap()
     };
     s.observation.ground_items = vec![
@@ -1190,17 +1201,24 @@ async fn a_figure_that_steps_up_to_meet_an_attack_is_attacked() {
                 50,
                 vec![
                     CombatEventView::Attack {
-                        attacker: Some(ActorId(1)),
-                        target: Some(ActorId(2)),
+                        attacker: Some(super::actor_target(1)),
+                        target: Some(super::actor_target(2)),
                         outcome: AttackOutcome::Hit,
                     },
-                    CombatEventView::Died { actor: ActorId(2) },
+                    CombatEventView::Died {
+                        actor: super::actor_target(2),
+                    },
                 ],
             );
             after.observation.visible_actors.clear();
             vec![
                 Frame::Ack,
-                Frame::View(after, Some(Event::AttackStarted { target: ActorId(2) })),
+                Frame::View(
+                    after,
+                    Some(Event::AttackStarted {
+                        target: super::actor_target(2),
+                    }),
+                ),
             ]
         }
         _ => vec![Frame::Ack],
@@ -1307,7 +1325,7 @@ fn open_ground(find: usize) -> Scripted {
                     serde_json::from_value(serde_json::json!({
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
                         "item": {"quantity": "1", "appearance": "item", "identified": true,
-                            "id": "7", "name": "pebble", "description": ""}}))
+                            "id":super::item_target(7), "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
             }
@@ -1409,7 +1427,7 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     let arrows = |id: u64, quantity: u64| {
         serde_json::from_value::<ItemView>(serde_json::json!({
             "quantity": quantity.to_string(), "appearance": "item", "identified": true,
-            "id": id.to_string(), "name": "arrow", "description": ""}))
+            "id": super::item_target(id), "name": "arrow", "description": ""}))
         .unwrap()
     };
     s.observation.inventory = vec![arrows(20, 2), arrows(21, 15)];

@@ -245,8 +245,10 @@ class IntentionProcesses(ProcessTestCase):
                                    capture_output=True, text=True, timeout=15)
         self.assertEqual(validated.returncode, 0, validated.stderr)
         server = self.server(scenario=package)
-        player, _ = self.client()
-        accepted = self.command(player, {"type": "act", "action": {"type": "attack", "target": "2"}})
+        player, initial = self.client()
+        target = next(actor['id'] for actor in initial['state']['observation']['visible_actors']
+                      if actor['name'] == 'ruin guard')
+        accepted = self.command(player, {"type": "act", "action": {"type": "attack", "target": target}})
         self.assertIsNone(accepted["error"])
         identity = accepted["intentions"][0]["intention"]
         started = self.frame(player, lambda frame: lifecycle(frame, identity, "started"))

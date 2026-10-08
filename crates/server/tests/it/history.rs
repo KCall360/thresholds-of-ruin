@@ -598,6 +598,10 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
     let original: serde_json::Value = support::read(&path);
     let mut unsupported = original.clone();
     unsupported["version"] = 999.into();
+    // Version 21 could reuse entity identities after a rewind. Its journal
+    // must not replay under the new allocation rules or be overwritten.
+    let mut obsolete_identity_rules = original.clone();
+    obsolete_identity_rules["version"] = 21.into();
     let mut missing_regions = original.clone();
     missing_regions["scenario"]
         .as_object_mut()
@@ -609,6 +613,7 @@ fn incompatible_or_inconsistent_archives_are_rejected_without_overwrite() {
     inconsistent["records"][0]["entry"]["tick"] = 1000.into();
     for bad in [
         unsupported,
+        obsolete_identity_rules,
         unsupported_rules,
         missing_regions,
         inconsistent,

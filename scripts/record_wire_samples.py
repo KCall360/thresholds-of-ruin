@@ -46,11 +46,11 @@ CLIENT = [
             {"type": "travel", "expected_revision": "3", "destination": "cell-key"},
             {"type": "wizard", "expected_revision": "3", "operation": "rewind initial"},
             *({"type": "act", "expected_revision": "3", "action": action} for action in [
-                {"type": "attack", "target": "2"},
-                {"type": "set_door", "door": "7", "open": True},
+                {"type": "attack", "target": "a_" + "02" * 32},
+                {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
                 {"type": "move", "direction": "north_east"},
-                {"type": "take", "item": "4", "quantity": "2"},
-                {"type": "drop", "item": "4", "quantity": None},
+                {"type": "take", "item": "i_" + "04" * 32, "quantity": "2"},
+                {"type": "drop", "item": "i_" + "04" * 32, "quantity": None},
                 {"type": "wait"},
             ]),
             {"type": "annotate", "anchor": {"type": "state", "revision": "3"}, "text": "A note",
@@ -71,7 +71,8 @@ class Recorder(ProcessTestCase):
         self.request(player, {"type": "history", "limit": 5, "before": None})
         self.act(player, {"type": "move", "direction": "east"})
         self.act(player, {"type": "move", "direction": "east"})
-        self.act(player, {"type": "take", "item": "999999"})
+        rejected = self.act(player, {"type": "take", "item": "i_" + "00" * 32})
+        self.assertTrue(rejected["error"].startswith("InvalidAction:"))
         state = self.request(player, {"type": "snapshot"})
         state = self.request(player, {"type": "command", "context": state["input_context"], "branch": state["branch"], "command": {
             "type": "annotate", "anchor": {"type": "state", "revision": state["state"]["revision"]},

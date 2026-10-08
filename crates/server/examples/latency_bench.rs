@@ -155,21 +155,25 @@ impl Runner {
         let history_start = self.engine.profile_counts().0;
         let start = Instant::now();
         let result = match &action {
-            Some(action) => self.engine.command_profiled(
-                "bench",
-                "headless",
-                actor,
-                &request,
-                &branch,
-                Command::Act {
-                    expected_revision: before.revision,
-                    action: tor_server::journal::Action::from_wire(action),
-                },
-            ),
+            Some(action) => self.engine.decode_action(actor, action).and_then(|action| {
+                self.engine.command_profiled(
+                    "bench",
+                    "headless",
+                    actor,
+                    &request,
+                    &branch,
+                    Command::Act {
+                        expected_revision: before.revision,
+                        action,
+                    },
+                )
+            }),
             None => self.engine.advance_ai_profiled(actor),
         };
         let command_call_ms = start.elapsed().as_secs_f64() * 1000.;
+        let start = Instant::now();
         let after = self.engine.state(actor).unwrap();
+        let disclosure_projection_ms = start.elapsed().as_secs_f64() * 1000.;
         if let Err(error) = &result {
             if expected != "blocked" {
                 println!(
@@ -197,7 +201,7 @@ impl Runner {
                 else {
                     panic!("AI execution did not record an action");
                 };
-                action = Some(selected.to_wire());
+                action = Some(self.engine.encode_action(actor, selected));
             }
             timings = phases(&p);
             profile = Some(p);
@@ -212,8 +216,13 @@ impl Runner {
             let state = self.engine.state(ActorId(1)).unwrap();
             self.sequence += 1;
             let tick = state.observation.tick;
-            let event = (actor == ActorId(1))
-                .then(|| Box::new(entry.disclosed().expect("completed command has history")));
+            let event = (actor == ActorId(1)).then(|| {
+                Box::new(
+                    self.engine
+                        .disclose_entry(entry)
+                        .expect("completed command has history"),
+                )
+            });
             let message = ServerMessage::Update {
                 update: Box::new(StreamUpdate {
                     context: fixture_context(),
@@ -269,6 +278,7 @@ impl Runner {
             timings.insert("rendering".into(), start.elapsed().as_secs_f64() * 1000.);
         }
         timings.insert("command_call".into(), command_call_ms);
+        timings.insert("disclosure_projection".into(), disclosure_projection_ms);
         for (phase, value) in &timings {
             self.distributions
                 .entry((label.to_string(), phase.clone()))

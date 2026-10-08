@@ -73,54 +73,6 @@ pub fn direction(direction: p::Direction) -> w::Direction {
     simulation_direction(requested_direction(direction))
 }
 
-pub fn requested_action(action: &p::Action) -> a::Action {
-    match action {
-        p::Action::Attack { target } => a::Action::Attack {
-            target: s::ActorId(target.0),
-        },
-        p::Action::SetDoor { door, open } => a::Action::SetDoor {
-            door: *door,
-            open: *open,
-        },
-        p::Action::Move { direction } => a::Action::Move {
-            direction: requested_direction(*direction),
-        },
-        p::Action::Take { item, quantity } => a::Action::Take {
-            item: *item,
-            quantity: *quantity,
-        },
-        p::Action::Drop { item, quantity } => a::Action::Drop {
-            item: *item,
-            quantity: *quantity,
-        },
-        p::Action::Wait => a::Action::Wait,
-    }
-}
-
-pub fn wire_action(action: &a::Action) -> p::Action {
-    match action {
-        a::Action::Attack { target } => p::Action::Attack {
-            target: p::ActorId(target.0),
-        },
-        a::Action::SetDoor { door, open } => p::Action::SetDoor {
-            door: *door,
-            open: *open,
-        },
-        a::Action::Move { direction } => p::Action::Move {
-            direction: wire_direction(*direction),
-        },
-        a::Action::Take { item, quantity } => p::Action::Take {
-            item: *item,
-            quantity: *quantity,
-        },
-        a::Action::Drop { item, quantity } => p::Action::Drop {
-            item: *item,
-            quantity: *quantity,
-        },
-        a::Action::Wait => p::Action::Wait,
-    }
-}
-
 pub fn action(action: &a::Action) -> s::Action {
     match action {
         a::Action::Attack { target } => s::Action::Attack { target: *target },
@@ -222,6 +174,7 @@ pub fn observation(
     salt: &str,
     ready: bool,
     terrain: Terrain,
+    targets: &crate::wire_adapter::TargetScope,
 ) -> p::Observation {
     let offset = |position: w::Position| p::Position {
         x: position.x,
@@ -246,7 +199,7 @@ pub fn observation(
         visible_cells.push(p::CellView {
             asset: if cell.wall { wall } else { floor },
             door: visible.door.map(|door| p::DoorView {
-                id: door.id,
+                id: targets.door(door.id),
                 name: "wooden door".into(),
                 description: "A plain wooden door with an iron handle.".into(),
                 open: door.open,
@@ -283,7 +236,7 @@ pub fn observation(
                     appearance: item.appearance.clone(),
                     identified: item.identified,
                     description: item.description.clone(),
-                    id: item.id.0,
+                    id: targets.item(item.id),
                     name: item.name.clone(),
                     asset: item.asset.clone(),
                 },
@@ -299,7 +252,7 @@ pub fn observation(
             visible_actors.push(p::ActorView {
                 name: actor.name.clone(),
                 description: String::new(),
-                id: p::ActorId(actor.id.0),
+                id: targets.actor(actor.id),
                 position: offset(cell.offset),
                 asset: actor.asset.clone(),
             });
@@ -308,7 +261,7 @@ pub fn observation(
             visible_actors.push(p::ActorView {
                 name: String::new(),
                 description: String::new(),
-                id: p::ActorId(view.actor.0),
+                id: targets.actor(view.actor),
                 position: offset(cell.offset),
                 asset: view.asset.clone(),
             });
@@ -325,12 +278,16 @@ pub fn observation(
                 .actors
                 .into_iter()
                 .map(|(id, hostile, injury)| p::CombatActorView {
-                    actor: p::ActorId(id.0),
+                    actor: targets.actor(id),
                     hostile,
                     injury: injury_view(injury),
                 })
                 .collect(),
-            events: c.events.into_iter().map(combat_event_view).collect(),
+            events: c
+                .events
+                .into_iter()
+                .map(|event| combat_event_view(event, targets))
+                .collect(),
             objective: c.objective.map(|o| match o {
                 s::combat::ObjectiveKind::RetrieveAndReturn => p::ObjectiveKind::RetrieveAndReturn,
                 s::combat::ObjectiveKind::ReachExit => p::ObjectiveKind::ReachExit,
@@ -348,6 +305,7 @@ pub fn observation(
         }),
         places: vec![],
         actor: p::ActorId(view.actor.0),
+        self_target: targets.actor(view.actor),
         tick: view.tick,
         position: p::Position { x: 0, y: 0, z: 0 },
         ready,
@@ -362,7 +320,7 @@ pub fn observation(
                 appearance: item.appearance.clone(),
                 identified: item.identified,
                 description: item.description,
-                id: item.id.0,
+                id: targets.item(item.id),
                 name: item.name,
                 asset: item.asset,
             })
@@ -379,9 +337,12 @@ fn injury_view(injury: s::combat::Injury) -> p::Injury {
     }
 }
 
-fn combat_event_view(event: s::combat::DisclosedCombatEvent) -> p::CombatEventView {
+fn combat_event_view(
+    event: s::combat::DisclosedCombatEvent,
+    targets: &crate::wire_adapter::TargetScope,
+) -> p::CombatEventView {
     use s::combat::{AttackOutcome as O, DisclosedCombatEvent as E};
-    let id = |actor: s::ActorId| p::ActorId(actor.0);
+    let id = |actor: s::ActorId| targets.actor(actor);
     match event {
         E::Attack {
             attacker,

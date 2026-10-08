@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v22";
+pub const RULESET: &str = "dungeon-v23";
 const VALIDATOR: &str = "tor-scenario-8";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;

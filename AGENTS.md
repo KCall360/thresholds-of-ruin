@@ -517,8 +517,8 @@ inputs and separate geometry/placement/population/loot streams; raw source hashe
 remain integrity identities. Default-zero salt is explicit, disjoint placement
 lanes preserve pool independence and infeasible minima fail instead of truncating
 silently. Lazy identity assembly now includes authored characters starting in
-generated regions. Ruleset dungeon-v22 and validator tor-scenario-8 changed;
-protocol 28, save 21 and authoring format 2 did not. Focused backend/validator and
+generated regions. The generator ruleset and validator identities changed;
+the then-current protocol, save 21 and authoring format 2 did not. Focused backend/validator and
 real-process regressions passed; final full, measurements and CI remain. The
 separate PR #74 checkpoint has passed Windows profiles, but Linux debug spectator
 drain failed its existing deadline; do not merge or activate it until corrected
@@ -552,3 +552,76 @@ All 33 release validators and all scenario process cases passed. Final debug
 publication evidence and replacement exact-head CI are still required; failed CI
 is retained, not rerun as a substitute for a correction. All original work
 sequences remain in scope.
+
+**Command conversion ownership (2026-10-07).** Wire command/action conversion
+and developer parsing now live in the explicit `wire_adapter`, with journal
+conversion methods and the implicit command conversion trait removed. Workspace
+callers use the same exhaustive adapter. Admission, authority, receipt ordering,
+numeric save payloads and simulation execution retain their behavior. The
+expanded boundary tests passed before and after extraction; 197 server unit
+tests, 148 server integration tests, all-target server Clippy and 30 selected
+process/documentation checks passed. Opaque targets and observer-scoped history
+projection remain open; this increment does not complete domain/save separation.
+Broad publication verification and final-head CI are required before pushing
+and merging this follow-up. PR #75's preceding scenario checkpoint has separately
+passed its 294-Python/889-Rust local debug gate and all nine final-head CI checks
+on `58081b3`, and is merged. All six accepted sequences remain in scope.
+
+**Opaque interaction references (in progress).** The current wire schema uses
+observer/save-scoped actor, item and door references and an explicit self target.
+Fresh resolution uses cached native disclosure after metadata checks; receipt
+comparison reconstructs original references without live target lookup. The
+save schema, deterministic simulation and queued execution remain independent.
+The real wire samples were regenerated. Focused verification passed 201 server
+unit tests, then the expanded three scope/retry regressions; 11 protocol unit,
+50 protocol integration and two diagnostic-example tests; 25 shared-client unit
+and 52 integration tests; and 46 text-client unit and 80 integration tests.
+Server integration, ASCII, diagnostic examples and process fixtures are migrated.
+All workspace test targets compile, and workspace/all-target Clippy passed before
+the latest recovery/order regression additions. The first broad server integration
+run passed 145 tests and failed three fresh-save comparison tests; their scoped
+reference normalization correction passed all four focused preloading tests.
+The new real-WebSocket taken-target reconnect retry passed, as did six ASCII unit
+and 30 integration tests, 31 selected process tests and the corrected wizard-client
+scenario. Four wire-request tests now also prove drop receipt recovery across
+rewind/restart without inventory lookup. An opaque-byte ordering regression failed
+first; scene ground ordering now preserves disclosure order and nearest portal
+occurrences. Door and tied figure order and identical-item selection likewise
+use disclosure order instead of handle bytes, with failing-first regressions;
+all 46 text unit and 84 integration tests passed. The broad debug run passed all
+904 workspace Rust tests, formatting, workspace Clippy, architecture and strict
+rustdoc, but its Python stage had 288 passes and ten failures. Nine were remaining
+legacy fixture assumptions; the corrected dungeon, physics, sight, generated
+content and invalid-state recovery suites passed all 23 focused process tests.
+The tenth was the narrowly waived LockApp mouse overlay; retain ordinary CI
+coverage and do not describe that broad run as an unqualified pass. Fresh final
+publication verification, targeted release measurements and exact-head CI remain pending.
+This committed follow-up is unpublished and must not be deployed or treated
+as a completed protocol checkpoint. No text product fixes or scripting runtime
+were added. All six refactor sequences remain in scope.
+
+The initial targeted release comparison validated all eighteen reports with
+matching operation/save counts and larger wire payloads. The 1,000-item client
+application interval increased; no broad performance improvement is claimed.
+Its latency timers omitted disclosure projection. Identical benchmark-only
+projection instrumentation is now prepared on both baseline and current source;
+the comparator retains request-call and projection intervals without inventing
+missing historical measurements. The new extraction regression failed first,
+then all 26 tooling tests passed with task-owned temporary storage; the initial
+default-temp sandbox failures remain recorded. Example Clippy and documentation
+checks passed. The three-round instrumented comparison then validated all twelve
+reports with matching operation/save counts: projection p95 was 0.405 to 0.392 ms
+in memory and 0.376 to 0.381 ms durably, with 945 samples per side. No broad speedup
+or all-load projection claim is made. Final debug publication evidence and all
+exact-head Windows/Linux CI checks remain required.
+
+
+**Interaction identity follow-up (unpublished, 2026-10-07).** Native target
+choices now retain disclosure order instead of sorting opaque bytes. Rewind
+continues all simulation allocation counters so abandoned dynamic entities
+cannot lend their handles to replacements. Failing-first native and durable
+actor/item/door regressions passed, as did actual-process pickup/restart coverage.
+Save 22 and dungeon-v23 identify the changed replay semantics; all 33 scenario
+certificates were regenerated from LF inputs. Wire 29, authoring 2 and validator
+8 stay unchanged. Expanded checks and final-head CI remain before publication;
+see the refactor plan for exact evidence and the retained LockApp qualification.

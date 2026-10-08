@@ -264,7 +264,7 @@ pub fn resolve(
         .map(|group| {
             *group
                 .iter()
-                .min_by_key(|r| (!r.reachable, r.position.map_or(0, distance), r.key))
+                .min_by_key(|r| (!r.reachable, r.position.map_or(0, distance)))
                 .expect("not empty")
         })
         .collect();

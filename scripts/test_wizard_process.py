@@ -34,9 +34,18 @@ class WizardProcesses(ProcessTestCase):
         self.assertIn("read-only", welcome)
         self.assertTrue(initial["state"]["wizard_game"])
         fixture = load_fixture("wizard-foundation.json")
+        seen = initial
         for step in fixture["steps"]:
-            output = wizard.command(step["command"])
-            self.assertNotIn("Server error", output)
+            command = step["command"]
+            if selector := step.get("target_item"):
+                candidates = [ground["item"]["id"]
+                              for ground in seen["state"]["observation"]["ground_items"]
+                              if ground["item"]["name"] == selector["name"]
+                              and ground["position"] == selector["position"]]
+                self.assertEqual(len(candidates), 1, f"Ambiguous fixture selector: {selector}")
+                command = command.format(target_item=candidates[0])
+            output = wizard.command(command)
+            self.assertNotIn("Server error", output, command)
             if not step["command"].startswith("note"):
                 seen = self.ascii_frame(spectator, lambda f: f["state"]["revision"] == str(step["revision"]))
                 self.assertEqual(seen["state"]["observation"]["position"], {"x":0,"y":0,"z":0})

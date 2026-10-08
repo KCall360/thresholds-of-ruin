@@ -135,7 +135,7 @@ class HeadlessProcesses(ProcessTestCase):
         observation = crossed["state"]["observation"]
         self.assertTrue(observation["motion"]["displaced"])
         self.assertGreater(int(observation["motion"]["velocity"][0]), 4096)
-        self.assertTrue(any(actor["id"] == "1" and actor["position"]["z"] == 1
+        self.assertTrue(any(actor["id"] == observation["self_target"] and actor["position"]["z"] == 1
                             for actor in observation["visible_actors"]))
         self.flush_save()
         player.stop()
@@ -145,7 +145,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertEqual(state["state"], crossed["state"])
         continued = self.act(resumed, {"type": "wait"})
         self.assertIsNone(continued["error"])
-        self.assertTrue(any(actor["id"] == "1" and actor["position"]["z"] == 1
+        self.assertTrue(any(actor["id"] == continued["state"]["observation"]["self_target"] and actor["position"]["z"] == 1
                             for actor in continued["state"]["observation"]["visible_actors"]))
         self.assertNotIn('"region"', json.dumps(continued["state"]["observation"]))
         # Definitions and derived portal bodies remain stable across another
@@ -314,7 +314,7 @@ class HeadlessProcesses(ProcessTestCase):
         self.assertIn("Invalid input", invalid["error"])
         invalid = self.command(player, {"type": "act", "action": {"type": "wait"}, "extra": True})
         self.assertIn("Invalid input", invalid["error"])
-        failed = self.act(player, {"type": "take", "item": '999999'})
+        failed = self.act(player, {"type": "take", "item": "i_" + "00" * 32})
         self.assertIsNotNone(failed["error"])
         self.assertEqual(failed["memory"], initial["memory"])
         self.assertEqual(failed["state"], initial["state"])

@@ -97,7 +97,7 @@ mod intention_admission_tests {
         let admitted = engine
             .admit_travel(actor, &root.entry.id, 1, steps[0])
             .unwrap();
-        assert!(admitted.entry.disclosed().is_none());
+        assert!(engine.disclose_entry(&admitted.entry).is_none());
         assert!(engine.archive.records.last().unwrap().receipt.is_none());
         assert_eq!(engine.revision(actor).unwrap(), revision);
         assert_eq!(engine.game.tick(), before.tick());
@@ -547,7 +547,7 @@ mod intention_admission_tests {
         assert_eq!(engine.revisions, revisions);
         assert!(admission.entry.intention_ends.is_empty());
         assert!(admission.entry.intention_suspensions.is_empty());
-        assert!(admission.entry.disclosed().is_none());
+        assert!(engine.disclose_entry(&admission.entry).is_none());
         assert!(matches!(admission.entry.content,
             JournalContent::AutonomousIntentionAdmitted { intention } if intention == identity));
         assert!(
@@ -1116,7 +1116,7 @@ mod intention_admission_tests {
                 },
             )
             .unwrap();
-        assert!(cancelled.entry.disclosed().is_none());
+        assert!(engine.disclose_entry(&cancelled.entry).is_none());
         assert_eq!(
             cancelled.entry.intention_ends[0].kind,
             crate::journal::IntentionEndKind::Cancelled
@@ -2530,7 +2530,7 @@ mod intention_admission_tests {
             *intention
         );
         assert_eq!(engine.state(actor).unwrap(), before);
-        assert!(result.entry.disclosed().is_none());
+        assert!(engine.disclose_entry(&result.entry).is_none());
         assert!(engine
             .history_branch(actor, "p", &branch, None, 10)
             .unwrap()
@@ -2963,7 +2963,10 @@ mod intention_execution_tests {
         assert!(retry.duplicate);
         assert_eq!(retry.entry, accepted.entry);
         let history = engine.history(ActorId(1), "p", None, 10).unwrap();
-        assert_eq!(history.entries, vec![result.entry.disclosed().unwrap()]);
+        assert_eq!(
+            history.entries,
+            vec![engine.disclose_entry(&result.entry).unwrap()]
+        );
         let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
         assert_eq!(replayed.game, engine.game);
         let restored = Checkpoint::capture(&engine)
@@ -3036,7 +3039,7 @@ mod intention_execution_tests {
         );
         assert_eq!(engine.state(ActorId(1)).unwrap(), before);
         assert!(engine.game.pending_intention(SimActor(1)).is_none());
-        assert!(failed.entry.disclosed().is_none());
+        assert!(engine.disclose_entry(&failed.entry).is_none());
         assert!(engine.execute_next_intention().unwrap().is_none());
         assert_eq!(
             Engine::replay(engine.archive.clone(), None, None)

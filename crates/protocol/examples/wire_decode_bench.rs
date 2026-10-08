@@ -43,7 +43,7 @@ fn measure<T: DeserializeOwned + Serialize + PartialEq + Debug>(
 
 fn snapshot(cells: usize) -> ServerMessage {
     let fixtures: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/wire-v28.json")).unwrap();
+        serde_json::from_str(include_str!("../tests/fixtures/wire-v29.json")).unwrap();
     assert_eq!(fixtures["protocol"], PROTOCOL_VERSION);
     let fixture = fixtures["server"]
         .as_array()

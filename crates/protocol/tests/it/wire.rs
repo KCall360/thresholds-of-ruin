@@ -98,24 +98,24 @@ fn queued_intention_controls_round_trip_opaque_identity_and_reject_extra_authori
 #[test]
 fn transfers_accept_optional_counts_but_reject_forged_identity_and_invalid_numbers() {
     assert_eq!(
-        serde_json::from_str::<Action>(r#"{"type":"take","item":"10"}"#).unwrap(),
+        serde_json::from_str::<Action>(r#"{"type":"take","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"}"#).unwrap(),
         Action::Take {
-            item: 10,
+            item: ItemTarget::from_digest([10; 32]),
             quantity: None
         }
     );
     assert_eq!(
-        serde_json::from_str::<Action>(r#"{"type":"drop","item":"10","quantity":"3"}"#).unwrap(),
+        serde_json::from_str::<Action>(r#"{"type":"drop","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","quantity":"3"}"#).unwrap(),
         Action::Drop {
-            item: 10,
+            item: ItemTarget::from_digest([10; 32]),
             quantity: Some(3)
         }
     );
     for text in [
-        r#"{"type":"take","item":"10","quantity":-1}"#,
-        r#"{"type":"take","item":"10","quantity":1.5}"#,
-        r#"{"type":"take","item":"10","quantity":"18446744073709551616"}"#,
-        r#"{"type":"drop","item":"10","identity":"healing"}"#,
+        r#"{"type":"take","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","quantity":-1}"#,
+        r#"{"type":"take","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","quantity":1.5}"#,
+        r#"{"type":"take","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","quantity":"18446744073709551616"}"#,
+        r#"{"type":"drop","item":"i_0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","identity":"healing"}"#,
     ] {
         assert!(serde_json::from_str::<Action>(text).is_err());
     }
@@ -202,20 +202,24 @@ fn clients_cannot_choose_a_role_and_welcome_requires_server_authority() {
 #[test]
 fn combat_facts_are_data_not_prose() {
     let events: Vec<CombatEventView> = serde_json::from_str(
-        r#"[{"type":"attack","attacker":"2","target":null,"outcome":"no_injury"},
-            {"type":"interrupted","actor":"1"},{"type":"died","actor":"2"}]"#,
+        r#"[{"type":"attack","attacker":"a_0202020202020202020202020202020202020202020202020202020202020202","target":null,"outcome":"no_injury"},
+            {"type":"interrupted","actor":"a_0101010101010101010101010101010101010101010101010101010101010101"},{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202"}]"#,
     )
     .unwrap();
     assert_eq!(
         events,
         [
             CombatEventView::Attack {
-                attacker: Some(ActorId(2)),
+                attacker: Some(ActorTarget::from_digest([2; 32])),
                 target: None,
                 outcome: AttackOutcome::NoInjury,
             },
-            CombatEventView::Interrupted { actor: ActorId(1) },
-            CombatEventView::Died { actor: ActorId(2) },
+            CombatEventView::Interrupted {
+                actor: ActorTarget::from_digest([1; 32])
+            },
+            CombatEventView::Died {
+                actor: ActorTarget::from_digest([2; 32])
+            },
         ]
     );
     assert_eq!(
@@ -224,7 +228,7 @@ fn combat_facts_are_data_not_prose() {
     );
     // Prose fields are gone, and unknown event fields are refused.
     assert!(serde_json::from_str::<CombatEventView>(
-        r#"{"type":"died","actor":"2","message":"The scout died."}"#
+        r#"{"type":"died","actor":"a_0202020202020202020202020202020202020202020202020202020202020202","message":"The scout died."}"#
     )
     .is_err());
 }
@@ -369,7 +373,7 @@ fn immediate_completion_is_distinct_from_admitted_gameplay() {
 #[test]
 fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v28.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v29.json")).unwrap();
     assert_eq!(samples["protocol"], PROTOCOL_VERSION);
     let snapshot = samples["server"]
         .as_array()
@@ -498,27 +502,27 @@ fn wire_64_bit_actor_decoding_rejects_numbers_and_noncanonical_strings() {
 #[test]
 fn wire_64_bit_optional_quantities_preserve_missing_and_null() {
     for input in [
-        serde_json::json!({"type":"take","item":"18446744073709551615"}),
-        serde_json::json!({"type":"take","item":"18446744073709551615","quantity":null}),
+        serde_json::json!({"type":"take","item":"i_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}),
+        serde_json::json!({"type":"take","item":"i_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","quantity":null}),
     ] {
         assert_eq!(
             serde_json::from_value::<Action>(input).unwrap(),
             Action::Take {
-                item: u64::MAX,
+                item: ItemTarget::from_digest([255; 32]),
                 quantity: None
             }
         );
     }
-    let input = serde_json::json!({"type":"drop","item":"18446744073709551615","quantity":"9007199254740993"});
+    let input = serde_json::json!({"type":"drop","item":"i_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","quantity":"9007199254740993"});
     assert_eq!(
         serde_json::from_value::<Action>(input).unwrap(),
         Action::Drop {
-            item: u64::MAX,
+            item: ItemTarget::from_digest([255; 32]),
             quantity: Some(9007199254740993)
         }
     );
     assert!(serde_json::from_value::<Action>(
-        serde_json::json!({"type":"take","item":"1","quantity":1})
+        serde_json::json!({"type":"take","item":"i_0101010101010101010101010101010101010101010101010101010101010101","quantity":1})
     )
     .is_err());
 }

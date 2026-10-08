@@ -32,7 +32,7 @@ class PhysicsProcesses(ProcessTestCase):
         player = self.launch('tor-client-ascii', ['--connect', self.address, '--automation'])
         initial = self.ascii_frame(player, lambda f: f['state'] is not None and not f['busy'])
         view = initial['state']['observation']
-        self.assertTrue(any(a['id'] == '1' and a['position']['z'] == 1 for a in view['visible_actors']))
+        self.assertTrue(any(a['id'] == view['self_target'] and a['position']['z'] == 1 for a in view['visible_actors']))
         browsed=self.key(player,'map_lower')
         self.assertEqual(browsed['state']['observation']['tick'],'0')
         self.assertIn('Viewing height -1',browsed['status'])
@@ -58,7 +58,7 @@ class PhysicsProcesses(ProcessTestCase):
         self.assertTrue(crossed['motion']['displaced'])
         self.assertGreater(int(crossed['motion']['velocity'][0]),4096)
         self.assertEqual(crossed['motion']['velocity'][2],'0')
-        self.assertTrue(any(a['id']=='1' and a['position']['z']==1 for a in crossed['visible_actors']))
+        self.assertTrue(any(a['id']==crossed['self_target'] and a['position']['z']==1 for a in crossed['visible_actors']))
         self.assertNotIn('region',json.dumps(crossed))
 
 
