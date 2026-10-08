@@ -2,8 +2,7 @@
 //! Planning never reads current terrain or undiscovered topology.
 use crate::navigation_map::RegionMap;
 use crate::{movement_cost, ActorId, Game, GameError};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::hash::{BuildHasherDefault, DefaultHasher};
+use std::collections::{BTreeMap, BTreeSet};
 use tor_world::{Direction, Location, Position};
 
 const DIRECTIONS: [Direction; 6] = [
@@ -185,9 +184,7 @@ impl Game {
         self.refresh_places(id, scene);
         let knowledge = self.navigation.entry(id).or_default();
         let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
-        // Membership only: scene traversal and saved knowledge remain ordered.
-        // A fixed hasher avoids ambient seeds in deterministic simulation.
-        let projected: HashSet<_, BuildHasherDefault<DefaultHasher>> = scene
+        let projected: BTreeSet<_> = scene
             .iter()
             .filter(|c| !c.wall)
             .map(|c| (c.location, c.offset, c.rotation))
