@@ -5,6 +5,41 @@ from process_harness import ProcessTestCase
 
 
 class InteractionProcesses(ProcessTestCase):
+    def test_text_commands_use_carried_affordances_and_opaque_choices(self):
+        self.server(scenario="interactions")
+        probe, initial = self.client(observe=True)
+        text, welcome = self.text_client()
+        self.assertNotIn("potion of healing", welcome)
+        self.assertIn("Which item", text.command("drink red potion"))
+        self.assertIn("ItemStarted", text.command("wear mail"))
+        view = self.request(probe, {"type": "snapshot"})["state"]["observation"]
+        mail = next(item["id"] for item in view["inventory"] if item["name"] == "mail")
+        self.assertEqual(next(item for item in view["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
+        self.assertIn("ItemStarted", text.command("remove mail"))
+        potion = next(item for item in view["inventory"] if item["class"] == "potion")
+        self.assertIn("ItemStarted", text.command(f"drink #{potion['id']}"))
+        after = self.request(probe, {"type": "snapshot"})["state"]["observation"]
+        self.assertEqual(next(item for item in after["inventory"] if item["id"] == potion["id"])["quantity"], "1")
+        self.assertIsNone(next(item for item in after["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"])
+
+    def test_adventure_equips_removes_and_drinks_without_hidden_names(self):
+        self.server(scenario="interactions")
+        probe, _ = self.client(observe=True)
+        player, welcome = self.adventure()
+        self.assertNotIn("potion of healing", welcome)
+        self.assertIn("begin", self.say(player, "wear mail").lower())
+        view = self.request(probe, {"type": "snapshot"})["state"]["observation"]
+        mail = next(item["id"] for item in view["inventory"] if item["name"] == "mail")
+        self.assertEqual(next(item for item in view["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
+        self.assertIn("begin", self.say(player, "take off mail").lower())
+        self.assertIn("can't", self.say(player, "drink mail").lower())
+        # Adventure already treats indistinguishable stacks as interchangeable;
+        # its representative follows disclosed order and consumes one unit.
+        self.assertIn("begin", self.say(player, "drink red potion").lower())
+        after = self.request(probe, {"type": "snapshot"})["state"]["observation"]
+        self.assertEqual(sorted(int(item["quantity"]) for item in after["inventory"] if item["class"] == "potion"), [1, 2])
+        self.assertIsNone(next(item for item in after["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"])
+
     def test_equipment_consumption_disclosure_and_checkpoint_restart(self):
         server = self.server("--checkpoint-interval", 1, scenario="interactions")
         player, initial = self.client()

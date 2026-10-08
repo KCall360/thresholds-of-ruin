@@ -2,6 +2,36 @@ use tor_client_text::{parse, Input};
 use tor_protocol::*;
 
 #[test]
+fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
+    let mut s = state();
+    let mut item = s.observation.ground_items[0].item.clone();
+    item.class = ItemClass::Ring;
+    item.name = "silver ring".into();
+    s.observation.inventory = vec![item.clone()];
+    s.observation.interactions = Some(InteractionView {
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: item.id,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    assert!(
+        matches!(parse("equip silver ring", &s).unwrap(), Input::Command(Command::Act { action: Action::Equip { item: target, slot: 0 }, .. }) if target == item.id)
+    );
+    assert!(parse("drink silver ring", &s).is_err());
+    s.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+    assert!(
+        matches!(parse("remove silver ring", &s).unwrap(), Input::Command(Command::Act { action: Action::Unequip { item: target }, .. }) if target == item.id)
+    );
+    assert!(parse("equip silver ring", &s).is_err());
+    assert!(parse("drink potion of healing", &s).is_err());
+}
+
+#[test]
 fn quantity_commands_and_drop_use_disclosed_ids() {
     let mut s = state();
     s.observation

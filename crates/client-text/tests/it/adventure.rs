@@ -29,6 +29,42 @@ fn state() -> StateView {
 }
 
 #[test]
+fn carried_equipment_verbs_resolve_disclosed_items_and_validate_current_slots() {
+    let mut s = state();
+    carrying(&mut s);
+    let ring = super::item_target(12);
+    s.observation.interactions = Some(InteractionView {
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item: ring,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    assert_eq!(
+        goals("wear ring", &s),
+        [Goal::UseItem {
+            item: ring,
+            operation: tor_client_common::items::ItemOperation::Equip,
+        }]
+    );
+    assert_eq!(said("drink ring", &s), "You can't drink that item.");
+    assert_eq!(said("remove ring", &s), "That item isn't equipped.");
+    s.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+    assert_eq!(
+        goals("take off ring", &s),
+        [Goal::UseItem {
+            item: ring,
+            operation: tor_client_common::items::ItemOperation::Unequip,
+        }]
+    );
+    assert_eq!(said("wear ring", &s), "That item is already equipped.");
+}
+
+#[test]
 fn ordinary_prose_has_objects_and_ways_without_debug_metadata() {
     let prose = describe(&state());
     assert!(prose.contains("stone"));
@@ -519,11 +555,11 @@ fn carried_things_drop_and_unbacked_verbs_say_so_plainly() {
         "You can't carry the goblin sentry."
     );
     for (line, answer) in [
-        ("drink potion", "You can't drink anything yet."),
+        ("drink potion", "That item has no usable interaction."),
         ("eat ration", "You can't eat anything yet."),
-        ("wear ring", "You can't wear anything yet."),
-        ("wield sword", "You can't wield anything yet."),
-        ("take off ring", "You can't take anything off yet."),
+        ("wear ring", "That item has no usable interaction."),
+        ("wield sword", "That item has no usable interaction."),
+        ("take off ring", "That item has no usable interaction."),
         ("give ring to goblin", "You can't give anything away yet."),
         ("talk to goblin", "You can't talk with anyone yet."),
         ("ask goblin about key", "You can't ask anyone anything yet."),

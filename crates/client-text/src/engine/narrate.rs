@@ -679,6 +679,13 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
 /// The beats after a goal's action; an attack with no blow yet still says
 /// what was done.
 fn done_beats(teller: &mut Teller, e: &Episode, after: &[Beat]) {
+    if matches!(e.goal, Goal::UseItem { .. }) {
+        for beat in after {
+            if let Beat::ItemBegan(text) = beat {
+                teller.say(text.trim_end_matches('.'));
+            }
+        }
+    }
     if matches!(e.goal, Goal::Attack { .. })
         && !after
             .iter()

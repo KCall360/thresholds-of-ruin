@@ -488,6 +488,52 @@ async fn an_approach_and_a_pickup_are_one_sentence() {
 }
 
 #[tokio::test]
+async fn equipment_goal_sends_matching_socket_and_tells_preparation() {
+    let mut initial = state();
+    let mut ring = initial.observation.ground_items.remove(0).item;
+    ring.name = "silver ring".into();
+    ring.class = ItemClass::Ring;
+    let item = ring.id;
+    initial.observation.inventory.push(ring);
+    initial.observation.interactions = Some(InteractionView {
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: None,
+        inventory: vec![ItemInteractionView {
+            item,
+            slot: Some(EquipmentSlot::Ring),
+            equipped_slot: None,
+            known_equipment: None,
+            drinkable: false,
+        }],
+    });
+    let mut link = Scripted::new(initial, move |request, now| {
+        assert!(is_act(request, &Action::Equip { item, slot: 0 }));
+        let mut after = now.clone();
+        after.observation.interactions.as_mut().unwrap().inventory[0].equipped_slot = Some(0);
+        vec![
+            Frame::View(
+                after,
+                Some(Event::ItemStarted {
+                    action: Action::Equip { item, slot: 0 },
+                }),
+            ),
+            Frame::Ack,
+        ]
+    });
+    let mut engine = Engine::default();
+    assert_eq!(
+        play(&mut link, &mut engine, "wear silver ring").await,
+        "You begin to equip the silver ring."
+    );
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(
+        play(&mut link, &mut engine, "wear silver ring").await,
+        "That item is already equipped."
+    );
+    assert_eq!(link.sent.len(), 1, "refusal spends no turn");
+}
+
+#[tokio::test]
 async fn a_pickup_waits_for_the_character_to_be_ready_after_the_journey() {
     // The corpse bug: arriving while still recovering dropped the pickup.
     let mut link = Scripted::new(state(), |request, now| match request {
@@ -990,7 +1036,7 @@ async fn verbs_the_game_cant_carry_out_yet_are_refused_plainly() {
     let mut link = Scripted::new(state(), obliging);
     let mut engine = Engine::default();
     for (line, answer) in [
-        ("wear the token", "You can't wear anything yet."),
+        ("wear the token", "You aren't carrying that item."),
         ("eat lamp", "You can't see any lamp here."),
         ("talk to me", "You can't talk with anyone yet."),
         ("jump", "You can't jump yet."),

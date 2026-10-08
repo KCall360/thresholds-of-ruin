@@ -67,7 +67,16 @@ A real server/headless-client process case passes for starting gear, equipment
 changes, equipped-drop rejection, consumption and checkpoint restart. All 34
 scenario certificates and current wire samples have been regenerated.
 
-Next: finish text/ASCII interaction controls and completion narration, then add
+Text commands now support equip/wear/wield, remove/unequip and drink/quaff using
+carried-item affordances and free matching anatomy sockets. Adventure commands
+use the same decisions and narrate preparation. No hidden statistic chooses an
+item or socket, and replacement requires a separate removal. The text integration
+suite passes 87 tests, the shared socket-choice test passes, and three actual
+server/client cases cover both text interfaces plus checkpoint restart. Adventure
+retains its established disclosed-order choice for indistinguishable stacks;
+direct commands provide opaque-target choices for ambiguity.
+
+Next: finish ASCII interaction controls and completion narration, then add
 knowledge-limited AI item decisions and final performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.

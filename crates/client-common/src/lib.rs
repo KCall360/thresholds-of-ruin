@@ -1,6 +1,7 @@
 //! Client-side validation of server-pushed observation ordering.
 
 mod connection;
+pub mod items;
 mod map_memory;
 pub mod narration;
 mod palette;
