@@ -39,14 +39,30 @@ impl PreparedControl {
         }
     }
 
-    pub fn profile(&self, kind: &str) -> Result<Option<&tor_simulation::ai::AiProfile>, Failure> {
+    pub fn profile(
+        &self,
+    ) -> Result<Option<&tor_simulation::ai::AiProfile>, MissingAiReference<'_>> {
         match self {
             Self::Ai(AiReference::Resolved(profile)) => Ok(Some(profile)),
-            Self::Ai(AiReference::Missing(name)) => {
-                Err(fail(format!("Unknown {kind} AI profile {name:?}")))
-            }
+            Self::Ai(AiReference::Missing(name)) => Err(MissingAiReference { name }),
             Self::External | Self::Omitted => Ok(None),
         }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct MissingAiReference<'a> {
+    pub name: &'a str,
+}
+
+#[derive(Debug)]
+pub(super) struct MissingArchetype<'a> {
+    pub name: &'a str,
+}
+
+impl From<MissingArchetype<'_>> for Failure {
+    fn from(reference: MissingArchetype<'_>) -> Self {
+        fail(format!("Unknown archetype {}", reference.name))
     }
 }
 
@@ -182,12 +198,15 @@ impl PreparedDefinitions {
         }
     }
 
-    pub fn archetype(&self, key: &Option<String>) -> Result<&PreparedArchetype, Failure> {
+    pub fn archetype<'a>(
+        &self,
+        key: &'a Option<String>,
+    ) -> Result<&PreparedArchetype, MissingArchetype<'a>> {
         match key {
             Some(key) => self
                 .archetypes
                 .get(key)
-                .ok_or_else(|| fail(format!("Unknown archetype {key}"))),
+                .ok_or(MissingArchetype { name: key }),
             None => Ok(&self.ordinary),
         }
     }
@@ -197,7 +216,7 @@ impl PreparedDefinitions {
     }
 
     pub fn actor(&self, author: &Actor) -> Result<PreparedCreature<'_>, Failure> {
-        let inherited = self.archetype(&author.archetype)?;
+        let inherited = self.archetype(&author.archetype).map_err(Failure::from)?;
         Ok(PreparedCreature {
             combat: author
                 .combat
@@ -225,7 +244,7 @@ impl PreparedDefinitions {
         seed: u64,
         appearances: &BTreeMap<String, String>,
     ) -> Result<tor_simulation::ItemSpec, Failure> {
-        let inherited = self.archetype(&author.archetype)?;
+        let inherited = self.archetype(&author.archetype).map_err(Failure::from)?;
         let name = if author.seed_names.is_empty() {
             author
                 .name
@@ -313,7 +332,7 @@ mod tests {
         manifest.characters.push(omitted);
         let prepared = PreparedDefinitions::new(&manifest, 1);
         let first = &prepared.characters[0].creature.control;
-        assert!(first.spawned() && first.profile("character").unwrap().is_none());
+        assert!(first.spawned() && first.profile().unwrap().is_none());
         assert!(prepared.characters[1].creature.control.spawned());
         assert!(!prepared.characters[2].creature.control.spawned());
         assert!(!prepared.omitted_carrier(Some(1)));
@@ -328,7 +347,7 @@ mod tests {
             prepared.characters[1]
                 .creature
                 .control
-                .profile("character")
+                .profile()
                 .unwrap()
                 .unwrap()
                 .memory_ticks,
@@ -338,7 +357,7 @@ mod tests {
         assert!(selected_other.characters[1]
             .creature
             .control
-            .profile("character")
+            .profile()
             .unwrap()
             .is_none());
         assert!(selected_other.omitted_carrier(Some(1)));
@@ -349,17 +368,17 @@ mod tests {
             deferred.characters[1]
                 .creature
                 .control
-                .profile("character")
+                .profile()
                 .unwrap_err()
-                .message,
-            "Unknown character AI profile \"missing\""
+                .name,
+            "missing"
         );
         // Selected characters are externally controlled even if their unused
         // unselected-mode reference is missing; preserve the existing policy.
         assert!(PreparedDefinitions::new(&manifest, 2).characters[1]
             .creature
             .control
-            .profile("character")
+            .profile()
             .unwrap()
             .is_none());
     }

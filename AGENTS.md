@@ -616,12 +616,25 @@ or all-load projection claim is made. Final debug publication evidence and all
 exact-head Windows/Linux CI checks remain required.
 
 
-**Interaction identity follow-up (unpublished, 2026-10-07).** Native target
+**Interaction identity follow-up (merged, PR #76).** Native target
 choices now retain disclosure order instead of sorting opaque bytes. Rewind
 continues all simulation allocation counters so abandoned dynamic entities
 cannot lend their handles to replacements. Failing-first native and durable
 actor/item/door regressions passed, as did actual-process pickup/restart coverage.
 Save 22 and dungeon-v23 identify the changed replay semantics; all 33 scenario
 certificates were regenerated from LF inputs. Wire 29, authoring 2 and validator
-8 stay unchanged. Expanded checks and final-head CI remain before publication;
-see the refactor plan for exact evidence and the retained LockApp qualification.
+8 stay unchanged. All nine exact-head CI checks passed. The three desktop launchers use its
+verified immutable build; all 30 copied-build smokes passed, with previous
+builds and saves preserved. The separate scenario-diagnostics branch remains
+in development; see the refactor plan for scope and evidence.
+
+**Scenario reference provenance (in development).** AI configuration and authored
+actor/item archetype failures now carry exact parser-span source locations,
+with typed missing-reference names and one declaration-context formatter. Source
+is acquired only on failure; unavailable, changed or ambiguous provenance keeps
+the original declaration error without guessed coordinates. Failing-first
+real-validator regressions passed, as did all 211 server unit tests, seven scenario
+integration tests, nine scenario process tests, workspace all-target Clippy and
+changed Python lint. Broad publication verification remains required; this branch
+is not published or deployed. Further reference normalization, recovery envelope
+feasibility and all other original refactor obligations remain in scope.

@@ -10,6 +10,35 @@ from process_harness import ProcessTestCase, Process, ROOT, TOKEN
 
 
 class ScenarioPackageProcesses(ProcessTestCase):
+    def test_semantic_reference_diagnostic_locates_the_field_among_repeated_values(self):
+        package = self.directory / "source-locations"
+        shutil.copytree(ROOT / "scenarios/two-room", package)
+        region = package / "regions/1.toml"
+        actor = (' { id = 3, at = [3, 1, 0], controller = "ai", '
+                 'combat = { name = "Gárd", max_hp = 41 }, ai = "missing", '
+                 'body = { cells = [[0, 0, 0]], eye = [1, 0, 0], mass = 91 } },')
+        text = region.read_text(encoding="utf-8") + (
+            '\n# ai = "missing" is a decoy, not the failing reference.\n'
+            'actors = [\n'
+            ' { id = 2, at = [2, 1, 0], controller = "external", '
+            'combat = { name = "missing", max_hp = 41 } },\n'
+            + actor + '\n]\n')
+        region.write_bytes(text.encode("utf-8"))
+        line = text.splitlines().index(actor) + 1
+        column = actor.index('ai = "missing"') + len('ai = ') + 1
+        before = {p.relative_to(package): p.read_bytes() for p in package.rglob("*") if p.is_file()}
+        result = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        error = json.loads(result.stderr)["error"]
+        self.assertEqual(error["code"], "scenario_invalid")
+        self.assertIn('Unknown actor AI profile "missing"', error["message"])
+        self.assertIn("actor 3", error["message"])
+        self.assertIn(f"regions/1.toml:{line}:{column}", error["message"])
+        self.assertNotIn("body eye", error["message"], "reference validation keeps its precedence")
+        self.assertEqual(before, {p.relative_to(package): p.read_bytes()
+                                 for p in package.rglob("*") if p.is_file()})
+
     def test_failed_lazy_generated_declaration_keeps_its_source_diagnostic(self):
         package = self.directory / "infeasible-declaration"
         shutil.copytree(ROOT / "scenarios/tests/generated-filler", package)
@@ -159,6 +188,11 @@ class ScenarioPackageProcesses(ProcessTestCase):
                 if name == 'item-archetype':
                     text = '\n'.join(line for line in text.splitlines() if not line.startswith('items =')) + '\n'
                 path.write_text(text + edit)
+                if name != 'actor-body':
+                    field = 'ai' if name == 'actor-ai' else 'archetype'
+                    offset = text.count('\n') + edit[:edit.index(f'{field} = "missing"')].count('\n') + 1
+                    column = edit.splitlines()[1].index(f'{field} = "missing"') + len(f'{field} = ') + 1
+                    message = message.replace(f'{source}: ', f'{source}:{offset}:{column}: ', 1)
                 before = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
                 result = subprocess.run([self.bin / ('tor-scenario' + self.suffix), 'validate', package],
                                         capture_output=True, text=True, timeout=15)

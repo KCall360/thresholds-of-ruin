@@ -11,6 +11,8 @@ use crate::{Failure, Scenario};
 mod authoring;
 #[path = "scenario_compiler.rs"]
 mod compiler;
+#[path = "scenario_diagnostics.rs"]
+mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
 pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
@@ -601,6 +603,10 @@ pub struct Package {
     pub index: Arc<RegionIndex>,
     #[serde(skip)]
     pub sources: RegionSources,
+    /// Original authoring bytes, when available; never fabricate coordinates
+    /// from a reconstructed manifest or persist diagnostic state as game state.
+    #[serde(skip)]
+    manifest_text: Option<Arc<str>>,
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -768,6 +774,7 @@ impl Package {
                 .map(|d| d.display().to_string()),
             index: Arc::new(index),
             sources,
+            manifest_text: Some(Arc::from(manifest_text)),
         })
     }
 
@@ -1155,7 +1162,12 @@ impl Package {
                         region: r.id,
                         id: actor.id,
                     }
-                    .context(failure)
+                    .reference(
+                        failure,
+                        self.region_text(r.id).ok().as_deref(),
+                        "archetype",
+                        key,
+                    )
                 })?;
                 assets.extend(archetype.asset.iter().cloned());
             }
@@ -1175,7 +1187,12 @@ impl Package {
                         region: r.id,
                         id: item.id,
                     }
-                    .context(failure)
+                    .reference(
+                        failure,
+                        self.region_text(r.id).ok().as_deref(),
+                        "archetype",
+                        key,
+                    )
                 })?;
                 assets.extend(self.item_asset(archetype));
             }
@@ -1639,13 +1656,18 @@ impl Package {
                     .turn_ticks
                     .or(definitions
                         .archetype(&a.archetype)
-                        .map_err(|failure| {
+                        .map_err(|reference| {
                             Origin::Actor {
                                 file: &r.file,
                                 region: r.id,
                                 id: a.id,
                             }
-                            .context(failure)
+                            .reference(
+                                fail(format!("Unknown archetype {}", reference.name)),
+                                self.region_text(r.id).ok().as_deref(),
+                                "archetype",
+                                reference.name,
+                            )
                         })?
                         .turn_ticks)
                     .unwrap_or(100);
@@ -2035,6 +2057,7 @@ impl Package {
                     c.id,
                     c.creature.borrowed(),
                     Origin::Character(c.id),
+                    || self.manifest_text.clone(),
                 )?;
             }
         }
@@ -2053,7 +2076,11 @@ impl Package {
                 let prepared = definitions
                     .actor(a)
                     .map_err(|failure| origin.context(failure))?;
-                instantiation::configure(game, a.id, prepared, origin)?;
+                instantiation::configure(game, a.id, prepared, origin, || {
+                    // Diagnostic acquisition must never replace the original
+                    // construction failure or add work to successful installs.
+                    self.region_text(r.id).ok()
+                })?;
             }
         }
         let appearances = &index.appearances;
@@ -2367,10 +2394,10 @@ mod tests {
         let package = Package::from_parts(manifest.clone(), regions.clone()).unwrap();
         let failure = package.build(42, true).unwrap_err();
         assert_eq!(failure.code, tor_protocol::ErrorCode::InvalidAction);
-        assert_eq!(
-            failure.message,
-            "regions/1.toml: region 1, actor 2: Unknown actor AI profile \"missing\""
-        );
+        assert!(failure.message.starts_with("regions/1.toml:"));
+        assert!(failure
+            .message
+            .ends_with(": region 1, actor 2: Unknown actor AI profile \"missing\""));
         manifest
             .ai_profiles
             .insert("careful".into(), AiProfile::default());
