@@ -609,4 +609,8 @@ the comparator retains request-call and projection intervals without inventing
 missing historical measurements. The new extraction regression failed first,
 then all 26 tooling tests passed with task-owned temporary storage; the initial
 default-temp sandbox failures remain recorded. Example Clippy and documentation
-checks passed. Measure this missing boundary before final publication.
+checks passed. The three-round instrumented comparison then validated all twelve
+reports with matching operation/save counts: projection p95 was 0.405 to 0.392 ms
+in memory and 0.376 to 0.381 ms durably, with 945 samples per side. No broad speedup
+or all-load projection claim is made. Final debug publication evidence and all
+exact-head Windows/Linux CI checks remain required.

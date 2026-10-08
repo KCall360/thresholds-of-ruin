@@ -33,8 +33,15 @@ disclosed-byte sum per round grew from 3,745,020 to 5,008,820 bytes; its saved-b
 sum stayed 18,513,920 bytes. The durable latency case retained 305 selected deltas
 per round, with selected complete-envelope bytes growing from 1,521,957 to
 1,613,572. Larger references have an explicit disclosure and client cost.
-These intervals omit disclosure projection, so a follow-up measurement adds
-identical projection timers to both sides before assessing handle derivation.
+These initial intervals omit disclosure projection. A follow-up comparison with
+identical projection timers on both sides validated all twelve reports from three
+interleaved rounds. At 945 samples per side, memory projection p50/p95/max was
+0.310/0.405/1.908 ms before and 0.310/0.392/1.036 ms after; durable projection was
+0.300/0.376/0.698 ms before and 0.301/0.381/0.793 ms after. Operation and save
+counts remained equal. These eight-region cases show no material aggregate
+projection regression; they do not establish projection costs for every larger
+disclosure or end-to-end queued-client latency. The larger client application
+cost and wire sizes above remain part of the result.
 Final publication verification and both-platform CI remain required.
 
 ## Contracts to preserve
