@@ -1348,8 +1348,13 @@ impl Service {
             request_id: request_id.into(),
             snapshot: Box::new(snapshot),
         };
-        if !self.admit_output(id, &message) {
+        if self.clients[&id]
+            .messages
+            .try_send_snapshot(&message)
+            .is_err()
+        {
             // Output rejection closes the connection; it is not a request error.
+            self.disconnect(id);
             return Ok(());
         }
         let ServerMessage::Snapshot { snapshot, .. } = message else {
@@ -2474,6 +2479,89 @@ mod tests {
         );
         assert_eq!(disclosed.state, snapshot.state);
         assert_eq!(client.waiting, None);
+    }
+
+    #[test]
+    fn recovery_preserves_a_complete_snapshot_when_metadata_exceeds_one_frame() {
+        let actor = ActorId(1);
+        let account = Account {
+            role: AccessRole::Spectator,
+            user: "recovery-observer".into(),
+            token: "test-only".into(),
+            actors: BTreeSet::from([actor]),
+        };
+        // Size the host limit from a real initial response, not guessed padding
+        // for every possible future history or queue envelope.
+        let frame_bytes = {
+            let mut probe = Service::new(Engine::memory(Scenario::two_room(42)).unwrap());
+            let mut peer = probe.connect(&account, "headless".into()).unwrap();
+            probe.handle(peer.id, "attach".into(), Request::Attach { actor });
+            let mut snapshot_bytes = None;
+            while let Ok(frame) = peer.messages.try_recv_frame() {
+                if matches!(
+                    decode_response(&frame.text).unwrap(),
+                    ServerMessage::Snapshot { .. }
+                ) {
+                    snapshot_bytes = Some(frame.text.len());
+                }
+            }
+            snapshot_bytes.expect("initial snapshot") + 256
+        };
+        let mut service = Service::with_outbound_limits(
+            Engine::memory(Scenario::two_room(42)).unwrap(),
+            crate::OutboundLimits {
+                frame_bytes,
+                client_bytes: 4 * frame_bytes,
+                total_bytes: 16 * frame_bytes,
+            },
+        )
+        .unwrap();
+        let mut peer = service.connect(&account, "headless".into()).unwrap();
+        service.handle(peer.id, "attach".into(), Request::Attach { actor });
+        while peer.messages.try_recv_frame().is_ok() {}
+        assert!(service.clients.contains_key(&peer.id));
+        for _ in 0..4 {
+            service
+                .annotate_backend(
+                    actor,
+                    "recovery-test",
+                    Anchor::State { revision: 0 },
+                    AnnotationCategory::Note,
+                    &"x".repeat(256),
+                )
+                .unwrap();
+            while let Ok(frame) = peer.messages.try_recv_frame() {
+                assert!(frame.text.len() <= frame_bytes);
+            }
+            assert!(
+                service.clients.contains_key(&peer.id),
+                "individual updates fit"
+            );
+        }
+        let expected_state = service.engine.state(actor).unwrap();
+        assert!(serde_json::to_vec(&expected_state).unwrap().len() < frame_bytes);
+        let expected_history = service
+            .engine
+            .history(actor, &account.user, None, MAX_HISTORY_PAGE)
+            .unwrap();
+        service.snapshot(peer.id, "recover").unwrap();
+        assert!(
+            service.clients.contains_key(&peer.id),
+            "a bounded state must remain recoverable when its complete snapshot spans frames"
+        );
+        let ServerMessage::Snapshot {
+            request_id,
+            snapshot,
+        } = peer.messages.try_recv().unwrap()
+        else {
+            panic!("recovery must publish one complete logical snapshot");
+        };
+        assert_eq!(request_id, "recover");
+        assert_eq!(*snapshot.state, expected_state);
+        assert_eq!(
+            snapshot.history, expected_history,
+            "recovery cannot prune history to fit"
+        );
     }
 
     #[test]

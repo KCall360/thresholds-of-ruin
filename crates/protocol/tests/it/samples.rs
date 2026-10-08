@@ -87,6 +87,7 @@ fn server_kind(message: &ServerMessage) -> &'static str {
     match message {
         ServerMessage::Welcome { .. } => "welcome",
         ServerMessage::Snapshot { .. } => "snapshot",
+        ServerMessage::SnapshotPart { .. } => "snapshot_part",
         ServerMessage::Update { update } => match update.body {
             UpdateBody::Readiness { .. } => "update.readiness",
             UpdateBody::Intention { .. } => "update.intention",
@@ -120,6 +121,7 @@ const SERVER_KINDS: &[&str] = &[
     "update.intention",
     "welcome",
     "snapshot",
+    "snapshot_part",
     "update.travel",
     "update.observation_delta",
     "update.annotation",

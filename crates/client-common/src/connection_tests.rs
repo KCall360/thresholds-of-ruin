@@ -124,6 +124,97 @@ fn snapshot() -> Snapshot {
 }
 
 #[tokio::test]
+async fn canceled_partial_snapshot_read_keeps_assembly_and_disables_requests() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let initial = snapshot();
+    let mut reset = initial.clone();
+    reset.context = reset.context.next_reset().unwrap();
+    let expected = reset.clone();
+    let (consumed, received) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Welcome {
+                protocol: PROTOCOL_VERSION,
+                capabilities: ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16),
+                user: "test".into(),
+                actors: vec![initial.actor],
+                role: AccessRole::Player,
+            },
+        )
+        .await;
+        receive(&mut socket).await;
+        send(
+            &mut socket,
+            ServerMessage::Snapshot {
+                request_id: "attach".into(),
+                snapshot: Box::new(initial),
+            },
+        )
+        .await;
+        let parts = encode_snapshot(
+            &ServerMessage::Snapshot {
+                request_id: "staged-reset".into(),
+                snapshot: Box::new(reset),
+            },
+            512,
+            tor_protocol::MAX_SNAPSHOT_BYTES * 2,
+        )
+        .unwrap();
+        assert!(parts.len() > 1);
+        socket
+            .send(Message::Text(parts[0].clone().into()))
+            .await
+            .unwrap();
+        socket.send(Message::Ping(Vec::new().into())).await.unwrap();
+        // The client's automatic pong proves its pending read consumed the part
+        // and the following ping. Cancel at this barrier, without a timing race.
+        let pong = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(pong, Message::Pong(_)));
+        consumed.send(()).unwrap();
+        released.await.unwrap();
+        for part in parts.into_iter().skip(1) {
+            socket.send(Message::Text(part.into())).await.unwrap();
+        }
+    });
+    let mut client = Connection::connect(address, "test".into(), ActorId(1), "headless")
+        .await
+        .unwrap();
+    let before = client.state.clone();
+    tokio::select! {
+        message = client.next() => panic!("partial transfer escaped: {message:?}"),
+        received = received => received.unwrap(),
+    }
+    assert_eq!(
+        client.state, before,
+        "partial snapshot must not replace the visible model"
+    );
+    assert!(!client.is_synchronized());
+    assert!(client.request(Request::AcquireControl).await.is_err());
+    release.send(()).unwrap();
+    let completed = client.next().await.unwrap();
+    assert_eq!(
+        completed,
+        ServerMessage::Snapshot {
+            request_id: "staged-reset".into(),
+            snapshot: Box::new(expected.clone()),
+        }
+    );
+    assert_eq!(client.state.snapshot(), expected);
+    assert!(client.is_synchronized());
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn receipts_keep_original_branch_identity_but_cannot_name_another_actor() {
     for admitted in [false, true] {
         for foreign_actor in [false, true] {

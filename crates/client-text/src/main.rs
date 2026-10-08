@@ -87,7 +87,7 @@ async fn run() -> Result<(), Error> {
             first = tor_client_common::server_before_local(connection.next(), rx.recv()) => {
                 match first {
                     tor_client_common::FirstReady::Server(message) => {
-                        present(&connection, &message?);
+                        present(&connection, &message?)?;
                         io::stdout().flush()?;
                     }
                     tor_client_common::FirstReady::Local(line) => {
@@ -155,7 +155,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
         let mut admitted = None;
         loop {
             let message = connection.next().await?;
-            present(connection, &message);
+            present(connection, &message)?;
             let recovered = connection.is_recovery_snapshot(&message);
             let complete = match pending.observe(connection, &message) {
                 Some(tor_client_common::RequestCompletion::Reply(tor_client_common::ConfirmedReply::Receipt(
@@ -186,7 +186,7 @@ async fn transact(connection: &mut Connection, request: Request) -> Result<(), E
     Ok(())
 }
 
-fn present(connection: &Connection, message: &ServerMessage) {
+fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error> {
     match message {
         ServerMessage::Update { update } => match &update.body {
             UpdateBody::Readiness { .. } | UpdateBody::Travel { .. } => {}
@@ -242,5 +242,9 @@ fn present(connection: &Connection, message: &ServerMessage) {
             ..
         } => println!("Done."),
         ServerMessage::Welcome { .. } => {}
+        ServerMessage::SnapshotPart { .. } => {
+            return Err("Unexpected unassembled snapshot part".into())
+        }
     }
+    Ok(())
 }

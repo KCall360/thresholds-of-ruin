@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 29;
+pub const PROTOCOL_VERSION: u32 = 30;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,6 +11,7 @@ pub struct ServerCapabilities {
     pub max_request_bytes: u32,
     pub max_response_bytes: u32,
     pub max_retained_state_bytes: u32,
+    pub max_snapshot_bytes: u32,
     pub max_connections: u32,
     pub max_history_page_entries: u32,
 }
@@ -22,6 +23,7 @@ impl ServerCapabilities {
             max_request_bytes: crate::MAX_REQUEST_BYTES as u32,
             max_response_bytes,
             max_retained_state_bytes: crate::MAX_STATE_BYTES as u32,
+            max_snapshot_bytes: crate::MAX_SNAPSHOT_BYTES as u32,
             max_connections,
             max_history_page_entries: MAX_HISTORY_PAGE as u32,
         }
@@ -35,6 +37,8 @@ impl ServerCapabilities {
             && self.max_response_bytes <= crate::MAX_RESPONSE_BYTES as u32
             && self.max_retained_state_bytes > 0
             && self.max_retained_state_bytes <= crate::MAX_STATE_BYTES as u32
+            && self.max_snapshot_bytes >= self.max_retained_state_bytes
+            && self.max_snapshot_bytes <= crate::MAX_SNAPSHOT_BYTES as u32
             && self.max_connections > 0
             && self.max_history_page_entries > 0
             && self.max_history_page_entries <= MAX_HISTORY_PAGE as u32
@@ -832,6 +836,10 @@ pub enum ServerMessage {
     Snapshot {
         request_id: String,
         snapshot: Box<Snapshot>,
+    },
+    /// One ordered part of a bounded logical snapshot. No part grants authority.
+    SnapshotPart {
+        part: Box<crate::SnapshotPart>,
     },
     Update {
         update: Box<StreamUpdate>,

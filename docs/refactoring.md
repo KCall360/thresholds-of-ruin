@@ -2631,7 +2631,7 @@ item away from the actor's feet and correctly failed pickup validation; the
 fixture was corrected without relaxing gameplay rules.
 
 Save format 22 and dungeon-v23 identify the new rewind replay behavior. Wire
-protocol 29, authoring format 2 and tor-scenario-8 remain unchanged. All 33 package
+version was unchanged in that increment, as were authoring format 2 and tor-scenario-8. All 33 package
 manifests are LF and their certificates were regenerated using the new validator
 binary. The explicit version-21 rejection regression failed before the version
 advance. Expanded server/simulation/persistence checks and final publication
@@ -2699,3 +2699,60 @@ normalization, compiler diagnostics and publication verification remain in progr
 All six original refactor sequences remain active, including recovery-envelope
 feasibility and measured persistence/restore/command tails. These published
 increments do not prove completion of those remaining requirements.
+
+**Scenario provenance published (2026-10-08).**
+[PR #77](https://github.com/KCall360/thresholds-of-ruin/pull/77) merged as
+`f305d27` after all nine [exact-head CI jobs](https://github.com/KCall360/thresholds-of-ruin/actions/runs/37719848091)
+passed on `5b07d93`. Its complete local debug gate passed 301 Python/process
+tests and 914 workspace Rust tests, formatting, Clippy, architecture and strict
+Rust documentation, with 543 unchanged recorded inputs and no waiver. Further
+reference normalization and compiler responsibilities remain open. The deployed
+desktop checkpoint remains PR #76 until the next coherent build update.
+
+**Bounded snapshot recovery (in development).** A failing-first session test
+proved that individually fitting annotation updates can make a later recovery
+snapshot exceed the configured frame limit, despite its state still fitting.
+The new shared codec transfers the complete snapshot response as ordered parts,
+with an independent bounded logical envelope and exact encoded frame sizing.
+The original state ceiling remains intact. One queue entry owns the complete
+transfer, admitted atomically under existing client and aggregate byte quotas;
+leases remain held through writes, failures and cancellation. Capacity rejection
+still closes that connection rather than bypassing guarantees for healthy peers.
+
+The shared client connection retains partial assembly across canceled reads,
+blocks requests during partial recovery, and publishes only the complete,
+identity-checked and semantically validated snapshot. History is not pruned to
+fit. Failing-first session, byte-lease and client cancellation checks passed;
+the retained-state ceiling and malformed-transfer tests passed. A real-process
+4 KiB-frame test preserved full history across reset, spectator attachment,
+save/restart and continued play. The current wire version identifies the new
+part shape and required logical-snapshot capability; save/rules/authoring axes
+are unchanged. Real wire samples include a server-emitted part with a 512-byte
+frame limit. Broader verification, targeted release evidence and publication
+remain pending. All original refactor sequences remain active.
+
+Review exposed a preparation-time resource gap: with very small frames, encoded
+part headers can exhaust a client's byte budget before queue admission. A
+failing-first regression now verifies exact-fit and one-byte-over-budget cases.
+Encoding counts escaped frame bytes before allocating each following payload and
+stops at the client's remaining quota. Ordinary output preparation no longer
+allocates a temporary response vector. All 18 protocol unit tests, 12 output
+admission tests, three transport tests, 26 shared-client unit tests and the real
+small-frame recovery process case passed. Expanded verification then passed all
+511 affected Rust unit/integration/example tests, workspace all-target Clippy and
+all 13 real-client recovery process scenarios. Targeted release recovery checks
+also passed. Broad local debug publication verification and exact-head CI remain
+pending; this implementation is not merged or deployed.
+
+The initial broad local debug gate passed 302 Python/application tests and 925
+workspace Rust tests, formatting, Clippy, architecture and strict Rust documentation
+with 544 unchanged input hashes and no waiver. Final transport review then found
+that resetting the write deadline for each part weakened the existing slow-reader
+policy. A paused-time regression failed first: every part could finish within the
+individual deadline while the whole transfer exceeded it. One absolute deadline
+now covers all parts under the same lease. All four transport tests, 16 WebSocket
+integration tests, all 13 real-client recovery scenarios and workspace Clippy
+passed. The prior gate is retained as evidence for its original sources; a fresh
+broad debug gate is required for this correction before publication.
+All four targeted release transport tests also passed; no broad local release
+suite was run. Full debug/release CI on Windows and Linux remains the merge gate.

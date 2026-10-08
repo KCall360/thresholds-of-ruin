@@ -628,13 +628,32 @@ verified immutable build; all 30 copied-build smokes passed, with previous
 builds and saves preserved. The separate scenario-diagnostics branch remains
 in development; see the refactor plan for scope and evidence.
 
-**Scenario reference provenance (in development).** AI configuration and authored
+**Scenario reference provenance (merged, PR #77).** AI configuration and authored
 actor/item archetype failures now carry exact parser-span source locations,
 with typed missing-reference names and one declaration-context formatter. Source
 is acquired only on failure; unavailable, changed or ambiguous provenance keeps
 the original declaration error without guessed coordinates. Failing-first
 real-validator regressions passed, as did all 211 server unit tests, seven scenario
 integration tests, nine scenario process tests, workspace all-target Clippy and
-changed Python lint. Broad publication verification remains required; this branch
-is not published or deployed. Further reference normalization, recovery envelope
-feasibility and all other original refactor obligations remain in scope.
+changed Python lint. The complete local debug gate passed 301 Python/process and
+914 Rust tests, with unchanged inputs and no waiver; all nine exact-head CI jobs
+passed before merge. Desktop remains PR #76 until the next coherent update.
+Further reference normalization and all other original obligations remain open.
+
+**Bounded snapshot recovery (in development).** Wire 30 adds ordered, bounded
+snapshot parts while retaining the independent state ceiling. A single queue
+entry and whole-transfer leases prevent interleaving; persistent client assembly
+survives canceled reads and publishes only complete validated snapshots.
+Preparation counts escaped bytes and stops at remaining client quota before
+allocating another part. Focused failing-first budget, atomic admission,
+cancellation and real small-frame save/restart recovery checks passed. All 511
+affected Rust tests, workspace all-target Clippy, all 13 recovery process scenarios
+and targeted release recovery checks passed. Broad debug publication verification,
+exact-head CI and deployment remain pending. The initial broad debug gate passed
+302 Python/application and 925 Rust tests with 544 unchanged inputs and no waiver.
+Final review then found a per-part write deadline renewal: a paused-time regression
+failed first, and one absolute deadline now covers the complete leased transfer.
+All four transport tests, 16 WebSocket integrations, all 13 recovery process cases
+and workspace Clippy passed after that fix. Fresh broad publication evidence is
+required; the prior gate does not certify these changed inputs. All four targeted
+release transport checks passed. Do not edit Rust inputs during verification.

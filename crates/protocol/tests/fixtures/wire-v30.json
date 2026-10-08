@@ -2,7 +2,7 @@
  "client": [
   {
    "frontend": "headless",
-   "protocol": 29,
+   "protocol": 30,
    "token": "a-sample-credential",
    "type": "hello"
   },
@@ -369,12 +369,12 @@
    "type": "request"
   }
  ],
- "protocol": 29,
+ "protocol": 30,
  "server": [
   {
    "context": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "cursor": {
      "sequence": "4",
      "tick": "0"
@@ -383,26 +383,26 @@
      "readiness_revision": "2",
      "stream": {
       "epoch": "1",
-      "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+      "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
      }
     },
     "revision": "0"
    },
    "receipt": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
-    "entry_id": "c3ad6490-f85a-4add-b1d4-3aef347f15c8",
-    "intention": "c3ad6490-f85a-4add-b1d4-3aef347f15c8",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
+    "entry_id": "a119c133-3ef4-4328-ae14-1487574b0427",
+    "intention": "a119c133-3ef4-4328-ae14-1487574b0427",
     "phase": "queued",
     "type": "admitted"
    },
-   "request_id": "aaec8419-cc2e-4653-839a-442cae4954a1",
+   "request_id": "d538845f-c13f-4517-a412-06f35569100c",
    "type": "ack"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "cursor": {
      "sequence": "2",
      "tick": "0"
@@ -411,28 +411,28 @@
      "readiness_revision": "1",
      "stream": {
       "epoch": "1",
-      "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+      "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
      }
     },
     "revision": "0"
    },
    "receipt": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "entry_id": null,
     "type": "immediate"
    },
-   "request_id": "5fbc2084-6cc8-4958-a193-76222976f860",
+   "request_id": "bde450bf-ad88-4320-8a1b-6cffecff71c8",
    "type": "ack"
   },
   {
    "code": "invalid_action",
    "message": "Target is unavailable",
-   "request_id": "aec6fb17-164b-4c2c-91b8-2ae47448ee46",
+   "request_id": "379f1669-d153-45a7-bba0-7e0603b0f97f",
    "scope": {
     "context": {
      "actor": "1",
-     "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+     "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
      "cursor": {
       "sequence": "14",
       "tick": "200"
@@ -441,7 +441,7 @@
       "readiness_revision": "5",
       "stream": {
        "epoch": "1",
-       "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+       "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
       }
      },
      "revision": "4"
@@ -453,7 +453,7 @@
   {
    "context": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "cursor": {
      "sequence": "2",
      "tick": "0"
@@ -462,7 +462,7 @@
      "readiness_revision": "1",
      "stream": {
       "epoch": "1",
-      "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+      "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
      }
     },
     "revision": "0"
@@ -471,13 +471,13 @@
     "entries": [],
     "older_before": null
    },
-   "request_id": "a99ca7c1-cd54-4fb1-b020-ce84491a0209",
+   "request_id": "b75e9937-e513-4efa-8b1c-1914057d36a1",
    "type": "history"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "cursor": {
      "sequence": "0",
      "tick": "0"
@@ -486,7 +486,7 @@
      "readiness_revision": "0",
      "stream": {
       "epoch": "1",
-      "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+      "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
      }
     },
     "revision": "0"
@@ -512,13 +512,13 @@
    "type": "palette"
   },
   {
-   "request_id": "f9a4925e-2b0a-4008-8209-780386a2454e",
+   "request_id": "13c0fe05-c591-48c3-bd1c-460d4b94fd4c",
    "snapshot": {
     "actor": "1",
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "2",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "14",
@@ -534,7 +534,7 @@
         "component": "scheduler",
         "type": "backend"
        },
-       "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+       "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
        "content": {
         "action": {
          "direction": "east",
@@ -546,7 +546,7 @@
         },
         "type": "action"
        },
-       "id": "baf1f352-f57a-4506-9652-113a3cdd6cab",
+       "id": "ea1a5bc3-6586-4402-8a79-39b3424ee9cf",
        "tick": "0"
       },
       {
@@ -556,7 +556,7 @@
         "component": "scheduler",
         "type": "backend"
        },
-       "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+       "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
        "content": {
         "action": {
          "direction": "east",
@@ -568,7 +568,7 @@
         },
         "type": "action"
        },
-       "id": "b9954e5f-d4ac-4db0-b718-b1af699260cc",
+       "id": "bfa73691-a786-46a3-9d27-dd705a9cc44f",
        "tick": "100"
       }
      ],
@@ -606,14 +606,14 @@
        "z": 0
       },
       "ready": true,
-      "self_target": "a_bfa43dc4c9450dcce4298b7d6cc94ef54a4a86d25619fb40ce4d2d6e169dd16d",
+      "self_target": "a_ee7d1e3fec62d805981da73609654aaa177f95fd298d4c079ece77c15ab44b7d",
       "tick": "200",
       "visible_actors": [],
       "visible_cells": [
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3795adee5cd33fd5b67c7a9907175c50c41ba1fe",
+        "key": "1fd0b89c22d5e68239c14f24a4b7d65df476e80a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -628,7 +628,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c552016ccbd5848d2150f0bd66e8d9b6c9f06789",
+        "key": "c13041be4026fc71e76e30ee3624dc4926e24786",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -643,7 +643,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "a486753d542020a332f6ffc4adf86c53affe8cb7",
+        "key": "a9874fe13bd6a06c0b343feb66df2234583a66fc",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -658,7 +658,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "5af8880e403b7f664f3d18f66869a1946aec3f2b",
+        "key": "2c41815e8c4c467ad93a3fbe4058cf9aafe25df9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -673,7 +673,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "33047e12ea988837f23d3712e934e1ea59f2bc1f",
+        "key": "18014ebe2648b7b32d87b6cfed40a2d1316894c3",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -688,7 +688,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "34a2e6ed7178c5784bba376798c94f91410aab89",
+        "key": "13566f268477b24f24a38a4f79162c81511bb283",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -703,7 +703,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b4b635c664aba3c4660fbe9604d149558873795f",
+        "key": "afba582210b57cf8af7c63b6994527ef84decac2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -718,7 +718,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c80f80af853b902cfddf4fa4dfd7f171f7b80a94",
+        "key": "38e273c0b83f5d28714c247df68b61294d46350c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -733,7 +733,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "9ce9f1105d3ccc957b7ae7dfe6e1cab22d719c2b",
+        "key": "48f52b09c449f7dab9a27ff0347e866c22c880f8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -748,7 +748,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "6820e553546a7b4bba44a43c653c7e51a62ba026",
+        "key": "0a31e18021f05ef8372ca89284ddcc9ef2dd889a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -763,7 +763,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "6b2658447ef3e92f83e6a3949e2133b6f3d873b3",
+        "key": "6802c0a7c9eec015e9d28fc3c6a1711b49bd3662",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -778,7 +778,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "dde611ff4000ee65240a7f68b39554f92eff342f",
+        "key": "752171a31fe661453ba8cb70dee25cca9a977a01",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -793,7 +793,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b58de7ce9d18c0d89ffe5cbffbe8616ff1a623bd",
+        "key": "9710936c55b5d19283d73b614f5885b96f1fd55b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -808,7 +808,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c711fb627e9f2cf57ac160ce7c10f843d2ba5dfa",
+        "key": "800c4eedf4ae4b167a42bcdfe7af5ae6476306d8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -823,7 +823,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b7276c1f9e3a6ca8286fff6e7859c1425b6aa4c2",
+        "key": "c8c03b4ce487b8a26039d1a9fa7fba40cd210acd",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -838,7 +838,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "78e36cb738a8005595457de0da05fef50f912c99",
+        "key": "8e2b79e1af7ba0351d72b3558e742ecb3287a1f3",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -853,7 +853,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "0fea272056274eca74b710750348981c899f3b7c",
+        "key": "8b25f154e5ae8a6ca6d30eba6826ddbc7ddaa0ad",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -868,7 +868,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "2db3e60c83a36afdb6c1796d162c472404c70cea",
+        "key": "19984e73e627361fc5c1a16a34c71e89ade17977",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -883,7 +883,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "21c3e49970fe5bd57255e9d74d0000606af04b36",
+        "key": "4afeba341990e982a79b8ba5b21b16ccda12be4f",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -898,7 +898,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "12001e8f5654cdad9982ff1bcf69216dc9ee4a88",
+        "key": "f2e604593bf3f5021c42cb9fcba157716a7e052b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -913,7 +913,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "867d2637154de929f5ccba3ecb3d31b915d4d8de",
+        "key": "82d26182b0725a86196479da36017e6849c732e6",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -928,7 +928,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "2ab808c5bc03e897317fdb28e46788674b8c3834",
+        "key": "8993cb439e5930c2f36664ccb14b7d604e48fec1",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -943,7 +943,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "24f9db9c52be7846027984e9842a638454f220e8",
+        "key": "57215f104b7ed9b7476e9cef298fec065f7025d5",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -958,7 +958,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "5f13b924168627e00403337bad8085741d571e07",
+        "key": "c5b91c008bc5ac9c08ee014b8c5b00cc8e4ed06e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -973,7 +973,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "d6363946a98cd5290548ffcf9c9e96de526278a7",
+        "key": "08269d39545c64427091c6d6f8bb017ea3df598f",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -988,7 +988,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "9d8e008d43490749dda81ae559d464ba3695a17a",
+        "key": "09113d65ed59aee583a3d102e07973214fa7236d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1003,7 +1003,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "206f0a85fbc727b1f115de1d31a03ee56237bed1",
+        "key": "0d31d91032abeb7fa4b8ce35f907b40b93da9b83",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1018,7 +1018,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c3a431a7bc00115001159dce5efd755c5c3cd177",
+        "key": "57c98f950c88b91f94714963f5007321908778e2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1033,7 +1033,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "ab247cb248486a24f96bf313c62433977fd9f1ba",
+        "key": "cc77a415a001a896e77883fed67f6555bf96928b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1048,7 +1048,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "e2eb3053d86949a586a3cbae437de7d04d1d9130",
+        "key": "453002eb03a9906bf05d8436a5e2b0de3b719faa",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1063,7 +1063,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3006e9f1d1a183bb9b3719c4f0e64494cd980118",
+        "key": "bdf20d81db2844863d378887717efc3bc41c488a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1078,7 +1078,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "99e648753cb37f6013abbf32ee0e61906940e572",
+        "key": "19cce94a2fd315f67f275d949766b0337a011281",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1093,7 +1093,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "88ed5dad1349ac32ec22dc527df6a237ed25dadb",
+        "key": "15697a8634dd93fd851f8e760a5768562f52ed40",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1108,7 +1108,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "865b5d8173aa19a70ea122b791540ce2397fca0a",
+        "key": "8bfb7cd3fa409e7b58a03783f50ea489589c59d7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1123,7 +1123,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f1892d5e0235eb9be3fb940e058c0cd1ec8fa205",
+        "key": "151dd741f751bb559a2ac3113c65099f8ea65c5c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1138,7 +1138,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "95ddda4ec9ae141901c175a5e75d3152a9282113",
+        "key": "6f0a05ad48b281c40ecc936436da7decbcbd1602",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1153,7 +1153,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "7fc1d6b5090d60b3d342fa3ef0e3273fc069e68f",
+        "key": "8d362bdc8c3fcd41f644c72dc9511d9c3deec8e2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1168,7 +1168,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "08f76fcfe8c7a4e5539f8c48b7151063fcbd91f0",
+        "key": "b15b855af3dc6aeb67ee8e6afdf1c2f7ebf91fcb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1183,7 +1183,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "dc8e7dfa1400aad960651cfa58ac6f4f63eee4e9",
+        "key": "9dc9b92a11ad21acf1901fb998933a68bcfa23ea",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1198,7 +1198,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "90129ae3f928da5a9967cdbb992c516c05d7ccaa",
+        "key": "398b24556d6eb37a4d4ca54b19bf7016ab2e541c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1213,7 +1213,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b11fc6136ad8a8b775a8923bc787393e18560f77",
+        "key": "287a05388956a7008f4ab578515b38aba8c4db3c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1228,7 +1228,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "8ac3afb7d3502688652a3f7adb91caf6d5174b14",
+        "key": "dbb541116f373ea05985398045ab16711e6caa22",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1243,7 +1243,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "cbf3c34c0dca181e3d664961453812b9e1dd22df",
+        "key": "7458aab7a631064c7320dd1d7a54bbdd2915f377",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1258,7 +1258,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "9a029d15e70dddfcf62bacba5bce37beb5e2cb0a",
+        "key": "c3f1ca8e86a131afd9968cca053aba4777e35b23",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1273,7 +1273,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "08fe8e6af3525ed8b49ed64d51294e1f72a5449a",
+        "key": "329425112aaa3c0b7ddc60cea55c66ed0678b30c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1288,7 +1288,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "bf3fa2a3fdc07a31f6bf7fdac325a8181369cd93",
+        "key": "63b07ea1f5e5d2bbec56d164c7b75dfb3d2f6b29",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1303,7 +1303,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3c91763080035af8e4b8afb9aeb41e130815944f",
+        "key": "34a460774fc3c333ec7048644bd2729815aceab2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1318,7 +1318,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "20fd334d18902455c8654a56bac68e8539233b25",
+        "key": "f8b9cc5d2b0c4bbe4d40787193de6b6aad45b30f",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1333,7 +1333,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "11915801a7f0eb8e04adf0443dcd181fab3d27c7",
+        "key": "b0383e198e00fd6f5135fef9cf3fb65a738705f7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1348,7 +1348,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3dae418ac5504e3ff14bad117e9a875594cb8cf3",
+        "key": "19ee98a1626c81c892f644d7453d65d771056509",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1363,7 +1363,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "84b85fa9857a136b008018915be38ae6121c3a95",
+        "key": "75dbe4eaeb50e8a492f2282bb387115fb0a27e03",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1378,7 +1378,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "2ee6d130f833b02eededda0e8efdee26a5a9ee23",
+        "key": "9d4ce951b1042a463977c30e887d7397bd679de9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1393,7 +1393,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "53893d3310be7e951bafaab0fb39b41b9407b2ab",
+        "key": "609533f728173eef17ec6581a6ff334693bae0a0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1408,7 +1408,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "06653f926f8f194bb456a38feb05ff2e7f372bf4",
+        "key": "ce5a37d5a0d2947a703ba2afbeb1cd692b944055",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1423,7 +1423,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "4a9e9d3e3f73f3bf60f622d995f000bed091f2ba",
+        "key": "8c21ba7ad4e313ec121136bda982f52bbd6ed27a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1438,7 +1438,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "7c03e51de047ad82ba359649349c454de0ae8d66",
+        "key": "3c510fe7e0794a6f61b59202750b948dea7ebc41",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1453,7 +1453,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b61e33864f02f96363d88b6cfec4f5b0c2fd6358",
+        "key": "ddf4e243ed5ac90abe825ad659f60ce8ed575dfa",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1468,7 +1468,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "96847ee2f58bf9c77e9d4be7e701d7011a185767",
+        "key": "7d1d5252f9caa5a65b22b948bf6ddc0256303156",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1483,7 +1483,7 @@
        {
         "asset": "terrain.floor.cave",
         "door": null,
-        "key": "0fa466df4cf195183475a715749074e6ad575095",
+        "key": "62ff678bc9ba6f52ef590a649f6ad3b3150c4521",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1505,6 +1505,19 @@
    "type": "snapshot"
   },
   {
+   "part": {
+    "context": {
+     "epoch": "1",
+     "stream": "0556e874-3656-4cb0-8493-0d8e843d5858"
+    },
+    "data": "{\"type\":\"snapshot\",\"request_id\":\"attach\",\"snapshot\":{\"context\":{\"stream\":\"0556e874-3656-4cb0-8493-0d8e843d5858\",\"epoch\":\"1\"},\"readiness\":{\"revision\":\"0\",\"admission\":false,\"resume\":[],\"cancel\":[]},\"intentions\":[],\"travel\":null,\"actor\":\"1\",\"branch\":\"bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95\",\"cursor\":{\"",
+    "offset": 0,
+    "request_id": "attach",
+    "total_bytes": 10759
+   },
+   "type": "snapshot_part"
+  },
+  {
    "type": "update",
    "update": {
     "actor": "1",
@@ -1516,7 +1529,7 @@
        "type": "user",
        "user": "local"
       },
-      "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+      "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
       "content": {
        "anchor": {
         "revision": "4",
@@ -1526,15 +1539,15 @@
        "text": "Shared sample note",
        "type": "annotation"
       },
-      "id": "ce92157d-bd45-4393-833b-be7bafdd6def",
+      "id": "b5bd1506-82a9-4eee-bd96-c81db8e9b063",
       "tick": "200"
      },
      "type": "annotation"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "2",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "15",
@@ -1550,10 +1563,10 @@
      "has_control": true,
      "type": "control"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "1",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "1",
@@ -1568,17 +1581,17 @@
     "body": {
      "status": {
       "actor": "1",
-      "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
-      "entry_id": "c3ad6490-f85a-4add-b1d4-3aef347f15c8",
-      "intention": "c3ad6490-f85a-4add-b1d4-3aef347f15c8",
+      "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
+      "entry_id": "a119c133-3ef4-4328-ae14-1487574b0427",
+      "intention": "a119c133-3ef4-4328-ae14-1487574b0427",
       "phase": "queued"
      },
      "type": "intention"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "1",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "3",
@@ -1605,7 +1618,7 @@
        "component": "scheduler",
        "type": "backend"
       },
-      "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+      "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
       "content": {
        "action": {
         "direction": "east",
@@ -1617,7 +1630,7 @@
        },
        "type": "action"
       },
-      "id": "baf1f352-f57a-4506-9652-113a3cdd6cab",
+      "id": "ea1a5bc3-6586-4402-8a79-39b3424ee9cf",
       "tick": "0"
      },
      "state": {
@@ -1628,7 +1641,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "bf3fa2a3fdc07a31f6bf7fdac325a8181369cd93",
+         "key": "63b07ea1f5e5d2bbec56d164c7b75dfb3d2f6b29",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -1643,7 +1656,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "3dae418ac5504e3ff14bad117e9a875594cb8cf3",
+         "key": "19ee98a1626c81c892f644d7453d65d771056509",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -1658,7 +1671,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "2ee6d130f833b02eededda0e8efdee26a5a9ee23",
+         "key": "9d4ce951b1042a463977c30e887d7397bd679de9",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -1673,7 +1686,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "06653f926f8f194bb456a38feb05ff2e7f372bf4",
+         "key": "ce5a37d5a0d2947a703ba2afbeb1cd692b944055",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -1688,7 +1701,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "b61e33864f02f96363d88b6cfec4f5b0c2fd6358",
+         "key": "ddf4e243ed5ac90abe825ad659f60ce8ed575dfa",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -1731,17 +1744,17 @@
       },
       "ready": false,
       "revision": "1",
-      "self_target": "a_bfa43dc4c9450dcce4298b7d6cc94ef54a4a86d25619fb40ce4d2d6e169dd16d",
+      "self_target": "a_ee7d1e3fec62d805981da73609654aaa177f95fd298d4c079ece77c15ab44b7d",
       "tick": "0",
       "visible_actors": [],
       "wizard_game": false
      },
      "type": "observation_delta"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "1",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "5",
@@ -1762,10 +1775,10 @@
      },
      "type": "readiness"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "1",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "2",
@@ -1785,26 +1798,26 @@
        "type": "user",
        "user": "local"
       },
-      "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+      "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
       "content": {
-       "destination": "3795adee5cd33fd5b67c7a9907175c50c41ba1fe",
+       "destination": "1fd0b89c22d5e68239c14f24a4b7d65df476e80a",
        "type": "travel"
       },
-      "id": "c9f14f90-612b-4963-ae61-38f68da2cd31",
+      "id": "d132b857-ebbf-486a-a342-aa0e4493263b",
       "tick": "200"
      },
      "status": {
       "completed_steps": "0",
-      "destination": "3795adee5cd33fd5b67c7a9907175c50c41ba1fe",
-      "id": "c9f14f90-612b-4963-ae61-38f68da2cd31",
+      "destination": "1fd0b89c22d5e68239c14f24a4b7d65df476e80a",
+      "id": "d132b857-ebbf-486a-a342-aa0e4493263b",
       "phase": "active"
      },
      "type": "travel"
     },
-    "branch": "8c8a62f9-088b-43f3-a905-c104a9259175",
+    "branch": "bbdc7e6f-9f18-4f88-bf7d-0d63d6a29c95",
     "context": {
      "epoch": "2",
-     "stream": "1f572513-6eb8-4db4-b1d7-bd2db1f96c39"
+     "stream": "eeef2e44-de7e-44f7-99fa-48808de5bd88"
     },
     "cursor": {
      "sequence": "16",
@@ -1825,9 +1838,10 @@
     "max_history_page_entries": 100,
     "max_request_bytes": 16384,
     "max_response_bytes": 16777216,
-    "max_retained_state_bytes": 16777216
+    "max_retained_state_bytes": 16777216,
+    "max_snapshot_bytes": 33554432
    },
-   "protocol": 29,
+   "protocol": 30,
    "role": "player",
    "type": "welcome",
    "user": "sample-user"

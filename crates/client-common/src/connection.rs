@@ -79,6 +79,7 @@ impl PendingQuery {
 /// commands are never retried with a new identity. Reconnect with a fresh snapshot.
 pub struct Connection {
     socket: Socket,
+    responses: ResponseAssembler,
     pub state: ClientState,
     /// The asset palette as last heard; [`Connection::next`] keeps it current.
     pub palette: Palette,
@@ -138,25 +139,31 @@ impl Connection {
             MAX_REQUEST_BYTES,
         )
         .await?;
-        let (role, capabilities) =
-            match timeout(DEADLINE, receive(&mut socket, MAX_RESPONSE_BYTES)).await?? {
-                ServerMessage::Welcome {
-                    protocol,
-                    actors,
-                    role,
-                    capabilities,
-                    ..
-                } if protocol == PROTOCOL_VERSION
-                    && actors.contains(&actor)
-                    && capabilities.is_valid() =>
-                {
-                    (role, capabilities)
-                }
-                ServerMessage::Error { code, .. } => {
-                    return Err(format!("Connection rejected: {code:?}").into())
-                }
-                _ => return Err("Incompatible welcome or unauthorized actor".into()),
-            };
+        let mut responses = ResponseAssembler::default();
+        let (role, capabilities) = match timeout(
+            DEADLINE,
+            receive(&mut socket, MAX_RESPONSE_BYTES, &mut responses),
+        )
+        .await??
+        {
+            ServerMessage::Welcome {
+                protocol,
+                actors,
+                role,
+                capabilities,
+                ..
+            } if protocol == PROTOCOL_VERSION
+                && actors.contains(&actor)
+                && capabilities.is_valid() =>
+            {
+                (role, capabilities)
+            }
+            ServerMessage::Error { code, .. } => {
+                return Err(format!("Connection rejected: {code:?}").into())
+            }
+            _ => return Err("Incompatible welcome or unauthorized actor".into()),
+        };
+        responses = ResponseAssembler::with_limit(capabilities.max_snapshot_bytes as usize)?;
         send(
             &mut socket,
             ClientMessage::Request {
@@ -168,7 +175,11 @@ impl Connection {
         .await?;
         let snapshot = match timeout(
             DEADLINE,
-            receive(&mut socket, capabilities.max_response_bytes as usize),
+            receive(
+                &mut socket,
+                capabilities.max_response_bytes as usize,
+                &mut responses,
+            ),
         )
         .await??
         {
@@ -182,6 +193,7 @@ impl Connection {
             ClientState::from_snapshot(snapshot).map_err(|e| format!("Invalid snapshot: {e:?}"))?;
         Ok(Self {
             socket,
+            responses,
             state,
             palette: Palette::default(),
             role,
@@ -232,7 +244,7 @@ impl Connection {
     /// Whether requests may use the current disclosed state. The last valid
     /// model remains available for display during recovery, never for commands.
     pub fn is_synchronized(&self) -> bool {
-        self.recovery.is_none()
+        self.recovery.is_none() && !self.responses.is_pending()
     }
 
     /// Classify a snapshot using this connection's own recovery request identity.
@@ -333,6 +345,7 @@ impl Connection {
                         receive(
                             &mut self.socket,
                             self.capabilities.max_response_bytes as usize,
+                            &mut self.responses,
                         ),
                     )
                     .await
@@ -341,6 +354,7 @@ impl Connection {
                         receive(
                             &mut self.socket,
                             self.capabilities.max_response_bytes as usize,
+                            &mut self.responses,
                         )
                         .await?
                     }
@@ -539,14 +553,20 @@ async fn send(
     Ok(())
 }
 
-async fn receive(socket: &mut Socket, limit: usize) -> Result<ServerMessage, ConnectionError> {
+async fn receive(
+    socket: &mut Socket,
+    limit: usize,
+    responses: &mut ResponseAssembler,
+) -> Result<ServerMessage, ConnectionError> {
     loop {
         match socket.next().await.ok_or("Server disconnected")?? {
             Message::Text(text) => {
                 if text.len() > limit {
                     return Err(DecodeError::TooLarge { limit }.into());
                 }
-                return Ok(decode_response(&text)?);
+                if let Some(message) = responses.push(decode_response(&text)?)? {
+                    return Ok(message);
+                }
             }
             Message::Close(_) => return Err("Server disconnected".into()),
             Message::Ping(_) | Message::Pong(_) => {}
