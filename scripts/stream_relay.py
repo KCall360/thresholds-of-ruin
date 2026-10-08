@@ -55,12 +55,14 @@ def tcp_socket_owned(rows, owned_inodes, local_port, remote_port):
 
 
 class StreamRelay:
-    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False, measure_actor_facts=False):
+    def __init__(self, upstream, receive_buffer=None, *, large_retained_base=False,
+                 measure_actor_facts=False, on_server_message=None):
         """Relay a client to the server at `upstream`. A small `receive_buffer`
         (bytes) on the relay's server connection keeps a paused relay from
         absorbing the server's output in socket buffers, which Linux grows to
         megabytes, so the server's own queue fills instead."""
         self.measure_actor_facts = measure_actor_facts
+        self.on_server_message = on_server_message
         self._traffic_lock = threading.Lock()
         self._actor_fact_bytes = 0
         self._largest_frame = 0
@@ -142,6 +144,8 @@ class StreamRelay:
                     self.held.set()
                 self.gate.wait()
                 message = json.loads(payload) if prefix[0] == 0x81 else None
+                if message is not None and self.on_server_message is not None:
+                    self.on_server_message(message)
                 if message is not None and self.drop_observation.is_set():
                     if message.get('type') == 'update' and message['update']['body']['type'] in ('observation', 'observation_delta'):
                         self.drop_observation.clear()

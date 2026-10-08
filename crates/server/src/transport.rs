@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
-use tokio::time::timeout;
+use tokio::time::{timeout, timeout_at, Instant};
 use tokio_tungstenite::{
     accept_hdr_async_with_config,
     tungstenite::{
@@ -37,12 +37,22 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Output<S> {
     async fn send_frame(&mut self, frame: crate::outbound::Frame) -> Result<Option<String>, ()> {
         debug_assert!(self.pending.is_none());
         self.pending = Some(frame);
-        let text = std::mem::take(&mut self.pending.as_mut().unwrap().text);
-        if !matches!(
-            timeout(IO_TIMEOUT, self.socket.send(Message::Text(text.into()))).await,
-            Ok(Ok(()))
-        ) {
-            return Err(());
+        // A logical transfer owns one lease and one write deadline. Following
+        // parts must not renew the time a slow reader can retain that lease.
+        let deadline = Instant::now() + IO_TIMEOUT;
+        loop {
+            let text = std::mem::take(&mut self.pending.as_mut().unwrap().text);
+            if !matches!(
+                timeout_at(deadline, self.socket.send(Message::Text(text.into()))).await,
+                Ok(Ok(()))
+            ) {
+                return Err(());
+            }
+            let pending = self.pending.as_mut().unwrap();
+            match pending.following.pop_front() {
+                Some(text) => pending.text = text,
+                None => break,
+            }
         }
         // SinkExt::send completes flush; the write buffer no longer owns this
         // frame. On failure/cancellation, Output retains it until socket drop.
@@ -298,6 +308,7 @@ mod tests {
         destroyed_while_charged: Arc<AtomicBool>,
         entered: Arc<tokio::sync::Notify>,
         fail: bool,
+        writes_before_block: usize,
     }
 
     impl Drop for Blocked {
@@ -319,10 +330,14 @@ mod tests {
 
     impl AsyncWrite for Blocked {
         fn poll_write(
-            self: Pin<&mut Self>,
+            mut self: Pin<&mut Self>,
             _: &mut Context<'_>,
-            _: &[u8],
+            bytes: &[u8],
         ) -> Poll<io::Result<usize>> {
+            if self.writes_before_block > 0 {
+                self.writes_before_block -= 1;
+                return Poll::Ready(Ok(bytes.len()));
+            }
             self.entered.notify_one();
             if self.fail {
                 Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()))
@@ -331,7 +346,7 @@ mod tests {
             }
         }
         fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Pending
+            Poll::Ready(Ok(()))
         }
         fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
             Poll::Pending
@@ -387,6 +402,7 @@ mod tests {
             destroyed_while_charged: destroyed.clone(),
             entered: entered.clone(),
             fail,
+            writes_before_block: 0,
         };
         let socket = WebSocketStream::from_raw_socket(
             stream,
@@ -437,5 +453,155 @@ mod tests {
         assert!(task.await.unwrap_err().is_cancelled());
         assert!(destroyed.load(Ordering::SeqCst));
         assert_eq!(pool.available_bytes(), total);
+    }
+
+    #[tokio::test]
+    async fn partial_snapshot_writes_keep_the_entire_lease_until_socket_destruction() {
+        let message = snapshot_message();
+        let parts = encode_snapshot(&message, 512, tor_protocol::MAX_SNAPSHOT_BYTES * 2).unwrap();
+        assert!(parts.len() > 2);
+        let count = parts.len();
+        let bytes: usize = parts.iter().map(String::len).sum();
+        for fail in [false, true] {
+            let pool = Arc::new(crate::outbound::Pool::new(crate::OutboundLimits {
+                frame_bytes: 512,
+                client_bytes: bytes,
+                total_bytes: bytes,
+            }));
+            let (sender, mut receiver) = pool.channel(1).unwrap();
+            sender.try_send_snapshot(&message).unwrap();
+            let frame = receiver.try_recv_frame().unwrap();
+            let destroyed = Arc::new(AtomicBool::new(false));
+            let stream = Blocked {
+                pool: pool.clone(),
+                destroyed_while_charged: destroyed.clone(),
+                entered: Arc::new(tokio::sync::Notify::new()),
+                fail,
+                writes_before_block: 1,
+            };
+            let socket = WebSocketStream::from_raw_socket(
+                stream,
+                Role::Server,
+                Some(WebSocketConfig::default().write_buffer_size(0)),
+            )
+            .await;
+            let mut output = Output {
+                socket,
+                pending: None,
+            };
+            let result = timeout(Duration::from_millis(10), output.send_frame(frame)).await;
+            if fail {
+                assert!(result.unwrap().is_err());
+            } else {
+                assert!(result.is_err());
+            }
+            assert_eq!(
+                output.pending.as_ref().unwrap().following.len(),
+                count - 2,
+                "the first part flushed before failure/cancellation on the second"
+            );
+            assert_eq!(
+                pool.available_bytes(),
+                0,
+                "all admitted parts remain charged"
+            );
+            drop(output);
+            assert!(
+                destroyed.load(Ordering::SeqCst),
+                "destroy socket before releasing the lease"
+            );
+            assert_eq!(pool.available_bytes(), bytes);
+        }
+    }
+
+    fn snapshot_message() -> ServerMessage {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../../protocol/tests/fixtures/wire-v30.json"))
+                .unwrap();
+        serde_json::from_value(
+            samples["server"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|value| value["type"] == "snapshot")
+                .unwrap()
+                .clone(),
+        )
+        .unwrap()
+    }
+
+    struct DelayedWrites {
+        delay: Pin<Box<tokio::time::Sleep>>,
+    }
+
+    impl AsyncRead for DelayedWrites {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for DelayedWrites {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            context: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.delay.as_mut().poll(context).is_pending() {
+                return Poll::Pending;
+            }
+            self.delay
+                .as_mut()
+                .reset(tokio::time::Instant::now() + Duration::from_secs(2));
+            Poll::Ready(Ok(bytes.len()))
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn snapshot_parts_share_one_write_deadline() {
+        let pool = crate::outbound::Pool::new(crate::OutboundLimits {
+            frame_bytes: 512,
+            client_bytes: 65536,
+            total_bytes: 65536,
+        });
+        let (sender, mut receiver) = pool.channel(1).unwrap();
+        sender.try_send_snapshot(&snapshot_message()).unwrap();
+        let frame = receiver.try_recv_frame().unwrap();
+        assert!(frame.following.len() >= 2);
+        let charged = pool.available_bytes();
+        let socket = WebSocketStream::from_raw_socket(
+            DelayedWrites {
+                delay: Box::pin(tokio::time::sleep(Duration::from_secs(2))),
+            },
+            Role::Server,
+            Some(WebSocketConfig::default().write_buffer_size(0)),
+        )
+        .await;
+        let mut output = Output {
+            socket,
+            pending: None,
+        };
+        let started = tokio::time::Instant::now();
+        assert!(
+            output.send_frame(frame).await.is_err(),
+            "parts must not renew the transfer deadline"
+        );
+        assert_eq!(started.elapsed(), IO_TIMEOUT);
+        assert_eq!(
+            pool.available_bytes(),
+            charged,
+            "timed-out transfer remains leased until socket destruction"
+        );
+        drop(output);
+        assert_eq!(pool.available_bytes(), 65536);
     }
 }

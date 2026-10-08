@@ -156,21 +156,36 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":29,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":30,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
 server-granted `role` (`player`, `spectator`, or `wizard`), and required typed
 `capabilities`. These state `max_request_bytes`, `max_response_bytes`,
-`max_retained_state_bytes`, `max_connections` and `max_history_page_entries` as
+`max_retained_state_bytes`, `max_snapshot_bytes`, `max_connections` and `max_history_page_entries` as
 bounded numeric counts. Clients validate capabilities before attaching and obey
 the advertised request ceiling. The response ceiling follows the configured
 frame limit; the connection ceiling is min(128, total/frame), 16 by default.
 Existing borrowing may exhaust admission before that ceiling. Capacity rejection
 uses `resource_limit`, distinct from `invalid_request`, and consumes no client ID.
 Capabilities describe static limits, not available capacity or actor authority.
-The retained-state ceiling does not promise that a full recovery envelope fits;
-frame admission still checks the complete encoded response.
+The retained state has a separate 16 MiB ceiling. Complete recovery snapshots,
+including history and authority metadata, have an advertised 32 MiB ceiling.
+When one response frame cannot hold a snapshot, ordered `snapshot_part` messages
+carry its complete encoded envelope. Each part names the request and reset
+context, its UTF-8 byte offset and the total logical byte length. Frame admission
+checks each complete encoded part, including JSON escaping and header bytes.
+Preparation stops at the client's remaining encoded-byte quota before allocating
+another part; queue admission rechecks the complete transfer atomically.
+The whole transfer occupies one ordered output queue entry and requires its
+complete encoded byte budget before publication. Resource exhaustion rejects the
+whole transfer and closes that connection; parts cannot bypass output quotas.
+One write deadline covers the entire transfer, so individual parts cannot extend
+the time a slow reader holds its memory lease.
+Clients assemble within the advertised logical ceiling, reject gaps, repeats,
+identity changes and interleaved responses, and validate the complete snapshot
+before replacing state or enabling input. Assembly survives canceled reads;
+partial contents never become client observations or authority.
 It rejects bad tokens, unsupported versions, and unknown request fields before
 disclosing game state. Attach once per connection:
 

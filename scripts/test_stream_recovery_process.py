@@ -1,4 +1,5 @@
 """Real clients: delayed delivery, atomic gap/invalid-state repair, and relaunch."""
+import json
 import unittest
 from stream_relay import StreamRelay
 
@@ -6,6 +7,41 @@ from process_harness import ProcessTestCase, AdventureProcess, SPECTATOR_TOKEN
 
 
 class StreamRecoveryProcesses(ProcessTestCase):
+    def test_small_frames_preserve_complete_history_across_reset_and_restart(self):
+        frame_bytes = 4096
+        limits = ["--outbound-frame-bytes", frame_bytes,
+                  "--outbound-client-bytes", 65536,
+                  "--outbound-total-bytes", 262144]
+        server = self.server(*limits)
+        player, initial = self.client()
+        notes = [f"Note {n}: " + "é\\\"" * 40 for n in range(6)]
+        for note in notes:
+            result = self.request(player, {
+                "type": "command", "context": initial["input_context"], "branch": initial["branch"],
+                "command": {"type": "annotate", "anchor": {"type": "state", "revision": "0"},
+                            "text": note, "source": "user", "category": "note", "audience": "actor"}})
+            self.assertIsNone(result["error"])
+        reset = self.request(player, {"type": "snapshot"})
+        # This subset alone exceeds a frame; complete wire snapshots include
+        # additional authority, cursor and history-page fields.
+        subset = json.dumps({"state": reset["state"], "history": reset["history"]},
+                            ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertGreater(len(subset), frame_bytes)
+        self.assertEqual(reset["state"], initial["state"])
+        self.assertEqual([entry["content"]["text"] for entry in reset["history"]], notes)
+        spectator, observed = self.client(SPECTATOR_TOKEN)
+        self.assertEqual(observed["state"], reset["state"])
+        self.assertEqual(observed["history"], reset["history"])
+        self.flush_save()
+        player.stop()
+        spectator.stop()
+        server.stop()
+        self.server(*limits)
+        resumed, restored = self.client()
+        self.assertEqual(restored["state"], reset["state"])
+        self.assertEqual(restored["history"], reset["history"])
+        self.assertIsNone(self.act(resumed, {"type": "wait"})["error"])
+
     def playable(self, kind, address):
         if kind == 'ascii':
             client = self.launch('tor-client-ascii', ['--connect', address, '--automation'], token=SPECTATOR_TOKEN)

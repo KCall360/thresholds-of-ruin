@@ -49,6 +49,7 @@ impl Write for Limited {
 #[derive(Debug)]
 pub enum EncodeError {
     TooLarge { limit: usize },
+    TransferTooLarge { limit: usize },
     RetainedStateTooLarge { limit: usize },
     Json(serde_json::Error),
 }
@@ -59,6 +60,10 @@ impl std::fmt::Display for EncodeError {
             Self::TooLarge { limit } => {
                 write!(formatter, "wire message exceeds byte limit ({limit} bytes)")
             }
+            Self::TransferTooLarge { limit } => write!(
+                formatter,
+                "snapshot transfer exceeds encoded byte budget ({limit} bytes)"
+            ),
             Self::RetainedStateTooLarge { limit } => write!(
                 formatter,
                 "observation exceeds retained-state byte limit ({limit} bytes)"
@@ -151,6 +156,10 @@ fn decode<T: DeserializeOwned>(text: &str, limit: usize) -> Result<T, DecodeErro
         }
     }
     serde_json::from_str(text).map_err(DecodeError::Json)
+}
+
+pub(crate) fn decode_snapshot_response(text: &str) -> Result<crate::ServerMessage, DecodeError> {
+    decode(text, crate::MAX_SNAPSHOT_BYTES)
 }
 
 /// Decode a complete client envelope after byte and nesting checks.
@@ -365,7 +374,7 @@ mod tests {
     #[test]
     fn response_decode_rejects_overdeep_ignored_fields() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v29.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v30.json")).unwrap();
         assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         let mut snapshot = samples["server"]
             .as_array()
@@ -510,7 +519,7 @@ mod tests {
     #[test]
     fn typed_decoders_preserve_all_recorded_message_kinds() {
         let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v29.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/wire-v30.json")).unwrap();
         assert_eq!(samples["protocol"], crate::PROTOCOL_VERSION);
         for sample in samples["client"].as_array().unwrap() {
             let text = serde_json::to_string(sample).unwrap();

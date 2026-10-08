@@ -1,5 +1,6 @@
 //! Ordered, single-encoding output with byte leases covering queued and in-flight
 //! frames. These are host resource limits, never game state or scheduling inputs.
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -43,6 +44,7 @@ impl std::error::Error for SendError {
 fn preparation_error(error: EncodeError) -> SendError {
     match error {
         EncodeError::TooLarge { limit } => SendError::FrameLimit { limit },
+        EncodeError::TransferTooLarge { .. } => SendError::ClientBudget,
         error => SendError::Preparation(error),
     }
 }
@@ -250,9 +252,23 @@ pub(crate) struct Sender {
 /// No second full message object is retained alongside the encoded text.
 pub(crate) struct Frame {
     pub text: String,
+    // A logical recovery occupies one queue entry. Its following parts cannot
+    // interleave with later updates, and all bytes share the admission lease.
+    pub following: VecDeque<String>,
     pub ack_id: Option<String>,
     _allocation: FrameLease,
     _client: OwnedSemaphorePermit,
+}
+
+struct PreparedFrames {
+    text: String,
+    following: VecDeque<String>,
+}
+
+impl PreparedFrames {
+    fn iter(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.text).chain(self.following.iter())
+    }
 }
 
 impl Sender {
@@ -269,19 +285,52 @@ impl Sender {
         message: &ServerMessage,
         prepare: impl FnOnce(&ServerMessage, usize) -> Result<String, EncodeError>,
     ) -> Result<(), SendError> {
+        self.try_send_batch_with(message, |message, limit| {
+            prepare(message, limit).map(|text| PreparedFrames {
+                text,
+                following: VecDeque::new(),
+            })
+        })
+    }
+
+    pub(crate) fn try_send_snapshot(&self, message: &ServerMessage) -> Result<(), SendError> {
+        self.try_send_batch_with(message, |message, limit| {
+            let mut following: VecDeque<_> =
+                tor_protocol::encode_snapshot(message, limit, self.bytes.available_permits())?
+                    .into();
+            Ok(PreparedFrames {
+                text: following
+                    .pop_front()
+                    .expect("encoder returns a complete response"),
+                following,
+            })
+        })
+    }
+
+    fn try_send_batch_with(
+        &self,
+        message: &ServerMessage,
+        prepare: impl FnOnce(&ServerMessage, usize) -> Result<PreparedFrames, EncodeError>,
+    ) -> Result<(), SendError> {
         let slot = self.sender.try_reserve().map_err(|error| match error {
             mpsc::error::TrySendError::Full(_) => SendError::QueueFull,
             mpsc::error::TrySendError::Closed(_) => SendError::Closed,
         })?;
-        let text = prepare(message, self.limits.frame_bytes).map_err(preparation_error)?;
-        if text.len() > self.limits.frame_bytes {
+        let texts = prepare(message, self.limits.frame_bytes).map_err(preparation_error)?;
+        if texts
+            .iter()
+            .any(|text| text.len() > self.limits.frame_bytes)
+        {
             return Err(SendError::FrameLimit {
                 limit: self.limits.frame_bytes,
             });
         }
-        let bytes = u32::try_from(text.len()).map_err(|_| SendError::FrameLimit {
-            limit: self.limits.frame_bytes,
-        })?;
+        let bytes = texts
+            .iter()
+            .try_fold(0u32, |total, text| {
+                total.checked_add(u32::try_from(text.len()).ok()?)
+            })
+            .ok_or(SendError::ClientBudget)?;
         let client =
             self.bytes
                 .clone()
@@ -296,7 +345,8 @@ impl Sender {
             _ => None,
         };
         slot.send(Frame {
-            text,
+            text: texts.text,
+            following: texts.following,
             ack_id,
             _allocation: allocation,
             _client: client,
@@ -338,16 +388,28 @@ impl Receiver {
     // Semantic tests consume the same encoded queue as the actual transport.
     #[cfg(test)]
     pub(crate) async fn recv(&mut self) -> Option<ServerMessage> {
-        self.recv_frame()
-            .await
-            .map(|frame| serde_json::from_str(&frame.text).expect("encoded server message"))
+        self.recv_frame().await.map(decode_logical_frame)
     }
 
     #[cfg(test)]
     pub(crate) fn try_recv(&mut self) -> Result<ServerMessage, mpsc::error::TryRecvError> {
-        self.try_recv_frame()
-            .map(|frame| serde_json::from_str(&frame.text).expect("encoded server message"))
+        self.try_recv_frame().map(decode_logical_frame)
     }
+}
+
+#[cfg(test)]
+fn decode_logical_frame(frame: Frame) -> ServerMessage {
+    let mut assembler = tor_protocol::ResponseAssembler::default();
+    let mut result = None;
+    for text in std::iter::once(&frame.text).chain(frame.following.iter()) {
+        let message = tor_protocol::decode_response(text).expect("encoded server part");
+        let complete = assembler.push(message).expect("encoded logical response");
+        if complete.is_some() {
+            assert!(result.is_none(), "one logical response per queue entry");
+            result = complete;
+        }
+    }
+    result.expect("complete admitted response")
 }
 
 #[cfg(test)]
@@ -391,6 +453,59 @@ mod tests {
         assert!(sender
             .try_send_with(&value, |_, _| panic!("closed queue must not prepare"))
             .is_err());
+    }
+
+    #[test]
+    fn snapshot_batch_admission_is_atomic_and_leases_every_part() {
+        let samples: serde_json::Value =
+            serde_json::from_str(include_str!("../../protocol/tests/fixtures/wire-v30.json"))
+                .unwrap();
+        let message: ServerMessage = serde_json::from_value(
+            samples["server"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|value| value["type"] == "snapshot")
+                .unwrap()
+                .clone(),
+        )
+        .unwrap();
+        let parts =
+            tor_protocol::encode_snapshot(&message, 512, tor_protocol::MAX_SNAPSHOT_BYTES * 2)
+                .unwrap();
+        assert!(parts.len() > 1);
+        let bytes: usize = parts.iter().map(String::len).sum();
+        for client_bytes in [bytes - 1, bytes] {
+            let pool = Pool::new(limits(512, client_bytes, bytes * 2));
+            let (sender, mut receiver) = pool.channel(1).unwrap();
+            if client_bytes < bytes {
+                assert!(matches!(
+                    sender.try_send_snapshot(&message),
+                    Err(SendError::ClientBudget)
+                ));
+                assert_eq!(sender.sender.capacity(), 1);
+                assert!(receiver.try_recv_frame().is_err());
+                assert_eq!(pool.available_bytes(), bytes * 2);
+            } else {
+                sender.try_send_snapshot(&message).unwrap();
+                assert_eq!(
+                    sender.sender.capacity(),
+                    0,
+                    "one logical output occupies one slot"
+                );
+                assert_eq!(pool.available_bytes(), bytes);
+                let frame = receiver.try_recv_frame().unwrap();
+                assert_eq!(frame.following.len() + 1, parts.len());
+                assert!(frame.following.iter().all(|text| text.len() <= 512));
+                assert_eq!(
+                    pool.available_bytes(),
+                    bytes,
+                    "in-flight parts remain leased"
+                );
+                drop(frame);
+                assert_eq!(pool.available_bytes(), bytes * 2);
+            }
+        }
     }
 
     #[test]

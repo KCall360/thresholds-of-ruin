@@ -12,6 +12,7 @@ import json
 import re
 
 from process_harness import ROOT, SPECTATOR_TOKEN, ProcessTestCase
+from stream_relay import StreamRelay
 
 PROTOCOL = int(re.search(r"PROTOCOL_VERSION: u32 = (\d+);", (ROOT / "crates/protocol/src/wire.rs").read_text()).group(1))
 
@@ -64,7 +65,7 @@ CLIENT = [
 
 class Recorder(ProcessTestCase):
     def runTest(self):
-        self.server(scenario="generated-filler", seed=5)
+        server = self.server(scenario="generated-filler", seed=5)
         player, initial = self.client()
         watcher, _ = self.client(SPECTATOR_TOKEN)
         self.request(player, {"type": "palette"})
@@ -96,6 +97,26 @@ class Recorder(ProcessTestCase):
                     message = json.loads(line).get("message")
                     if message:
                         server_samples.setdefault(kind(message), message)
+        player.stop()
+        watcher.stop()
+        server.stop()
+        self.server("--outbound-frame-bytes", 512, "--outbound-client-bytes", 65536,
+                    "--outbound-total-bytes", 262144, scenario="generated-filler", seed=5)
+        captured = []
+
+        def capture_part(message):
+            if message["type"] == "snapshot_part" and not captured:
+                captured.append(message)
+
+        relay = StreamRelay(self.address, on_server_message=capture_part)
+        self.addCleanup(relay.close)
+        peer = self.launch("tor-client-headless", ["--connect", relay.address, "--observe"],
+                           token=SPECTATOR_TOKEN)
+        self.frame(peer, lambda frame: frame["type"] == "ready")
+        peer.stop()
+        relay.close()
+        self.assertEqual(len(captured), 1, "record an actual bounded snapshot transfer part")
+        server_samples["snapshot_part"] = captured[0]
         output = ROOT / f"crates/protocol/tests/fixtures/wire-v{PROTOCOL}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({

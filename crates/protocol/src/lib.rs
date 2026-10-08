@@ -3,6 +3,8 @@
 mod codec;
 mod delta;
 mod integers;
+mod recovery;
+pub use recovery::*;
 mod targets;
 pub use targets::{ActorTarget, DoorTarget, InvalidTarget, ItemTarget};
 mod validation;

@@ -373,7 +373,7 @@ fn immediate_completion_is_distinct_from_admitted_gameplay() {
 #[test]
 fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v29.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v30.json")).unwrap();
     assert_eq!(samples["protocol"], PROTOCOL_VERSION);
     let snapshot = samples["server"]
         .as_array()
@@ -559,6 +559,7 @@ fn capability_limits_are_explicit_bounded_and_required_in_welcome() {
     let capabilities = ServerCapabilities::new(MAX_RESPONSE_BYTES as u32, 16);
     assert!(capabilities.is_valid());
     assert_eq!(capabilities.max_request_bytes, MAX_REQUEST_BYTES as u32);
+    assert_eq!(capabilities.max_snapshot_bytes, MAX_SNAPSHOT_BYTES as u32);
     assert_eq!(
         capabilities.max_retained_state_bytes,
         MAX_STATE_BYTES as u32
@@ -594,6 +595,14 @@ fn capability_limits_are_explicit_bounded_and_required_in_welcome() {
         },
         ServerCapabilities {
             max_retained_state_bytes: MAX_STATE_BYTES as u32 + 1,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_snapshot_bytes: MAX_SNAPSHOT_BYTES as u32 + 1,
+            ..capabilities
+        },
+        ServerCapabilities {
+            max_snapshot_bytes: MAX_STATE_BYTES as u32 - 1,
             ..capabilities
         },
     ] {

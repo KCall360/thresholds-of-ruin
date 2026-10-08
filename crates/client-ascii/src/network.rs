@@ -195,6 +195,7 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
             publish(tx, Event::Status("History loaded.".into()))
         }
         ServerMessage::Welcome { .. } => Err("Unexpected repeated welcome".into()),
+        ServerMessage::SnapshotPart { .. } => Err("Unexpected unassembled snapshot part".into()),
         // Palettes are drawn with once the window resolves assets.
         ServerMessage::Palette { .. } => Ok(()),
         // Input permissions arrive through ordered readiness updates.
