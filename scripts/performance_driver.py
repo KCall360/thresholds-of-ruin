@@ -157,13 +157,20 @@ class JsonProcess:
             if predicate(value):
                 return value, received
 
-    def send(self, value):
+    def send(self, value, *, wait_for_completion=False):
+        """Return first execution by default; optionally await a matching outcome.
+
+        Completion mode is for workloads that can advance without another driver
+        command. Multi-controller workloads must keep driving the other actors.
+        Timings use reader-arrival boundaries, separate from legacy ack consumption.
+        """
         encoded = json.dumps(value) + "\n"
         started = time.perf_counter()
         self.child.stdin.write(encoded)
         self.child.stdin.flush()
         acknowledgement = None
         admission = None
+        self.action_timing = None
         self.ack_line_received = None
         self.ack_line_unix_ns = None
         self.ack_request_id = None
@@ -180,6 +187,7 @@ class JsonProcess:
             return value.get("type") == "ready"
         frame, received = self.until(ready)
         if admission is not None and not frame.get("error"):
+            phases = {"started", "resolved", "failed", "cancelled", "suspended"}
             def executed(value):
                 message = value.get("message") or {}
                 body = (message.get("update") or {}).get("body") or {}
@@ -187,16 +195,29 @@ class JsonProcess:
                 return (message.get("type") == "update" and body.get("type") == "intention"
                         and all(status.get(key) == admission[key]
                                 for key in ("intention", "actor", "branch"))
-                        and status.get("phase") in
-                            ("started", "resolved", "failed", "cancelled", "suspended"))
+                        and status.get("phase") in phases)
             frame, received = self.until(executed)
+            execution_received = received
             phase = frame["message"]["update"]["body"]["status"]["phase"]
+            self.action_timing = {
+                "version": 1, **{key: admission[key] for key in ("intention", "actor", "branch")},
+                "outcome": None,
+                "request_to_admission_ms": (self.ack_line_received-started)*1000,
+                "request_to_execution_ms": (execution_received-started)*1000,
+                "request_to_outcome_ms": None, "request_to_context_ms": None}
+            if wait_for_completion and phase == "started":
+                phases.remove("started")
+                frame, received = self.until(executed)
+                phase = frame["message"]["update"]["body"]["status"]["phase"]
             if phase != "started":
+                self.action_timing["outcome"] = phase
+                self.action_timing["request_to_outcome_ms"] = (received-started)*1000
                 # Simulation publishes lifecycle effects before the resulting
                 # permission update. Return a current context for the next command.
                 revision = int(frame["readiness"]["revision"])
                 frame, received = self.until(
                     lambda value: int(value["readiness"]["revision"]) > revision)
+                self.action_timing["request_to_context_ms"] = (received-started)*1000
         return frame, started, acknowledgement, received
 
     def snapshot(self):

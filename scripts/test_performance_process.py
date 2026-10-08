@@ -3,12 +3,45 @@ import json
 import os
 import subprocess
 import unittest
-from performance_driver import run_demo
+from performance_driver import JsonProcess, run_demo
 
-from process_harness import ProcessTestCase, ROOT, SUFFIX
+from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
+    def test_multiphase_attack_timing_reaches_authoritative_outcome_and_fresh_context(self):
+        self.server(scenario="dungeon-loop", seed=None)
+        client = JsonProcess(self.bin / ("tor-client-headless" + SUFFIX),
+                             ["--connect", self.address],
+                             {**os.environ, "TOR_SERVER_TOKEN": TOKEN}, self.directory, "timed-player")
+        self.addCleanup(client.stop)
+        initial, _ = client.until(lambda frame: frame.get("type") == "ready")
+        target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"]
+                      if actor["name"] == "ruin guard")
+        completed, *_ = client.send({"type": "act", "action": {"type": "attack", "target": target}},
+                                    wait_for_completion=True)
+        timing = client.action_timing.copy()
+        self.assertIsNone(completed["error"])
+        self.assertEqual(timing["outcome"], "resolved")
+        self.assertEqual(timing["version"], 1)
+        self.assertEqual(timing["branch"], initial["branch"])
+        self.assertGreaterEqual(timing["request_to_execution_ms"], timing["request_to_admission_ms"])
+        self.assertGreater(timing["request_to_outcome_ms"], timing["request_to_execution_ms"])
+        self.assertGreaterEqual(timing["request_to_context_ms"], timing["request_to_outcome_ms"])
+        self.assertFalse(any(status["intention"] == timing["intention"]
+                             for status in completed["intentions"]))
+        self.assertFalse(completed["state"]["observation"]["combat"]["preparation_active"])
+        self.assertTrue(any(entry["content"].get("event", {}).get("target") == target
+                            for entry in completed["history"]))
+        noted, *_ = client.send({"type": "request", "request": {
+            "type": "command", "branch": completed["branch"], "context": completed["input_context"],
+            "command": {"type": "annotate", "anchor": {
+                "type": "state", "revision": completed["state"]["revision"]},
+                "text": "Fresh context after measured attack completion"}}})
+        self.assertIsNone(noted["error"])
+        self.assertEqual(noted["state"], completed["state"])
+        (self.directory / "action-timing.json").write_text(json.dumps(timing), encoding="utf-8")
+
     def test_streaming_benchmark_emits_valid_nested_acquisition_profiles(self):
         from performance_report import validate
         build = ['cargo', 'build', '-p', 'tor-server', '--example', 'latency_bench', '--locked']
