@@ -4,13 +4,16 @@ This is the accepted refactor scope. Implementation proceeds in verified
 increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
-As of 2026-10-08, PR #82 (`fd68f43`) is merged, with all nine Windows/Linux CI
-jobs successful. Its immutable desktop release passed 43 copied-executable checks
-and is active; previous saves and builds remain retained. Action-completion timing
-is a separate follow-up. Restore peak memory, checkpoint/flush and physics tails,
-and the complete requirement-by-requirement audit remain unfinished. The detailed
-increment notes below retain historical evidence; earlier pending states do not
-override this current status.
+As of 2026-10-08, PR #82 (`fd68f43`) and PR #83 (`45882f4`) are merged,
+with all nine respective Windows/Linux CI jobs successful. PR #82's immutable
+desktop release passed 43 copied-executable checks and is active; previous saves
+and builds remain retained. PR #83 adds queued-action completion measurements
+without changing runtime executables. The strict save-decoder candidate (`f985e0e`)
+reduces measured restore peak memory and preserves validation/recovery; its
+six-round release comparison passed. Final broad verification, CI, publication,
+checkpoint/flush and physics tail review, and the integrated requirements audit
+remain unfinished. Detailed increment notes below retain historical evidence;
+earlier pending states do not override this current status.
 
 The command-boundary follow-up separates wire command/action conversion from
 journal types. Typed actor, item and door interaction references are scoped to
@@ -200,14 +203,78 @@ an AI profile; a moving-AI fixture also encountered an authentic stale revision.
 Those failures remain retained and are excluded from the twelve valid samples.
 Valid completed cases were not rerun after an unrelated fixture failed.
 
-The large transient peak warrants focused validation/restore attribution.
-`save_codec::strict` currently retains the typed state and an original JSON tree
-while constructing a second normalized JSON tree. `RestoreContext` later clones
-raw actor/item maps into memoized runtime stores. These are source-backed candidate
-costs, not measured phase contributions. Optimize the dominant measured cost while
-preserving duplicate/unknown-field rejection, canonical schema validation, shared
-rewind state and exact recovery. Compression, pruning and format changes are not
-justified by these results alone.
+The baseline strict decoder retained typed state, an original JSON tree and a
+normalized JSON tree simultaneously. The candidate keeps typed state and one
+canonical tree, comparing input through a private streaming visitor. It rejects
+decoded duplicate keys, unknown/missing fields, aliases, skipped fields and
+noncanonical keys with the same scalar/array/object semantics. The former decoder
+remains only as an independent test oracle. There are no format changes, new
+runtime dependencies, unsafe code or changes to restore ownership.
+
+## Strict saved-JSON comparison (2026-10-08)
+
+Five semantic-equivalence codec tests passed before and after the change;
+243 server unit tests, 150 integration tests, server all-target Clippy and twelve
+actual-release checkpoint/background-save acceptance checks passed. The performance
+change intentionally preserves behavior, so the semantic tests pass the old
+implementation too. A separate diagnostic memory target failed on the baseline
+and passed on the candidate; it is not a hardware-dependent CI threshold.
+
+Twelve exact-fixture recoveries (three per case) preserved complete state and
+history. Whole-process startup peak working sets, in MiB:
+
+| Fixture | Before range | After range |
+| --- | --- | --- |
+| 1,000 items, one actor, eight actions | 71.59–71.63 | 44.27–44.81 |
+| 6,000 items, one actor, no actions | 83.40–83.42 | 51.02–51.05 |
+| 6,000 items, one actor, eight actions | 372.32–372.34 | 211.02–211.04 |
+| 1,000 items, fifty external actors, no actions | 57.21–57.32 | 36.13–36.41 |
+
+The largest peak fell about 43%, or 161 MiB. These are sequential supplemental
+whole-process diagnostics, not isolated decoder allocation measurements. The first
+1,000-item/eight-action candidate startup took 424.16 ms versus baseline
+131.86–134.11 ms; subsequent candidate samples took 119.07 and 121.03 ms. The
+adverse outlier is retained and its cause is unproven. No general startup speedup
+is inferred from three samples. Compression, pruning and changes to restore
+ownership are not justified by the remaining peak alone.
+
+The standard `perf_compare.py 45882f4 --case items --case r8-a8-h100-durable
+--case physics --rounds 6 --cycles 10` comparison used committed candidate
+`f985e0e` on machine `6a1878811f37`, the Windows i7-9750H/HDD host. All 36
+interleaved runs passed their own validators across eleven groups. Workload
+versions, operation counts, disclosed/retained sizes and saved-byte counts matched.
+Selected pooled timing results are p50 / p95 / maximum in milliseconds:
+
+| Case | Interval | n per side | Before | After |
+| --- | --- | --- | --- | --- |
+| r8-a8-h100-durable | command_call | 30,096 | 0.0449 / 2.5394 / 6.3993 | 0.0489 / 3.3804 / 6.5045 |
+| r8-a8-h100-durable | disclosure_projection | 30,096 | 0.2276 / 0.5180 / 1.1129 | 0.2374 / 0.5637 / 1.0257 |
+| r8-a8-h100-durable | final_flush_ms | 6 | 487.6120 / 554.9413 / 554.9413 | 489.5579 / 503.7748 / 503.7748 |
+| r8-a8-h100-durable | restart_replay_ms | 6 | 868.4445 / 1318.4329 / 1318.4329 | 944.1115 / 1328.4552 / 1328.4552 |
+| i1000-id256 | client_apply_ms | 2,400 | 1.1393 / 2.3758 / 2.9935 | 1.2714 / 2.3862 / 3.0403 |
+| i1000-id256 | resume_ms | 120 | 42.9181 / 81.5478 / 83.4754 | 39.8558 / 70.9700 / 73.8925 |
+| i1000-id256 | save_ms | 120 | 121.3204 / 572.3867 / 1418.9481 | 127.7821 / 742.8591 / 1506.6542 |
+| a1-i1-c2-falling | command_ms | 144 | 0.2366 / 1.7173 / 1.8191 | 0.2219 / 2.3649 / 2.8241 |
+| a1-i1-c2-falling | save_ms | 18 | 107.6788 / 148.4448 / 148.4448 | 105.5688 / 840.5811 / 840.5811 |
+| a1-i1-c2-static | save_ms | 18 | 107.2119 / 181.8177 / 181.8177 | 101.7010 / 1561.4023 / 1561.4023 |
+| a8-i128-c2-falling | command_ms | 1,152 | 0.1095 / 16.6201 / 35.4388 | 0.1113 / 17.1664 / 34.8800 |
+| a8-i128-c2-falling | resume_ms | 18 | 235.4364 / 376.9286 / 376.9286 | 210.8346 / 339.2805 / 339.2805 |
+| a8-i128-c2-falling | save_ms | 18 | 209.4237 / 1471.7899 / 1471.7899 | 197.9995 / 1282.4785 / 1282.4785 |
+| a8-i128-c8-falling | command_ms | 1,152 | 0.1679 / 17.4245 / 36.3257 | 0.1714 / 19.6492 / 36.2199 |
+| a8-i128-c8-falling | resume_ms | 18 | 230.6396 / 364.2236 / 364.2236 | 215.2962 / 340.7862 / 340.7862 |
+| a8-i128-c8-falling | save_ms | 18 | 171.6027 / 1986.9092 / 1986.9092 | 158.6266 / 1148.3107 / 1148.3107 |
+
+Results are mixed. The durable command-call p95 rose about 33%; round p95 ranges
+were 2.4330–3.4058 ms before and 2.5626–3.5857 ms after. Other wire timings also
+rose. Dense falling-physics p95 remains above the existing 8 ms target and maxima
+remain above 33 ms. Item save tails and small-physics save outliers increased,
+while several restore intervals and dense-physics save tails decreased. The
+candidate only changes strict saved-input validation; unchanged hot-path work
+counts do not establish that host variation caused the adverse timings. Six
+flush/restart samples remain weak tail evidence. These results support lower
+restore peak memory, not a broad latency improvement or closure of milestone 3p.
+Raw samples and failed diagnostic attempts remain local; no release assets or
+performance-ledger entries were published.
 
 ## Future scenario extension contracts
 
