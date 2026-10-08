@@ -8,6 +8,69 @@ use tor_simulation::{
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 #[test]
+fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_completion() {
+    use tor_simulation::{
+        checkpoint::SharedState, ConsumableSpec, EffectSpec, ItemClass, ItemId, ItemSpec,
+    };
+    let mut game = Game::two_room(42);
+    let at = |x| Location {
+        region: RegionId(1),
+        position: Position { x, y: 1, z: 0 },
+    };
+    let human = game
+        .spawn_actor(at(1), NonZeroU64::new(50).unwrap())
+        .unwrap();
+    let ai = game
+        .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    game.configure_ai(ai, AiProfile::default()).unwrap();
+    let mut potion = ItemSpec::ordinary("healing".into());
+    potion.class = ItemClass::Potion;
+    potion.stackable = true;
+    potion.concealed = true;
+    potion.appearance = "red potion".into();
+    potion.consumable = Some(ConsumableSpec {
+        effects: vec![EffectSpec::Heal { amount: 10 }],
+    });
+    game.place_item_stack(20, at(2), Some(ai), 2, potion)
+        .unwrap();
+    game.identify_item(ai, ItemId(20)).unwrap();
+    game.apply_effects(
+        ai,
+        &[EffectSpec::Damage {
+            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 15)]),
+        }],
+    )
+    .unwrap();
+    game.refresh_navigation();
+    game.act(human, Action::Wait).unwrap();
+    assert_eq!(
+        game.next_ai_action(),
+        Some((ai, Action::Drink { item: ItemId(20) }))
+    );
+    game.admit_ai_intention(ai).unwrap();
+    let execution = game.execute_next_intention().unwrap();
+    assert_eq!(execution.action, Some(Action::Drink { item: ItemId(20) }));
+    execution.outcome.unwrap();
+    assert_eq!(game.observe(ai).unwrap().inventory[0].quantity, 2);
+    let mut shared = SharedState::default();
+    let snapshot =
+        serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
+            .unwrap();
+    let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    assert_eq!(restored.preparation(ai), game.preparation(ai));
+    while restored.preparation(ai).is_some() {
+        restored
+            .act(restored.next_actor().unwrap(), Action::Wait)
+            .unwrap();
+    }
+    assert_eq!(restored.health(ai).unwrap().0, 25);
+    assert_eq!(restored.observe(ai).unwrap().inventory[0].quantity, 1);
+}
+
+#[test]
 fn a_many_target_decision_uses_one_remembered_topology_search() {
     let mut world = World::new(vec![], vec![]).unwrap();
     world

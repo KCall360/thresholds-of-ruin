@@ -128,6 +128,17 @@ impl Game {
             .find(|(low, known, _)| *low == frightened && *known == ai.target.is_some())
             .unwrap()
             .2;
+        // Use a known restorative before fleeing or attacking. Unknown potions
+        // and mixed sequences with harm never qualify as safe healing.
+        if u64::from(hp) * 2 <= u64::from(max) {
+            if let Some(item) = view
+                .inventory
+                .iter()
+                .find(|item| self.known_healing(id, item.id))
+            {
+                return Some((Action::Drink { item: item.id }, ai));
+            }
+        }
         if ai.state == State::Flee {
             let (_, threat, _) = ai.target.unwrap();
             let current = route(threat).map_or(0, |r| r.len());
@@ -213,6 +224,23 @@ impl Game {
             }
         }
         Some((Action::Wait, ai))
+    }
+
+    pub(crate) fn known_healing(&self, actor: ActorId, item: crate::ItemId) -> bool {
+        let Some(item) = self.items.get(&item) else {
+            return false;
+        };
+        let Some(actor) = self.actors.get(&actor) else {
+            return false;
+        };
+        (!item.spec.concealed || actor.knowledge.contains(&item.spec.identity))
+            && item.spec.consumable.as_ref().is_some_and(|consumable| {
+                !consumable.effects.is_empty()
+                    && consumable
+                        .effects
+                        .iter()
+                        .all(|effect| matches!(effect, crate::EffectSpec::Heal { amount: 1.. }))
+            })
     }
 }
 
@@ -310,5 +338,80 @@ mod tests {
         let (action, ai) = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.state, State::Flee);
         assert_eq!(action, Action::Attack { target: ActorId(1) });
+    }
+
+    #[test]
+    fn healing_decisions_require_the_ai_actors_own_identity_knowledge() {
+        let mut game = fixture();
+        let actor = ActorId(2);
+        let mut potion = crate::ItemSpec::ordinary("healing".into());
+        potion.class = crate::ItemClass::Potion;
+        potion.concealed = true;
+        potion.appearance = "red potion".into();
+        potion.consumable = Some(crate::ConsumableSpec {
+            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+        });
+        game.place_item_stack(20, at(1, 2, 1), Some(actor), 1, potion)
+            .unwrap();
+        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 15)]));
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
+        game.identify_item(ActorId(1), crate::ItemId(20)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
+        game.identify_item(actor, crate::ItemId(20)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Drink {
+                item: crate::ItemId(20)
+            }
+        );
+    }
+
+    #[test]
+    fn healing_priority_does_not_drink_known_mixed_harmful_effects_or_waste_full_health() {
+        let mut game = fixture();
+        let actor = ActorId(2);
+        let mut potion = crate::ItemSpec::ordinary("mixed".into());
+        potion.class = crate::ItemClass::Potion;
+        potion.consumable = Some(crate::ConsumableSpec {
+            effects: vec![
+                crate::EffectSpec::Heal { amount: 10 },
+                crate::EffectSpec::Damage {
+                    components: BTreeMap::from([(DamageType::Vital, 1)]),
+                },
+            ],
+        });
+        game.place_item_stack(20, at(1, 2, 1), Some(actor), 1, potion)
+            .unwrap();
+        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 15)]));
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
+        let mut healing = crate::ItemSpec::ordinary("healing".into());
+        healing.class = crate::ItemClass::Potion;
+        healing.consumable = Some(crate::ConsumableSpec {
+            effects: vec![crate::EffectSpec::Heal { amount: 20 }],
+        });
+        game.place_item_stack(21, at(1, 2, 1), Some(actor), 1, healing)
+            .unwrap();
+        game.apply_effects(actor, &[crate::EffectSpec::Heal { amount: 30 }])
+            .unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
+        game.apply_damage(actor, &BTreeMap::from([(DamageType::Vital, 25)]));
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Drink {
+                item: crate::ItemId(21)
+            }
+        );
     }
 }

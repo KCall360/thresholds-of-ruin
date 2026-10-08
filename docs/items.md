@@ -84,6 +84,17 @@ observations, deltas, checkpoints and replay. The validated
 `scenarios/tests/interactions` package and `test_interactions_process.py` cover
 starting gear, timing, disclosure, consumption and checkpoint restart.
 
+## AI item decisions
+
+AI healing uses the acting actor's own identity knowledge. At half health or
+below, an AI prefers a carried, known potion containing only positive healing
+effects before fleeing or attacking. It does not infer effects from an unknown
+appearance, borrow a human's knowledge, drink known harmful mixtures, or spend a
+potion at full health. This uses ordinary timed item work and autonomous intention
+execution. The `ai-interactions` package and actual-process tests cover known
+healing, knowledge isolation, consumption timing and restart. AI equipment
+replacement and nearby looting remain the next adaptation step.
+
 ## Authoring and disclosure
 
 Archetypes declare an optional physical `class` (default `misc`); item placements

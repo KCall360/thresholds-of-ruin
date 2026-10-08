@@ -1,0 +1,1 @@
+{"regions":[{"id":1,"file":"regions/1.toml","hash":"4402cae67a3ae052b987a29ab8f2f0111cc97879b7dbf0b0cf1a0b2ddde7eb34","name":"AI interaction laboratory","size":[6,3,2],"chamber":true,"zone":null,"anchors":{"start":[1,1,0]},"portals":[],"actors":[{"id":2,"at":[2,1,0],"turn_ticks":null,"archetype":null,"external":false}],"items":[{"id":20,"carried_by":2}],"doors":[]}]}

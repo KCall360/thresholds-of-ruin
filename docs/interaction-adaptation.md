@@ -38,7 +38,8 @@ actor rather than its combat state, preserving existing attack behavior and
 saved intention identity. Generalized preparation, anatomy-based equipment and
 shared immediate healing/damage effects are now implemented in the simulation,
 server, authoring and transport boundaries. Text and ASCII controls now use shared
-client item checks. Knowledge-limited AI item actions remain outstanding.
+client item checks. AI known healing is implemented; gear replacement and nearby
+looting remain outstanding.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -98,7 +99,16 @@ All four actual-client interaction process tests pass, including native ASCII
 completion narration after the final potion unit disappears and checkpoint
 restart through the server/headless client.
 
-Next: add
-knowledge-limited AI item decisions and final performance/desktop/CI closeout.
+AI now prioritizes a carried known restorative at half health or below, using the
+AI actor's own identity knowledge and accepting only wholly positive healing
+sequences. Five focused AI tests pass, including human/AI knowledge isolation,
+mixed harmful effects and healing before flight. A checkpoint integration test
+passes for active autonomous consumption and one-unit completion. Two real-server
+process tests pass for known healing/restart and leaving an unknown potion
+untouched when only the human knows it. The new `ai-interactions` fixture has a
+current validation certificate.
+
+Next: adapt AI gear replacement and safe nearby looting, then finish
+performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.
