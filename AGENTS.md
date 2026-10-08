@@ -667,8 +667,10 @@ regressions failed first for duplicate anchor keys and omitted canonical index
 fields, then passed; all 28 save/scenario/streaming process checks passed.
 Pre-refactor writer fixtures pin four current-format scenario shapes. Eight schema
 units, the borrowed-encoding test, five checkpoint, twelve package-pinning and
-seven scenario integrations, and workspace Clippy passed. Targeted release
-comparison and publication verification remain pending. Save 22 and
+seven scenario integrations, and workspace Clippy passed. All 18 targeted release
+comparison runs validated with matching counts/saved sizes; variable streamed
+flush maxima increased and 256-region restart p95 rose 3.9%, so no broad speedup
+is claimed. Full debug publication verification remains pending. Save 22 and
 other format axes are unchanged. Portable export is documented as a future
 contract in [checkpoints](docs/checkpoints.md); no export or scripting runtime is
 implemented. All remaining compiler/performance/final-audit obligations stay open.
