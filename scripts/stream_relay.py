@@ -11,6 +11,11 @@ import struct
 import sys
 import threading
 
+# A fixed, bounded receive buffer large enough for ordinary loopback TCP
+# segments. Tiny pre-connect buffers also constrain Linux's initial receive
+# threshold; enlarging memory/window later does not fully undo that constraint.
+PRESSURE_RECEIVE_BYTES = 65536
+
 
 def exact(stream, size):
     result = bytearray()
@@ -179,16 +184,6 @@ class StreamRelay:
             self.errors.append(error)
         finally:
             self.close_sockets()
-
-    def resume_reading(self):
-        """End artificial receive pressure before draining buffered output."""
-        if self.receive_buffer:
-            self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-            if sys.platform.startswith("linux"):
-                # Linux keeps the advertised-window clamp independently of
-                # receive memory. Restore both before ending artificial pressure.
-                self._server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_WINDOW_CLAMP, 65536)
-        self.gate.set()
 
     def server_connection_open(self, server_pid):
         """On Linux, observe whether the server still owns this exact TCP socket.

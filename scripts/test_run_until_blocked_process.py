@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import unittest
 
-from stream_relay import StreamRelay
+from stream_relay import PRESSURE_RECEIVE_BYTES, StreamRelay
 
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN, TOKEN
 
@@ -19,7 +19,7 @@ from process_harness import ProcessTestCase, SPECTATOR_TOKEN, TOKEN
 TURNS = 1500
 MAX_PRESSURE_TURNS = 20000
 OUTBOUND_SLOTS = 256
-RECEIVE_BUFFER = 4096
+RECEIVE_BUFFER = PRESSURE_RECEIVE_BYTES
 
 
 def tcp_send_buffer_budget():
@@ -256,7 +256,9 @@ class RunUntilBlockedProcesses(ProcessTestCase):
                 if time.monotonic() >= deadline:
                     self.fail("Server still owns the stalled spectator socket after pressure and stall deadline")
                 time.sleep(0.05)
-        relay.resume_reading()
+        # End application pressure without changing TCP configuration. The
+        # receive buffer was included in the workload bound from the start.
+        relay.gate.set()
         self.assertNotEqual(stalled.child.wait(timeout=STALL_SECONDS * 4), 0)
         # A replacement spectator starts at the committed state.
         watcher, watching = self.client(SPECTATOR_TOKEN)

@@ -2796,7 +2796,7 @@ passed 33 real-client/copied-validator checks without rebuilding. All three
 launchers now use it; post-activation source, binary, backup and shortcut hashes
 were verified. Earlier builds and saves remain preserved.
 
-**Save scenario ownership (in development).** Actual-process regressions proved
+**Save scenario ownership (merged, PR #80).** Actual-process regressions proved
 that the stored package index accepted duplicate anchor-map keys and omitted
 canonical nullable fields. Save-owned schemas now explicitly map scenario,
 fixture actor/coordinate, streaming, package, nested manifest/certificate and
@@ -2809,7 +2809,12 @@ shapes. Golden-format and malformed-index unit checks passed, and all 28 actual
 save/scenario/streaming process checks passed, including the failing-first cases.
 Eight schema units, the borrowed-encoding check, five checkpoint, twelve package-
 pinning and seven scenario integrations, and workspace Clippy passed. Targeted
-release comparison passed; publication verification remains pending.
+release comparison passed. [PR #80](https://github.com/KCall360/thresholds-of-ruin/pull/80)
+merged as `7da6393` after all nine exact-head Windows/Linux CI jobs passed on
+`a6ae97b`. The full local debug gate passed 305 Python/application and 940 Rust
+tests on 546 unchanged inputs, without a waiver. Its immutable desktop build
+passed 34 copied-binary checks before activation; source, binary, backup and
+shortcut hashes were independently verified afterward.
 Save 22 and all other format axes are unchanged. The portable export contract is
 [documented separately](checkpoints.md#portable-export-contract-design); its
 container, compression and commands are not implemented. Further compiler,
@@ -2837,3 +2842,36 @@ close persistence/restore tails or claim a broad performance improvement. Raw
 samples remain local and no release assets or performance-ledger entries were
 published. The compared Rust and benchmark inputs precede only the documentation
 of these results.
+
+**Scenario reference paths (in development).** Nine failing-first actual-validator
+cases reproduced missing locations for portal destinations, character item
+identities, objective anchors/items, region zones, generator actor/item archetypes,
+generator AI and numeric inventory owners. The existing provenance mechanism now
+traverses typed table fields and array positions and compares decoded string or
+numeric values. Root region references also verify region identity. Validation
+order and lazy source acquisition are retained; stale, unavailable or ambiguous
+source has no invented coordinates. Objective anchor and item errors now identify
+the failing field separately. All 36 scenario unit tests, seven scenario
+integrations, twelve actual scenario process tests and workspace all-target Clippy
+passed. The full local debug gate passed 306 Python/application and 943 Rust
+tests on 546 unchanged inputs without a waiver. PR #81 remains open: the first
+Linux debug run and a later Linux release run observed timely server descriptor
+closure but exceeded the unchanged 20-second actual-client exit bound. The fixed,
+bounded 64 KiB relay receive capacity and actual-socket pressure/drain regression
+remain; changing the test buffer did not resolve the Linux release failure.
+
+Transport shutdown now has an explicit ownership policy. Resource disconnects,
+write failures and task cancellation abort upgraded TCP connections, discarding
+stale kernel output. Intentional actor detaches retain their final explanation,
+with one deadline for the complete queued drain. Successful HTTP upgrade
+rejection and authentication/protocol errors preserve their explanations. Two
+real-TCP regressions failed on ordinary EOF before reset-on-abandonment, then
+passed with the policy; a separate baseline probe confirms that the former
+per-message drain loop fails the shared-deadline regression. Socket destruction
+still precedes release of in-flight byte leases. All 236 server units, seventeen
+WebSocket integrations and nineteen actual-client pressure/recovery cases passed
+on Windows before the final drain-bound cleanup; all eight final transport units
+passed. Full final local debug and exact-head Windows/Linux CI remain required.
+Earlier failures are retained, and the desktop candidate remains inactive.
+No format axis changed. Broader compiler ownership, measured performance and final
+requirements audit remain open; this increment does not close the entire refactor.

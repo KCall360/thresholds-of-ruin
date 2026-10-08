@@ -9,7 +9,9 @@ use toml::de::{DeTable, DeValue, ValueDeserializer};
 #[derive(Clone, Copy)]
 pub(super) enum Origin<'a> {
     Character(u64),
+    Objective,
     Archetype(&'a str),
+    Region { file: &'a str, id: u64 },
     Actor { file: &'a str, region: u64, id: u64 },
     Item { file: &'a str, region: u64, id: u64 },
 }
@@ -26,7 +28,9 @@ impl Origin<'_> {
         };
         let declaration = match self {
             Self::Archetype(name) => format!("{}: archetype {name:?}", source("scenario.toml")),
+            Self::Objective => format!("{}: objective", source("scenario.toml")),
             Self::Character(id) => format!("{}: character {id}", source("scenario.toml")),
+            Self::Region { file, id } => format!("{}: region {id}", source(file)),
             Self::Actor { file, region, id } => {
                 format!("{}: region {region}, actor {id}", source(file))
             }
@@ -39,8 +43,10 @@ impl Origin<'_> {
 
     pub(super) fn names(self) -> (&'static str, &'static str) {
         match self {
+            Self::Objective => ("Objective", "objective"),
             Self::Character(_) => ("Character", "character"),
             Self::Archetype(_) => ("Archetype", "archetype"),
+            Self::Region { .. } => ("Region", "region"),
             Self::Actor { .. } => ("Actor", "actor"),
             Self::Item { .. } => ("Item", "item"),
         }
@@ -53,14 +59,30 @@ impl Origin<'_> {
         field: &str,
         expected: &str,
     ) -> Failure {
-        let (collection, declaration) = match self {
-            Self::Character(id) => ("characters", Declaration::Id(id)),
-            Self::Archetype(name) => ("archetypes", Declaration::Name(name)),
-            Self::Actor { id, .. } => ("actors", Declaration::Id(id)),
-            Self::Item { id, .. } => ("items", Declaration::Id(id)),
+        self.reference_path(
+            failure,
+            source,
+            &[PathSegment::Field(field)],
+            ReferenceValue::Text(expected),
+        )
+    }
+
+    pub fn reference_path(
+        self,
+        failure: Failure,
+        source: Option<&str>,
+        path: &[PathSegment<'_>],
+        expected: ReferenceValue<'_>,
+    ) -> Failure {
+        let selection = match self {
+            Self::Objective => Selection::Document,
+            Self::Region { id, .. } => Selection::Root(id),
+            Self::Character(id) => Selection::Declaration("characters", Declaration::Id(id)),
+            Self::Archetype(name) => Selection::Declaration("archetypes", Declaration::Name(name)),
+            Self::Actor { id, .. } => Selection::Declaration("actors", Declaration::Id(id)),
+            Self::Item { id, .. } => Selection::Declaration("items", Declaration::Id(id)),
         };
-        let location = source
-            .and_then(|text| reference_location(text, collection, declaration, &[field], expected));
+        let location = source.and_then(|text| value_location(text, selection, path, expected));
         self.context_at(failure, location.map(|location| location.coordinates()))
     }
 }
@@ -88,49 +110,208 @@ pub(super) enum Declaration<'a> {
     Name(&'a str),
 }
 
-/// Locate a scalar reference in one uniquely identified authored declaration.
-/// Matching its decoded value prevents a programmatically changed declaration
-/// from acquiring a misleading location in an older source document.
-pub(super) fn reference_location<'a>(
+/// Parser traversal stays typed: array indices never become guessed field names.
+#[derive(Clone, Copy)]
+pub(super) enum PathSegment<'a> {
+    Field(&'a str),
+    Index(usize),
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ReferenceValue<'a> {
+    Text(&'a str),
+    Id(u64),
+}
+
+#[derive(Clone, Copy)]
+enum Selection<'a> {
+    Document,
+    Root(u64),
+    Declaration(&'a str, Declaration<'a>),
+}
+
+/// Matching both declaration identity and decoded value rejects stale provenance.
+fn value_location<'a>(
+    text: &'a str,
+    selection: Selection<'_>,
+    path: &[PathSegment<'_>],
+    expected: ReferenceValue<'_>,
+) -> Option<SourceLocation<'a>> {
+    let root = DeValue::Table(DeTable::parse(text).ok()?.into_inner());
+    let matches_id = |value: &DeValue<'_>, id| {
+        value.get("id").is_some_and(|value| {
+            u64::deserialize(ValueDeserializer::from(value.clone())).ok() == Some(id)
+        })
+    };
+    let declaration = match selection {
+        Selection::Document => &root,
+        Selection::Root(id) => {
+            if !matches_id(&root, id) {
+                return None;
+            }
+            &root
+        }
+        Selection::Declaration(collection, declaration) => {
+            let collection = root.get(collection)?.get_ref();
+            match declaration {
+                Declaration::Name(name) => collection.get(name)?,
+                Declaration::Id(id) => {
+                    let mut matching = collection
+                        .as_array()?
+                        .iter()
+                        .filter(|entry| matches_id(entry.get_ref(), id));
+                    let declaration = matching.next()?;
+                    if matching.next().is_some() {
+                        return None;
+                    }
+                    declaration
+                }
+            }
+            .get_ref()
+        }
+    };
+    let mut value = declaration;
+    let mut selected = None;
+    for segment in path {
+        let child = match segment {
+            PathSegment::Field(field) => value.get(*field)?,
+            PathSegment::Index(index) => value.as_array()?.get(*index)?,
+        };
+        selected = Some(child);
+        value = child.get_ref();
+    }
+    let selected = selected?;
+    let matches = match expected {
+        ReferenceValue::Text(expected) => value.as_str() == Some(expected),
+        ReferenceValue::Id(expected) => {
+            u64::deserialize(ValueDeserializer::from(selected.clone())).ok() == Some(expected)
+        }
+    };
+    if !matches {
+        return None;
+    }
+    let span = selected.span();
+    text.get(span.clone())?;
+    Some(SourceLocation { span, text })
+}
+
+#[cfg(test)]
+fn reference_location<'a>(
     text: &'a str,
     collection: &str,
     declaration: Declaration<'_>,
     fields: &[&str],
     expected: &str,
 ) -> Option<SourceLocation<'a>> {
-    let root = DeValue::Table(DeTable::parse(text).ok()?.into_inner());
-    let collection = root.get(collection)?.get_ref();
-    let declaration = match declaration {
-        Declaration::Name(name) => collection.get(name)?,
-        Declaration::Id(id) => {
-            let mut matching = collection.as_array()?.iter().filter(|entry| {
-                entry.get_ref().get("id").is_some_and(|id_value| {
-                    u64::deserialize(ValueDeserializer::from(id_value.clone())).ok() == Some(id)
-                })
-            });
-            let declaration = matching.next()?;
-            if matching.next().is_some() {
-                return None;
-            }
-            declaration
-        }
-    };
-    let mut value = declaration;
-    for field in fields {
-        value = value.get_ref().get(*field)?;
-    }
-    if value.get_ref().as_str()? != expected {
-        return None;
-    }
-    let span = value.span();
-    text.get(span.clone())?;
-    Some(SourceLocation { span, text })
+    let path: Vec<_> = fields
+        .iter()
+        .map(|field| PathSegment::Field(field))
+        .collect();
+    value_location(
+        text,
+        Selection::Declaration(collection, declaration),
+        &path,
+        ReferenceValue::Text(expected),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::fail;
     use super::*;
+
+    #[test]
+    fn root_array_references_locate_the_requested_occurrence_and_verify_region_identity() {
+        let text = "# missing is a decoy\r\nid=2\r\n[generate.items]\r\narchetypes=[\"missing\", \"m\\u0069ssing\"]\r\n";
+        let path = [
+            PathSegment::Field("generate"),
+            PathSegment::Field("items"),
+            PathSegment::Field("archetypes"),
+            PathSegment::Index(1),
+        ];
+        let location = value_location(
+            text,
+            Selection::Root(2),
+            &path,
+            ReferenceValue::Text("missing"),
+        )
+        .unwrap();
+        assert_eq!(&text[location.span], "\"m\\u0069ssing\"");
+        assert!(value_location(
+            text,
+            Selection::Root(3),
+            &path,
+            ReferenceValue::Text("missing")
+        )
+        .is_none());
+        assert!(value_location(
+            text,
+            Selection::Root(2),
+            &path,
+            ReferenceValue::Text("changed")
+        )
+        .is_none());
+        let out_of_bounds = [
+            PathSegment::Field("generate"),
+            PathSegment::Field("items"),
+            PathSegment::Field("archetypes"),
+            PathSegment::Index(2),
+        ];
+        assert!(value_location(
+            text,
+            Selection::Root(2),
+            &out_of_bounds,
+            ReferenceValue::Text("missing")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn numeric_references_match_decoded_ids_and_reject_strings_negative_or_stale_values() {
+        let path = [PathSegment::Field("carried_by")];
+        let text = "items=[{id=10,carried_by=0x3e7}]";
+        let location = value_location(
+            text,
+            Selection::Declaration("items", Declaration::Id(10)),
+            &path,
+            ReferenceValue::Id(999),
+        )
+        .unwrap();
+        assert_eq!(&text[location.span], "0x3e7");
+        for text in [
+            "items=[{id=10,carried_by=998}]",
+            "items=[{id=10,carried_by=\"999\"}]",
+            "items=[{id=10,carried_by=-1}]",
+        ] {
+            assert!(value_location(
+                text,
+                Selection::Declaration("items", Declaration::Id(10)),
+                &path,
+                ReferenceValue::Id(999)
+            )
+            .is_none());
+        }
+    }
+
+    #[test]
+    fn root_origin_keeps_semantic_failure_when_source_is_missing_or_stale() {
+        let origin = Origin::Region {
+            file: "regions/2.toml",
+            id: 2,
+        };
+        for source in [
+            None,
+            Some("id=3\nzone=\"missing\""),
+            Some("id=2\nzone=\"old\""),
+        ] {
+            let failure =
+                origin.reference(fail("Unknown zone reference"), source, "zone", "missing");
+            assert_eq!(
+                failure.message,
+                "regions/2.toml: region 2: Unknown zone reference"
+            );
+        }
+    }
 
     #[test]
     fn named_references_follow_the_table_key_and_decoded_value_with_unicode_columns() {

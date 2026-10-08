@@ -1,8 +1,9 @@
 """Conservative accounting of simulation facts shared by actor watchers."""
 import json
 import unittest
-from unittest.mock import Mock, patch
 import socket
+import threading
+import time
 
 import stream_relay
 
@@ -35,53 +36,66 @@ class SharedActorTraffic(unittest.TestCase):
 
 
 class PressureConnection(unittest.TestCase):
-    def test_resume_restores_receive_capacity_before_releasing_held_frame(self):
-        relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)
-        relay.receive_buffer = 4096
-        relay._server_socket = Mock()
-        relay.gate = Mock()
-        calls = Mock()
-        calls.attach_mock(relay._server_socket, 'socket')
-        calls.attach_mock(relay.gate, 'gate')
-        with patch.object(stream_relay.sys, "platform", "win32"):
-            relay.resume_reading()
-        self.assertEqual(calls.mock_calls, [
-            unittest.mock.call.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536),
-            unittest.mock.call.gate.set(),
-        ])
+    def test_bounded_pressure_connection_drains_to_natural_eof(self):
+        # Exercise actual TCP pressure and drain independently of game/client work.
+        # The fake producer has a bounded send buffer; no socket is force-closed
+        # by the relay and the receive capacity stays fixed through both phases.
+        frame = b'\x82\x7e\x04\x00' + b'x' * 1024
+        header = b'HTTP/1.1 101 Switching Protocols\r\n\r\n'
+        count = 8192
+        sent = threading.Event()
+        errors = []
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        listener.settimeout(5)
 
-    def test_linux_resume_restores_advertised_window_before_releasing_pressure(self):
-        relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)
-        relay.receive_buffer = 4096
-        relay._server_socket = Mock()
-        relay.gate = Mock()
-        capacity = {"buffer": 4096, "window": 4096}
+        def produce():
+            try:
+                with listener.accept()[0] as peer:
+                    peer.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                    peer.settimeout(20)
+                    peer.sendall(header)
+                    for _ in range(count):
+                        peer.sendall(frame)
+                    sent.set()
+            except Exception as error:
+                errors.append(error)
 
-        def configure(level, option, value):
-            if (level, option) == (socket.SOL_SOCKET, socket.SO_RCVBUF):
-                capacity["buffer"] = value
-            elif (level, option) == (socket.IPPROTO_TCP, 10):
-                capacity["window"] = value
-
-        def resume():
-            self.assertGreaterEqual(min(capacity.values()), 65536,
-                                    "Receive memory and advertised window both remain pressure controls")
-
-        relay._server_socket.setsockopt.side_effect = configure
-        relay.gate.set.side_effect = resume
-        with patch.object(stream_relay.sys, "platform", "linux"), \
-                patch.object(socket, "TCP_WINDOW_CLAMP", 10, create=True):
-            relay.resume_reading()
-        relay.gate.set.assert_called_once_with()
-
-    def test_resume_without_pressure_buffer_preserves_socket_configuration(self):
-        relay = stream_relay.StreamRelay.__new__(stream_relay.StreamRelay)
-        relay.receive_buffer = None
-        relay._server_socket = Mock()
-        relay.gate = Mock()
-        relay.resume_reading()
-        relay._server_socket.setsockopt.assert_not_called()
-        relay.gate.set.assert_called_once_with()
+        sender = threading.Thread(target=produce, daemon=True)
+        sender.start()
+        self.addCleanup(sender.join, 5)
+        relay = stream_relay.StreamRelay(
+            '127.0.0.1:' + str(listener.getsockname()[1]), receive_buffer=stream_relay.PRESSURE_RECEIVE_BYTES)
+        self.addCleanup(relay.close)
+        relay.gate.clear()
+        with socket.create_connection(('127.0.0.1', int(relay.address.rsplit(':', 1)[1]))) as peer:
+            peer.settimeout(20)
+            self.assertTrue(relay.held.wait(5))
+            capacity = relay._server_socket.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+            self.assertLessEqual(capacity, 2 * stream_relay.PRESSURE_RECEIVE_BYTES)
+            self.assertFalse(sent.wait(.2), 'paused relay must exert actual TCP pressure')
+            relay.gate.set()
+            received = 0
+            deadline = time.monotonic() + 20
+            while True:
+                remaining = deadline - time.monotonic()
+                self.assertGreater(remaining, 0, 'bounded relay drain deadline')
+                peer.settimeout(remaining)
+                data = peer.recv(65536)
+                if not data:
+                    break
+                received += len(data)
+            self.assertEqual(received, len(header) + count * len(frame))
+        relay.thread.join(5)
+        self.assertFalse(relay.thread.is_alive())
+        self.assertEqual(relay._server_socket.fileno(), -1)
+        sender.join(5)
+        self.assertFalse(sender.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(relay.errors, [])
+        self.assertTrue(sent.is_set())
 
     def test_server_socket_requires_matching_endpoint_and_owned_inode(self):
         # /proc/net/tcp lists local endpoint before remote endpoint. TIME_WAIT

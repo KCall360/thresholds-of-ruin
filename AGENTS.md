@@ -674,3 +674,25 @@ is claimed. Full debug publication verification remains pending. Save 22 and
 other format axes are unchanged. Portable export is documented as a future
 contract in [checkpoints](docs/checkpoints.md); no export or scripting runtime is
 implemented. All remaining compiler/performance/final-audit obligations stay open.
+
+**Scenario reference paths (in development).** Typed parser traversal now covers
+root/table fields, array entries and numeric references using the existing
+failure-only provenance owner. Nine actual-validator failures reproduced first;
+36 scenario units, seven scenario integrations, twelve actual-process tests and
+workspace Clippy passed. Validation precedence, lazy acquisition and unavailable-
+source behavior remain intact. PR #81 passed the full local debug gate (306
+Python/application and 943 Rust tests), but Linux debug and a later Linux release
+run exceeded the stalled client's exit bound after timely server descriptor
+closure. The fixed-capacity relay repair did not resolve the release failure.
+The next candidate explicitly owns transport closure: resource failures and
+cancellation reset upgraded TCP connections; intentional detach explanations
+share one bounded drain deadline. Successful rejection/normal closure preserves
+output, and byte leases survive until socket destruction. Two real-TCP behavioral
+regressions failed first, then passed; the old drain loop also fails the deadline
+regression. Final transport units passed; 236 server units, seventeen WebSocket
+integrations and nineteen actual-process cases passed before the last drain
+cleanup. Full final debug and both-platform CI are required before publication,
+merge or deployment. Original deadlines and pressure/recovery assertions remain.
+PR #80 is merged and its separately verified immutable desktop build is active;
+the PR #81 candidate remains inactive. Broader compiler references, measured
+performance tails and the final requirements audit remain in scope.

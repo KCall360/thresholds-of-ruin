@@ -4,9 +4,11 @@ use crate::{Account, Service};
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
@@ -26,6 +28,72 @@ use tor_protocol::*;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+// The connection owns its TCP close policy, including task cancellation.
+struct TransportSocket {
+    stream: TcpStream,
+    graceful: bool,
+}
+
+impl TransportSocket {
+    fn new(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            graceful: false,
+        }
+    }
+
+    fn preserve_output_on_drop(&mut self) {
+        self.graceful = true;
+    }
+}
+
+impl Drop for TransportSocket {
+    fn drop(&mut self) {
+        if !self.graceful {
+            // Discard stale kernel output as well as the WebSocket write buffer.
+            // Drop cannot report a socket-option failure; closing still releases
+            // ownership if the OS refuses this best-effort reset.
+            let _ = self.stream.set_zero_linger();
+        }
+    }
+}
+
+impl AsyncRead for TransportSocket {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for TransportSocket {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, buf)
+    }
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+    }
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
+    }
+}
+
 // Field order matters on cancellation: destroy the socket's write buffer before
 // releasing the in-flight frame's byte leases.
 struct Output<S> {
@@ -34,6 +102,19 @@ struct Output<S> {
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Output<S> {
+    async fn drain(&mut self, messages: &mut crate::outbound::Receiver) -> Result<(), ()> {
+        // Final output shares one deadline, rather than renewing it for every
+        // queued message. Failure leaves the in-flight lease owned by Output.
+        timeout(IO_TIMEOUT, async {
+            while let Ok(frame) = messages.try_recv_frame() {
+                self.send_frame(frame).await?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| ())?
+    }
+
     async fn send_frame(&mut self, frame: crate::outbound::Frame) -> Result<Option<String>, ()> {
         debug_assert!(self.pending.is_none());
         self.pending = Some(frame);
@@ -158,10 +239,15 @@ async fn connection(
         .max_write_buffer_size(MAX_RESPONSE_BYTES + 64 * 1024)
         .max_message_size(Some(MAX_REQUEST_BYTES))
         .max_frame_size(Some(MAX_REQUEST_BYTES));
+    // HTTP upgrade rejection may carry a response. Only an upgraded protocol
+    // connection owns the abort-on-failure policy below.
+    let mut socket = TransportSocket::new(socket);
+    socket.preserve_output_on_drop();
     let upgrade = accept_hdr_async_with_config(socket, native_origin, Some(config));
     let Ok(Ok(mut socket)) = timeout(IO_TIMEOUT, upgrade).await else {
         return;
     };
+    socket.get_mut().graceful = false;
     let Ok(Some(Ok(Message::Text(text)))) = timeout(IO_TIMEOUT, socket.next()).await else {
         return;
     };
@@ -198,13 +284,17 @@ async fn connection(
             match connected {
                 Ok(client) => client,
                 Err(error) => {
-                    send_error(&mut socket, error.code, &error.message).await;
+                    if send_error(&mut socket, error.code, &error.message).await {
+                        socket.get_mut().preserve_output_on_drop();
+                    }
                     return;
                 }
             }
         }
         Err((code, message)) => {
-            send_error(&mut socket, code, message).await;
+            if send_error(&mut socket, code, message).await {
+                socket.get_mut().preserve_output_on_drop();
+            }
             return;
         }
     };
@@ -212,14 +302,15 @@ async fn connection(
         socket,
         pending: None,
     };
+    let mut graceful = false;
     loop {
         tokio::select! {
             biased;
             _ = client.close.changed() => {
-                // Deliver what was queued before the disconnect, such as the
-                // reason for it, without waiting for anything new.
-                while let Ok(frame) = client.messages.try_recv_frame() {
-                    if output.send_frame(frame).await.is_err() { break; }
+                if *client.close.borrow() == Some(crate::session::DisconnectMode::Drain) {
+                    // A semantic detach carries a final explanation. Resource
+                    // failures instead discard obsolete output immediately.
+                    graceful = output.drain(&mut client.messages).await.is_ok();
                 }
                 break;
             },
@@ -243,12 +334,16 @@ async fn connection(
                                 break;
                             }
                         },
-                        _ => { send_error(&mut output.socket, ErrorCode::InvalidRequest, "Invalid request message").await; break; }
+                        _ => {
+                            graceful = send_error(&mut output.socket, ErrorCode::InvalidRequest, "Invalid request message").await;
+                            break;
+                        }
                     },
                     Some(Ok(Message::Ping(_))) => {
                         if !matches!(timeout(IO_TIMEOUT, output.socket.flush()).await, Ok(Ok(()))) { break; }
                     },
                     Some(Ok(Message::Pong(_))) => {},
+                    Some(Ok(Message::Close(_))) => { graceful = true; break; },
                     _ => break,
                 }
             }
@@ -256,7 +351,14 @@ async fn connection(
     }
     drop(client.messages);
     let _ = mail.send(Mail::Disconnect(client.id)).await;
-    let _ = timeout(IO_TIMEOUT, output.socket.close(None)).await;
+    if graceful
+        && matches!(
+            timeout(IO_TIMEOUT, output.socket.close(None)).await,
+            Ok(Ok(()))
+        )
+    {
+        output.socket.get_mut().preserve_output_on_drop();
+    }
     // A failed send can leave its bytes in Tungstenite's write buffer. Keep the
     // lease until that buffer is gone, including close errors and timeouts.
     drop(output);
@@ -279,19 +381,23 @@ fn native_origin(
 }
 
 async fn send_error(
-    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+    socket: &mut WebSocketStream<TransportSocket>,
     code: ErrorCode,
     message: &str,
-) {
+) -> bool {
     let response = ServerMessage::Error {
         scope: tor_protocol::ErrorScope::Transport {},
         request_id: None,
         code,
         message: message.into(),
     };
-    if let Ok(text) = serde_json::to_string(&response) {
-        let _ = timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await;
-    }
+    let Ok(text) = serde_json::to_string(&response) else {
+        return false;
+    };
+    matches!(
+        timeout(IO_TIMEOUT, socket.send(Message::Text(text.into()))).await,
+        Ok(Ok(()))
+    )
 }
 
 #[cfg(test)]
@@ -302,6 +408,71 @@ mod tests {
     use std::task::{Context, Poll};
     use tokio::io::ReadBuf;
     use tokio_tungstenite::tungstenite::protocol::Role;
+
+    async fn tcp_pair() -> (TransportSocket, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        (TransportSocket::new(stream), peer)
+    }
+
+    async fn read_closed_peer(peer: &mut TcpStream) -> (io::Result<usize>, Vec<u8>) {
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        let result = timeout(Duration::from_secs(2), peer.read_to_end(&mut bytes))
+            .await
+            .unwrap();
+        (result, bytes)
+    }
+
+    #[tokio::test]
+    async fn abandoned_connection_resets_peer_instead_of_graceful_eof() {
+        use tokio::io::AsyncWriteExt;
+        let (mut socket, mut peer) = tcp_pair().await;
+        socket.write_all(b"unfinished output").await.unwrap();
+        drop(socket);
+        let (result, _) = read_closed_peer(&mut peer).await;
+        assert!(
+            result.is_err(),
+            "an abandoned connection must signal failure, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_connection_resets_peer() {
+        let (socket, mut peer) = tcp_pair().await;
+        let (ready, started) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _socket = socket;
+            ready.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        started.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        let (result, _) = read_closed_peer(&mut peer).await;
+        assert!(
+            result.is_err(),
+            "cancelled connection must reset its peer, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_connection_delivers_output_before_graceful_eof() {
+        use tokio::io::AsyncWriteExt;
+        let (mut socket, mut peer) = tcp_pair().await;
+        socket.write_all(b"completed output").await.unwrap();
+        socket.preserve_output_on_drop();
+        drop(socket);
+        let (result, bytes) = read_closed_peer(&mut peer).await;
+        assert!(
+            result.is_ok(),
+            "completed connection must finish gracefully: {result:?}"
+        );
+        assert_eq!(bytes, b"completed output");
+    }
 
     struct Blocked {
         pool: Arc<crate::outbound::Pool>,
@@ -564,6 +735,47 @@ mod tests {
         fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn final_queued_output_shares_one_drain_deadline() {
+        let pool = crate::outbound::Pool::new(crate::OutboundLimits {
+            frame_bytes: 512,
+            client_bytes: 4096,
+            total_bytes: 4096,
+        });
+        let (sender, mut receiver) = pool.channel(3).unwrap();
+        let message = ServerMessage::Error {
+            scope: ErrorScope::Transport {},
+            request_id: None,
+            code: ErrorCode::NotAttached,
+            message: "Final explanation".into(),
+        };
+        for _ in 0..3 {
+            sender.try_send_with(&message, encode_bounded_json).unwrap();
+        }
+        let socket = WebSocketStream::from_raw_socket(
+            DelayedWrites {
+                delay: Box::pin(tokio::time::sleep(Duration::from_secs(2))),
+            },
+            Role::Server,
+            Some(WebSocketConfig::default().write_buffer_size(0)),
+        )
+        .await;
+        let mut output = Output {
+            socket,
+            pending: None,
+        };
+        let started = Instant::now();
+        assert!(output.drain(&mut receiver).await.is_err());
+        assert_eq!(started.elapsed(), IO_TIMEOUT);
+        assert!(
+            output.pending.is_some(),
+            "partial final output stays leased"
+        );
+        assert!(pool.available_bytes() < 4096);
+        drop(output);
+        assert_eq!(pool.available_bytes(), 4096);
     }
 
     #[tokio::test(start_paused = true)]

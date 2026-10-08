@@ -364,6 +364,39 @@ async fn private_annotations_stream_to_same_user_across_frontends_but_not_other_
 }
 
 #[tokio::test]
+async fn upgrade_rejection_and_invalid_request_deliver_their_explanations() {
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::timeout;
+    let (address, _, stop, server) = launch().await;
+    let mut rejected = tokio::net::TcpStream::connect(address.trim_start_matches("ws://"))
+        .await
+        .unwrap();
+    rejected.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: https://example.test\r\n\r\n").await.unwrap();
+    let mut response = Vec::new();
+    timeout(Duration::from_secs(2), rejected.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 403"));
+    let mut client = connect(&address, "alice-test-token", "text").await;
+    client
+        .send(Message::Text("invalid json".into()))
+        .await
+        .unwrap();
+    assert!(matches!(
+        receive(&mut client).await,
+        ServerMessage::Error {
+            scope: ErrorScope::Transport {},
+            code: ErrorCode::InvalidRequest,
+            ..
+        }
+    ));
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn authentication_version_and_actor_permissions_are_checked_before_disclosure() {
     let (address, _, stop, server) = launch().await;
     for (protocol, token, expected) in [
