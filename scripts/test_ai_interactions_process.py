@@ -7,6 +7,52 @@ from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
 
 
 class AiInteractionProcesses(ProcessTestCase):
+    def test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack(self):
+        package = self.save.parent / "ground-healing"
+        shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)
+        region = package / "regions/1.toml"
+        region.write_text(region.read_text().replace(
+            'archetype = "healing", quantity = 2, carried_by = 2',
+            'archetype = "healing", quantity = 3'))
+        subprocess.run([self.bin / "tor-scenario", "validate", package], check=True, capture_output=True, text=True)
+        self.server(scenario=package, wizard=True)
+        observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        player, _ = self.client()
+        self.wizard_command(self.wizard(), "teleport 1 1 4 1 0")
+        for _ in range(12):
+            self.act(player, {"type": "wait"})
+            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            carried = [item for item in view["inventory"] if item["class"] == "potion"]
+            if carried:
+                break
+        self.assertEqual([item["quantity"] for item in carried], ["1"])
+        self.assertEqual([item["item"]["quantity"] for item in view["ground_items"] if item["item"]["class"] == "potion"], ["2"])
+
+    def test_ai_walks_to_safe_known_ground_armor_then_replaces_old_gear(self):
+        package = self.save.parent / "ground-armor"
+        shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)
+        region = package / "regions/1.toml"
+        region.write_text(region.read_text().replace(
+            '{ id = 11, at = [2, 1, 0], archetype = "mail", carried_by = 2 }',
+            '{ id = 11, at = [3, 1, 0], archetype = "mail" }').replace(
+            'archetype = "ring", carried_by = 2 }',
+            'archetype = "ring", carried_by = 2, equipped_slot = 2 }'))
+        subprocess.run([self.bin / "tor-scenario", "validate", package], check=True, capture_output=True, text=True)
+        self.server(scenario=package, wizard=True)
+        observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        player, _ = self.client()
+        self.wizard_command(self.wizard(), "teleport 1 1 5 1 0")
+        equipped = None
+        for _ in range(18):
+            self.act(player, {"type": "wait"})
+            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            mail = next((item for item in view["inventory"] if item["name"] == "mail"), None)
+            if mail:
+                equipped = next(item["equipped_slot"] for item in view["interactions"]["inventory"] if item["item"] == mail["id"])
+                if equipped == 0:
+                    break
+        self.assertEqual(equipped, 0, "AI must travel, pick up known armor and complete replacement")
+
     def test_ai_replaces_armor_fills_duplicate_ring_and_restores_equipment(self):
         server = self.server(scenario="ai-interactions", wizard=True)
         observer, initial = self.client(WIZARD_TOKEN, observe=True, actor=2)

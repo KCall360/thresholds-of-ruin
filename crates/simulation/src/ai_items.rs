@@ -1,11 +1,51 @@
 //! Item decisions inspect definitions only after the acting actor knows them.
 use crate::{
     combat::CombatSpec, Action, ActorId, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game,
-    ItemId, Observation,
+    ItemId, Observation, TravelStep,
 };
 use tor_world::Location;
 
 impl Game {
+    pub(crate) fn choose_nearby_loot(
+        &self,
+        actor: ActorId,
+        view: &Observation,
+        route: &mut impl FnMut(Location) -> Option<Vec<TravelStep>>,
+    ) -> Option<Action> {
+        let has_healing = view
+            .inventory
+            .iter()
+            .any(|item| self.known_healing(actor, item.id));
+        view.ground_items
+            .iter()
+            .filter(|item| {
+                self.gear_destination(actor, item.id).is_some()
+                    || (!has_healing && self.known_healing(actor, item.id))
+            })
+            .filter(|item| !self.exposed_to_visible_hostile(actor, item.location, view))
+            .filter_map(|item| {
+                let path = route(item.location)?;
+                if path.len() > 3 {
+                    return None;
+                }
+                let action = if let Some(step) = path.first() {
+                    let (at, _) = self.actor_translation(actor, step.direction)?;
+                    if self.exposed_to_visible_hostile(actor, at, view) {
+                        return None;
+                    }
+                    Action::Move(step.direction)
+                } else {
+                    Action::Take {
+                        item: item.id,
+                        quantity: Some(1),
+                    }
+                };
+                Some((path.len(), item.id, action))
+            })
+            .min_by_key(|(distance, item, _)| (*distance, *item))
+            .map(|(_, _, action)| action)
+    }
+
     fn known_gear(&self, actor: ActorId, item: ItemId) -> Option<&EquipmentSpec> {
         let item = self.items.get(&item)?;
         let actor = self.actors.get(&actor)?;

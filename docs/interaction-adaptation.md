@@ -38,8 +38,8 @@ actor rather than its combat state, preserving existing attack behavior and
 saved intention identity. Generalized preparation, anatomy-based equipment and
 shared immediate healing/damage effects are now implemented in the simulation,
 server, authoring and transport boundaries. Text and ASCII controls now use shared
-client item checks. AI known healing and gear replacement are implemented;
-safe nearby looting remains outstanding.
+client item checks. AI known healing, gear replacement and safe nearby looting
+are implemented.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -120,7 +120,16 @@ A simulation checkpoint test passes midway through autonomous armor removal,
 then completes removal and equips the upgrade after restoration. The existing
 many-target test still verifies one topology search per AI decision.
 
-Next: adapt safe nearby looting, then finish
-performance/desktop/CI closeout.
+Nearby looting considers only visible, known useful gear or a known restorative
+when none is carried. It chooses a safe candidate within three remembered route
+steps, ordered by distance and item ID, and checks both the destination and next
+step against visible hostile reach. It takes one unit and reuses the decision's
+existing route search. Five real-server AI process tests pass, including travel
+to ground armor followed by timed replacement and one-unit healing pickup with
+the remaining stack intact. Focused simulation tests cover the range, unsafe
+first-step alternatives, own-actor knowledge and one-search invariant; a
+checkpoint case preserves split quantities and avoids collecting spare healing.
+
+Next: finish performance/desktop/CI closeout.
 Active item work and equipped gear already pass frozen and detached checkpoint
 round trips, including completion after reattachment.

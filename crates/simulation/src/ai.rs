@@ -143,6 +143,9 @@ impl Game {
             if let Some(action) = self.choose_gear(id, &view) {
                 return Some((action, ai));
             }
+            if let Some(action) = self.choose_nearby_loot(id, &view, &mut route) {
+                return Some((action, ai));
+            }
         }
         if ai.state == State::Flee {
             let (_, threat, _) = ai.target.unwrap();
@@ -358,6 +361,140 @@ mod tests {
         });
         game.place_item_stack(item, at(1, 2, 1), Some(ActorId(2)), 1, spec)
             .unwrap();
+    }
+
+    #[test]
+    fn loot_range_and_safe_first_step_are_checked_on_remembered_routes() {
+        use tor_world::{Extent, Region, World};
+        let mut world = World::new(vec![], vec![]).unwrap();
+        world
+            .add_region(Region {
+                id: RegionId(1),
+                name: "arena".into(),
+                bounds: Extent::new(10, 5, 1).unwrap(),
+            })
+            .unwrap();
+        let mut game = Game::new(world, 42);
+        let human = game
+            .spawn_actor(at(1, 3, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let actor = game
+            .spawn_actor(at(1, 1, 2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        for (id, faction) in [(human, "hero"), (actor, "foe")] {
+            game.configure_combat(
+                id,
+                CombatSpec {
+                    faction: faction.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        game.configure_run(
+            human,
+            BTreeSet::from([human]),
+            None,
+            BTreeMap::from([("foe".into(), BTreeSet::from(["hero".into()]))]),
+        )
+        .unwrap();
+        let mut potion = crate::ItemSpec::ordinary("healing".into());
+        potion.class = crate::ItemClass::Potion;
+        potion.consumable = Some(crate::ConsumableSpec {
+            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+        });
+        game.place_item_stack(20, at(1, 4, 2), None, 1, potion.clone())
+            .unwrap();
+        game.place_item_stack(21, at(1, 1, 0), None, 1, potion.clone())
+            .unwrap();
+        game.refresh_navigation();
+        let view = game.observe(actor).unwrap();
+        let mut search = game.route_search(actor).unwrap();
+        let mut route = |at| search.route(at).ok();
+        // The eastward first step is adjacent to the hostile; the northward
+        // alternative remains safe and must still be considered.
+        assert_eq!(
+            game.choose_nearby_loot(actor, &view, &mut route),
+            Some(Action::Move(Direction::North))
+        );
+        game.teleport(human, at(1, 8, 2)).unwrap();
+        game.place_item_stack(22, at(1, 5, 2), None, 1, potion)
+            .unwrap();
+        game.refresh_navigation();
+        let mut view = game.observe(actor).unwrap();
+        view.ground_items
+            .retain(|item| item.id == crate::ItemId(22));
+        let mut search = game.route_search(actor).unwrap();
+        assert_eq!(
+            game.choose_nearby_loot(actor, &view, &mut |at| search.route(at).ok()),
+            None
+        );
+    }
+
+    #[test]
+    fn nearby_loot_uses_own_knowledge_and_takes_only_one_unit() {
+        let mut game = fixture();
+        let actor = ActorId(2);
+        game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
+        let mut potion = crate::ItemSpec::ordinary("healing".into());
+        potion.class = crate::ItemClass::Potion;
+        potion.stackable = true;
+        potion.concealed = true;
+        potion.appearance = "red potion".into();
+        potion.consumable = Some(crate::ConsumableSpec {
+            effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+        });
+        game.place_item_stack(20, at(1, 2, 1), None, 3, potion)
+            .unwrap();
+        game.identify_item(ActorId(1), crate::ItemId(20)).unwrap();
+        assert!(!matches!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Take { .. }
+        ));
+        game.identify_item(actor, crate::ItemId(20)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Take {
+                item: crate::ItemId(20),
+                quantity: Some(1)
+            }
+        );
+    }
+
+    #[test]
+    fn nearby_loot_routes_share_one_search_and_do_not_step_beside_hostiles() {
+        let mut game = fixture();
+        let actor = ActorId(2);
+        game.teleport(ActorId(1), at(1, 5, 1)).unwrap();
+        for (id, x) in [(20, 3), (21, 4)] {
+            let mut potion = crate::ItemSpec::ordinary(format!("healing {id}"));
+            potion.class = crate::ItemClass::Potion;
+            potion.consumable = Some(crate::ConsumableSpec {
+                effects: vec![crate::EffectSpec::Heal { amount: 10 }],
+            });
+            game.place_item_stack(id, at(1, x, 1), None, 1, potion)
+                .unwrap();
+        }
+        game.refresh_navigation();
+        let before = crate::diagnostics::work_counts().route_searches;
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Move(Direction::East)
+        );
+        assert_eq!(crate::diagnostics::work_counts().route_searches - before, 1);
+        game.teleport(actor, at(1, 3, 1)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Take {
+                item: crate::ItemId(20),
+                quantity: Some(1)
+            }
+        );
+        game.teleport(ActorId(1), at(1, 4, 1)).unwrap();
+        assert_eq!(
+            game.choose_ai(actor).unwrap().0,
+            Action::Attack { target: ActorId(1) }
+        );
     }
 
     #[test]

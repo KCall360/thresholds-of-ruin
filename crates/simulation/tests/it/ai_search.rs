@@ -171,6 +171,75 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
 }
 
 #[test]
+fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares() {
+    use tor_simulation::{
+        checkpoint::SharedState, ConsumableSpec, EffectSpec, ItemClass, ItemId, ItemSpec,
+    };
+    let mut game = Game::two_room(42);
+    let at = |x| Location {
+        region: RegionId(1),
+        position: Position { x, y: 1, z: 0 },
+    };
+    let human = game
+        .spawn_actor(at(1), NonZeroU64::new(50).unwrap())
+        .unwrap();
+    let ai = game
+        .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.configure_combat(ai, CombatSpec::default()).unwrap();
+    game.configure_ai(ai, AiProfile::default()).unwrap();
+    let mut potion = ItemSpec::ordinary("healing".into());
+    potion.class = ItemClass::Potion;
+    potion.stackable = true;
+    potion.consumable = Some(ConsumableSpec {
+        effects: vec![EffectSpec::Heal { amount: 10 }],
+    });
+    game.place_item_stack(20, at(2), None, 3, potion).unwrap();
+    game.refresh_navigation();
+    game.act(human, Action::Wait).unwrap();
+    assert_eq!(
+        game.next_ai_action(),
+        Some((
+            ai,
+            Action::Take {
+                item: ItemId(20),
+                quantity: Some(1)
+            }
+        ))
+    );
+    game.admit_ai_intention(ai).unwrap();
+    game.execute_next_intention().unwrap().outcome.unwrap();
+    let mut shared = SharedState::default();
+    let snapshot =
+        serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
+            .unwrap();
+    let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let view = restored.observe(ai).unwrap();
+    assert_eq!(view.inventory.len(), 1);
+    assert_eq!(view.inventory[0].quantity, 1);
+    assert_eq!(
+        view.ground_items
+            .iter()
+            .find(|item| item.id == ItemId(20))
+            .unwrap()
+            .quantity,
+        2
+    );
+    for _ in 0..4 {
+        if restored.next_actor() == Some(ai) {
+            break;
+        }
+        restored.act(human, Action::Wait).unwrap();
+    }
+    let (next, action) = restored
+        .next_ai_action()
+        .expect("AI must have its next decision");
+    assert_eq!(next, ai);
+    assert!(!matches!(action, Action::Take { .. }));
+}
+
+#[test]
 fn a_many_target_decision_uses_one_remembered_topology_search() {
     let mut world = World::new(vec![], vec![]).unwrap();
     world
