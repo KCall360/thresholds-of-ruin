@@ -37,7 +37,7 @@ pub enum IntentionState {
 pub enum IntentionWork {
     Action(Action),
     AiDecision,
-    ResumeAttack { target: ActorId },
+    ResumePreparation { work: crate::Work },
 }
 
 /// Region-local movement meaning at admission, including portal frame changes.
@@ -134,7 +134,7 @@ pub struct IntentionControl {
 /// a second policy. Existing queue work never allocates another identity.
 enum ResumeIntention {
     Queue,
-    Preparation { target: ActorId },
+    Preparation { work: crate::Work },
 }
 
 enum CancelIntention {
@@ -383,7 +383,7 @@ impl Game {
             let action = match intention.work {
                 IntentionWork::Action(action) => Some(action),
                 IntentionWork::AiDecision => None,
-                IntentionWork::ResumeAttack { target } => Some(Action::Attack { target }),
+                IntentionWork::ResumePreparation { work } => Some(work.action()),
             };
             return Some(IntentionExecution {
                 intention,
@@ -411,11 +411,11 @@ impl Game {
                     Err(error) => (None, Err(error)),
                 }
             }
-            IntentionWork::ResumeAttack { target } => {
-                let action = Action::Attack { target };
+            IntentionWork::ResumePreparation { work } => {
+                let action = work.action();
                 let outcome = if self.preparation(actor).is_some_and(|preparation| {
                     preparation.intention == Some(intention.id)
-                        && preparation.target == target
+                        && preparation.work == work
                         && !preparation.active
                 }) {
                     self.act_with_context(actor, action, Some(intention.id), None)
@@ -441,6 +441,12 @@ impl Game {
         actor: ActorId,
         id: IntentionId,
     ) -> Result<CancelIntention, GameError> {
+        if self
+            .preparation(actor)
+            .is_some_and(|p| p.intention == Some(id) && p.work.item().is_some())
+        {
+            return Err(GameError::InvalidIntention);
+        }
         if self
             .pending_intention(actor)
             .is_some_and(|queued| queued.id == id)
@@ -541,7 +547,7 @@ impl Game {
             return Err(GameError::QueueFull);
         }
         Ok(ResumeIntention::Preparation {
-            target: preparation.target,
+            work: preparation.work,
         })
     }
 
@@ -554,13 +560,13 @@ impl Game {
                     .expect("checked intention")
                     .state = IntentionState::Queued;
             }
-            ResumeIntention::Preparation { target } => {
+            ResumeIntention::Preparation { work } => {
                 self.intentions.entries.insert(
                     actor,
                     QueuedIntention {
                         id,
                         actor,
-                        work: IntentionWork::ResumeAttack { target },
+                        work: IntentionWork::ResumePreparation { work },
                         origin: IntentionOrigin::Human,
                         state: IntentionState::Queued,
                         movement_context: None,
@@ -603,19 +609,24 @@ impl Game {
                             target.0 != 0 && target != *actor
                         }
                         IntentionWork::Action(Action::SetDoor { door, .. }) => door != 0,
+                        IntentionWork::Action(Action::Equip { item, slot }) => {
+                            item.0 > 0 && slot.0 < 64
+                        }
+                        IntentionWork::Action(
+                            Action::Unequip { item } | Action::Drink { item },
+                        ) => item.0 > 0,
                         IntentionWork::Action(
                             Action::Take { item, quantity } | Action::Drop { item, quantity },
                         ) => item.0 != 0 && quantity.is_none_or(|quantity| quantity != 0),
                         IntentionWork::Action(Action::Move(_) | Action::Wait) => true,
                         IntentionWork::AiDecision => entry.origin == IntentionOrigin::Autonomous,
-                        IntentionWork::ResumeAttack { target } => {
-                            target.0 != 0
-                                && target != *actor
+                        IntentionWork::ResumePreparation { work } => {
+                            work.structural_valid(*actor)
                                 && entry.origin == IntentionOrigin::Human
                                 && if self.actors.contains_key(actor) {
                                     self.preparation(*actor).is_some_and(|preparation| {
                                         preparation.intention == Some(entry.id)
-                                            && preparation.target == target
+                                            && preparation.work == work
                                             && !preparation.active
                                     })
                                 } else {
@@ -636,8 +647,8 @@ impl Game {
                                 || self.pending_intention(actor).is_some_and(|queued| {
                                     queued.id == id
                                         && queued.work
-                                            == IntentionWork::ResumeAttack {
-                                                target: preparation.target,
+                                            == IntentionWork::ResumePreparation {
+                                                work: preparation.work,
                                             }
                                 }))
                     })
@@ -1025,7 +1036,7 @@ mod tests {
         execution.outcome.unwrap();
         if let Some(progress) = restored.preparation(actor) {
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.target, target);
+            assert_eq!(progress.work.target(), Some(target));
             assert!(progress.remaining <= preparation.remaining);
             assert!(progress.active);
         } else {

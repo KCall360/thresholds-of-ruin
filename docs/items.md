@@ -1,8 +1,9 @@
 # Items and character knowledge
 
 Milestone 4b adds quantities, pickup/drop, compatible stacking and character-owned
-identity knowledge. Equipment, capacity, containers, item use, and ordinary
-identification gameplay remain deferred. NetHack informs the interaction style;
+identity knowledge. The interaction adaptation adds anatomy-based equipment and
+timed potion effects to the simulation and server. Capacity, containers and
+ordinary identification actions remain deferred. NetHack informs the interaction style;
 these are this project's explicit rules, not a claim of exact NetHack behavior.
 
 ## Ordinary play
@@ -10,8 +11,8 @@ these are this project's explicit rules, not a claim of exact NetHack behavior.
 After setting the server token as described in the [README](../README.md), run
 `cargo run -p tor-server -- --scenario scenarios/tests/items --character 1 --save saves/items-demo.db`
 and connect either client normally. This ordinary package demonstrates stacks and
-concealed potions without wizard mode. `take 3 #10`, `take #11`, and `drop 2 #23`
-exercise a split, merge, and partial drop in a fresh game.
+concealed potions without wizard mode. Use the opaque `#id` shown by the client
+when selecting between alike stacks; these targets are scoped to the observer.
 
 Text and adventure commands accept `take [quantity] <name or #id>` and
 `drop [quantity] <name or #id>`. `get` aliases `take`. Omission (or `all` before
@@ -37,11 +38,51 @@ transfers retain the source ID and allocate a new monotonic ID only when there i
 no destination stack. Retired IDs are not reused on the same timeline. History
 records source ID, result ID and transferred quantity. Rewind restores allocation.
 
+## Timed equipment and initial effects
+
+The server accepts `equip` (carried item plus anatomy slot index), `unequip`
+(carried equipped item) and `drink` (carried potion) through ordinary intention
+admission. Targets are opaque observer-scoped inventory references. Client menus
+and natural-language commands are the next adaptation checkpoint.
+
+Anatomy is an ordered slot list; duplicate kinds provide distinct sockets, such
+as two rings. Archetypes and actors can declare `anatomy = { slots = [...] }`.
+Character declarations supply their own anatomy. Item archetypes optionally
+provide `equipment` or `consumable`; placements use `equipped_slot` with
+`carried_by` for starting gear. Invalid classes, counts, slots, conflicting gear
+and effect definitions are rejected. The initial weapon model equips one weapon;
+dual wielding remains outside this slice.
+
+Body armor changes take three actor turns; other equipment changes and drinking
+take one. Effects apply only on completion. Equipped armor protects during
+removal, occupied slots require removal before replacement, and equipped items
+cannot be dropped. Damage or a newly visible hostile pauses work, preserving
+progress and the original admission. A resume accepts the current threat baseline.
+Waiting preserves progress; a different successful action can discard it. Explicit
+cancellation of item preparation is rejected. Death clears equipment and drops each
+remaining carried stack once alongside the corpse.
+
+Consumables contain a sequence of shared `heal` and typed `damage` effect
+primitives. Definitions are validated before mutation. Healing caps at maximum
+health; damage uses effective reductions and immunities. A lethal effect ends the
+sequence. Exactly one unit is consumed on completion. Observable health effects
+teach identity to the actor, even when the consumed stack disappears; an
+unobservable effect does not identify it.
+
+The optional observation `interactions` contains the controlled actor's slots,
+preparation and carried-item affordances, independently of combat attributes.
+Equipment statistics are disclosed only for known identities. Item effects and
+other actors' inventory are absent. This state reconstructs exactly through full
+observations, deltas, checkpoints and replay. The validated
+`scenarios/tests/interactions` package and `test_interactions_process.py` cover
+starting gear, timing, disclosure, consumption and checkpoint restart.
+
 ## Authoring and disclosure
 
 Archetypes declare an optional physical `class` (default `misc`); item placements
 may override it for ordinary items. Concealed items retain their archetype class,
-and appearance pools share one class so it cannot reveal a hidden effect.
+and appearance pools share one class and the same equipment-slot/drink affordances
+so these facts cannot reveal a hidden effect.
 Classes are appearance facts, independent of mechanics, and survive transfer,
 identification, rewind and persistence. They participate in stack compatibility.
 ASCII uses `)` weapon, `[` armor, `!` potion, `%` food/corpse, `(` misc/tool,
@@ -59,7 +100,8 @@ Properties are inert stack-compatibility metadata here; they do not activate ite
 effects, equipment, weight or capacity mechanics.
 
 `appearance_pools.<key>` contains `appearances` and optional `confounding` (default
-false). Archetypes sharing an identity must agree on the identity name and pool.
+false). Archetypes sharing an identity must agree on its name, pool, physical
+class, equipment and effects.
 Sorted identity keys receive appearances shuffled deterministically from the game
 seed, pool key, and appearance index with SHA-256. Ordinary pools require enough
 distinct appearances. Explicit confounding pools permit reuse. Assignment covers
@@ -67,15 +109,16 @@ the manifest's archetypes, independently of character selection or current items
 Resolved appearances persist with authoritative item state and pinned inputs.
 
 An item with an appearance pool conceals its identity until learned; other items
-start known. Characters may declare `known_identities`. Learning an identity
+start known. Characters and other actors may declare `known_identities`. Learning an identity
 identifies matching effects for that character, including other instances, without
 identifying a different effect merely because it shares the appearance. Knowledge
 survives dropping and persists independently of item ownership and existence.
 
 The privileged `wizard identify <actor> <item>` command exercises knowledge
 updates through the ordinary journal and rewind path. It requires existing wizard
-authorization and marks the lineage through the existing wizard rules. No normal
-item-use or identification action is introduced.
+authorization and marks the lineage through the existing wizard rules. Drinking
+can teach identity through an observable effect; standalone ordinary
+identification actions remain deferred.
 
 Clients receive only disclosed `name`, `description`, `appearance`, `identified`,
 quantity and instance ID. Hidden archetype/identity keys and properties are never

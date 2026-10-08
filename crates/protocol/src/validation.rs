@@ -14,6 +14,7 @@ pub enum InvalidState {
     ConflictingItemLocation,
     InvalidCombat,
     InvalidMotion,
+    InvalidInteraction,
 }
 
 // Canonically ordered collections need no allocation. Unordered full views
@@ -90,6 +91,66 @@ impl StateView {
             .is_some_and(|motion| motion.units_per_cell == 0)
         {
             return Err(InvalidState::InvalidMotion);
+        }
+        if let Some(interactions) = &o.interactions {
+            let inventory: std::collections::HashMap<_, _> =
+                o.inventory.iter().map(|item| (item.id, item)).collect();
+            let mut equipped = HashSet::new();
+            if interactions.slots.len() > 64
+                || interactions.inventory.len() > inventory.len()
+                || !unique(interactions.inventory.iter().map(|item| item.item))
+                || interactions.inventory.iter().any(|interaction| {
+                    let Some(item) = inventory.get(&interaction.item) else {
+                        return true;
+                    };
+                    (!item.identified && interaction.known_equipment.is_some())
+                        || (interaction.slot.is_none()
+                            && (interaction.equipped_slot.is_some()
+                                || interaction.known_equipment.is_some()))
+                        || (interaction.drinkable && interaction.slot.is_some())
+                        || interaction.equipped_slot.is_some_and(|slot| {
+                            !equipped.insert(slot)
+                                || interactions.slots.get(usize::from(slot)).copied()
+                                    != interaction.slot
+                        })
+                        || interaction
+                            .known_equipment
+                            .as_ref()
+                            .is_some_and(|equipment| {
+                                !(-1000..=1000).contains(&equipment.defense)
+                                    || equipment
+                                        .reductions
+                                        .values()
+                                        .any(|amount| *amount > 1_000_000)
+                                    || equipment.attack.as_ref().is_some_and(|attack| {
+                                        interaction.slot != Some(crate::EquipmentSlot::Weapon)
+                                            || !(-1000..=1000).contains(&attack.bonus)
+                                            || attack.wind_up == 0
+                                            || attack.wind_up.checked_add(attack.recovery).is_none()
+                                            || attack.damage.is_empty()
+                                            || attack
+                                                .damage
+                                                .values()
+                                                .any(|amount| *amount > 1_000_000)
+                                    })
+                            })
+                })
+                || interactions.preparation.as_ref().is_some_and(|progress| {
+                    match &progress.action {
+                        crate::Action::Attack { .. } => false,
+                        crate::Action::Equip { item, slot } => {
+                            !inventory.contains_key(item)
+                                || usize::from(*slot) >= interactions.slots.len()
+                        }
+                        crate::Action::Unequip { item } | crate::Action::Drink { item } => {
+                            !inventory.contains_key(item)
+                        }
+                        _ => true,
+                    }
+                })
+            {
+                return Err(InvalidState::InvalidInteraction);
+            }
         }
         if !matches!(
             crate::codec::encoded_length(self, crate::MAX_STATE_BYTES),

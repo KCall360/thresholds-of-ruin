@@ -70,6 +70,8 @@ impl From<MissingArchetype<'_>> for Failure {
 /// inline authoring values are converted once and then moved into the game.
 #[derive(Debug)]
 pub(super) struct PreparedCreature<'a> {
+    pub anatomy: Option<Cow<'a, tor_simulation::AnatomySpec>>,
+    pub known_identities: Vec<String>,
     pub combat: Option<Cow<'a, tor_simulation::combat::CombatSpec>>,
     pub body: Option<Cow<'a, tor_simulation::BodySpec>>,
     pub control: PreparedControl,
@@ -80,6 +82,8 @@ pub(super) struct PreparedCreature<'a> {
 impl PreparedCreature<'_> {
     pub fn borrowed(&self) -> PreparedCreature<'_> {
         PreparedCreature {
+            anatomy: self.anatomy.as_deref().map(Cow::Borrowed),
+            known_identities: self.known_identities.clone(),
             combat: self.combat.as_deref().map(Cow::Borrowed),
             body: self.body.as_deref().map(Cow::Borrowed),
             control: self.control.clone(),
@@ -91,6 +95,9 @@ impl PreparedCreature<'_> {
 
 #[derive(Debug, Default)]
 pub(super) struct PreparedArchetype {
+    pub anatomy: Option<tor_simulation::AnatomySpec>,
+    pub equipment: Option<tor_simulation::EquipmentSpec>,
+    pub consumable: Option<tor_simulation::ConsumableSpec>,
     pub class: tor_simulation::ItemClass,
     pub combat: Option<tor_simulation::combat::CombatSpec>,
     pub body: Option<tor_simulation::BodySpec>,
@@ -107,6 +114,9 @@ pub(super) struct PreparedArchetype {
 impl PreparedArchetype {
     fn new(author: &Archetype, manifest: &Manifest) -> Self {
         Self {
+            anatomy: author.anatomy.clone().map(Into::into),
+            equipment: author.equipment.clone().map(Into::into),
+            consumable: author.consumable.clone().map(Into::into),
             class: author.class.into(),
             combat: author.combat.clone().map(Into::into),
             body: author.body.clone().map(Into::into),
@@ -165,6 +175,11 @@ impl PreparedDefinitions {
                 anchor: author.anchor.clone(),
                 turn_ticks: author.turn_ticks,
                 creature: PreparedCreature {
+                    anatomy: author
+                        .anatomy
+                        .clone()
+                        .map(|anatomy| Cow::Owned(anatomy.into())),
+                    known_identities: author.known_identities.clone(),
                     combat: author
                         .combat
                         .clone()
@@ -223,6 +238,12 @@ impl PreparedDefinitions {
     pub fn actor(&self, author: &Actor) -> Result<PreparedCreature<'_>, Failure> {
         let inherited = self.archetype(&author.archetype).map_err(Failure::from)?;
         Ok(PreparedCreature {
+            anatomy: author
+                .anatomy
+                .clone()
+                .map(|anatomy| Cow::Owned(anatomy.into()))
+                .or_else(|| inherited.anatomy.as_ref().map(Cow::Borrowed)),
+            known_identities: author.known_identities.clone(),
             combat: author
                 .combat
                 .clone()
@@ -292,6 +313,8 @@ impl PreparedDefinitions {
         let mut properties = inherited.properties.clone();
         properties.extend(author.properties.clone());
         let spec = tor_simulation::ItemSpec {
+            equipment: inherited.equipment.clone(),
+            consumable: inherited.consumable.clone(),
             class: author.class.map(Into::into).unwrap_or(inherited.class),
             archetype: key,
             identity,
@@ -464,6 +487,9 @@ mod tests {
         manifest.archetypes.insert(
             "guard".into(),
             Archetype {
+                anatomy: None,
+                equipment: None,
+                consumable: None,
                 class: Default::default(),
                 combat: Some(CombatSpec {
                     name: "guard".into(),

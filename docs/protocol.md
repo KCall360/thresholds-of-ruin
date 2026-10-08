@@ -156,7 +156,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":31,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":32,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and
@@ -766,3 +766,14 @@ progress and waits for fresh input. Repeat the attack to resume. If a saved run
 is in recovery with AI ready, `continue` resumes autonomous scheduling without
 starting a new player action; text `wait` and ASCII Space issue it while unready.
 Only the attached controller can continue. Spectators cannot request it.
+
+### Disclosed item interactions
+
+An optional observation `interactions` describes the attached actor's anatomy
+slots, actor-owned preparation and carried-item affordances. Prepared actions use
+opaque actor/item targets, and remaining ticks use exact decimal strings. Slot
+indices are bounded by the disclosed anatomy; duplicate kinds are distinct slots.
+Equipment statistics are absent for unidentified items. Consumable effect
+primitives stay in the backend. Deltas replace this optional snapshot, including
+removing it when no interaction facts remain. `equip`, `unequip` and `drink` use
+the same intention admission, authority and retry rules as other ordinary actions.

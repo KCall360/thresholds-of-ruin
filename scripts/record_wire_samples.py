@@ -47,6 +47,9 @@ CLIENT = [
             {"type": "travel", "expected_revision": "3", "destination": "cell-key"},
             {"type": "wizard", "expected_revision": "3", "operation": "rewind initial"},
             *({"type": "act", "expected_revision": "3", "action": action} for action in [
+                {"type": "equip", "item": "i_" + "04" * 32, "slot": 1},
+                {"type": "unequip", "item": "i_" + "04" * 32},
+                {"type": "drink", "item": "i_" + "04" * 32},
                 {"type": "attack", "target": "a_" + "02" * 32},
                 {"type": "set_door", "door": "d_" + "07" * 32, "open": True},
                 {"type": "move", "direction": "north_east"},

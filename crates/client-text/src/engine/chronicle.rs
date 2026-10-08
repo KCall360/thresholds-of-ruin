@@ -44,6 +44,7 @@ pub enum Beat {
     },
     Waited,
     AttackBegan,
+    ItemBegan(String),
     Blow {
         attacker: Who,
         target: Who,
@@ -172,6 +173,9 @@ impl Chronicler {
                     })
                 }
                 Event::Waited => beats.push(Beat::Waited),
+                Event::ItemStarted { .. } => beats.push(Beat::ItemBegan(
+                    tor_client_common::narration::action(event, a),
+                )),
                 Event::AttackStarted { .. } => beats.push(Beat::AttackBegan),
                 Event::PreparationPaused => {}
             }

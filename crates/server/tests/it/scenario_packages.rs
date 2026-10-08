@@ -99,7 +99,7 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         ),
         (
             "scenario.toml",
-            "interactions-v24",
+            "interactions-v25",
             "missing-v1",
             "dependency",
         ),

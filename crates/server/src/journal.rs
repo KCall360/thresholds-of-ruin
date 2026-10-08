@@ -79,6 +79,10 @@ pub enum Command {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     PreparationPaused,
+    ItemStarted {
+        #[serde(with = "crate::storage::schema::Action")]
+        action: Action,
+    },
     AttackStarted {
         #[serde(with = "crate::storage::schema::ActorId")]
         target: ActorId,
@@ -365,9 +369,7 @@ impl AdmittedWork<'_> {
             Self::Human(action) => {
                 let original = crate::adapt::action(action);
                 work == tor_simulation::IntentionWork::Action(original)
-                    || matches!((work, original),
-                        (tor_simulation::IntentionWork::ResumeAttack { target },
-                            tor_simulation::Action::Attack { target: expected }) if target == expected)
+                    || matches!(work, tor_simulation::IntentionWork::ResumePreparation { work } if work.action() == original)
             }
             Self::AutonomousDecision => work == tor_simulation::IntentionWork::AiDecision,
             Self::Travel(action, _) => {

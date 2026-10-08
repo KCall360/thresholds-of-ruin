@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **31**, save format **23**, ruleset
-**`interactions-v24`**, scenario validator **`tor-scenario-9`**. The server rejects
+**Current formats:** protocol **32**, save format **24**, ruleset
+**`interactions-v25`**, scenario validator **`tor-scenario-10`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -234,8 +234,10 @@ or generalized recipe syntax is implemented by this plan update.
 
 Adaptation is in progress from PR #87. Physical item classes and ASCII symbols
 are implemented with disclosure, memory and recovery tests; preparation has
-moved onto actors while retaining attack behavior. Equipment, item effects and
-item-aware AI remain in progress. See [interaction adaptation](interaction-adaptation.md)
+moved onto actors while retaining attack behavior. The simulation/server foundation
+now supports anatomy-based equipment, starting gear, timed consumption and shared
+healing/damage effects, with opaque targets and saved intention lineage. Client
+controls, completion narration and item-aware AI remain in progress. See [interaction adaptation](interaction-adaptation.md)
 for scope, retained work and focused verification.
 
 Equipment after items, then item effects and other selected interactions.

@@ -38,6 +38,7 @@ fn room(ox: i32, oy: i32, revision: u64) -> StateView {
         wizard_game: false,
         revision,
         observation: Observation {
+            interactions: None,
             combat: None,
             motion: None,
             places: Vec::new(),
@@ -59,6 +60,35 @@ fn round_trip(base: &StateView, next: &StateView) -> StateDelta {
     let wire: StateDelta = serde_json::from_str(&serde_json::to_string(&delta).unwrap()).unwrap();
     assert_eq!(wire.clone().apply(base).unwrap(), *next);
     wire
+}
+
+#[test]
+fn interaction_snapshots_round_trip_delta_and_validate_anatomy_bounds() {
+    let base = room(5, 5, 1);
+    let mut next = base.clone();
+    next.revision = 2;
+    next.observation.interactions = Some(InteractionView {
+        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        preparation: Some(PreparationView {
+            action: Action::Attack {
+                target: ActorTarget::from_digest(synthetic_digest(2)),
+            },
+            remaining: u64::MAX,
+            active: false,
+        }),
+        inventory: vec![],
+    });
+    assert!(next.validate().is_ok());
+    round_trip(&base, &next);
+    let mut cleared = next.clone();
+    cleared.revision = 3;
+    cleared.observation.interactions = None;
+    round_trip(&next, &cleared);
+    next.observation.interactions.as_mut().unwrap().slots = vec![EquipmentSlot::Ring; 65];
+    assert!(
+        next.validate().is_err(),
+        "unbounded anatomy must be rejected"
+    );
 }
 
 #[test]

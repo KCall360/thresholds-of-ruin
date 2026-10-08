@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 23;
+pub(crate) const ARCHIVE_VERSION: u32 = 24;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -30,6 +30,9 @@ mod intention_lifecycle;
 #[cfg(test)]
 #[path = "intention_tests.rs"]
 mod intention_tests;
+#[cfg(test)]
+#[path = "interaction_tests.rs"]
+mod interaction_tests;
 #[path = "wire_request.rs"]
 mod wire_request;
 pub(crate) use checkpoint::{Checkpoint, DiskCheckpoint};
@@ -641,12 +644,12 @@ impl Record {
                 } => original_action.is_none_or(|action| executed == action),
                 JournalContent::IntentionContinued {
                     action: executed, ..
-                } => original_action.is_some_and(|action| {
-                    executed == action && matches!(action, Action::Attack { .. })
-                }),
+                } => {
+                    original_action.is_some_and(|action| executed == action && action.is_prepared())
+                }
                 JournalContent::IntentionFailed { .. } => true,
                 JournalContent::IntentionContinuationFailed { .. } => {
-                    original_action.is_some_and(|action| matches!(action, Action::Attack { .. }))
+                    original_action.is_some_and(|action| action.is_prepared())
                 }
                 _ => false,
             }
@@ -2166,7 +2169,10 @@ impl Engine {
         let mut navigation_refreshed = false;
         let navigation_changed = match action {
             Action::Move { .. } | Action::SetDoor { .. } => true,
-            Action::Attack { .. } => false,
+            Action::Attack { .. }
+            | Action::Equip { .. }
+            | Action::Unequip { .. }
+            | Action::Drink { .. } => false,
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
         };
@@ -2175,6 +2181,9 @@ impl Engine {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
             | Action::Attack { .. }
+            | Action::Equip { .. }
+            | Action::Unequip { .. }
+            | Action::Drink { .. }
             | Action::SetDoor { .. }
             | Action::Take { .. }
             | Action::Drop { .. } => true,
@@ -2323,7 +2332,7 @@ impl Engine {
                 )
             }
             Command::PausePreparation => {
-                let target = candidate
+                let work = candidate
                     .game
                     .pause_preparation(SimActor(receipt.actor.0))
                     .ok_or_else(|| {
@@ -2340,7 +2349,7 @@ impl Engine {
                     },
                     Audience::Actor,
                     JournalContent::Action {
-                        action: Action::Attack { target },
+                        action: adapt::recorded_action(work.action()).unwrap(),
                         event: crate::journal::Event::PreparationPaused,
                     },
                 )

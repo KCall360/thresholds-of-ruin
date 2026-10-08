@@ -8,6 +8,7 @@ mod combat;
 mod diagonal;
 mod doors;
 mod enclosures;
+mod interactions;
 mod item_index;
 mod items;
 mod perception;

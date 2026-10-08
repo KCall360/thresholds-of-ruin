@@ -209,6 +209,21 @@ fn describe_changes(
 /// Ordinary action narration resolves names only from the resulting disclosed view.
 pub fn action(event: &Event, view: &Observation) -> String {
     match event {
+        Event::ItemStarted { action } => {
+            let (verb, item) = match action {
+                tor_protocol::Action::Equip { item, .. } => ("equip", item),
+                tor_protocol::Action::Unequip { item } => ("remove", item),
+                tor_protocol::Action::Drink { item } => ("drink", item),
+                _ => return "You begin preparing.".into(),
+            };
+            let name = view
+                .inventory
+                .iter()
+                .find(|candidate| candidate.id == *item)
+                .map_or_else(|| "item".into(), |candidate| label(&candidate.name, "item"));
+            format!("You begin to {verb} the {name}.")
+        }
+
         Event::Moved { direction } => format!(
             "You move {}.",
             match direction {
@@ -267,6 +282,7 @@ mod tests {
 
     fn observation() -> Observation {
         Observation {
+            interactions: None,
             combat: None,
             motion: None,
             places: Vec::new(),
@@ -303,6 +319,28 @@ mod tests {
         after.visible_actors[0].id = after.self_target;
         after.visible_actors.pop();
         assert!(changes(&before, &after).is_empty());
+    }
+
+    #[test]
+    fn item_preparation_names_only_disclosed_items_and_reports_no_effect_early() {
+        let mut view = observation();
+        let item = tor_protocol::ItemTarget::from_digest([3; 32]);
+        view.inventory.push(tor_protocol::ItemView {
+            class: tor_protocol::ItemClass::Potion,
+            quantity: 2,
+            appearance: "red potion".into(),
+            identified: false,
+            description: String::new(),
+            id: item,
+            name: "red potion".into(),
+            asset: None,
+        });
+        let event = Event::ItemStarted {
+            action: tor_protocol::Action::Drink { item },
+        };
+        assert_eq!(action(&event, &view), "You begin to drink the red potion.");
+        view.inventory.clear();
+        assert_eq!(action(&event, &view), "You begin to drink the item.");
     }
 
     #[test]

@@ -256,7 +256,92 @@ fn queued_native_attack_survives_frozen_and_detached_checkpoint_boundaries() {
             execution.outcome.unwrap();
             let progress = candidate.preparation(attacker).unwrap();
             assert_eq!(progress.intention, Some(intention));
-            assert_eq!(progress.target, target);
+            assert_eq!(progress.work.target(), Some(target));
+            if let Some(expected) = &expected {
+                assert_eq!(&candidate, expected);
+            } else {
+                expected = Some(candidate);
+            }
+        }
+    }
+}
+
+#[test]
+fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
+    use tor_simulation::{
+        AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec, IntentionOrigin, ItemClass,
+        ItemSpec,
+    };
+    for detach in [false, true] {
+        let mut records = MemoryRecords::default();
+        let (mut game, player) = corridor();
+        let worker = game.spawn_actor(at(3, 5, 1), ticks(100)).unwrap();
+        game.configure_anatomy(
+            worker,
+            AnatomySpec {
+                slots: vec![EquipmentSlot::BodyArmor, EquipmentSlot::Ring],
+            },
+        )
+        .unwrap();
+        for (item, class, slot, index) in [
+            (10, ItemClass::Armor, EquipmentSlot::BodyArmor, None),
+            (11, ItemClass::Ring, EquipmentSlot::Ring, Some(1)),
+        ] {
+            let mut spec = ItemSpec::ordinary(format!("gear {item}"));
+            spec.class = class;
+            spec.equipment = Some(EquipmentSpec {
+                slot,
+                attack: None,
+                defense: 1,
+                reductions: BTreeMap::new(),
+            });
+            game.place_item_stack(item, at(3, 5, 1), Some(worker), 1, spec)
+                .unwrap();
+            if let Some(index) = index {
+                game.equip_authored(worker, ItemId(item), EquipmentSlotId(index))
+                    .unwrap();
+            }
+        }
+        run(&mut game, player, &[]);
+        let intention = game
+            .admit_intention(
+                worker,
+                Action::Equip {
+                    item: ItemId(10),
+                    slot: EquipmentSlotId(0),
+                },
+                IntentionOrigin::Human,
+            )
+            .unwrap();
+        game.act(player, Action::Wait).unwrap();
+        game.execute_next_intention().unwrap().outcome.unwrap();
+        let progress = game.preparation(worker).unwrap().clone();
+        game.transition_regions(
+            &sets(&[1], if detach { &[1, 2] } else { &[1, 2, 3] }),
+            &mut records,
+        )
+        .unwrap();
+        step(&mut game, 3);
+        let restored = round_trip(&game);
+        assert_eq!(restored, game);
+        assert!(restored.detached_records_valid(&mut records));
+        let mut expected = None;
+        for mut candidate in [game, restored] {
+            candidate
+                .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
+                .unwrap();
+            let resumed = candidate.preparation(worker).unwrap();
+            assert_eq!(resumed.intention, Some(intention));
+            assert_eq!(resumed.remaining, progress.remaining);
+            assert_eq!(candidate.equipment(worker).unwrap().len(), 1);
+            for _ in 0..10 {
+                if candidate.preparation(worker).is_none() {
+                    break;
+                }
+                step(&mut candidate, 1);
+            }
+            assert!(candidate.preparation(worker).is_none());
+            assert_eq!(candidate.equipment(worker).unwrap().len(), 2);
             if let Some(expected) = &expected {
                 assert_eq!(&candidate, expected);
             } else {
@@ -312,7 +397,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
     execution.outcome.unwrap();
     let resumed = restored.preparation(attacker).unwrap();
     assert_eq!(resumed.intention, Some(intention));
-    assert_eq!(resumed.target, target);
+    assert_eq!(resumed.work.target(), Some(target));
     assert!(resumed.active);
     assert!(resumed.remaining <= progress.remaining);
 }

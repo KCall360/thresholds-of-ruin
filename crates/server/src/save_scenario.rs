@@ -279,6 +279,12 @@ enum ItemClass {
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
     #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
+    #[serde(with = "mapped")]
+    equipment: Option<source::EquipmentSpec>,
+    #[serde(with = "mapped")]
+    consumable: Option<source::ConsumableSpec>,
+    #[serde(with = "mapped")]
     class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
     combat: Option<source::CombatSpec>,
@@ -296,6 +302,8 @@ struct Archetype {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Character", deny_unknown_fields)]
 struct Character {
+    #[serde(with = "mapped")]
+    anatomy: Option<source::AnatomySpec>,
     #[serde(with = "mapped")]
     combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
@@ -324,6 +332,59 @@ struct Objective {
 struct AiProfile {
     memory_ticks: u64,
     flee_percent: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EquipmentSlot", rename_all = "snake_case")]
+enum EquipmentSlot {
+    Weapon,
+    BodyArmor,
+    Shield,
+    HeadArmor,
+    HandsArmor,
+    FeetArmor,
+    Cloak,
+    Ring,
+    Amulet,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::AnatomySpec", deny_unknown_fields)]
+struct AnatomySpec {
+    #[serde(with = "mapped")]
+    slots: Vec<source::EquipmentSlot>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::EquipmentSpec", deny_unknown_fields)]
+struct EquipmentSpec {
+    #[serde(with = "mapped")]
+    slot: source::EquipmentSlot,
+    #[serde(with = "mapped")]
+    attack: Option<source::AttackSpec>,
+    defense: i32,
+    #[serde(with = "mapped")]
+    reductions: BTreeMap<source::DamageType, u32>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "source::EffectSpec",
+    tag = "type",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum EffectSpec {
+    Heal {
+        amount: u32,
+    },
+    Damage {
+        #[serde(with = "mapped")]
+        components: BTreeMap<source::DamageType, u32>,
+    },
+}
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "source::ConsumableSpec", deny_unknown_fields)]
+struct ConsumableSpec {
+    #[serde(with = "mapped")]
+    effects: Vec<source::EffectSpec>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -454,6 +515,11 @@ remote!(
     Character => source::Character,
     Objective => source::Objective,
     AiProfile => source::AiProfile,
+    AnatomySpec => source::AnatomySpec,
+    EquipmentSlot => source::EquipmentSlot,
+    EquipmentSpec => source::EquipmentSpec,
+    EffectSpec => source::EffectSpec,
+    ConsumableSpec => source::ConsumableSpec,
     BodySpec => source::BodySpec,
     DamageType => source::DamageType,
     AttackSpec => source::AttackSpec,

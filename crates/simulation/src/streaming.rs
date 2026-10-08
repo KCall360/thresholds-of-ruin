@@ -715,7 +715,10 @@ impl Game {
     /// A loaded actor's live references: its body and any attack in progress.
     fn live_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let mut live = self.body_regions(id);
-        let target = self.actors[&id].pending.as_ref().map(|p| p.target);
+        let target = self.actors[&id]
+            .pending
+            .as_ref()
+            .and_then(|p| p.work.target());
         if let Some(target) = target {
             if self.actors.contains_key(&target) {
                 live.extend(self.body_regions(target));
@@ -1310,10 +1313,6 @@ impl Game {
     /// Whether an identity refers to something detached.
     pub(crate) fn detached_actor(&self, id: ActorId) -> bool {
         self.lifecycle.directory.actors.contains_key(&id)
-    }
-
-    pub(crate) fn detached_item(&self, id: ItemId) -> bool {
-        self.lifecycle.directory.items.contains_key(&id)
     }
 
     pub(crate) fn has_detached_actors(&self) -> bool {

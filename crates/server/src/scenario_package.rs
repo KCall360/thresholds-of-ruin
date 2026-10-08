@@ -15,7 +15,10 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
-pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType, ItemClass};
+pub use authoring::{
+    AiProfile, AnatomySpec, AttackSpec, BodySpec, CombatSpec, ConsumableSpec, DamageType,
+    EffectSpec, EquipmentSlot, EquipmentSpec, ItemClass,
+};
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
@@ -23,8 +26,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v24";
-const VALIDATOR: &str = "tor-scenario-9";
+pub const RULESET: &str = "interactions-v25";
+const VALIDATOR: &str = "tor-scenario-10";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -126,6 +129,9 @@ pub struct AppearancePool {
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    pub anatomy: Option<AnatomySpec>,
+    pub equipment: Option<EquipmentSpec>,
+    pub consumable: Option<ConsumableSpec>,
     #[serde(default)]
     pub class: crate::scenario_package::ItemClass,
     pub combat: Option<CombatSpec>,
@@ -150,6 +156,9 @@ impl Clone for Archetype {
     fn clone(&self) -> Self {
         ARCHETYPE_DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
         Self {
+            anatomy: self.anatomy.clone(),
+            equipment: self.equipment.clone(),
+            consumable: self.consumable.clone(),
             class: self.class,
             combat: self.combat.clone(),
             body: self.body.clone(),
@@ -166,6 +175,7 @@ impl Clone for Archetype {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Character {
+    pub anatomy: Option<AnatomySpec>,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
@@ -286,6 +296,7 @@ pub struct Door {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    pub equipped_slot: Option<u16>,
     pub class: Option<crate::scenario_package::ItemClass>,
     #[serde(default = "unit_quantity")]
     pub quantity: u64,
@@ -303,6 +314,9 @@ pub struct Item {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Actor {
+    pub anatomy: Option<AnatomySpec>,
+    #[serde(default)]
+    pub known_identities: Vec<String>,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub velocity: Option<[i64; 3]>,
@@ -1297,6 +1311,13 @@ impl Package {
             })?;
         }
         for character in &self.manifest.characters {
+            require(
+                character
+                    .anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid character anatomy",
+            )?;
             if let Some(spec) = &character.combat {
                 self.check_combat(spec, Origin::Character(character.id), || {
                     self.manifest_text.clone()
@@ -1682,6 +1703,22 @@ impl Package {
             };
             let contextualize = |failure| origin.context(failure);
             require(
+                a.anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid actor anatomy",
+            )
+            .map_err(contextualize)?;
+            for identity in &a.known_identities {
+                require(
+                    self.manifest.archetypes.iter().any(|(key, archetype)| {
+                        archetype.identity.as_ref().unwrap_or(key) == identity
+                    }),
+                    "Unknown initial item identity",
+                )
+                .map_err(contextualize)?;
+            }
+            require(
                 matches!(a.controller.as_str(), "external" | "ai")
                     && (a.controller == "ai") == a.ai.is_some()
                     && a.ai.as_ref().is_none_or(|s| label(s)),
@@ -1698,13 +1735,39 @@ impl Package {
         let mut result = BTreeMap::new();
         let mut signatures = BTreeMap::new();
         for (key, a) in &self.manifest.archetypes {
+            require(
+                a.anatomy
+                    .as_ref()
+                    .is_none_or(|anatomy| anatomy.slots.len() <= 64),
+                "Invalid anatomy",
+            )?;
+            require(
+                a.equipment.as_ref().is_none_or(|equipment| {
+                    let spec: tor_simulation::EquipmentSpec = equipment.clone().into();
+                    !a.stackable && a.consumable.is_none() && spec.valid(a.class.into())
+                }),
+                "Invalid equipment definition",
+            )?;
+            require(
+                a.consumable.as_ref().is_none_or(|consumable| {
+                    let spec: tor_simulation::ConsumableSpec = consumable.clone().into();
+                    a.class == ItemClass::Potion && spec.valid()
+                }),
+                "Invalid consumable definition",
+            )?;
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
-            let signature = (&a.name, &a.appearance_pool, a.class);
+            let signature = (
+                &a.name,
+                &a.appearance_pool,
+                a.class,
+                &a.equipment,
+                &a.consumable,
+            );
             if let Some(previous) = signatures.insert(identity, signature) {
                 require(
                     previous == signature,
-                    "One identity must have one name, appearance pool and physical class",
+                    "One identity must have one name, appearance pool, physical class and item effects",
                 )?;
             }
             if let Some(pool) = &a.appearance_pool {
@@ -1733,11 +1796,17 @@ impl Package {
                 .archetypes
                 .values()
                 .filter(|a| a.appearance_pool.as_ref() == Some(key))
-                .map(|a| a.class)
+                .map(|a| {
+                    (
+                        a.class,
+                        a.equipment.as_ref().map(|e| e.slot),
+                        a.consumable.is_some(),
+                    )
+                })
                 .collect();
             require(
                 classes.len() <= 1,
-                "Appearance pool must have one physical class",
+                "Appearance pool must have one physical class and interaction affordances",
             )?;
             require(
                 label(key)
@@ -2344,6 +2413,21 @@ impl Package {
                 spec,
             )
             .map_err(|e| contextualize(fail(format!("Item {}: {e:?}", i.id))))?;
+            if let Some(slot) = i.equipped_slot {
+                let owner = i
+                    .carried_by
+                    .ok_or_else(|| contextualize(fail("Starting equipment must be carried")))?;
+                game.equip_authored(
+                    tor_simulation::ActorId(owner),
+                    tor_simulation::ItemId(i.id),
+                    tor_simulation::EquipmentSlotId(slot),
+                )
+                .map_err(|_| {
+                    contextualize(fail(
+                        "Starting equipment does not fit anatomy or occupied slot",
+                    ))
+                })?;
+            }
         }
         for c in &definitions.characters {
             if c.creature.control.spawned() && homes.get(&c.id).is_some_and(|h| keep(h.region.0)) {
@@ -2547,6 +2631,32 @@ mod tests {
         package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Weapon;
         assert!(package.appearance_mapping(42).is_err());
         package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Potion;
+        assert!(package.appearance_mapping(42).is_ok());
+    }
+
+    #[test]
+    fn appearance_pools_share_affordances_while_effects_remain_distinct() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = read_package(&path).unwrap();
+        package
+            .manifest
+            .archetypes
+            .get_mut("healing")
+            .unwrap()
+            .consumable = Some(ConsumableSpec {
+            effects: vec![EffectSpec::Heal { amount: 5 }],
+        });
+        assert!(package.appearance_mapping(42).is_err());
+        package
+            .manifest
+            .archetypes
+            .get_mut("poison")
+            .unwrap()
+            .consumable = Some(ConsumableSpec {
+            effects: vec![EffectSpec::Damage {
+                components: BTreeMap::from([(DamageType::Vital, 8)]),
+            }],
+        });
         assert!(package.appearance_mapping(42).is_ok());
     }
     use super::*;
@@ -2838,6 +2948,8 @@ mod tests {
         );
         regions[0].actors.extend([
             Actor {
+                anatomy: None,
+                known_identities: vec![],
                 id: 2,
                 at: [3, 1, 0],
                 archetype: Some("guard".into()),
@@ -2849,6 +2961,8 @@ mod tests {
                 velocity: None,
             },
             Actor {
+                anatomy: None,
+                known_identities: vec![],
                 id: 3,
                 at: [4, 1, 0],
                 archetype: Some("guard".into()),
@@ -2862,6 +2976,7 @@ mod tests {
         ]);
         regions[0].items.extend([
             Item {
+                equipped_slot: None,
                 class: None,
                 id: 3,
                 at: [1, 1, 0],
@@ -2874,6 +2989,7 @@ mod tests {
                 seed_names: vec![],
             },
             Item {
+                equipped_slot: None,
                 class: None,
                 id: 4,
                 at: [1, 1, 0],

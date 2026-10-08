@@ -17,6 +17,11 @@ pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
 mod items;
 pub use items::{ItemClass, ItemSpec};
+mod interactions;
+pub use interactions::{
+    AnatomySpec, ConsumableSpec, EffectSpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
+    InteractionView, ItemInteractionView, PreparationView, Work,
+};
 pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;
@@ -60,6 +65,9 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
+    Equip { item: ItemId, slot: EquipmentSlotId },
+    Unequip { item: ItemId },
+    Drink { item: ItemId },
     Attack { target: ActorId },
     SetDoor { door: u64, open: bool },
     Move(Direction),
@@ -88,6 +96,9 @@ pub enum GameError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    ItemStarted {
+        work: Work,
+    },
     AttackStarted {
         target: ActorId,
     },
@@ -129,6 +140,8 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Actor {
+    anatomy: Shared<AnatomySpec>,
+    equipment: BTreeMap<EquipmentSlotId, ItemId>,
     pending: Option<combat::Preparation>,
     combat: Option<combat::CombatState>,
     body: Shared<BodySpec>,
@@ -327,6 +340,8 @@ impl Game {
         self.actors.insert(
             id,
             Actor {
+                anatomy: Shared::default(),
+                equipment: BTreeMap::new(),
                 combat: None,
                 pending: None,
                 body: Shared::default(),
@@ -547,7 +562,8 @@ impl Game {
         self.actors
             .iter()
             .filter(|(id, a)| {
-                a.alive() && a.pending.as_ref().is_none_or(|p| !p.active)
+                a.alive()
+                    && a.pending.as_ref().is_none_or(|p| !p.active)
                     && !self.actor_frozen(**id)
             })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))

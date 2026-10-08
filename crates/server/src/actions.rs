@@ -4,11 +4,23 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     Attack { target: tor_simulation::ActorId },
+    Equip { item: u64, slot: u16 },
+    Unequip { item: u64 },
+    Drink { item: u64 },
     SetDoor { door: u64, open: bool },
     Move { direction: Direction },
     Take { item: u64, quantity: Option<u64> },
     Drop { item: u64, quantity: Option<u64> },
     Wait,
+}
+
+impl Action {
+    pub(crate) fn is_prepared(&self) -> bool {
+        matches!(
+            self,
+            Self::Attack { .. } | Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. }
+        )
+    }
 }
 
 /// Directions supported by backend requests and recorded action facts.
@@ -123,6 +135,28 @@ mod tests {
         let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
         let observer = wire::ActorId(1);
         let mut cases = vec![
+            (
+                Action::Equip {
+                    item: u64::MAX,
+                    slot: u16::MAX,
+                },
+                sim::Action::Equip {
+                    item: sim::ItemId(u64::MAX),
+                    slot: sim::EquipmentSlotId(u16::MAX),
+                },
+            ),
+            (
+                Action::Unequip { item: u64::MAX },
+                sim::Action::Unequip {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
+            (
+                Action::Drink { item: u64::MAX },
+                sim::Action::Drink {
+                    item: sim::ItemId(u64::MAX),
+                },
+            ),
             (
                 Action::Attack {
                     target: sim::ActorId(u64::MAX),

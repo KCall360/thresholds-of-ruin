@@ -373,7 +373,7 @@ fn immediate_completion_is_distinct_from_admitted_gameplay() {
 #[test]
 fn readiness_is_required_and_does_not_accept_extra_authority() {
     let samples: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/wire-v31.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/wire-v32.json")).unwrap();
     assert_eq!(samples["protocol"], PROTOCOL_VERSION);
     let snapshot = samples["server"]
         .as_array()

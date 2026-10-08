@@ -13,7 +13,7 @@ struct WorkPhase {
     intention: Id,
     phase: Phase,
     /// Original execution target, derived from the typed start record.
-    target: Option<ActorId>,
+    preparation: Option<tor_simulation::Work>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -47,7 +47,7 @@ impl ActorPhases {
             *slot = Some(WorkPhase {
                 intention: id,
                 phase,
-                target: None,
+                preparation: None,
             });
         }
         Ok(())
@@ -230,7 +230,7 @@ impl<'a> JournalLifecycle<'a> {
         phases.get(&actor)?.phase(id)
     }
 
-    fn target_at(&self, phases: &Phases, id: Id) -> Option<ActorId> {
+    fn work_at(&self, phases: &Phases, id: Id) -> Option<tor_simulation::Work> {
         let actor = self.root(id)?.entry.actor;
         phases
             .get(&actor)?
@@ -238,7 +238,7 @@ impl<'a> JournalLifecycle<'a> {
             .iter()
             .flatten()
             .find(|work| work.intention == id)?
-            .target
+            .preparation
     }
 
     fn phase(&self, id: Id) -> Result<Phase, Failure> {
@@ -379,7 +379,7 @@ impl<'a> JournalLifecycle<'a> {
                     return Err(invalid_archive());
                 }
                 self.transition(*intention, Phase::Running)?;
-                if let Action::Attack { target } = action {
+                if let Some(preparation) = adapt::work(action) {
                     let actor = self
                         .root(*intention)
                         .ok_or_else(invalid_archive)?
@@ -394,9 +394,9 @@ impl<'a> JournalLifecycle<'a> {
                         .flatten()
                         .find(|work| work.intention == *intention)
                         .ok_or_else(invalid_archive)?
-                        .target = Some(ActorId(target.0));
+                        .preparation = Some(preparation);
                 }
-                if !matches!(action, Action::Attack { .. }) {
+                if !action.is_prepared() {
                     self.require_end(record, *intention, IntentionEndKind::Resolved)?;
                 }
             }
@@ -547,7 +547,7 @@ impl<'a> JournalLifecycle<'a> {
                         | tor_simulation::IntentionWork::AiDecision
                 ) | (
                     Some(Phase::ProgressQueued | Phase::ProgressQueueSuspended),
-                    tor_simulation::IntentionWork::ResumeAttack { .. }
+                    tor_simulation::IntentionWork::ResumePreparation { .. }
                 )
             );
             work_matches_phase
@@ -566,7 +566,7 @@ impl<'a> JournalLifecycle<'a> {
                 progress.intention.is_none_or(|id| {
                     self.root(id).is_some_and(|root| {
                         root.entry.actor.0 == actor.0
-                            && self.target_at(phases, id) == Some(ActorId(progress.target.0))
+                            && self.work_at(phases, id) == Some(progress.work)
                     }) && match self.phase_at(phases, id) {
                         Some(Phase::Running) => progress.active,
                         Some(

@@ -122,8 +122,9 @@ mod tests {
         let mut decoded: Pool = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(decoded.capture(&queue).entries, suspended.entries);
         assert_eq!(serde_json::to_vec(&decoded).unwrap(), bytes);
-        queue.entries.get_mut(&ActorId(1)).unwrap().work =
-            IntentionWork::ResumeAttack { target: ActorId(2) };
+        queue.entries.get_mut(&ActorId(1)).unwrap().work = IntentionWork::ResumePreparation {
+            work: crate::Work::Attack { target: ActorId(2) },
+        };
         pool.capture(&queue);
         assert_eq!(pool.entries.len(), 4);
     }

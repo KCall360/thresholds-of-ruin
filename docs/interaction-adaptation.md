@@ -35,8 +35,10 @@ September benchmark results for measurements of the adapted implementation.
 The original dirty work is archived and the adaptation branch is based on PR #87.
 Physical classes and ASCII glyphs are implemented. Preparation now belongs to the
 actor rather than its combat state, preserving existing attack behavior and
-saved intention identity. Equipment, consumables, AI item actions and generalized
-work variants are not implemented on this branch yet.
+saved intention identity. Generalized preparation, anatomy-based equipment and
+shared immediate healing/damage effects are now implemented in the simulation,
+server, authoring and transport boundaries. Client controls and knowledge-limited
+AI item actions remain outstanding.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -53,6 +55,19 @@ combat tests, 18 region-lifecycle tests and five server tests covering preparati
 identity, persistence rejection, paused recovery, independent admissions and
 rewind/recovery lineage. These are focused checks, not a full-suite claim.
 
-Next: generalize preparation within the current saved-intention and
-region-lifecycle architecture, then add anatomy-based equipment and initial
-shared consumable effects.
+The equipment/effect foundation has focused simulation and server tests for
+completion timing, damage interruption, same-admission continuation, concealed
+statistics, duplicate anatomy sockets, death drops, observable identification,
+consumed objectives, replay and checkpoint restoration. The affected simulation
+integration suite passes 99 tests, the protocol suite passes 51 tests, and focused
+server checks cover preparation recovery, action/save schemas and appearance
+pool affordances. Seven documentation checks pass. Anatomy definitions are
+shared after checkpoint decoding, matching the existing refactor architecture.
+A real server/headless-client process case passes for starting gear, equipment
+changes, equipped-drop rejection, consumption and checkpoint restart. All 34
+scenario certificates and current wire samples have been regenerated.
+
+Next: finish text/ASCII interaction controls and completion narration, then add
+knowledge-limited AI item decisions and final performance/desktop/CI closeout.
+Active item work and equipped gear already pass frozen and detached checkpoint
+round trips, including completion after reattachment.

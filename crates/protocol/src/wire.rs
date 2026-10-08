@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 31;
+pub const PROTOCOL_VERSION: u32 = 32;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +214,16 @@ pub enum Action {
     Attack {
         target: ActorTarget,
     },
+    Equip {
+        item: ItemTarget,
+        slot: u16,
+    },
+    Unequip {
+        item: ItemTarget,
+    },
+    Drink {
+        item: ItemTarget,
+    },
     SetDoor {
         door: DoorTarget,
         open: bool,
@@ -318,6 +328,8 @@ pub struct MotionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactions: Option<InteractionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub combat: Option<CombatView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<MotionView>,
@@ -333,6 +345,70 @@ pub struct Observation {
     pub inventory: Vec<ItemView>,
     pub visible_actors: Vec<ActorView>,
     pub ready: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EquipmentSlot {
+    Weapon,
+    BodyArmor,
+    Shield,
+    HeadArmor,
+    HandsArmor,
+    FeetArmor,
+    Cloak,
+    Ring,
+    Amulet,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DamageType {
+    Energy,
+    Impact,
+    Keen,
+    Spirit,
+    Vital,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttackView {
+    pub bonus: i32,
+    #[serde(with = "crate::integers::unsigned")]
+    pub wind_up: u64,
+    #[serde(with = "crate::integers::unsigned")]
+    pub recovery: u64,
+    pub damage: std::collections::BTreeMap<DamageType, u32>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EquipmentView {
+    pub attack: Option<AttackView>,
+    pub defense: i32,
+    pub reductions: std::collections::BTreeMap<DamageType, u32>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ItemInteractionView {
+    pub item: ItemTarget,
+    pub slot: Option<EquipmentSlot>,
+    pub equipped_slot: Option<u16>,
+    pub known_equipment: Option<EquipmentView>,
+    pub drinkable: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparationView {
+    pub action: Action,
+    #[serde(with = "crate::integers::unsigned")]
+    pub remaining: u64,
+    pub active: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InteractionView {
+    pub slots: Vec<EquipmentSlot>,
+    pub preparation: Option<PreparationView>,
+    pub inventory: Vec<ItemInteractionView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -552,6 +628,9 @@ pub enum Command {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     PreparationPaused,
+    ItemStarted {
+        action: Action,
+    },
     AttackStarted {
         target: ActorTarget,
     },

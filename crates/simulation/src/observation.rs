@@ -92,6 +92,7 @@ pub struct MotionView {
 /// Disclosed facts for one actor, separate from the authoritative game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
+    pub interactions: Option<crate::interactions::InteractionView>,
     pub combat: Option<crate::combat::CombatView>,
     pub motion: Option<MotionView>,
     pub actor: ActorId,
@@ -150,6 +151,7 @@ impl Game {
         let occurrences: BTreeSet<_> = scene.iter().map(|c| (c.location, c.rotation)).collect();
         let mut ground_items = Vec::new();
         let mut inventory = Vec::new();
+        let mut item_interactions = Vec::new();
         for (item_id, item) in self.items.perceived(id, &cells) {
             crate::diagnostics::item_view(item.spec.concealed);
             let identified = !item.spec.concealed || actor.knowledge.contains(&item.spec.identity);
@@ -174,6 +176,20 @@ impl Game {
                     });
                 }
                 ItemLocation::Carried(owner) if owner == id => {
+                    if item.spec.equipment.is_some() || item.spec.consumable.is_some() {
+                        item_interactions.push(crate::interactions::ItemInteractionView {
+                            item: item_id,
+                            slot: item.spec.equipment.as_ref().map(|equipment| equipment.slot),
+                            equipped_slot: actor
+                                .equipment
+                                .iter()
+                                .find_map(|(slot, item)| (*item == item_id).then_some(*slot)),
+                            known_equipment: identified
+                                .then(|| item.spec.equipment.clone())
+                                .flatten(),
+                            drinkable: item.spec.consumable.is_some(),
+                        });
+                    }
                     inventory.push(ItemView {
                         class: item.spec.class,
                         description: item_description(name),
@@ -189,6 +205,26 @@ impl Game {
             }
         }
         Ok(Observation {
+            interactions: (!actor.anatomy.slots.is_empty()
+                || actor.pending.is_some()
+                || !item_interactions.is_empty())
+            .then(|| crate::interactions::InteractionView {
+                slots: actor.anatomy.slots.clone(),
+                preparation: actor.pending.as_ref().map(|progress| {
+                    crate::interactions::PreparationView {
+                        work: progress.work,
+                        remaining: if progress.active {
+                            progress.remaining.saturating_sub(
+                                self.actor_clock(id).saturating_sub(progress.started),
+                            )
+                        } else {
+                            progress.remaining
+                        },
+                        active: progress.active,
+                    }
+                }),
+                inventory: item_interactions,
+            }),
             combat: self.combat_view(id, &visible, &perceived),
             motion: self.motion_view_active(id).then_some(MotionView {
                 velocity: actor.motion.velocity,

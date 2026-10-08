@@ -143,6 +143,7 @@ fn told(beat: &Beat) -> bool {
             | Beat::SetDoor { .. }
             | Beat::Waited
             | Beat::AttackBegan
+            | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)
@@ -668,6 +669,7 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
                 if *open { "open" } else { "close" }
             )),
             Beat::Waited => teller.say("time passes"),
+            Beat::ItemBegan(text) => teller.say(text.trim_end_matches('.')),
             Beat::AttackBegan => teller.say("you ready an attack"),
             _ => {}
         }
@@ -787,6 +789,7 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::SetDoor { .. }
             | Beat::Waited
             | Beat::AttackBegan
+            | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
             | Beat::Barred(_)

@@ -1031,6 +1031,12 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             Event::Waited => "Waited.".into(),
             Event::PreparationPaused => "Preparation paused.".into(),
             Event::AttackStarted { .. } => "Prepared an attack.".into(),
+            Event::ItemStarted { action } => match action {
+                tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
+                tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
+                tor_protocol::Action::Drink { .. } => "Began drinking an item.".into(),
+                _ => "Began preparation.".into(),
+            },
         },
         HistoryContent::Annotation { text, category, .. } => {
             format!("{:?} {:?}: {text}", entry.audience, category)

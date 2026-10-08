@@ -27,7 +27,8 @@ pub struct Preparation {
     /// Backend admission identity; assigned before wind-up can advance.
     #[serde(deserialize_with = "deserialize_intention_context")]
     pub intention: Option<crate::IntentionId>,
-    pub target: ActorId,
+    pub work: crate::Work,
+    pub threats: BTreeSet<ActorId>,
     pub remaining: u64,
     pub started: u64,
     pub active: bool,
@@ -125,6 +126,11 @@ pub enum DisclosedCombatEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CombatEvent {
+    ItemCompleted {
+        actor: ActorId,
+        work: crate::Work,
+        intention: Option<crate::IntentionId>,
+    },
     Resolved {
         #[serde(deserialize_with = "deserialize_intention_context")]
         intention: Option<crate::IntentionId>,
@@ -188,8 +194,10 @@ impl Game {
             && self.combat.characters.iter().all(known)
             && self.combat.objective.as_ref().is_none_or(|o| {
                 self.world.knows(o.anchor)
-                    && o.item
-                        .is_none_or(|id| self.items.contains_key(&id) || self.detached_item(id))
+                    // An objective item can have been consumed. Keep its issued
+                    // identity so the objective remains unmet, without requiring
+                    // a live stack or permitting a future/unissued identity.
+                    && o.item.is_none_or(|id| id.0 > 0 && id.0 < self.next_item_id)
             })
             && self
                 .combat
@@ -202,24 +210,11 @@ impl Game {
                 .deceased
                 .is_none_or(|id| self.combat.selected == Some(id) && !self.alive(id))
             && self.actors.iter().all(|(id, actor)| {
-                (actor.pending.is_none() || actor.combat.is_some())
-                    && actor.combat.as_ref().is_none_or(|c| {
-                        c.spec.valid()
-                            && c.hp <= c.spec.max_hp
-                            && actor.pending.as_ref().is_none_or(|p| {
-                                c.hp > 0
-                                    && p.target != *id
-                                    && self.actors.contains_key(&p.target)
-                                    && p.remaining <= c.spec.attack.wind_up
-                                    && p.started <= self.tick
-                                    && p.started
-                                        .checked_add(p.remaining)
-                                        .and_then(|t| t.checked_add(c.spec.attack.recovery))
-                                        .is_some()
-                                    && (!p.active
-                                        || p.started + p.remaining >= self.actor_clock(*id))
-                            })
-                    })
+                self.work_state_valid(*id)
+                    && actor
+                        .combat
+                        .as_ref()
+                        .is_none_or(|c| c.spec.valid() && c.hp <= c.spec.max_hp)
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()
@@ -430,13 +425,17 @@ impl Game {
         actor: ActorId,
         damage: &BTreeMap<DamageType, u32>,
     ) -> u32 {
+        let Some(effective) = self.effective_combat(actor) else {
+            return 0;
+        };
+        let damage_taken = effective.damage_taken(damage);
         let Some(mut edited) = self.actors.get_mut(&actor) else {
             return 0;
         };
         let Some(state) = edited.combat.as_mut() else {
             return 0;
         };
-        let loss = state.spec.damage_taken(damage).min(state.hp);
+        let loss = damage_taken.min(state.hp);
         state.hp -= loss;
         let died = loss > 0 && state.hp == 0;
         let mut interrupted = false;
@@ -473,6 +472,7 @@ impl Game {
         self.combat.input_boundaries.remove(&id);
         let mut actor = self.actors.get_mut(&id).unwrap();
         actor.pending = None;
+        actor.equipment.clear();
         let location = actor.location;
         let motion = actor.motion.clone();
         let orientation = actor.orientation;
@@ -529,7 +529,7 @@ impl Game {
         self.actors.get(&actor)?.pending.as_ref()
     }
 
-    pub fn pause_preparation(&mut self, actor: ActorId) -> Option<ActorId> {
+    pub fn pause_preparation(&mut self, actor: ActorId) -> Option<crate::Work> {
         let mut a = self.actors.get_mut(&actor)?;
         let p = a.pending.as_mut()?;
         if !p.active {
@@ -539,10 +539,10 @@ impl Game {
             .remaining
             .saturating_sub(self.tick.saturating_sub(p.started));
         p.active = false;
-        let target = p.target;
+        let work = p.work;
         a.ready_at = self.tick;
         self.combat.input_boundaries.insert(actor);
-        Some(target)
+        Some(work)
     }
 
     pub fn attack_available(&self, actor: ActorId, target: ActorId) -> bool {
@@ -627,28 +627,6 @@ impl Game {
         destination.map(|(at, _)| at)
     }
 
-    pub(crate) fn start_attack(
-        &mut self,
-        actor: ActorId,
-        target: ActorId,
-        intention: Option<crate::IntentionId>,
-    ) {
-        let mut edited = self.actors.get_mut(&actor).unwrap();
-        let wind_up = edited.combat.as_ref().unwrap().spec.attack.wind_up;
-        let remaining = edited
-            .pending
-            .as_ref()
-            .filter(|p| p.target == target)
-            .map_or(wind_up, |p| p.remaining);
-        edited.pending = Some(Preparation {
-            intention,
-            target,
-            remaining,
-            started: self.tick,
-            active: true,
-        });
-    }
-
     pub(crate) fn next_attack_tick(&self) -> Option<u64> {
         self.actors
             .iter()
@@ -671,7 +649,7 @@ impl Game {
             let Some(p) = self.preparation(id).cloned() else {
                 continue;
             };
-            let valid = self.attack_available(id, p.target);
+            let valid = self.work_duration(id, p.work).is_ok();
             if !valid || self.physics.displaced.contains(&id) {
                 self.actors.get_mut(&id).unwrap().pending = None;
                 if p.active {
@@ -686,24 +664,35 @@ impl Game {
             if !p.active {
                 continue;
             }
+            if p.work.item().is_some() && !self.visible_hostiles(id).is_subset(&p.threats) {
+                self.pause_preparation(id);
+                self.combat.events.push(CombatEvent::Interrupted {
+                    actor: id,
+                    intention: p.intention,
+                });
+                if self.is_ai(id) {
+                    self.combat.input_boundaries.remove(&id);
+                }
+                continue;
+            }
             if p.started + p.remaining > self.tick {
                 continue;
             }
-            let attack = self.actors[&id]
-                .combat
-                .as_ref()
-                .unwrap()
-                .spec
-                .attack
-                .clone();
-            let defense = self.actors[&p.target].combat.as_ref().unwrap().spec.defense;
+            self.actors.get_mut(&id).unwrap().pending = None;
+            let Some(target) = p.work.target() else {
+                self.actors.get_mut(&id).unwrap().ready_at = self.tick;
+                self.finish_item_work(id, p.work, p.intention);
+                continue;
+            };
+            let attack = self.effective_combat(id).unwrap().attack.clone();
+            let defense = self.effective_combat(target).unwrap().defense;
             let hit = hits(self.combat.d20(), attack.bonus, defense);
             self.actors.get_mut(&id).unwrap().pending = None;
             self.actors.get_mut(&id).unwrap().ready_at = self.tick + attack.recovery;
             // The blow comes before any death it causes.
             let resolved = self.combat.events.len();
             let damage = if hit {
-                self.apply_damage(p.target, &attack.damage)
+                self.apply_damage(target, &attack.damage)
             } else {
                 0
             };
@@ -712,7 +701,7 @@ impl Game {
                 CombatEvent::Resolved {
                     intention: p.intention,
                     actor: id,
-                    target: p.target,
+                    target,
                     hit,
                     damage,
                 },

@@ -63,7 +63,10 @@ fn every_actor_applies_effects_before_recovery_and_uses_the_same_scheduler() {
             assert_eq!(outcome.next_tick, if acting_second { 100 } else { 0 });
             let observed = game.observe(actor).unwrap();
             match action {
-                Action::Attack { .. } => unreachable!("combat has separate timing tests"),
+                Action::Attack { .. }
+                | Action::Equip { .. }
+                | Action::Unequip { .. }
+                | Action::Drink { .. } => unreachable!("prepared work has separate timing tests"),
                 Action::Drop { .. } => unreachable!("tested separately"),
                 Action::Wait => assert_eq!(outcome.kind, OutcomeKind::Waited),
                 Action::Take { .. } => {
