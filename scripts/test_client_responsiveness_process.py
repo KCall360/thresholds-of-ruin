@@ -1,7 +1,9 @@
 """Native input during blocked saving/checkpoints, and bounded burst delivery."""
 import sqlite3
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from process_harness import ProcessTestCase
 
@@ -77,27 +79,32 @@ class ClientResponsivenessProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--observe", "--report-frames"])
         self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         key = self.native_keys(window)
-        player.child.stdin.write('{"type":"act","action":{"type":"wait"}}\n' * 160)
-        player.child.stdin.flush()
-        started = time.monotonic()
-        key("F4", True)
-        opened = self.ascii_frame(window, lambda f: f["note"] == "")
-        key("F4", False)
-        self.assertLess(time.monotonic()-started, 1.5)
-        self.assertTrue(opened["connected"])
-        final = None
-        for _ in range(160):
-            final = self.frame(player, lambda f: f.get("type") == "ready")
-            self.assertIsNone(final["error"])
-        # The last ready frame acknowledges admission; effects follow on the
-        # ordered simulation stream. Compare both frontends at that completion.
-        if final["state"]["observation"]["tick"] != '16000':
-            pending = next(s for s in final["intentions"] if s["phase"] == "queued")
-            final = self.frame(player, lambda f: (
-                (f.get("message") or {}).get("type") == "update"
-                and f["message"]["update"]["body"]["type"] == "intention"
-                and f["message"]["update"]["body"]["status"]["intention"] == pending["intention"]
-                and f["message"]["update"]["body"]["status"]["phase"] == "resolved"))
+        first_completed = threading.Event()
+
+        def produce_burst():
+            # Admission acknowledges a queued intention, not permission for the
+            # next action. Keep producing independently of the native reader,
+            # but wait for authoritative readiness instead of relying on the
+            # simulation worker beating the next stdin line.
+            final = None
+            for _ in range(160):
+                final = self.act(player, {"type": "wait"})
+                self.assertIsNone(final["error"])
+                if not final["readiness"]["admission"]:
+                    final = self.frame(player, lambda f: f["readiness"]["admission"])
+                first_completed.set()
+            return final
+
+        with ThreadPoolExecutor(max_workers=1) as producer:
+            burst = producer.submit(produce_burst)
+            self.assertTrue(first_completed.wait(15))
+            started = time.monotonic()
+            key("F4", True)
+            opened = self.ascii_frame(window, lambda f: f["note"] == "")
+            key("F4", False)
+            self.assertLess(time.monotonic()-started, 1.5)
+            self.assertTrue(opened["connected"])
+            final = burst.result()
         self.assertEqual(final["state"]["observation"]["tick"], '16000')
         presented = opened if opened["state"]["observation"]["tick"] == '16000' else self.ascii_frame(
             window, lambda f: f["state"]["observation"]["tick"] == '16000')

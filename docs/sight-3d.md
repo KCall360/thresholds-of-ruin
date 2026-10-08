@@ -364,6 +364,12 @@ including restart at every observer height. No test was ignored or waived.
 Native captures were reviewed separately. Windows/Linux debug/release CI remains
 the required publication gate.
 
+The first closeout CI run exposed an inherited native burst test that submitted
+another action before authoritative admission reopened. Its producer now waits
+for readiness while running independently of the native reader. The acceptance
+requirements remain 160 executed actions, responsive native input, equal final
+state, bounded history and network events, and the exact saved checkpoint.
+
 This audit changes no production sight algorithm or latency-sensitive behavior,
 so it makes no new performance claim.
 Dense-falling physics and unexplained save tails remain tracked under deferred
