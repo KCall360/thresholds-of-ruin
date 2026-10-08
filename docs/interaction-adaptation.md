@@ -191,3 +191,7 @@ fixture. Current version-24 metadata is now captured from the production writer,
 including interaction and AI packages, and checked against its fixed golden
 fixture. The old package records remain rejection cases. All 251 server unit
 tests pass locally after this update; no compatibility reader was introduced.
+Ledger preparation exposed a conversion bug for the streaming workload's
+`streaming-v1` identifier. The import now separates its name and numeric version
+without relaxing ledger validation. All 44 focused comparison/ledger tooling
+tests pass, including an actual CLI regression and malformed identifier checks.
