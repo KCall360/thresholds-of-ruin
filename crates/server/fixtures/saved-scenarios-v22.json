@@ -1,0 +1,481 @@
+{
+  "two-room": {
+    "seed": 42,
+    "actors": [],
+    "regions": 2,
+    "workload_version": null,
+    "package": {
+      "manifest": {
+        "factions": {},
+        "ai_profiles": {},
+        "format": 2,
+        "id": "two-room",
+        "version": "1.1",
+        "ruleset": "dungeon-v23",
+        "default_character": 1,
+        "themes": [
+          "stone"
+        ],
+        "zones": {
+          "entry": {
+            "themes": null,
+            "terrain": null
+          }
+        },
+        "archetypes": {
+          "tablet": {
+            "combat": null,
+            "body": null,
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": false,
+            "properties": {},
+            "name": "stone tablet",
+            "turn_ticks": null,
+            "asset": null
+          },
+          "token": {
+            "combat": null,
+            "body": null,
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": false,
+            "properties": {},
+            "name": "copper token",
+            "turn_ticks": null,
+            "asset": null
+          }
+        },
+        "appearance_pools": {},
+        "characters": [
+          {
+            "combat": null,
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 80
+            },
+            "velocity": null,
+            "known_identities": [],
+            "id": 1,
+            "anchor": "1/start",
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "ai": null,
+            "asset": null
+          }
+        ],
+        "objective": null,
+        "assets": {},
+        "terrain": null
+      },
+      "certificate": {
+        "validator": "tor-scenario-8",
+        "ruleset": "dungeon-v23",
+        "content_hash": "c50136a5e4df324376c59ad4a346d5a3024215b1db9e8b1593be5796d6deb9da",
+        "files": {
+          "index.json": "bee1a394db851dec4719dbb6cd6aa8accf5e393d669b04820b0d22da9592ebf6",
+          "scenario.toml": "540fe3fa2af723c90b21683776dee54946c5d5cf294c022093a19eb7f28805f4"
+        },
+        "regions": 2,
+        "model_hash": "c9085d0b1f9852005c4decce3311bb2b86e9b8a3e884753773d028e0a72d881e",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
+      },
+      "validated": true,
+      "selected": 1,
+      "directory": null
+    },
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    }
+  },
+  "items": {
+    "seed": 42,
+    "actors": [],
+    "regions": 1,
+    "workload_version": null,
+    "package": {
+      "manifest": {
+        "factions": {},
+        "ai_profiles": {},
+        "format": 2,
+        "id": "items",
+        "version": "1.0",
+        "ruleset": "dungeon-v23",
+        "default_character": 1,
+        "themes": [],
+        "zones": {},
+        "archetypes": {
+          "arrow": {
+            "combat": null,
+            "body": null,
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": true,
+            "properties": {},
+            "name": "arrow",
+            "turn_ticks": null,
+            "asset": null
+          },
+          "healing": {
+            "combat": null,
+            "body": null,
+            "identity": "healing",
+            "appearance_pool": "potions",
+            "stackable": true,
+            "properties": {},
+            "name": "potion of healing",
+            "turn_ticks": null,
+            "asset": null
+          },
+          "poison": {
+            "combat": null,
+            "body": null,
+            "identity": "poison",
+            "appearance_pool": "potions",
+            "stackable": true,
+            "properties": {},
+            "name": "potion of poison",
+            "turn_ticks": null,
+            "asset": null
+          }
+        },
+        "appearance_pools": {
+          "potions": {
+            "appearances": [
+              "red potion"
+            ],
+            "confounding": true,
+            "asset": null
+          }
+        },
+        "characters": [
+          {
+            "combat": null,
+            "body": null,
+            "velocity": null,
+            "known_identities": [],
+            "id": 1,
+            "anchor": "1/start",
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "ai": null,
+            "asset": null
+          },
+          {
+            "combat": null,
+            "body": null,
+            "velocity": null,
+            "known_identities": [
+              "healing"
+            ],
+            "id": 2,
+            "anchor": "1/start",
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "ai": null,
+            "asset": null
+          }
+        ],
+        "objective": null,
+        "assets": {},
+        "terrain": null
+      },
+      "certificate": {
+        "validator": "tor-scenario-8",
+        "ruleset": "dungeon-v23",
+        "content_hash": "5db2a6f82fb4d5175c5cd3628b5ecfe0e00a962be8cfce88195520ec99e152aa",
+        "files": {
+          "index.json": "627d7475f237af746d70dacd2d21432a773dbfb78190f5834f7db0dabebc1d84",
+          "scenario.toml": "237275898d65712d7fb17a48dbe13782403eee9a6bfe41f021ed9f1db6975fa9"
+        },
+        "regions": 1,
+        "model_hash": "06bfa778e9add4bf64a9f336da8722316cd7d575ae38c7cb16e2fe7a9e4de76a",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
+      },
+      "validated": true,
+      "selected": 1,
+      "directory": null
+    },
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    }
+  },
+  "first-dungeon": {
+    "seed": 42,
+    "actors": [],
+    "regions": 5,
+    "workload_version": null,
+    "package": {
+      "manifest": {
+        "factions": {
+          "delvers": [
+            "ruin"
+          ],
+          "neutral": [],
+          "ruin": [
+            "delvers"
+          ]
+        },
+        "ai_profiles": {
+          "tactical": {
+            "memory_ticks": 1000,
+            "flee_percent": 25
+          }
+        },
+        "format": 2,
+        "id": "first-dungeon",
+        "version": "1.0",
+        "ruleset": "dungeon-v23",
+        "default_character": 1,
+        "themes": [
+          "ruined-stone",
+          "scavengers"
+        ],
+        "zones": {},
+        "archetypes": {
+          "guardian": {
+            "combat": {
+              "name": "stone guardian",
+              "max_hp": 18,
+              "defense": 12,
+              "attack": {
+                "bonus": 3,
+                "wind_up": 130,
+                "recovery": 70,
+                "damage": {
+                  "impact": 4
+                }
+              },
+              "immunities": [],
+              "reductions": {
+                "impact": 2
+              },
+              "faction": "ruin"
+            },
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 120
+            },
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": false,
+            "properties": {},
+            "name": null,
+            "turn_ticks": null,
+            "asset": null
+          },
+          "scout": {
+            "combat": {
+              "name": "ruin scout",
+              "max_hp": 10,
+              "defense": 9,
+              "attack": {
+                "bonus": 1,
+                "wind_up": 80,
+                "recovery": 50,
+                "damage": {
+                  "keen": 2
+                }
+              },
+              "immunities": [],
+              "reductions": {},
+              "faction": "ruin"
+            },
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 60
+            },
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": false,
+            "properties": {},
+            "name": null,
+            "turn_ticks": null,
+            "asset": null
+          },
+          "wisp": {
+            "combat": {
+              "name": "ember wisp",
+              "max_hp": 8,
+              "defense": 10,
+              "attack": {
+                "bonus": 2,
+                "wind_up": 70,
+                "recovery": 80,
+                "damage": {
+                  "energy": 3
+                }
+              },
+              "immunities": [
+                "energy"
+              ],
+              "reductions": {},
+              "faction": "ruin"
+            },
+            "body": null,
+            "identity": null,
+            "appearance_pool": null,
+            "stackable": false,
+            "properties": {},
+            "name": null,
+            "turn_ticks": null,
+            "asset": null
+          }
+        },
+        "appearance_pools": {},
+        "characters": [
+          {
+            "combat": {
+              "name": "delver",
+              "max_hp": 50,
+              "defense": 12,
+              "attack": {
+                "bonus": 5,
+                "wind_up": 60,
+                "recovery": 40,
+                "damage": {
+                  "keen": 7
+                }
+              },
+              "immunities": [],
+              "reductions": {},
+              "faction": "delvers"
+            },
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 80
+            },
+            "velocity": null,
+            "known_identities": [],
+            "id": 1,
+            "anchor": "1/exit",
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "ai": null,
+            "asset": null
+          }
+        ],
+        "objective": {
+          "anchor": "1/exit",
+          "item": 100,
+          "disclosed": true,
+          "continue_play": false
+        },
+        "assets": {},
+        "terrain": null
+      },
+      "certificate": {
+        "validator": "tor-scenario-8",
+        "ruleset": "dungeon-v23",
+        "content_hash": "aa509abc0d76833861d96e3d59dddef4666011f670a34677b53ad1a568db6292",
+        "files": {
+          "index.json": "f9b60ee13575d89fed902eb99f57aaf76bebc852b69d562f6296ea7a04401a4e",
+          "scenario.toml": "cc19857f342d6e265999bb59bcfd706796118ccfb630737be941444884a80d6a"
+        },
+        "regions": 5,
+        "model_hash": "4f2fb428e458457d054709c5c46c627668f21b62d35010ae71d2104d51536404",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
+      },
+      "validated": true,
+      "selected": 1,
+      "directory": null
+    },
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    }
+  },
+  "diagnostic": {
+    "seed": 42,
+    "actors": [
+      {
+        "position": {
+          "region": 1,
+          "x": 2,
+          "y": 4,
+          "z": 0
+        },
+        "turn_ticks": 100
+      },
+      {
+        "position": {
+          "region": 1,
+          "x": 6,
+          "y": 1,
+          "z": 0
+        },
+        "turn_ticks": 100
+      }
+    ],
+    "regions": 8,
+    "workload_version": 1,
+    "package": null,
+    "streaming": null
+  }
+}

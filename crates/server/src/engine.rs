@@ -722,6 +722,7 @@ pub(crate) struct Archive {
     pub(crate) wizard_game: bool,
     pub(crate) version: u32,
     pub(crate) ruleset: String,
+    #[serde(with = "crate::storage::schema::scenario")]
     pub(crate) scenario: Scenario,
     #[serde(with = "crate::storage::schema::BranchId")]
     pub(crate) branch: BranchId,

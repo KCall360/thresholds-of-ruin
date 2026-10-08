@@ -742,6 +742,27 @@ fn model_hash(manifest: &Manifest, index: &RegionIndex) -> Result<String, Failur
 }
 
 impl Package {
+    /// Restore only stored metadata. Storage attaches the bounded index and lazy
+    /// region sources separately before validating or exposing the scenario.
+    pub(crate) fn from_saved_metadata(
+        manifest: Manifest,
+        certificate: Certificate,
+        validated: bool,
+        selected: u64,
+        directory: Option<String>,
+    ) -> Self {
+        Self {
+            manifest,
+            certificate,
+            validated,
+            selected,
+            directory,
+            index: Default::default(),
+            sources: Default::default(),
+            manifest_text: None,
+        }
+    }
+
     fn assemble(
         manifest: Manifest,
         manifest_text: &str,
@@ -2339,6 +2360,31 @@ impl tor_simulation::RecordStore for PackageRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_scenario_encoding_borrows_definitions_without_region_acquisition() {
+        #[derive(Serialize)]
+        struct StoredScenario<'a>(#[serde(with = "crate::storage::schema::scenario")] &'a Scenario);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/first-dungeon");
+        let scenario = load(&root, 42, None, false).unwrap();
+        let package = scenario.package.as_ref().unwrap();
+        let reads = package.sources.files_read();
+        ARCHETYPE_DEFINITION_COPIES.with(|copies| copies.set(0));
+        let saved = serde_json::to_value(StoredScenario(&scenario)).unwrap();
+        assert_eq!(ARCHETYPE_DEFINITION_COPIES.with(|copies| copies.get()), 0);
+        assert_eq!(package.sources.files_read(), reads);
+        let metadata = saved["package"].as_object().unwrap();
+        assert_eq!(
+            metadata.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "certificate",
+                "directory",
+                "manifest",
+                "selected",
+                "validated"
+            ]
+        );
+    }
 
     #[test]
     fn missing_identity_name_does_not_blame_a_valid_appearance_pool_reference() {

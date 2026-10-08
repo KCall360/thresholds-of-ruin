@@ -1,5 +1,6 @@
 """Real-process save barriers, acknowledged rollback, and transaction interruption."""
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -7,10 +8,62 @@ import sys
 import time
 import unittest
 
-from process_harness import ProcessTestCase
+from process_harness import ProcessTestCase, TOKEN, package_path
 
 
 class BackgroundSaveProcesses(ProcessTestCase):
+    def test_saved_package_index_rejects_duplicate_and_missing_canonical_fields(self):
+        server = self.server(scenario="two-room")
+        player, _ = self.client()
+        completed = self.act(player, {"type": "wait"})
+        self.assertIsNone(self.request(player, {"type": "save"})["error"])
+        player.stop()
+        server.stop()
+        server = self.server(scenario="two-room")
+        player, restored = self.client()
+        self.assertEqual(restored["state"], completed["state"])
+        self.assertEqual(restored["history"], completed["history"])
+        player.stop()
+        server.stop()
+        with sqlite3.connect(self.save) as db:
+            chunks = db.execute("SELECT chunk,bytes FROM package ORDER BY chunk").fetchall()
+        self.assertEqual([chunk for chunk, _ in chunks], [0])
+        text = chunks[0][1].decode("utf-8")
+        self.assertIn('"id":1', text)
+        self.assertIn('"start":[1,1,0]', text)
+        self.assertIn('"zone":null,', text)
+        cases = {
+            "duplicate-collection": text.replace('"regions":', '"regions":[],"regions":', 1),
+            "duplicate-region-id": text.replace('"id":1', '"id":0,"id":1', 1),
+            "duplicate-anchor": text.replace('"start":[1,1,0]', '"start":[0,0,0],"start":[1,1,0]', 1),
+            "missing-null-field": text.replace('"zone":null,', '', 1),
+            "unknown-field": text.replace('{', '{"unrecognized":true,', 1),
+        }
+        for name, malformed in cases.items():
+            with self.subTest(shape=name):
+                corrupted = self.directory / f"{name}.db"
+                shutil.copyfile(self.save, corrupted)
+                with sqlite3.connect(corrupted) as db:
+                    db.execute("UPDATE package SET bytes=? WHERE chunk=0", [malformed.encode("utf-8")])
+                before = corrupted.read_bytes()
+                env = {key: value for key, value in os.environ.items()
+                       if key not in ("TOR_SPECTATOR_TOKEN", "TOR_WIZARD_TOKEN")}
+                try:
+                    result = subprocess.run(
+                        [self.bin / ("tor-server" + self.suffix), "--listen", "127.0.0.1:0",
+                         "--save", corrupted, "--scenario", package_path("two-room")],
+                        env={**env, "TOR_SERVER_TOKEN": TOKEN}, capture_output=True,
+                        text=True, encoding="utf-8", timeout=5)
+                except subprocess.TimeoutExpired as error:
+                    output = error.stdout or b""
+                    if isinstance(output, bytes):
+                        output = output.decode("utf-8")
+                    self.assertIn('"address":', output, "failure must prove the server reached its listener")
+                    self.fail(f"Server accepted noncanonical saved package index: {name}")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("InvalidArchive", result.stderr)
+                self.assertEqual(corrupted.read_bytes(), before, "rejected save must remain unchanged")
+
     def test_checkpointed_shutdown_releases_the_journal_for_immediate_restarts(self):
         server = self.server("--checkpoint-interval", 1, scenario="two-room")
         player, _ = self.client()

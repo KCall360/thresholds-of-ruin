@@ -2785,3 +2785,32 @@ integrations, 11 real scenario process cases and six item/palette process checks
 passed, along with workspace Clippy and changed Python lint. Final review is
 complete; the debug publication gate and publication remain pending.
 No format axis changed. The other original refactor obligations remain open.
+
+**Scenario reference ownership published and deployed (2026-10-08).**
+[PR #79](https://github.com/KCall360/thresholds-of-ruin/pull/79) merged as
+`9c3c847` after all nine [exact-head CI jobs](https://github.com/KCall360/thresholds-of-ruin/actions/runs/37730888414)
+passed on `76ff104`. Full local debug verification passed 304 Python/application
+and 931 Rust tests, formatting, Clippy, architecture and strict Rust documentation
+on 544 unchanged inputs, with no waiver. The inactive immutable desktop candidate
+passed 33 real-client/copied-validator checks without rebuilding. All three
+launchers now use it; post-activation source, binary, backup and shortcut hashes
+were verified. Earlier builds and saves remain preserved.
+
+**Save scenario ownership (in development).** Actual-process regressions proved
+that the stored package index accepted duplicate anchor-map keys and omitted
+canonical nullable fields. Save-owned schemas now explicitly map scenario,
+fixture actor/coordinate, streaming, package, nested manifest/certificate and
+indexed-region values. The index uses the same strict save decoder and sorted
+identity validation. Authoring JSON parsing remains a separate boundary.
+Encoding borrows definitions without copying archetypes or reading region files;
+decoding moves fields into runtime values and constructs containers directly.
+Four canonical fixtures captured from the pre-refactor writer pin existing save
+shapes. Golden-format and malformed-index unit checks passed, and all 28 actual
+save/scenario/streaming process checks passed, including the failing-first cases.
+Eight schema units, the borrowed-encoding check, five checkpoint, twelve package-
+pinning and seven scenario integrations, and workspace Clippy passed. Targeted
+release comparison and publication verification remain pending.
+Save 22 and all other format axes are unchanged. The portable export contract is
+[documented separately](checkpoints.md#portable-export-contract-design); its
+container, compression and commands are not implemented. Further compiler,
+measured performance and final requirements audit work remain in scope.

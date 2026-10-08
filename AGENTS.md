@@ -650,14 +650,25 @@ jobs passed before merge. All 31 copied-release real-client checks passed. The
 three desktop launchers use immutable `2f79b3d`; post-activation hashes verified
 sources, binaries, backups and shortcuts. Previous builds and saves remain intact.
 
-**Scenario reference ownership (in development).** Shared declaration provenance
-now lives in diagnostics, with numeric and named parser-backed selectors and no
-guessed stale locations. Both character-anchor checks share one lookup; missing
-identity names cannot blame a valid appearance-pool reference. Prepared compilation
-and palette discovery share the concealed-item asset rule. Failing-first actual
-validator and missing-name regressions passed; all 32 scenario units, 220 server
-units, nine scenario integrations, seven palette integrations, 11 scenario process
-cases and six item/palette process checks passed, along with workspace Clippy
-and changed Python lint. Final review is complete; the debug publication gate
-is next. Publication and broader compiler/save/performance obligations
-remain open; no scripting runtime, text-product changes or format advance added.
+**Scenario reference ownership (merged/deployed, PR #79).** Shared declaration
+provenance belongs to diagnostics; character anchors and concealed-item assets
+use one rule each. Full debug passed 304 Python/application and 931 Rust tests
+on 544 unchanged inputs, without waiver; all nine exact-head CI jobs passed.
+All 33 copied-release client/validator checks passed. The three desktop launchers
+use immutable `76ff104`; source, binary, backup and shortcut hashes were verified
+after activation. Previous builds and saves remain available.
+
+**Save scenario ownership (in development).** Explicit save schemas now cover
+scenario/actor/coordinate/streaming values, package metadata, nested authoring
+schemas and the separately stored region index. Encoding borrows definitions;
+decoding moves fields and builds containers directly. Diagnostic text, caches and
+derived topology are excluded, and region acquisition stays lazy. Actual-process
+regressions failed first for duplicate anchor keys and omitted canonical index
+fields, then passed; all 28 save/scenario/streaming process checks passed.
+Pre-refactor writer fixtures pin four current-format scenario shapes. Eight schema
+units, the borrowed-encoding test, five checkpoint, twelve package-pinning and
+seven scenario integrations, and workspace Clippy passed. Targeted release
+comparison and publication verification remain pending. Save 22 and
+other format axes are unchanged. Portable export is documented as a future
+contract in [checkpoints](docs/checkpoints.md); no export or scripting runtime is
+implemented. All remaining compiler/performance/final-audit obligations stay open.

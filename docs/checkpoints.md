@@ -73,6 +73,53 @@ private annotations, retry payloads and abandoned futures remain retained. The
 database therefore still grows with retained history; checkpointing does not delete
 history or run a blocking `VACUUM` to shrink the file.
 
+## Stored scenario ownership
+
+The archive's scenario and the separate package-index table use save-owned
+schemas with explicit mappings to runtime values. These schemas cover fixture
+actors and coordinates, streaming settings, package metadata, nested manifest
+definitions, certificates and indexed regions. Encoding borrows definitions;
+decoding moves fields into the runtime and builds each container once. Authoring
+and runtime serde changes therefore cannot silently redefine the stored fields.
+
+The package index and copied region sources remain separate from base metadata.
+Metadata decoding initializes no runtime cache, acquires no region file and
+stores no diagnostic source text. Storage attaches the bounded index and lazy
+source reader before the engine validates and exposes the recovered scenario.
+The stored index uses the same strict JSON checks as other save payloads,
+including duplicate keys and canonical field presence, then requires unique
+increasing region identities. The generated-region flag retains its existing
+omission when false. These mappings preserve save format 22 and current writer
+shapes; they add no old-format importer.
+
+## Portable export contract (design)
+
+Portable export is a future operation separate from live storage and ordinary
+recovery. Its versioned envelope should describe a self-contained, consistent
+durable save boundary and a manifest of content identities and digests. The
+payload must preserve the checkpoint, replay tail, retained history and branches,
+receipt identities, suspended intentions and identity high-water marks together.
+Export must not acknowledge or discard an unsaved tail implicitly: first obtain
+an explicit durable boundary, then capture a consistent read snapshot without
+holding the engine lock during packaging.
+
+The content manifest must cover the pinned scenario definitions, index and every
+region source needed for future activation, including unbuilt regions. Export
+may acquire and verify those sources explicitly; ordinary restart remains lazy.
+Package-directory paths are locators and must not become portable identities.
+Missing or mismatched resources fail the export, leaving the original save
+unchanged. Connection credentials, observer stream contexts, derived topology
+indexes and runtime caches are excluded; save-owned identity state is retained.
+
+A future import should validate supported save, rules, authoring and envelope
+versions independently, bound both encoded and expanded resources, reject
+duplicate identities and unsafe paths, verify digests, and run the same strict
+save/recovery invariants before making the result available. It should create a
+new destination atomically and preserve existing saves. Compression, container
+layout and export/import commands remain undecided and unimplemented. Future
+extension state must use the typed ownership and deterministic scheduling
+contracts in the [refactor plan](refactoring.md#future-scenario-extension-contracts).
+
 ## Recovery and limits
 
 Loading checks the format, SQLite integrity of the journal, history and
