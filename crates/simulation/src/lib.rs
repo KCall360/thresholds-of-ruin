@@ -129,6 +129,7 @@ pub struct ActionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Actor {
+    pending: Option<combat::Preparation>,
     combat: Option<combat::CombatState>,
     body: Shared<BodySpec>,
     motion: MotionState,
@@ -327,6 +328,7 @@ impl Game {
             id,
             Actor {
                 combat: None,
+                pending: None,
                 body: Shared::default(),
                 motion: MotionState::default(),
                 location,
@@ -441,10 +443,8 @@ impl Game {
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
-        if let Some(combat) = &mut actor.combat {
-            if combat.pending.take().is_some() {
-                actor.ready_at = clock;
-            }
+        if actor.pending.take().is_some() {
+            actor.ready_at = clock;
         }
         actor.visited.insert(location.region);
         drop(actor);
@@ -547,9 +547,7 @@ impl Game {
         self.actors
             .iter()
             .filter(|(id, a)| {
-                a.combat
-                    .as_ref()
-                    .is_none_or(|c| c.hp > 0 && c.pending.as_ref().is_none_or(|p| !p.active))
+                a.alive() && a.pending.as_ref().is_none_or(|p| !p.active)
                     && !self.actor_frozen(**id)
             })
             .min_by_key(|(id, actor)| (actor.ready_at, **id))

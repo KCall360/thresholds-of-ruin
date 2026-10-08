@@ -595,7 +595,7 @@ impl Game {
         }
         let mut actor = self.actors.get_mut(&id).expect("stamped actor");
         actor.ready_at = actor.ready_at.saturating_add(delta);
-        if let Some(pending) = actor.combat.as_mut().and_then(|c| c.pending.as_mut()) {
+        if let Some(pending) = actor.pending.as_mut() {
             pending.started += delta;
         }
         if let Some((_, _, seen)) = self
@@ -715,11 +715,7 @@ impl Game {
     /// A loaded actor's live references: its body and any attack in progress.
     fn live_regions(&self, id: ActorId) -> BTreeSet<RegionId> {
         let mut live = self.body_regions(id);
-        let target = self.actors[&id]
-            .combat
-            .as_ref()
-            .and_then(|c| c.pending.as_ref())
-            .map(|p| p.target);
+        let target = self.actors[&id].pending.as_ref().map(|p| p.target);
         if let Some(target) = target {
             if self.actors.contains_key(&target) {
                 live.extend(self.body_regions(target));

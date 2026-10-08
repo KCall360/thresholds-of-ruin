@@ -33,8 +33,10 @@ September benchmark results for measurements of the adapted implementation.
 ## Current progress
 
 The original dirty work is archived and the adaptation branch is based on PR #87.
-Physical classes and ASCII glyphs are implemented. Equipment, consumables, AI item
-actions and generalized preparation are not implemented on this branch yet.
+Physical classes and ASCII glyphs are implemented. Preparation now belongs to the
+actor rather than its combat state, preserving existing attack behavior and
+saved intention identity. Equipment, consumables, AI item actions and generalized
+work variants are not implemented on this branch yet.
 
 Verified locally: workspace all-target compile check; 50 protocol integration
 tests; 33 ASCII model tests followed by four focused memory tests after expanding
@@ -45,6 +47,11 @@ hidden potion identities, category glyphs, save/restart and existing remembered
 map/rewind behavior. Current wire samples were recorded through real processes.
 The concealed-placement regression failed before its restriction was added.
 Full suites and targeted release profiling remain outstanding.
+
+The preparation ownership refactor passes 25 simulation intention tests, 14
+combat tests, 18 region-lifecycle tests and five server tests covering preparation
+identity, persistence rejection, paused recovery, independent admissions and
+rewind/recovery lineage. These are focused checks, not a full-suite claim.
 
 Next: generalize preparation within the current saved-intention and
 region-lifecycle architecture, then add anatomy-based equipment and initial

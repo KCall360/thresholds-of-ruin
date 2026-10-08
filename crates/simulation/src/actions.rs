@@ -150,7 +150,7 @@ impl Game {
                     return Err(GameError::InvalidLocation);
                 }
                 let c = actor.combat.as_ref().unwrap();
-                let duration = c
+                let duration = actor
                     .pending
                     .as_ref()
                     .filter(|p| p.target == target)
@@ -254,9 +254,7 @@ impl Game {
             kind,
             OutcomeKind::Waited | OutcomeKind::AttackStarted { .. }
         ) {
-            if let Some(c) = actor.combat.as_mut() {
-                c.pending = None;
-            }
+            actor.pending = None;
         }
         if let OutcomeKind::Moved { to, .. } = kind {
             actor.location = to;

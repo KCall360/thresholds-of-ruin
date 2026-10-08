@@ -19,7 +19,6 @@ where
 pub(crate) struct CombatState {
     pub spec: tor_world::Shared<CombatSpec>,
     pub hp: u32,
-    pub pending: Option<Preparation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,22 +202,24 @@ impl Game {
                 .deceased
                 .is_none_or(|id| self.combat.selected == Some(id) && !self.alive(id))
             && self.actors.iter().all(|(id, actor)| {
-                actor.combat.as_ref().is_none_or(|c| {
-                    c.spec.valid()
-                        && c.hp <= c.spec.max_hp
-                        && c.pending.as_ref().is_none_or(|p| {
-                            c.hp > 0
-                                && p.target != *id
-                                && self.actors.contains_key(&p.target)
-                                && p.remaining <= c.spec.attack.wind_up
-                                && p.started <= self.tick
-                                && p.started
-                                    .checked_add(p.remaining)
-                                    .and_then(|t| t.checked_add(c.spec.attack.recovery))
-                                    .is_some()
-                                && (!p.active || p.started + p.remaining >= self.actor_clock(*id))
-                        })
-                })
+                (actor.pending.is_none() || actor.combat.is_some())
+                    && actor.combat.as_ref().is_none_or(|c| {
+                        c.spec.valid()
+                            && c.hp <= c.spec.max_hp
+                            && actor.pending.as_ref().is_none_or(|p| {
+                                c.hp > 0
+                                    && p.target != *id
+                                    && self.actors.contains_key(&p.target)
+                                    && p.remaining <= c.spec.attack.wind_up
+                                    && p.started <= self.tick
+                                    && p.started
+                                        .checked_add(p.remaining)
+                                        .and_then(|t| t.checked_add(c.spec.attack.recovery))
+                                        .is_some()
+                                    && (!p.active
+                                        || p.started + p.remaining >= self.actor_clock(*id))
+                            })
+                    })
             })
             && self.combat.ai.iter().all(|(id, ai)| {
                 self.health(*id).is_some()
@@ -302,7 +303,7 @@ impl Game {
         Some(CombatView {
             hp: c.hp,
             max_hp: c.spec.max_hp,
-            preparation_remaining: c.pending.as_ref().map(|p| {
+            preparation_remaining: a.pending.as_ref().map(|p| {
                 if p.active {
                     p.remaining
                         .saturating_sub(self.tick.saturating_sub(p.started))
@@ -310,8 +311,8 @@ impl Game {
                     p.remaining
                 }
             }),
-            preparation_active: c.pending.as_ref().is_some_and(|p| p.active),
-            recovery_remaining: if c.pending.is_none() {
+            preparation_active: a.pending.as_ref().is_some_and(|p| p.active),
+            recovery_remaining: if a.pending.is_none() {
                 a.ready_at.saturating_sub(self.tick)
             } else {
                 0
@@ -411,10 +412,10 @@ impl Game {
             return Err(GameError::InvalidLocation);
         }
         let mut actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
+        actor.pending = None;
         actor.combat = Some(CombatState {
             hp: spec.max_hp,
             spec: tor_world::Shared::new(spec),
-            pending: None,
         });
         Ok(())
     }
@@ -441,7 +442,7 @@ impl Game {
         let mut interrupted = false;
         let mut intention = None;
         if loss > 0 {
-            if let Some(pending) = state.pending.as_mut().filter(|p| p.active) {
+            if let Some(pending) = edited.pending.as_mut().filter(|p| p.active) {
                 pending.remaining = pending
                     .remaining
                     .saturating_sub(self.tick.saturating_sub(pending.started));
@@ -471,7 +472,7 @@ impl Game {
     fn finish_death(&mut self, id: ActorId) {
         self.combat.input_boundaries.remove(&id);
         let mut actor = self.actors.get_mut(&id).unwrap();
-        actor.combat.as_mut().unwrap().pending = None;
+        actor.pending = None;
         let location = actor.location;
         let motion = actor.motion.clone();
         let orientation = actor.orientation;
@@ -525,12 +526,12 @@ impl Game {
     }
 
     pub fn preparation(&self, actor: ActorId) -> Option<&Preparation> {
-        self.actors.get(&actor)?.combat.as_ref()?.pending.as_ref()
+        self.actors.get(&actor)?.pending.as_ref()
     }
 
     pub fn pause_preparation(&mut self, actor: ActorId) -> Option<ActorId> {
         let mut a = self.actors.get_mut(&actor)?;
-        let p = a.combat.as_mut()?.pending.as_mut()?;
+        let p = a.pending.as_mut()?;
         if !p.active {
             return None;
         }
@@ -633,13 +634,13 @@ impl Game {
         intention: Option<crate::IntentionId>,
     ) {
         let mut edited = self.actors.get_mut(&actor).unwrap();
-        let c = edited.combat.as_mut().unwrap();
-        let remaining = c
+        let wind_up = edited.combat.as_ref().unwrap().spec.attack.wind_up;
+        let remaining = edited
             .pending
             .as_ref()
             .filter(|p| p.target == target)
-            .map_or(c.spec.attack.wind_up, |p| p.remaining);
-        c.pending = Some(Preparation {
+            .map_or(wind_up, |p| p.remaining);
+        edited.pending = Some(Preparation {
             intention,
             target,
             remaining,
@@ -652,7 +653,7 @@ impl Game {
         self.actors
             .iter()
             .filter(|(id, _)| !self.actor_frozen(**id))
-            .filter_map(|(_, a)| a.combat.as_ref()?.pending.as_ref())
+            .filter_map(|(_, a)| a.pending.as_ref())
             .filter(|p| p.active)
             .map(|p| p.started + p.remaining)
             .min()
@@ -672,13 +673,7 @@ impl Game {
             };
             let valid = self.attack_available(id, p.target);
             if !valid || self.physics.displaced.contains(&id) {
-                self.actors
-                    .get_mut(&id)
-                    .unwrap()
-                    .combat
-                    .as_mut()
-                    .unwrap()
-                    .pending = None;
+                self.actors.get_mut(&id).unwrap().pending = None;
                 if p.active {
                     self.actors.get_mut(&id).unwrap().ready_at = self.tick;
                 }
@@ -703,13 +698,7 @@ impl Game {
                 .clone();
             let defense = self.actors[&p.target].combat.as_ref().unwrap().spec.defense;
             let hit = hits(self.combat.d20(), attack.bonus, defense);
-            self.actors
-                .get_mut(&id)
-                .unwrap()
-                .combat
-                .as_mut()
-                .unwrap()
-                .pending = None;
+            self.actors.get_mut(&id).unwrap().pending = None;
             self.actors.get_mut(&id).unwrap().ready_at = self.tick + attack.recovery;
             // The blow comes before any death it causes.
             let resolved = self.combat.events.len();

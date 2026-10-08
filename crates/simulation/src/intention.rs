@@ -471,14 +471,11 @@ impl Game {
         let Some(mut state) = self.actors.get_mut(&actor) else {
             return false;
         };
-        let Some(combat) = state.combat.as_mut() else {
-            return false;
-        };
-        let Some(preparation) = combat.pending.as_ref().filter(|p| p.intention == Some(id)) else {
+        let Some(preparation) = state.pending.as_ref().filter(|p| p.intention == Some(id)) else {
             return false;
         };
         let active = preparation.active;
-        combat.pending = None;
+        state.pending = None;
         if active {
             state.ready_at = self.tick;
         }
@@ -630,9 +627,7 @@ impl Game {
             && self
                 .actors
                 .iter()
-                .filter_map(|(actor, state)| {
-                    Some((*actor, state.combat.as_ref()?.pending.as_ref()?))
-                })
+                .filter_map(|(actor, state)| Some((*actor, state.pending.as_ref()?)))
                 .all(|(actor, preparation)| {
                     preparation.intention.is_none_or(|id| {
                         id.0 != 0
@@ -1161,8 +1156,7 @@ mod tests {
             let value = serde_json::to_value(&snapshot).unwrap();
             let mut pool = serde_json::to_value(&shared).unwrap();
             let actors = value["actors"].as_u64().unwrap() as usize;
-            pool["actors"][actors]["1"]["combat"]["pending"]["intention"] =
-                serde_json::json!(corrupt);
+            pool["actors"][actors]["1"]["pending"]["intention"] = serde_json::json!(corrupt);
             let invalid_shared = serde_json::from_value(pool).unwrap();
             assert!(Game::restore_checkpoint(
                 serde_json::from_value(value).unwrap(),

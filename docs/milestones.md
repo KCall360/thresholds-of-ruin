@@ -232,6 +232,12 @@ or generalized recipe syntax is implemented by this plan update.
 
 ### 4f — Subsequent interaction extensions
 
+Adaptation is in progress from PR #87. Physical item classes and ASCII symbols
+are implemented with disclosure, memory and recovery tests; preparation has
+moved onto actors while retaining attack behavior. Equipment, item effects and
+item-aware AI remain in progress. See [interaction adaptation](interaction-adaptation.md)
+for scope, retained work and focused verification.
+
 Equipment after items, then item effects and other selected interactions.
 Equipment changes and item use consume simulation time and can be interrupted,
 using the shared progress/resume model. Capacity and weight, containers, locks
