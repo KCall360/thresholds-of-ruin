@@ -17,7 +17,7 @@ mod diagnostics;
 mod instantiation;
 pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
 use compiler::PreparedDefinitions;
-use diagnostics::Origin;
+use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tor_simulation::Game;
@@ -1389,13 +1389,25 @@ impl Package {
             .iter()
             .map(|(id, a)| a.identity.as_ref().unwrap_or(id))
             .collect();
-        require(
-            self.manifest
-                .characters
-                .iter()
-                .all(|c| c.known_identities.iter().all(|id| identities.contains(id))),
-            "Unknown initial item identity",
-        )?;
+        for character in &self.manifest.characters {
+            for (index, identity) in character.known_identities.iter().enumerate() {
+                require(
+                    identities.contains(identity),
+                    "Unknown initial item identity",
+                )
+                .map_err(|failure| {
+                    Origin::Character(character.id).reference_path(
+                        failure,
+                        self.manifest_text.as_deref(),
+                        &[
+                            PathSegment::Field("known_identities"),
+                            PathSegment::Index(index),
+                        ],
+                        ReferenceValue::Text(identity),
+                    )
+                })?;
+            }
+        }
         let mut actor_ids = BTreeSet::new();
         for c in &self.manifest.characters {
             require(
@@ -1423,12 +1435,24 @@ impl Package {
                     && (1..=8).contains(&r.size[2]),
                 format!("Region {}: invalid ID/name/bounds", r.id),
             )?;
-            require(
-                r.zone
-                    .as_ref()
-                    .is_none_or(|z| self.manifest.zones.contains_key(z)),
-                "Unknown zone reference",
-            )?;
+            if let Some(zone) = &r.zone {
+                require(
+                    self.manifest.zones.contains_key(zone),
+                    "Unknown zone reference",
+                )
+                .map_err(|failure| {
+                    self.region_reference(
+                        r.id,
+                        Origin::Region {
+                            file: &r.file,
+                            id: r.id,
+                        },
+                        failure,
+                        &[PathSegment::Field("zone")],
+                        ReferenceValue::Text(zone),
+                    )
+                })?;
+            }
             for a in &r.actors {
                 require(
                     a.id > 0 && a.id < u64::MAX && actor_ids.insert(a.id),
@@ -1471,9 +1495,19 @@ impl Package {
         for r in &self.index.regions {
             for i in &r.items {
                 if let Some(owner) = i.carried_by {
-                    let start = starts
-                        .get(&owner)
-                        .ok_or_else(|| fail("Unknown inventory owner"))?;
+                    let start = starts.get(&owner).ok_or_else(|| {
+                        self.region_reference(
+                            r.id,
+                            Origin::Item {
+                                file: &r.file,
+                                region: r.id,
+                                id: i.id,
+                            },
+                            fail("Unknown inventory owner"),
+                            &[PathSegment::Field("carried_by")],
+                            ReferenceValue::Id(owner),
+                        )
+                    })?;
                     require(
                         *start == r.id,
                         format!(
@@ -1484,34 +1518,111 @@ impl Package {
                 }
             }
         }
-        if let Some(o) = &self.manifest.objective {
+        if let Some(objective) = &self.manifest.objective {
             require(
-                anchors.contains_key(&o.anchor) && o.item.is_none_or(|id| item_ids.contains(&id)),
-                "Invalid objective anchor/item reference",
-            )?;
+                anchors.contains_key(&objective.anchor),
+                "Invalid objective anchor reference",
+            )
+            .map_err(|failure| {
+                Origin::Objective.reference_path(
+                    failure,
+                    self.manifest_text.as_deref(),
+                    &[
+                        PathSegment::Field("objective"),
+                        PathSegment::Field("anchor"),
+                    ],
+                    ReferenceValue::Text(&objective.anchor),
+                )
+            })?;
+            if let Some(item) = objective.item {
+                require(item_ids.contains(&item), "Invalid objective item reference").map_err(
+                    |failure| {
+                        Origin::Objective.reference_path(
+                            failure,
+                            self.manifest_text.as_deref(),
+                            &[PathSegment::Field("objective"), PathSegment::Field("item")],
+                            ReferenceValue::Id(item),
+                        )
+                    },
+                )?;
+            }
         }
         Ok(())
     }
+    /// Acquire diagnostic text only after a reference check fails. Unavailable
+    /// source must never replace the semantic failure or invent coordinates.
+    fn region_reference(
+        &self,
+        region: u64,
+        origin: Origin<'_>,
+        failure: Failure,
+        path: &[PathSegment<'_>],
+        expected: ReferenceValue<'_>,
+    ) -> Failure {
+        let source = self.region_text(region).ok();
+        origin.reference_path(failure, source.as_deref(), path, expected)
+    }
+
     /// What only a region's own file can show: its actors' controllers and
     /// combat. The validator checks every region; building one checks it.
     fn check_region(&self, r: &RegionDef) -> Result<(), Failure> {
         if let Some(generate) = &r.generate {
-            let archetypes = generate
+            let pools = generate
                 .actors
                 .iter()
-                .flat_map(|p| &p.archetypes)
-                .chain(generate.items.iter().flat_map(|p| &p.archetypes));
-            for archetype in archetypes {
-                require(
-                    self.manifest.archetypes.contains_key(archetype),
-                    format!("Region {}: unknown archetype {archetype}", r.id),
-                )?;
+                .map(|pool| ("actors", pool.archetypes.as_slice()))
+                .chain(
+                    generate
+                        .items
+                        .iter()
+                        .map(|pool| ("items", pool.archetypes.as_slice())),
+                );
+            let file = self
+                .index
+                .region(r.id)
+                .map(|entry| entry.file.as_str())
+                .unwrap_or("generated region");
+            let origin = Origin::Region { file, id: r.id };
+            for (kind, archetypes) in pools {
+                for (index, archetype) in archetypes.iter().enumerate() {
+                    require(
+                        self.manifest.archetypes.contains_key(archetype),
+                        format!("Region {}: unknown archetype {archetype}", r.id),
+                    )
+                    .map_err(|failure| {
+                        self.region_reference(
+                            r.id,
+                            origin,
+                            failure,
+                            &[
+                                PathSegment::Field("generate"),
+                                PathSegment::Field(kind),
+                                PathSegment::Field("archetypes"),
+                                PathSegment::Index(index),
+                            ],
+                            ReferenceValue::Text(archetype),
+                        )
+                    })?;
+                }
             }
             if let Some(pool) = &generate.actors {
                 require(
                     self.manifest.ai_profiles.contains_key(&pool.ai),
                     format!("Region {}: unknown AI profile {}", r.id, pool.ai),
-                )?;
+                )
+                .map_err(|failure| {
+                    self.region_reference(
+                        r.id,
+                        origin,
+                        failure,
+                        &[
+                            PathSegment::Field("generate"),
+                            PathSegment::Field("actors"),
+                            PathSegment::Field("ai"),
+                        ],
+                        ReferenceValue::Text(&pool.ai),
+                    )
+                })?;
             }
         }
         for a in &r.actors {
@@ -1987,7 +2098,7 @@ impl Package {
             game.set_gravity(RegionId(r.id), gravity)
                 .map_err(|_| fail("Invalid region gravity"))?;
         }
-        for p in &r.portals {
+        for (index, p) in r.portals.iter().enumerate() {
             let direction = match p.direction.as_str() {
                 "north" => Direction::North,
                 "east" => Direction::East,
@@ -1997,9 +2108,24 @@ impl Package {
                 "down" => Direction::Down,
                 _ => return Err(fail("Invalid portal direction")),
             };
-            let to = *anchors
-                .get(&p.to)
-                .ok_or_else(|| fail(format!("Missing portal anchor {}", p.to)))?;
+            let to = *anchors.get(&p.to).ok_or_else(|| {
+                let file = self
+                    .index
+                    .region(r.id)
+                    .map(|entry| entry.file.as_str())
+                    .unwrap_or("generated region");
+                self.region_reference(
+                    r.id,
+                    Origin::Region { file, id: r.id },
+                    fail(format!("Missing portal anchor {}", p.to)),
+                    &[
+                        PathSegment::Field("portals"),
+                        PathSegment::Index(index),
+                        PathSegment::Field("to"),
+                    ],
+                    ReferenceValue::Text(&p.to),
+                )
+            })?;
             require(
                 p.turns < 4 && !(p.rotation.is_some() && p.turns != 0),
                 "Use rotation for a cube transform, or turns for planar rotation",

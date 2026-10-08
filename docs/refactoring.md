@@ -2837,3 +2837,17 @@ close persistence/restore tails or claim a broad performance improvement. Raw
 samples remain local and no release assets or performance-ledger entries were
 published. The compared Rust and benchmark inputs precede only the documentation
 of these results.
+
+**Scenario reference paths (in development).** Nine failing-first actual-validator
+cases reproduced missing locations for portal destinations, character item
+identities, objective anchors/items, region zones, generator actor/item archetypes,
+generator AI and numeric inventory owners. The existing provenance mechanism now
+traverses typed table fields and array positions and compares decoded string or
+numeric values. Root region references also verify region identity. Validation
+order and lazy source acquisition are retained; stale, unavailable or ambiguous
+source has no invented coordinates. Objective anchor and item errors now identify
+the failing field separately. All 36 scenario unit tests, seven scenario
+integrations, twelve actual scenario process tests and workspace all-target Clippy
+passed. Full publication verification remains pending. No format axis changed.
+Broader compiler ownership, measured performance and final requirements audit
+remain open; this increment does not close the entire refactor.

@@ -23,6 +23,34 @@ class ScenarioPackageProcesses(ProcessTestCase):
         self.assertEqual(error["code"], "scenario_invalid")
         return error
 
+    def test_region_and_generated_references_report_exact_source_values(self):
+        cases = [
+            ("portal", "two-room", "regions/1.toml", '"to" = "2/landing"', '"to" = "2/missing"', '"2/missing"', "portal anchor"),
+            ("known-identity", "tests/items", "scenario.toml", 'known_identities = ["healing"]', 'known_identities = ["healing", "missing"]', '"missing"', "initial item identity"),
+            ("objective-anchor", "first-dungeon", "scenario.toml", 'objective = { anchor = "1/exit"', 'objective = { anchor = "1/missing"', '"1/missing"', "objective anchor"),
+            ("objective-item", "first-dungeon", "scenario.toml", 'item = 100', 'item = 999', '999', "objective"),
+            ("zone", "two-room", "regions/1.toml", 'zone = "entry"', 'zone = "missing"', '"missing"', "zone"),
+            ("generated-actor", "tests/generated-filler", "regions/2.toml", 'archetypes = ["rat"]', 'archetypes = ["rat", "missing"]', '"missing"', "archetype"),
+            ("generated-item", "tests/generated-filler", "regions/2.toml", 'archetypes = ["coin"]', 'archetypes = ["coin", "missing"]', '"missing"', "archetype"),
+            ("generated-ai", "tests/generated-filler", "regions/2.toml", 'ai = "wander"', 'ai = "missing"', '"missing"', "ai profile"),
+            ("carrier", "tests/items", "regions/1.toml", 'id = 10, at = [1, 1, 0]', 'id = 10, at = [1, 1, 0], carried_by = 999', '999', "inventory owner"),
+        ]
+        for name, fixture, source, old, new, expected, diagnostic in cases:
+            with self.subTest(reference=name):
+                package = self.directory / name
+                shutil.copytree(ROOT / "scenarios" / fixture, package)
+                path = package / source
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(text.count(old), 1)
+                text = '# Écho: "missing" and 999 are decoys.\n' + text.replace(old, new)
+                path.write_bytes(text.encode("utf-8"))
+                reference_line = next(line for line in text.splitlines() if new in line)
+                line = text.splitlines().index(reference_line) + 1
+                column = reference_line.index(new) + new.index(expected) + 1
+                error = self.validation_failure(package)
+                self.assertIn(diagnostic, error["message"].lower())
+                self.assertIn(f"{source}:{line}:{column}", error["message"])
+
     def test_missing_identity_name_reports_its_declaration_without_blaming_a_valid_pool(self):
         package = self.directory / "missing-identity-name"
         shutil.copytree(ROOT / "scenarios/tests/items", package)

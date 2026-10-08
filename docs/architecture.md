@@ -441,7 +441,13 @@ scenario inputs in saves. `tor-scenario` explicitly validates complete bounded
 authored packages. Construction calls deterministic simulation/world APIs; these
 crates do not acquire filesystem dependencies. The package schema is independent
 of wizard commands and client protocol types. Clients continue receiving only
-actor-specific observations. See [scenario packages](scenario-packages.md).
+actor-specific observations. Diagnostic provenance is owned by the package
+compiler boundary. One parser-span traversal handles declaration identity,
+root fields, array positions and decoded string/numeric reference values. Source
+is acquired only after a semantic check fails; unavailable or stale provenance
+never replaces the original failure. Diagnostic text is excluded from persistence, and parser state is constructed
+only on the failure path.
+See [scenario packages](scenario-packages.md).
 
 ## Initial content and deferred decisions
 

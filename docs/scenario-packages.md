@@ -34,6 +34,13 @@ writes the region index and binds SHA-256 hashes of the manifest and the index
 validator identity, and recorded coverage. Versions are
 author-controlled `major.minor`; changing a hash does not require a version bump.
 Validator failures produce a nonzero exit status and JSON diagnostics on stderr.
+Reference errors identify their authored declaration and, when its original
+source still matches, the exact line and column of the failing value. This
+includes numeric carrier/item references and individual generator/identity array
+entries. Comments, repeated values and escaped strings do not redirect a
+location. Missing, changed or ambiguous source retains the semantic error and
+declaration context without guessed coordinates. Validation does not rewrite a
+rejected package.
 Stale/missing validation is refused by default: an edited manifest when the
 package loads, and an edited region file when its region is first built, since
 a validated game reads a region file only then. `--allow-unvalidated` reads and
