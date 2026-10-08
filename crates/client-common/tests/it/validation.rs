@@ -15,8 +15,8 @@ pub(super) fn snapshot(revision: u64) -> Snapshot {
                 {"key":"here","position":{"x":0,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false},
                 {"key":"there","position":{"x":1,"y":0,"z":0},"wall":false,"stairs_up":false,"stairs_down":false,"place_hint":false}
             ],
-            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","appearance":"stone","identified":true}}],
-            "inventory":[{"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","appearance":"stone","identified":true}],
+            "ground_items":[{"reachable":false,"position":{"x":1,"y":0,"z":0},"item":{"id":tor_protocol::ItemTarget::from_digest([8; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}}],
+            "inventory":[{"id":tor_protocol::ItemTarget::from_digest([7; 32]),"quantity":"1","name":"stone","class":"misc","appearance":"stone","identified":true}],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":1,"y":0,"z":0}}],
             "combat":{"hp":10,"max_hp":10,"preparation_remaining":null,"preparation_active":false,"recovery_remaining":"0","actors":[],"events":[],"objective":null,"victory":false,"dead":false,"terminal":false},
             "motion":{"velocity":["0","0","0"],"units_per_cell":65536,"displaced":false,"impacted":false},

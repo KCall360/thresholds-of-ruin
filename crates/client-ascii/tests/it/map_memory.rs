@@ -13,7 +13,7 @@ fn snapshot(hidden: bool) -> Snapshot {
                 "key":x.to_string(),"position":{"x":x,"y":0,"z":0},"wall":x==3,
                 "stairs_up":x==2,"stairs_down":false,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
+            "ground_items":if hidden {vec![]} else {vec![serde_json::json!({"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"token"},"position":{"x":1,"y":0,"z":0},"reachable":false})]},
             "visible_actors":if hidden {vec![]} else {vec![serde_json::json!({"id":super::actor_target(2),"position":{"x":2,"y":0,"z":0}})]},
             "inventory":[],"ready":true
         }}
@@ -21,11 +21,69 @@ fn snapshot(hidden: bool) -> Snapshot {
 }
 
 #[test]
+fn item_classes_use_disclosed_pile_order_and_keep_their_remembered_glyph() {
+    let mut snapshot = snapshot(false);
+    let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+    let mut second = observation.ground_items[0].clone();
+    observation.ground_items[0].item.class = ItemClass::Weapon;
+    second.item.id = super::item_target(2);
+    second.item.class = ItemClass::Potion;
+    observation.ground_items.push(second);
+    assert_eq!(tor_client_ascii::glyph_at(observation, 1, 0), ')');
+    let mut state = ClientState::from_snapshot(snapshot).unwrap();
+    assert_eq!(
+        render::map_tiles(&state)
+            .iter()
+            .find(|t| t.position.x == 1)
+            .unwrap()
+            .glyph,
+        ')'
+    );
+    state.replace_snapshot(self::snapshot(true)).unwrap();
+    let tiles = render::map_tiles(&state);
+    let tile = tiles.iter().find(|t| t.position.x == 1).unwrap();
+    assert_eq!(tile.glyph, ')');
+    assert!(tile.remembered);
+    assert_eq!(tile.color, render::MEMORY_COLOR);
+}
+
+#[test]
+fn every_physical_class_draws_its_symbol_through_the_map_renderer() {
+    for (class, glyph) in [
+        (ItemClass::Misc, '('),
+        (ItemClass::Tool, '('),
+        (ItemClass::Weapon, ')'),
+        (ItemClass::Armor, '['),
+        (ItemClass::Potion, '!'),
+        (ItemClass::Food, '%'),
+        (ItemClass::Corpse, '%'),
+        (ItemClass::Amulet, '"'),
+        (ItemClass::Ring, '='),
+        (ItemClass::Scroll, '?'),
+        (ItemClass::Spellbook, '+'),
+        (ItemClass::Wand, '/'),
+        (ItemClass::Coin, '$'),
+        (ItemClass::Gem, '*'),
+    ] {
+        let mut snapshot = snapshot(false);
+        let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+        observation.ground_items[0].item.class = class;
+        assert_eq!(tor_client_ascii::glyph_at(observation, 1, 0), glyph);
+        let state = ClientState::from_snapshot(snapshot).unwrap();
+        let tiles = render::map_tiles(&state);
+        assert_eq!(
+            tiles.iter().find(|t| t.position.x == 1).unwrap().glyph,
+            glyph
+        );
+    }
+}
+
+#[test]
 fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_visible_cells_only() {
     let mut state = ClientState::from_snapshot(snapshot(false)).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
     let tiles = render::map_tiles(&state);
-    for (x, glyph) in [(0, '@'), (1, '!'), (2, '<'), (3, '#')] {
+    for (x, glyph) in [(0, '@'), (1, '('), (2, '<'), (3, '#')] {
         let tile = tiles.iter().find(|t| t.position.x == x).unwrap();
         assert_eq!(tile.glyph, glyph);
         assert_eq!(tile.remembered, x != 0);

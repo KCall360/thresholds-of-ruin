@@ -491,7 +491,9 @@ fn detaching_and_reattaching_equals_only_freezing() {
     }
     game.configure_ai(hunter, AiProfile::default()).unwrap();
     game.configure_ai(prey, AiProfile::default()).unwrap();
-    game.place_authored_item(60, at(3, 7, 1), "coin".into(), None)
+    let mut coin = tor_simulation::ItemSpec::ordinary("coin".into());
+    coin.class = tor_simulation::ItemClass::Coin;
+    game.place_item_stack(60, at(3, 7, 1), None, 1, coin)
         .unwrap();
     game.place_authored_item(61, at(3, 4, 2), "key".into(), Some(keeper))
         .unwrap();

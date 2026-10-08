@@ -254,8 +254,32 @@ struct AppearancePool {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::scenario_package::ItemClass",
+    rename_all = "snake_case"
+)]
+enum ItemClass {
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "source::Archetype", deny_unknown_fields)]
 struct Archetype {
+    #[serde(with = "mapped")]
+    class: crate::scenario_package::ItemClass,
     #[serde(with = "mapped")]
     combat: Option<source::CombatSpec>,
     #[serde(with = "mapped")]
@@ -426,6 +450,7 @@ remote!(
     TerrainAssets => source::TerrainAssets,
     AppearancePool => source::AppearancePool,
     Archetype => source::Archetype,
+    ItemClass => crate::scenario_package::ItemClass,
     Character => source::Character,
     Objective => source::Objective,
     AiProfile => source::AiProfile,

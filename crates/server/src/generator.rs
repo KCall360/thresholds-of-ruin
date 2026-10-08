@@ -327,6 +327,7 @@ pub(crate) fn materialize(
             .enumerate()
         {
             out.items.push(Item {
+                class: None,
                 quantity: 1,
                 stackable: None,
                 properties: BTreeMap::new(),

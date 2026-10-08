@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **30**, save format **22**, ruleset
-**`dungeon-v23`**, scenario validator **`tor-scenario-8`**. The server rejects
+**Current formats:** protocol **31**, save format **23**, ruleset
+**`interactions-v24`**, scenario validator **`tor-scenario-9`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.

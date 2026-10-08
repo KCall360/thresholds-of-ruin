@@ -13,7 +13,7 @@ fn synthetic_digest(index: u64) -> [u8; 32] {
 
 fn views(count: usize, case: &str) -> (StateView, StateView) {
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/wire-v30.json")).unwrap();
+        serde_json::from_str(include_str!("../tests/fixtures/wire-v31.json")).unwrap();
     assert_eq!(fixture["protocol"], PROTOCOL_VERSION);
     let message = fixture["server"]
         .as_array()
@@ -37,6 +37,7 @@ fn views(count: usize, case: &str) -> (StateView, StateView) {
     o.visible_actors.clear();
     for index in 0..count {
         let item = ItemView {
+            class: Default::default(),
             quantity: 1,
             appearance: "disclosed appearance".repeat(4),
             identified: true,

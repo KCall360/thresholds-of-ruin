@@ -16,7 +16,7 @@ mod physics;
 pub use physics::{BodySpec, Impact, MotionState, PhysicsEntity};
 mod item_store;
 mod items;
-pub use items::ItemSpec;
+pub use items::{ItemClass, ItemSpec};
 pub mod checkpoint;
 pub mod diagnostics;
 mod fixture;

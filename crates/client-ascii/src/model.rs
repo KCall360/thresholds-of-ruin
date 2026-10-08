@@ -997,8 +997,8 @@ pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
     if o.visible_actors.iter().any(|a| a.position == position) {
         return '&';
     }
-    if o.ground_items.iter().any(|i| i.position == position) {
-        return '!';
+    if let Some(item) = o.ground_items.iter().find(|i| i.position == position) {
+        return item_glyph(item.item.class);
     }
     if let Some(door) = &cell.door {
         return if door.open { '/' } else { '+' };
@@ -1062,4 +1062,21 @@ pub fn history_lines(entries: &[HistoryEntry]) -> Vec<String> {
             lines
         })
         .collect()
+}
+
+pub fn item_glyph(class: ItemClass) -> char {
+    match class {
+        ItemClass::Weapon => ')',
+        ItemClass::Armor => '[',
+        ItemClass::Potion => '!',
+        ItemClass::Food | ItemClass::Corpse => '%',
+        ItemClass::Misc | ItemClass::Tool => '(',
+        ItemClass::Amulet => '"',
+        ItemClass::Ring => '=',
+        ItemClass::Scroll => '?',
+        ItemClass::Spellbook => '+',
+        ItemClass::Wand => '/',
+        ItemClass::Coin => '$',
+        ItemClass::Gem => '*',
+    }
 }

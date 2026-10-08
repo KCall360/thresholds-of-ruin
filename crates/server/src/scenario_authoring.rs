@@ -1,6 +1,48 @@
 //! Author-owned declaration schemas. Conversions into simulation definitions are
 //! explicit so runtime representation changes cannot silently alter package files.
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemClass {
+    #[default]
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
+}
+
+impl From<ItemClass> for tor_simulation::ItemClass {
+    fn from(value: ItemClass) -> Self {
+        match value {
+            ItemClass::Misc => Self::Misc,
+            ItemClass::Weapon => Self::Weapon,
+            ItemClass::Armor => Self::Armor,
+            ItemClass::Potion => Self::Potion,
+            ItemClass::Food => Self::Food,
+            ItemClass::Corpse => Self::Corpse,
+            ItemClass::Tool => Self::Tool,
+            ItemClass::Amulet => Self::Amulet,
+            ItemClass::Ring => Self::Ring,
+            ItemClass::Scroll => Self::Scroll,
+            ItemClass::Spellbook => Self::Spellbook,
+            ItemClass::Wand => Self::Wand,
+            ItemClass::Coin => Self::Coin,
+            ItemClass::Gem => Self::Gem,
+        }
+    }
+}
+
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -15,7 +15,7 @@ mod compiler;
 mod diagnostics;
 #[path = "scenario_instantiation.rs"]
 mod instantiation;
-pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType};
+pub use authoring::{AiProfile, AttackSpec, BodySpec, CombatSpec, DamageType, ItemClass};
 use compiler::PreparedDefinitions;
 use diagnostics::{Origin, PathSegment, ReferenceValue};
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "dungeon-v23";
-const VALIDATOR: &str = "tor-scenario-8";
+pub const RULESET: &str = "interactions-v24";
+const VALIDATOR: &str = "tor-scenario-9";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -126,6 +126,8 @@ pub struct AppearancePool {
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct Archetype {
+    #[serde(default)]
+    pub class: crate::scenario_package::ItemClass,
     pub combat: Option<CombatSpec>,
     pub body: Option<BodySpec>,
     pub identity: Option<String>,
@@ -148,6 +150,7 @@ impl Clone for Archetype {
     fn clone(&self) -> Self {
         ARCHETYPE_DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
         Self {
+            class: self.class,
             combat: self.combat.clone(),
             body: self.body.clone(),
             identity: self.identity.clone(),
@@ -283,6 +286,7 @@ pub struct Door {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    pub class: Option<crate::scenario_package::ItemClass>,
     #[serde(default = "unit_quantity")]
     pub quantity: u64,
     pub stackable: Option<bool>,
@@ -1696,11 +1700,11 @@ impl Package {
         for (key, a) in &self.manifest.archetypes {
             let identity = a.identity.as_ref().unwrap_or(key);
             require(label(identity), "Invalid item identity")?;
-            let signature = (&a.name, &a.appearance_pool);
+            let signature = (&a.name, &a.appearance_pool, a.class);
             if let Some(previous) = signatures.insert(identity, signature) {
                 require(
                     previous == signature,
-                    "One identity must have one name and appearance pool",
+                    "One identity must have one name, appearance pool and physical class",
                 )?;
             }
             if let Some(pool) = &a.appearance_pool {
@@ -1724,6 +1728,17 @@ impl Package {
             }
         }
         for (key, pool) in &self.manifest.appearance_pools {
+            let classes: BTreeSet<_> = self
+                .manifest
+                .archetypes
+                .values()
+                .filter(|a| a.appearance_pool.as_ref() == Some(key))
+                .map(|a| a.class)
+                .collect();
+            require(
+                classes.len() <= 1,
+                "Appearance pool must have one physical class",
+            )?;
             require(
                 label(key)
                     && !pool.appearances.is_empty()
@@ -2524,6 +2539,16 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn appearance_pools_cannot_encode_hidden_identity_through_physical_class() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let mut package = super::read_package(&path).unwrap();
+        package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Weapon;
+        assert!(package.appearance_mapping(42).is_err());
+        package.manifest.archetypes.get_mut("poison").unwrap().class = super::ItemClass::Potion;
+        assert!(package.appearance_mapping(42).is_ok());
+    }
     use super::*;
 
     #[test]
@@ -2837,6 +2862,7 @@ mod tests {
         ]);
         regions[0].items.extend([
             Item {
+                class: None,
                 id: 3,
                 at: [1, 1, 0],
                 archetype: Some("guard".into()),
@@ -2848,6 +2874,7 @@ mod tests {
                 seed_names: vec![],
             },
             Item {
+                class: None,
                 id: 4,
                 at: [1, 1, 0],
                 archetype: Some("guard".into()),

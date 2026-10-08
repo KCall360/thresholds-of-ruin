@@ -313,8 +313,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[],
         "combat":{"hp":50,"max_hp":50,"preparation_remaining":null,"preparation_active":false,
             "recovery_remaining":"0","actors":[],"events":[],"objective":null,
@@ -1020,7 +1020,7 @@ async fn stacks_of_alike_things_are_counted_together() {
     let stack = |id: u64, name: &str, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": true, "position": {"x": 0, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": name, "description": ""}}))
         .unwrap()
     };
@@ -1324,7 +1324,7 @@ fn open_ground(find: usize) -> Scripted {
                 there.observation.ground_items.push(
                     serde_json::from_value(serde_json::json!({
                         "reachable": false, "position": {"x": 5, "y": 0, "z": 0},
-                        "item": {"quantity": "1", "appearance": "item", "identified": true,
+                        "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                             "id":super::item_target(7), "name": "pebble", "description": ""}}))
                     .unwrap(),
                 );
@@ -1426,7 +1426,7 @@ async fn a_count_from_alike_stacks_is_some_of_them_not_the_ones() {
     let mut s = state();
     let arrows = |id: u64, quantity: u64| {
         serde_json::from_value::<ItemView>(serde_json::json!({
-            "quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
             "id": super::item_target(id), "name": "arrow", "description": ""}))
         .unwrap()
     };

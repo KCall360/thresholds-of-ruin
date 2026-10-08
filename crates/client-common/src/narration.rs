@@ -360,6 +360,7 @@ mod tests {
             "You pick up the item."
         );
         view.inventory.push(ItemView {
+            class: Default::default(),
             asset: None,
             quantity: 1,
             appearance: String::new(),

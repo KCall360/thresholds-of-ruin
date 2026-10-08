@@ -1,7 +1,7 @@
 format = 2
 id = "items"
 version = "1.0"
-ruleset = "dungeon-v23"
+ruleset = "interactions-v24"
 default_character = 1
 characters = [
   { id = 1, anchor = "1/start" },
@@ -9,16 +9,19 @@ characters = [
 ]
 
 [archetypes.arrow]
+class = "weapon"
 name = "arrow"
 stackable = true
 
 [archetypes.healing]
+class = "potion"
 name = "potion of healing"
 identity = "healing"
 appearance_pool = "potions"
 stackable = true
 
 [archetypes.poison]
+class = "potion"
 name = "potion of poison"
 identity = "poison"
 appearance_pool = "potions"

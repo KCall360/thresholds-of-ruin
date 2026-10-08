@@ -69,7 +69,12 @@ fn indexed_glyphs(
         .iter()
         .map(|a| key(a.position))
         .collect();
-    let items: BTreeSet<_> = view.ground_items.iter().map(|i| key(i.position)).collect();
+    let mut items = BTreeMap::new();
+    for item in &view.ground_items {
+        items
+            .entry(key(item.position))
+            .or_insert(crate::item_glyph(item.item.class));
+    }
     let mut glyphs = BTreeMap::new();
     for cell in &view.visible_cells {
         let p = key(cell.position);
@@ -79,8 +84,8 @@ fn indexed_glyphs(
             '@'
         } else if actors.contains(&p) {
             '&'
-        } else if items.contains(&p) {
-            '!'
+        } else if let Some(glyph) = items.get(&p) {
+            *glyph
         } else if let Some(door) = &cell.door {
             if door.open {
                 '/'
@@ -113,6 +118,8 @@ pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) ->
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
     let glyphs = indexed_glyphs(&display);
+    let item_cells: std::collections::BTreeSet<_> =
+        display.ground_items.iter().map(|i| i.position).collect();
     let mut tiles = Vec::new();
     for panel in map_panels(&display, level) {
         for row in 0..panel.rows {
@@ -135,9 +142,9 @@ pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) ->
                 } else {
                     match glyph {
                         '@' => ACCENT,
-                        '!' => GOLD,
-                        '<' | '>' => 0x8cbafa,
                         '&' => 0xef958c,
+                        _ if item_cells.contains(&position) => GOLD,
+                        '<' | '>' => 0x8cbafa,
                         _ => 0x7890a2,
                     }
                 };
@@ -351,7 +358,12 @@ impl Canvas {
                 self.text(
                     804,
                     146 + i * 22,
-                    &format!("{} x {}", item.quantity, item.name),
+                    &format!(
+                        "{} {} x {}",
+                        crate::item_glyph(item.class),
+                        item.quantity,
+                        item.name
+                    ),
                     TEXT,
                     2,
                     22,
@@ -394,7 +406,12 @@ impl Canvas {
                 self.text(
                     804,
                     316 + i * 36,
-                    &format!("{} x {}", item.item.quantity, item.item.name),
+                    &format!(
+                        "{} {} x {}",
+                        crate::item_glyph(item.item.class),
+                        item.item.quantity,
+                        item.item.name
+                    ),
                     TEXT,
                     2,
                     22,
@@ -795,7 +812,7 @@ mod index_tests {
                 "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
                 "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
             })).collect::<Vec<_>>(),
-            "ground_items":[{"item":{"quantity":"1","appearance":"item","identified":true,"id":tor_protocol::ItemTarget::from_digest([1; 32]),"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
+            "ground_items":[{"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":tor_protocol::ItemTarget::from_digest([1; 32]),"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
             "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":3,"y":0,"z":0}}],"inventory":[]
         })).unwrap();
         let index = super::indexed_glyphs(&view);

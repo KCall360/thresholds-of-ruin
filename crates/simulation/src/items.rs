@@ -3,11 +3,32 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tor_world::Location;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemClass {
+    #[default]
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
+}
+
 /// Authoritative identity and physical stack properties. Never a client DTO.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(not(test), derive(Clone))]
 #[serde(deny_unknown_fields)]
 pub struct ItemSpec {
+    pub class: ItemClass,
     pub archetype: String,
     pub identity: String,
     pub name: String,
@@ -32,6 +53,7 @@ impl Clone for ItemSpec {
     fn clone(&self) -> Self {
         ITEM_DEFINITION_COPIES.with(|copies| copies.set(copies.get() + 1));
         Self {
+            class: self.class,
             archetype: self.archetype.clone(),
             identity: self.identity.clone(),
             name: self.name.clone(),
@@ -47,6 +69,7 @@ impl Clone for ItemSpec {
 impl ItemSpec {
     pub fn ordinary(name: String) -> Self {
         Self {
+            class: ItemClass::Misc,
             archetype: name.clone(),
             identity: name.clone(),
             appearance: name.clone(),

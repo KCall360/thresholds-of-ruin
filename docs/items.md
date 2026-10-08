@@ -39,6 +39,17 @@ records source ID, result ID and transferred quantity. Rewind restores allocatio
 
 ## Authoring and disclosure
 
+Archetypes declare an optional physical `class` (default `misc`); item placements
+may override it for ordinary items. Concealed items retain their archetype class,
+and appearance pools share one class so it cannot reveal a hidden effect.
+Classes are appearance facts, independent of mechanics, and survive transfer,
+identification, rewind and persistence. They participate in stack compatibility.
+ASCII uses `)` weapon, `[` armor, `!` potion, `%` food/corpse, `(` misc/tool,
+`"` amulet, `=` ring, `?` scroll, `+` spellbook, `/` wand, `$` coin and `*` gem.
+An item pile draws the first disclosed item. Actors/terrain keep their existing
+precedence, and remembered items keep the last disclosed class and grey color.
+These classes do not implement food, spells, tools or other item-use mechanics.
+
 Packages declare `quantity` (default 1), optional `stackable` overrides, and
 string-valued `properties` on item placements. Archetypes default to non-stackable
 and may declare `identity`, `appearance_pool`, `stackable`, and `properties`.

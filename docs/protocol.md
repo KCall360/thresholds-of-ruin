@@ -156,7 +156,7 @@ of this wire representation.
 The first frame authenticates and declares a frontend label:
 
 ```json
-{"type":"hello","protocol":30,"token":"<session token>","frontend":"text"}
+{"type":"hello","protocol":31,"token":"<session token>","frontend":"text"}
 ```
 
 The server sends `welcome` with the authenticated user, authorized actor IDs, and

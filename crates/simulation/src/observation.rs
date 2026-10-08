@@ -25,6 +25,7 @@ pub(crate) fn stair_landing_offset(body: &crate::BodySpec, direction: Direction)
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemView {
+    pub class: crate::ItemClass,
     pub description: String,
     pub id: ItemId,
     pub name: String,
@@ -36,6 +37,7 @@ pub struct ItemView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroundItemView {
+    pub class: crate::ItemClass,
     pub description: String,
     pub id: ItemId,
     pub name: String,
@@ -160,6 +162,7 @@ impl Game {
             match item.location {
                 ItemLocation::Ground(location) if visible(location) => {
                     ground_items.push(GroundItemView {
+                        class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
                         name: name.clone(),
@@ -172,6 +175,7 @@ impl Game {
                 }
                 ItemLocation::Carried(owner) if owner == id => {
                     inventory.push(ItemView {
+                        class: item.spec.class,
                         description: item_description(name),
                         id: item_id,
                         name: name.clone(),

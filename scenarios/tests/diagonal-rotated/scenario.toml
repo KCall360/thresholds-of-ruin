@@ -2,7 +2,7 @@
 format = 2
 id = "diagonal-rotated"
 version = "1.0"
-ruleset = "dungeon-v23"
+ruleset = "interactions-v24"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

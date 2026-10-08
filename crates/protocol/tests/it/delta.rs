@@ -417,6 +417,7 @@ fn collection_view(count: usize) -> StateView {
     let mut state = room(15, 15, 1);
     for index in 0..count {
         let item = ItemView {
+            class: Default::default(),
             quantity: 1,
             appearance: "disclosed appearance".repeat(4),
             identified: true,

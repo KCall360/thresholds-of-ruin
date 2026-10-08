@@ -91,6 +91,7 @@ impl PreparedCreature<'_> {
 
 #[derive(Debug, Default)]
 pub(super) struct PreparedArchetype {
+    pub class: tor_simulation::ItemClass,
     pub combat: Option<tor_simulation::combat::CombatSpec>,
     pub body: Option<tor_simulation::BodySpec>,
     pub identity: Option<String>,
@@ -106,6 +107,7 @@ pub(super) struct PreparedArchetype {
 impl PreparedArchetype {
     fn new(author: &Archetype, manifest: &Manifest) -> Self {
         Self {
+            class: author.class.into(),
             combat: author.combat.clone().map(Into::into),
             body: author.body.clone().map(Into::into),
             identity: author.identity.clone(),
@@ -248,6 +250,13 @@ impl PreparedDefinitions {
         appearances: &BTreeMap<String, String>,
     ) -> Result<tor_simulation::ItemSpec, Failure> {
         let inherited = self.archetype(&author.archetype).map_err(Failure::from)?;
+        require(
+            !inherited.concealed
+                || author
+                    .class
+                    .is_none_or(|class| tor_simulation::ItemClass::from(class) == inherited.class),
+            "Concealed items cannot override their physical class",
+        )?;
         let name = if author.seed_names.is_empty() {
             author
                 .name
@@ -283,6 +292,7 @@ impl PreparedDefinitions {
         let mut properties = inherited.properties.clone();
         properties.extend(author.properties.clone());
         let spec = tor_simulation::ItemSpec {
+            class: author.class.map(Into::into).unwrap_or(inherited.class),
             archetype: key,
             identity,
             name,
@@ -311,6 +321,23 @@ impl PreparedDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concealed_item_cannot_override_its_physical_class() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/items");
+        let package = super::super::read_package(&root).unwrap();
+        let prepared = PreparedDefinitions::new(&package.manifest, 1);
+        let mut item: Item =
+            toml::from_str("id = 99\nat = [1, 1, 0]\narchetype = 'healing'\nclass = 'weapon'\n")
+                .unwrap();
+        assert!(prepared.item(&item, 42, &BTreeMap::new()).is_err());
+        item.class = None;
+        let spec = prepared.item(&item, 42, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            spec.class,
+            package.manifest.archetypes["healing"].class.into()
+        );
+    }
 
     #[test]
     fn prepared_item_assets_keep_pool_absence_and_do_not_reveal_identity_assets() {
@@ -437,6 +464,7 @@ mod tests {
         manifest.archetypes.insert(
             "guard".into(),
             Archetype {
+                class: Default::default(),
                 combat: Some(CombatSpec {
                     name: "guard".into(),
                     max_hp: 41,

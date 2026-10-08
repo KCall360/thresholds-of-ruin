@@ -23,8 +23,8 @@ fn state() -> StateView {
             "stairs_up":false,"stairs_down":false
         })).collect::<Vec<_>>(),
         "ground_items":[
-            {"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
-            {"reachable":false,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
+            {"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(1),"name":"copper token","description":"A small copper disc."},"position":{"x":0,"y":0,"z":0}},
+            {"reachable":false,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(2),"name":"stone tablet","description":"A weathered slab of stone."},"position":{"x":6,"y":0,"z":0}}
         ],"inventory":[],"visible_actors":[]}})).unwrap()
 }
 
@@ -219,6 +219,7 @@ fn carrying(s: &mut StateView) {
         (13, "iron sword", "A sharp steel blade."),
     ] {
         s.observation.inventory.push(ItemView {
+            class: Default::default(),
             id: super::item_target(id),
             name: name.into(),
             appearance: "item".into(),
@@ -673,7 +674,7 @@ pub(crate) fn walled(map: &[&str]) -> StateView {
             }
             if ch == 'i' {
                 items.push(serde_json::json!({"reachable": x == 0 && y == 0,
-                    "item": {"quantity": "1", "appearance": "item", "identified": true,
+                    "item": {"quantity": "1", "class":"misc","appearance": "item", "identified": true,
                         "id":super::item_target(1), "name": "copper token", "description": ""},
                     "position": {"x": x, "y": y, "z": 0}}));
             }
@@ -849,7 +850,7 @@ fn things_and_figures_are_told_in_sentences() {
     let token = |id: u64, x: i32, quantity: u64| {
         serde_json::from_value::<GroundItemView>(serde_json::json!({
             "reachable": x == 0, "position": {"x": x, "y": 0, "z": 0},
-            "item": {"quantity": quantity.to_string(), "appearance": "item", "identified": true,
+            "item": {"quantity": quantity.to_string(), "class":"misc","appearance": "item", "identified": true,
                 "id": super::item_target(id), "name": "copper token", "description": ""}}))
         .unwrap()
     };

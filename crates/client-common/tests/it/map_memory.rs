@@ -86,6 +86,7 @@ fn map_aligns_every_update_and_refreshes_items_without_retaining_actors() {
         .ground_items
         .push(GroundItemView {
             item: ItemView {
+                class: Default::default(),
                 asset: None,
                 quantity: 1,
                 appearance: String::new(),

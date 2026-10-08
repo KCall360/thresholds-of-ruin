@@ -495,6 +495,7 @@ impl Game {
             "{} corpse",
             actor.combat.as_ref().unwrap().spec.name
         ));
+        spec.class = crate::ItemClass::Corpse;
         spec.properties.insert("actor".into(), id.0.to_string());
         spec.properties
             .insert("death_tick".into(), self.tick.to_string());

@@ -232,6 +232,7 @@ pub fn observation(
         {
             ground_items.push(p::GroundItemView {
                 item: p::ItemView {
+                    class: item_class(item.class),
                     quantity: item.quantity,
                     appearance: item.appearance.clone(),
                     identified: item.identified,
@@ -316,6 +317,7 @@ pub fn observation(
             .inventory
             .into_iter()
             .map(|item| p::ItemView {
+                class: item_class(item.class),
                 quantity: item.quantity,
                 appearance: item.appearance.clone(),
                 identified: item.identified,
@@ -381,4 +383,23 @@ pub fn cell_key(salt: &str, actor: u64, location: w::Location) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn item_class(class: s::ItemClass) -> p::ItemClass {
+    match class {
+        s::ItemClass::Misc => p::ItemClass::Misc,
+        s::ItemClass::Weapon => p::ItemClass::Weapon,
+        s::ItemClass::Armor => p::ItemClass::Armor,
+        s::ItemClass::Potion => p::ItemClass::Potion,
+        s::ItemClass::Food => p::ItemClass::Food,
+        s::ItemClass::Corpse => p::ItemClass::Corpse,
+        s::ItemClass::Tool => p::ItemClass::Tool,
+        s::ItemClass::Amulet => p::ItemClass::Amulet,
+        s::ItemClass::Ring => p::ItemClass::Ring,
+        s::ItemClass::Scroll => p::ItemClass::Scroll,
+        s::ItemClass::Spellbook => p::ItemClass::Spellbook,
+        s::ItemClass::Wand => p::ItemClass::Wand,
+        s::ItemClass::Coin => p::ItemClass::Coin,
+        s::ItemClass::Gem => p::ItemClass::Gem,
+    }
 }

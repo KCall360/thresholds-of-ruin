@@ -521,7 +521,7 @@ fn state() -> ClientState {
             "actor":"1","self_target":super::actor_target(1),"tick":"0","position":{"x":1,"y":1,"z":0},
 
             "places":[],"visible_cells": (0..5).flat_map(|x| (0..3).map(move |y| serde_json::json!({"key":format!("{x}:{y}"),"stairs_up":false,"stairs_down":false,"position":{"x":x,"y":y,"z":0},"wall":false,"place_hint":false}))).collect::<Vec<_>>(),
-            "ground_items":[{"reachable":true,"item":{"quantity":"1","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
+            "ground_items":[{"reachable":true,"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":super::item_target(3),"name":"token"},"position":{"x":1,"y":1,"z":0}}],
             "inventory":[],"visible_actors":[],
             "ready":true
         }}
@@ -592,7 +592,7 @@ fn only_disclosed_current_level_cells_are_drawn_and_actor_wins_over_item() {
     });
     assert_eq!(glyph_at(&other_level, 2, 1), '#');
     other_level.ground_items[0].position = Position { x: 3, y: 1, z: 0 };
-    assert_eq!(glyph_at(&other_level, 3, 1), '!');
+    assert_eq!(glyph_at(&other_level, 3, 1), '(');
 }
 
 #[test]
@@ -654,6 +654,7 @@ fn ambiguous_pickup_is_modal_free_and_invalidated_by_an_observation_change() {
         .push(GroundItemView {
             reachable: true,
             item: ItemView {
+                class: Default::default(),
                 asset: None,
                 quantity: 1,
                 appearance: String::new(),

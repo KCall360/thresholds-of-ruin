@@ -2,7 +2,7 @@ use crate::{ActorId, ActorTarget, DoorTarget, ItemTarget, StreamContext, StreamC
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub const PROTOCOL_VERSION: u32 = 30;
+pub const PROTOCOL_VERSION: u32 = 31;
 /// Static limits of this authenticated server. Available capacity is not
 /// advertised: it can change between welcome and the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,6 +244,7 @@ pub struct Position {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemView {
+    pub class: ItemClass,
     #[serde(with = "crate::integers::unsigned")]
     pub quantity: u64,
     pub appearance: String,
@@ -952,4 +953,25 @@ pub enum TravelPhase {
     ControlLost,
     WorldChanged,
     Failed,
+}
+
+/// Disclosed physical category; independent of true identity and item effects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemClass {
+    #[default]
+    Misc,
+    Weapon,
+    Armor,
+    Potion,
+    Food,
+    Corpse,
+    Tool,
+    Amulet,
+    Ring,
+    Scroll,
+    Spellbook,
+    Wand,
+    Coin,
+    Gem,
 }
