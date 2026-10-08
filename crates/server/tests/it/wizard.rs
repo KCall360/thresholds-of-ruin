@@ -143,7 +143,7 @@ fn invalid_placement_is_atomic_and_successful_placement_is_idempotent() {
 }
 
 #[test]
-fn rewind_restores_inventory_knowledge_scheduler_and_identity_allocation() {
+fn rewind_restores_inventory_knowledge_scheduler_without_reusing_actor_identity() {
     let mut engine = Engine::memory(Scenario::two_room(42)).unwrap();
     engine.enable_wizard().unwrap();
     let initial = engine.state(ActorId(1)).unwrap();
@@ -211,7 +211,26 @@ fn rewind_restores_inventory_knowledge_scheduler_and_identity_allocation() {
         },
     )
     .unwrap();
-    assert_eq!(spawned.entry.content, spawned_again.entry.content);
+    let actor_created = |entry: &tor_server::journal::JournalEntry| {
+        let tor_server::journal::JournalContent::Wizard {
+            operation:
+                WizardOperation::SpawnActor {
+                    position: at,
+                    turn_ticks: 75,
+                },
+            result: tor_server::journal::WizardResult::ActorSpawned { actor },
+            ..
+        } = &entry.content
+        else {
+            panic!("expected successful actor creation");
+        };
+        assert_eq!(*at, position);
+        *actor
+    };
+    let abandoned = actor_created(&spawned.entry);
+    let replacement = actor_created(&spawned_again.entry);
+    assert!(replacement.0 > abandoned.0);
+    assert_eq!(engine.actors(), vec![ActorId(1), replacement]);
 }
 
 #[test]

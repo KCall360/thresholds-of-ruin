@@ -6,7 +6,7 @@
 format = 2
 id = "sight-3d-giant"
 version = "1.0"
-ruleset = "dungeon-v22"
+ruleset = "dungeon-v23"
 default_character = 1
 themes = ["stone"]
 zones = { "hall" = {  } }

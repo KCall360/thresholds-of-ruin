@@ -96,6 +96,175 @@ mod tests {
     use crate::{journal::Action, Scenario};
     use tor_protocol::{Action as WireAction, Command as WireCommand};
 
+    fn spawn_then_fork_must_not_rebind_target(
+        first: crate::journal::WizardOperation,
+        second: crate::journal::WizardOperation,
+    ) {
+        use crate::journal::{JournalContent, WizardOperation, WizardResult};
+        let actor = ActorId(1);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("fork-identities.db");
+        let policy = crate::SavePolicy {
+            checkpoint_interval: 1,
+            ..Default::default()
+        };
+        let mut engine =
+            Engine::open_with_policy(&path, Scenario::two_room(42), policy.clone()).unwrap();
+        engine.enable_wizard().unwrap();
+        let wizard = |engine: &mut Engine, request: &str, operation| {
+            let command = Command::Wizard {
+                expected_revision: engine.revision(actor).unwrap(),
+                operation,
+            };
+            engine
+                .command(
+                    "player",
+                    "test",
+                    actor,
+                    request,
+                    &engine.branch().clone(),
+                    command,
+                )
+                .unwrap()
+        };
+        let target = |engine: &Engine, result: &CommandResult| {
+            let JournalContent::Wizard { result, .. } = &result.entry.content else {
+                panic!("fixture must create a wizard entity")
+            };
+            let action = match result {
+                WizardResult::ItemPlaced { item } => Action::Take {
+                    item: *item,
+                    quantity: None,
+                },
+                WizardResult::DoorPlaced { door } => Action::SetDoor {
+                    door: *door,
+                    open: true,
+                },
+                WizardResult::ActorSpawned { actor } => Action::Attack {
+                    target: tor_simulation::ActorId(actor.0),
+                },
+                _ => panic!("fixture must create an interaction target"),
+            };
+            (engine.encode_action(actor, &action), action)
+        };
+        let created = wizard(&mut engine, "first", first);
+        let (old_reference, old_action) = target(&engine, &created);
+        assert_eq!(
+            engine.decode_action(actor, &old_reference).unwrap(),
+            old_action
+        );
+        wizard(
+            &mut engine,
+            "rewind",
+            WizardOperation::Rewind { target: None },
+        );
+        let rewound = engine.state(actor).unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        let mut engine =
+            Engine::open_with_policy(&path, Scenario::two_room(42), policy.clone()).unwrap();
+        assert_eq!(engine.state(actor).unwrap(), rewound);
+        engine.enable_wizard().unwrap();
+        let recreated = wizard(&mut engine, "second", second);
+        let (new_reference, new_action) = target(&engine, &recreated);
+        assert_eq!(
+            engine.decode_action(actor, &new_reference).unwrap(),
+            new_action
+        );
+        assert_ne!(
+            old_reference, new_reference,
+            "An abandoned entity must not become a different entity"
+        );
+        assert_eq!(
+            engine
+                .decode_action(actor, &old_reference)
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidAction
+        );
+        let current = engine.state(actor).unwrap();
+        engine.flush().unwrap();
+        drop(engine);
+        let engine = Engine::open_with_policy(&path, Scenario::two_room(42), policy).unwrap();
+        assert_eq!(engine.state(actor).unwrap(), current);
+        assert_eq!(
+            engine.decode_action(actor, &new_reference).unwrap(),
+            new_action
+        );
+        assert_eq!(
+            engine
+                .decode_action(actor, &old_reference)
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidAction
+        );
+    }
+
+    #[test]
+    fn rewind_does_not_rebind_an_abandoned_item_reference() {
+        use crate::journal::{Position, WizardItem, WizardOperation};
+        let position = Position {
+            region: 1,
+            x: 2,
+            y: 1,
+            z: 0,
+        };
+        spawn_then_fork_must_not_rebind_target(
+            WizardOperation::PlaceItem {
+                position,
+                kind: WizardItem::Token,
+            },
+            WizardOperation::PlaceItem {
+                position,
+                kind: WizardItem::Tablet,
+            },
+        );
+    }
+
+    #[test]
+    fn rewind_does_not_rebind_an_abandoned_actor_reference() {
+        use crate::journal::{Position, WizardOperation};
+        let position = Position {
+            region: 1,
+            x: 2,
+            y: 1,
+            z: 0,
+        };
+        spawn_then_fork_must_not_rebind_target(
+            WizardOperation::SpawnActor {
+                position,
+                turn_ticks: 75,
+            },
+            WizardOperation::SpawnActor {
+                position,
+                turn_ticks: 100,
+            },
+        );
+    }
+
+    #[test]
+    fn rewind_does_not_rebind_an_abandoned_door_reference() {
+        use crate::journal::{Position, WizardOperation};
+        let position = Position {
+            region: 1,
+            x: 2,
+            y: 1,
+            z: 0,
+        };
+        spawn_then_fork_must_not_rebind_target(
+            WizardOperation::PlaceDoor {
+                position,
+                open: false,
+                height: 1,
+            },
+            WizardOperation::PlaceDoor {
+                position,
+                open: true,
+                height: 1,
+            },
+        );
+    }
+
     #[test]
     fn foreign_observer_and_save_references_do_not_resolve_disclosed_entities() {
         let actor = ActorId(1);

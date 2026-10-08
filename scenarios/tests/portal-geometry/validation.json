@@ -1,12 +1,12 @@
 {
   "validator": "tor-scenario-8",
-  "ruleset": "dungeon-v22",
-  "content_hash": "10ab98e7edf5e7a8d0bb34e9224a57a740a86017ec0e4713b87430aa4ea7c61b",
+  "ruleset": "dungeon-v23",
+  "content_hash": "a03e91b6ce9b7da3de330ee7d934cf3001a153ea15d58e447290a8791234de86",
   "files": {
     "index.json": "364dea5346ab2942b6c6085399721897cbfb432fe9a39591a8855ccd62b3f74d",
-    "scenario.toml": "d4f2e425baebc91c9113627ebeebda52091e7a8f3c48a7457efb2cc751d18d51"
+    "scenario.toml": "1cc905ebc0c4ae9e567222fd8a922229e9e306c4577142447b6ff701865b34d9"
   },
   "regions": 3,
-  "model_hash": "0bd7c36543f4030c1c206654ec6ef610b072d70d842c1945c3ab9e47df712cc8",
+  "model_hash": "1f881c85d9587ea3e1bcf8080b92a4d3220cbfc3447ddaede3b1987fa3bf867a",
   "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
 }

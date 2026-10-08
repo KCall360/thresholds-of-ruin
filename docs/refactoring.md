@@ -2550,8 +2550,8 @@ seeds and does not claim a proof over every possible seed.
 Lazy declarations now combine indexed character starts and generated inhabitants
 in one identity assembly, including item-carrier exclusions. This fixes a
 validated character starting in a generated region being rejected at run setup.
-The compatibility axes are rooms version 2, ruleset dungeon-v22 and validator
-tor-scenario-8; authoring format 2, save format 21 and the then-current protocol
+That checkpoint advanced the rooms generator, gameplay and validator identities;
+authoring format 2, the then-current save format and protocol
 were unchanged.
 No migration or scripting runtime is introduced.
 
@@ -2608,3 +2608,45 @@ All 33 release validators and all scenario process cases passed. Final debug
 publication evidence and replacement exact-head CI are still required; failed CI
 is retained, not rerun as a substitute for a correction. All original work
 sequences remain in scope.
+
+
+**Opaque interaction identity follow-up (2026-10-07, unpublished).** Final
+local debug verification passed 904 Rust tests and 297 of 299 Python tests.
+The native quantity-picker failure exposed sorting by opaque handle bytes;
+choices now preserve disclosure order and deduplicate repeated portal/body
+occurrences. Both new model regressions failed first; all 38 native Rust tests
+and the original quantity-picker process case subsequently passed. The remaining
+native mouse failure is the previously documented LockApp limitation, expressly
+waived locally; ordinary complete native CI remains required.
+
+Three failing-first rewind regressions then exposed dynamic actor, item and door
+identity reuse. A single simulation-owned continuation operation now retains all
+allocation watermarks alongside record/intention watermarks when restoring an
+older boundary. The durable regressions cover checkpoints and restart before
+and after replacement creation. All seven scoped-request tests passed. A real
+server/client regression confirms an abandoned handle rejects without admitting
+work while the replacement can be taken and recovered exactly after restart;
+all five opaque-target process cases passed. Its first attempt placed the new
+item away from the actor's feet and correctly failed pickup validation; the
+fixture was corrected without relaxing gameplay rules.
+
+Save format 22 and dungeon-v23 identify the new rewind replay behavior. Wire
+protocol 29, authoring format 2 and tor-scenario-8 remain unchanged. All 33 package
+manifests are LF and their certificates were regenerated using the new validator
+binary. The explicit version-21 rejection regression failed before the version
+advance. Expanded server/simulation/persistence checks and final publication
+verification remain pending. Previous measurement results describe their exact
+recorded heads and do not certify these later changes. All six refactor sequences
+remain active; this increment is not deployed or merged.
+
+
+Follow-up compatibility checks passed all 206 server unit tests and 163
+simulation tests. Server integration passed 148 of 149 cases; the remaining
+case expected the obsolete actor-ID reuse behavior. It now asserts restored
+inventory/knowledge/scheduling and a fresh replacement actor ID, and passes.
+The explicit version-21 archive rejection case passed without overwriting its
+input. All 23 affected real-application cases passed under the new versions;
+the eight documentation/certificate checks passed after historical version
+notes were clarified. Formatting, workspace all-target Clippy and changed
+Python lint passed. A final coherent debug publication gate and complete
+final-head Windows/Linux CI remain required. Earlier failed runs are retained.

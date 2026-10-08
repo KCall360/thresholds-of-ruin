@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 21;
+pub(crate) const ARCHIVE_VERSION: u32 = 22;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -3076,10 +3076,9 @@ impl Candidate {
                     return Err(invalid());
                 }
                 let later = std::mem::replace(&mut self.game, boundary.game.clone());
-                // Records the abandoned future made may still be referred to
-                // by retained boundaries, so their identities stay taken.
-                self.game.continue_record_ids(&later);
-                self.game.continue_intention_ids(&later);
+                // Retained futures can still refer to their entities and work;
+                // new entities and work must never reuse those identities.
+                self.game.continue_identities(&later);
                 self.revisions = boundary.revisions.clone();
                 let from_branch = self.current_branch.clone();
                 self.current_branch = BranchId(entry_id.0.clone());

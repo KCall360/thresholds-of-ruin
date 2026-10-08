@@ -4,6 +4,83 @@ use tor_client_common::ClientState;
 use tor_protocol::*;
 
 #[test]
+fn opaque_bytes_do_not_reorder_pickup_or_drop_choices() {
+    for key in [Key::Pickup, Key::Drop] {
+        let mut snapshot = state().snapshot();
+        let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+        let mut first = observation.ground_items[0].clone();
+        first.item.id = super::item_target(250);
+        first.item.quantity = 10;
+        let mut second = first.clone();
+        second.item.id = super::item_target(1);
+        second.item.quantity = 1;
+        if key == Key::Drop {
+            observation.inventory = vec![first.item.clone(), second.item.clone()];
+        } else {
+            let mut repeated = first.clone();
+            repeated.position.x = 2;
+            observation.ground_items = vec![first, second, repeated];
+        }
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.ready();
+        app.input(Input::Key { key });
+        assert_eq!(
+            app.pickup.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![super::item_target(250), super::item_target(1)]
+        );
+        app.input(Input::Text { text: "3".into() });
+        let effect = app.input(Input::Key { key: Key::Enter });
+        let expected = if key == Key::Drop {
+            Action::Drop {
+                item: super::item_target(250),
+                quantity: Some(3),
+            }
+        } else {
+            Action::Take {
+                item: super::item_target(250),
+                quantity: Some(3),
+            }
+        };
+        assert!(matches!(effect, Effect::Request(Request::Command {
+            command: Command::Act { action, .. }, ..
+        }) if action == expected));
+    }
+}
+
+#[test]
+fn opaque_bytes_do_not_reorder_attack_choices_or_duplicate_body_cells() {
+    let mut snapshot = state().snapshot();
+    let first = ActorView {
+        id: super::actor_target(250),
+        name: "first figure".into(),
+        description: String::new(),
+        asset: None,
+        position: Position { x: 1, y: 1, z: 0 },
+    };
+    let mut second = first.clone();
+    second.id = super::actor_target(2);
+    let mut repeated = first.clone();
+    repeated.position.x = 2;
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .visible_actors = vec![first, second, repeated];
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.ready();
+    app.input(Input::Key { key: Key::Attack });
+    assert_eq!(
+        app.attack_targets
+            .iter()
+            .map(|actor| actor.id)
+            .collect::<Vec<_>>(),
+        vec![super::actor_target(250), super::actor_target(2)]
+    );
+}
+
+#[test]
 fn suspended_work_does_not_advertise_or_send_undisclosed_controls() {
     let mut snapshot = state().snapshot();
     snapshot.readiness.admission = false;

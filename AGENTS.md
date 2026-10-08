@@ -517,7 +517,7 @@ inputs and separate geometry/placement/population/loot streams; raw source hashe
 remain integrity identities. Default-zero salt is explicit, disjoint placement
 lanes preserve pool independence and infeasible minima fail instead of truncating
 silently. Lazy identity assembly now includes authored characters starting in
-generated regions. Ruleset dungeon-v22 and validator tor-scenario-8 changed;
+generated regions. The generator ruleset and validator identities changed;
 the then-current protocol, save 21 and authoring format 2 did not. Focused backend/validator and
 real-process regressions passed; final full, measurements and CI remain. The
 separate PR #74 checkpoint has passed Windows profiles, but Linux debug spectator
@@ -614,3 +614,14 @@ reports with matching operation/save counts: projection p95 was 0.405 to 0.392 m
 in memory and 0.376 to 0.381 ms durably, with 945 samples per side. No broad speedup
 or all-load projection claim is made. Final debug publication evidence and all
 exact-head Windows/Linux CI checks remain required.
+
+
+**Interaction identity follow-up (unpublished, 2026-10-07).** Native target
+choices now retain disclosure order instead of sorting opaque bytes. Rewind
+continues all simulation allocation counters so abandoned dynamic entities
+cannot lend their handles to replacements. Failing-first native and durable
+actor/item/door regressions passed, as did actual-process pickup/restart coverage.
+Save 22 and dungeon-v23 identify the changed replay semantics; all 33 scenario
+certificates were regenerated from LF inputs. Wire 29, authoring 2 and validator
+8 stay unchanged. Expanded checks and final-head CI remain before publication;
+see the refactor plan for exact evidence and the retained LockApp qualification.

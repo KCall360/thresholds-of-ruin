@@ -670,8 +670,8 @@ impl App {
                         .filter(|a| a.id != state.state().observation.self_target)
                         .cloned()
                         .collect();
-                    self.attack_targets.sort_by_key(|a| a.id);
-                    self.attack_targets.dedup_by_key(|a| a.id);
+                    let mut seen = std::collections::BTreeSet::new();
+                    self.attack_targets.retain(|actor| seen.insert(actor.id));
                     self.selected = 0;
                     self.status = self.attack_targets.first().map_or_else(
                         || "No target is visible.".into(),
@@ -781,8 +781,9 @@ impl App {
                 if self.dropping {
                     items = o.inventory.clone();
                 }
-                items.sort_by_key(|item| item.id);
-                items.dedup_by_key(|item| item.id);
+                // Keep disclosed choice order; opaque identities have no ordinal meaning.
+                let mut seen = std::collections::BTreeSet::new();
+                items.retain(|item| seen.insert(item.id));
                 match items.as_slice() {
                     [] => {
                         self.status = if self.dropping {

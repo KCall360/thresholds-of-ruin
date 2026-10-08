@@ -39,7 +39,10 @@ without expanding repeated cell/edge payloads. Empty or mixed-region table
 entries, invalid/duplicate/out-of-order references and malformed fields fail closed.
 This preserves historical changes and deletions rather than merging knowledge
 from different rewind boundaries. Item specs, quantities, character identity
-knowledge, and the item-ID allocator are included, so rewind restores them all.
+knowledge, and allocation counters are included. Rewind restores entity state
+while retaining the highest actor, item, door, record and intention counters
+from the abandoned future. Existing entities keep their identities; new entities
+and work cannot reuse them. Checkpoints preserve these counters through restart.
 World geometry is shared independently of door state, so opening
 a door does not duplicate the entire dungeon. Runtime control leases, client-held map memory and active travel
 jobs retain their existing restart behavior and are not restored from this snapshot.

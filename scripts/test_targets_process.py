@@ -3,6 +3,46 @@ from process_harness import ProcessTestCase, door
 
 
 class TargetProcesses(ProcessTestCase):
+    def test_rewind_restart_does_not_rebind_an_abandoned_item_handle(self):
+        server = self.server('--checkpoint-interval', 1, wizard=True)
+        player, initial = self.client()
+        original = {ground['item']['id'] for ground in initial['state']['observation']['ground_items']}
+        wizard = self.wizard()
+        self.wizard_command(wizard, 'item token 1 1 1 0')
+        first = self.request(player, {'type': 'snapshot'})
+        created = {ground['item']['id'] for ground in first['state']['observation']['ground_items']} - original
+        self.assertEqual(len(created), 1)
+        abandoned = created.pop()
+        self.wizard_command(wizard, 'rewind initial')
+        rewound = self.request(player, {'type': 'snapshot'})
+        self.assertEqual(rewound['state']['observation'], initial['state']['observation'])
+        self.flush_save()
+        player.stop(); wizard.stop(); server.stop()
+
+        server = self.server('--checkpoint-interval', 1, wizard=True)
+        player, restored = self.client()
+        self.assertEqual(restored['state'], rewound['state'])
+        wizard = self.wizard()
+        self.wizard_command(wizard, 'item tablet 1 1 1 0')
+        current = self.request(player, {'type': 'snapshot'})
+        created = {ground['item']['id'] for ground in current['state']['observation']['ground_items']} - original
+        self.assertEqual(len(created), 1)
+        replacement = created.pop()
+        self.assertNotEqual(replacement, abandoned)
+        rejected = self.act(player, {'type': 'take', 'item': abandoned})
+        self.assertTrue(rejected['error'].startswith('InvalidAction:'))
+        self.assertEqual(rejected['state'], current['state'])
+        self.assertEqual(rejected['history'], current['history'])
+        self.assertEqual(rejected['intentions'], [])
+        taken = self.act(player, {'type': 'take', 'item': replacement})
+        self.assertIsNone(taken['error'])
+        self.assertEqual(taken['state']['observation']['inventory'][0]['id'], replacement)
+        self.flush_save()
+        player.stop(); wizard.stop(); server.stop()
+        self.server(wizard=True)
+        _, continued = self.client()
+        self.assertEqual(continued['state'], taken['state'])
+
     def test_disclosed_actor_handle_drives_queued_attack_and_history(self):
         self.server(scenario="dungeon-loop", seed=None)
         player, initial = self.client()

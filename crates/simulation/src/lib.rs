@@ -200,6 +200,15 @@ impl Game {
     pub fn authored_links_clear(&self) -> bool {
         self.world.authored_links_clear()
     }
+    /// Keep every allocation namespace beyond a retained future when restoring
+    /// an older game. Existing entities keep their identity; newly created
+    /// entities and work must not reuse identities from the abandoned branch.
+    pub fn continue_identities(&mut self, later: &Game) {
+        self.reserve_identities(later.next_actor_id, later.next_item_id, later.next_door_id);
+        self.continue_record_ids(later);
+        self.continue_intention_ids(later);
+    }
+
     pub fn spawn_authored_actor(
         &mut self,
         id: u64,
