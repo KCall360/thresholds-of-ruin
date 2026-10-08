@@ -3,9 +3,9 @@ use std::num::NonZeroU64;
 use tor_simulation::{Action, BodySpec, Game};
 use tor_world::{rotate_vector, Direction, Extent, Location, Passage, Position, Region, RegionId};
 
-fn two_cell_body(eye: [i32; 3]) -> BodySpec {
+fn body(height: i32, eye: [i32; 3]) -> BodySpec {
     BodySpec {
-        cells: vec![[0, 0, 0], [0, 0, 1]],
+        cells: (0..height).map(|z| [0, 0, z]).collect(),
         eye,
         mass: 80,
     }
@@ -26,7 +26,7 @@ fn a_humanoid_sees_over_a_waist_wall_only_from_its_head_and_offsets_stay_at_its_
         let id = game
             .spawn_actor(feet, NonZeroU64::new(100).unwrap())
             .unwrap();
-        game.set_body(id, two_cell_body(eye)).unwrap();
+        game.set_body(id, body(2, eye)).unwrap();
         // A wall one cell high in a room two cells high, along the room's
         // edge row (the fixture's items and hints are in the middle row).
         game.set_wall(cell(1, 0), true).unwrap();
@@ -62,7 +62,12 @@ fn a_humanoid_sees_over_a_waist_wall_only_from_its_head_and_offsets_stay_at_its_
 
 #[test]
 fn the_eye_turns_with_a_body_lying_sideways_after_a_rotated_portal() {
-    for (eye, sees_past_the_wall) in [([0, 0, 1], true), ([0, 0, 0], false)] {
+    for (height, eye, sees_past_the_wall) in [
+        (1, [0, 0, 0], false),
+        (2, [0, 0, 1], true),
+        (2, [0, 0, 0], false),
+        (3, [0, 0, 2], true),
+    ] {
         let mut world = tor_world::World::new(vec![], vec![]).unwrap();
         for id in 1..=2 {
             world
@@ -81,7 +86,7 @@ fn the_eye_turns_with_a_body_lying_sideways_after_a_rotated_portal() {
         let id = game
             .spawn_actor(at(1, 7, 10), NonZeroU64::new(100).unwrap())
             .unwrap();
-        game.set_body(id, two_cell_body(eye)).unwrap();
+        game.set_body(id, body(height, eye)).unwrap();
         // Region 2 is stored sideways: body +x becomes region -z, and body
         // up (+z) becomes region +x.
         let rotation = (0..24)
@@ -98,7 +103,7 @@ fn the_eye_turns_with_a_body_lying_sideways_after_a_rotated_portal() {
             },
             rotation,
             1,
-            2,
+            height.max(2) as u16,
         )
         .unwrap();
         // A wall straight "ahead" of the feet in region 2; the head is one
@@ -110,14 +115,56 @@ fn the_eye_turns_with_a_body_lying_sideways_after_a_rotated_portal() {
         game.act(id, Action::Wait).unwrap();
         assert_eq!(game.observe(id).unwrap().location, at(2, 2, 10));
         let scene = game.scene(id).unwrap();
-        // The head lies at region +x, still at body-frame offset (0, 0, 1).
-        assert!(scene
-            .iter()
-            .any(|c| c.location == at(2, 3, 10) && c.offset == Position { x: 0, y: 0, z: 1 }));
+        // Every occupied body cell rotates to region +x while keeping its
+        // original body-frame offset in the disclosed scene.
+        for z in 0..height {
+            assert!(scene
+                .iter()
+                .any(|c| c.location == at(2, 2 + z, 10) && c.offset == Position { x: 0, y: 0, z }));
+        }
         assert_eq!(
             scene.iter().any(|c| c.location == at(2, 2, 7)),
             sees_past_the_wall,
             "eye {eye:?}: the cell behind the wall"
+        );
+    }
+}
+
+#[test]
+fn upright_bodies_of_every_height_see_from_their_eye_and_keep_offsets_at_the_feet() {
+    for height in 1..=3 {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        world
+            .add_chamber(Region {
+                id: RegionId(1),
+                name: "tall room".into(),
+                bounds: Extent::new(8, 3, 3).unwrap(),
+            })
+            .unwrap();
+        let at = |x, z| Location {
+            region: RegionId(1),
+            position: Position { x, y: 1, z },
+        };
+        world.set_wall(at(1, 0), true).unwrap();
+        let mut game = Game::new(world, 42);
+        let actor = game
+            .spawn_actor(at(0, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.set_body(actor, body(height, [0, 0, height - 1]))
+            .unwrap();
+        let scene = game.scene(actor).unwrap();
+        for z in 0..height {
+            assert!(scene
+                .iter()
+                .any(|c| c.location == at(0, z) && c.offset == Position { x: 0, y: 0, z }));
+        }
+        assert!(scene
+            .iter()
+            .any(|c| c.location == at(0, -1) && c.offset == Position { x: 0, y: 0, z: -1 }));
+        assert_eq!(
+            scene.iter().any(|c| c.location == at(3, -1)),
+            height > 1,
+            "height {height}: floor beyond the waist wall"
         );
     }
 }

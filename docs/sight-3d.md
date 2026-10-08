@@ -1,43 +1,25 @@
 # Three-dimensional sight
 
-**Status: in progress.** This is its own effort,
-[3s](milestones.md#3s--three-dimensional-sight), separate from 4e. The maintainer
-has authorized the protocol and save-format break it requires. Every observer
-now sees with the model below, from the eye cell its body declares. Floors and
-ceilings are seen solid cells that clients classify (see
-[material volumes](material-volumes.md)), and observation updates are view
-deltas. Still to come: the remaining client changes. When 3s is complete, this
-note becomes the sight guide.
+**Status: complete for the accepted scope.** Milestone
+[3s](milestones.md#3s--three-dimensional-sight) uses one sight rule for every
+observer, from the eye cell its body declares. Floors, ceilings and walls are
+seen solid cells that clients classify (see [material volumes](material-volumes.md)),
+and observation updates are view deltas. Text examination, shared surface
+classification, the ASCII enclosure header and disclosed-height browsing are
+implemented. An ASCII layout redesign and palette-based glyphs are separate work.
 
-## Why the current model falls short
+## Why the previous sight model was replaced
 
-`Game::scene` chooses between two scene builders for each observer:
+The previous model used 2D symmetric shadowcasting for single-cell static
+observers and height slices with conservative voxel rays for bodies, gravity,
+motion and off-axis orientations. Rays started at the reference cell rather
+than the eye. Separate vertical probes supplied floor and ceiling facts.
 
-- **`shadow_scene`** is used for single-cell, static observers. It runs 2D
-  symmetric shadowcasting on the observer's plane and adds only the vertical
-  column through explicit stair links.
-- **`volume_scene`** is used for multi-cell bodies, any active gravity or motion,
-  and off-axis orientations. In the first dungeon, that means every actor. It
-  keeps shadowcasting on the observer's plane and adds height slices using
-  conservative voxel rays. Those rays start at the body's reference cell and are
-  rejected as soon as they cross any opaque cell before the target.
-
-Floors and ceilings are not seen as cells. Each visible empty cell carries
-`floor` and `ceiling` facts from a separate straight-line probe up or down.
-
-This produces visible defects:
-
-- **Missing floors and ceilings.** A voxel ray to a distant floor cell must cross
-  nearer floor cells first, so only the floor directly below the reference cell
-  is disclosed. Ceilings behave the same way. The ASCII height panels show this
-  as a single block.
-- **Wrong eye position.** Sight starts at the reference cell, which for the
-  default two-cell character is the feet, not the head.
-- **Blocking is not modelled.** A waist-high wall, a lintel or a pit rim can't
-  hide or reveal surfaces correctly, because surface facts are probes rather
-  than lines of sight.
-- **Two rule sets.** Observers see by different rules depending on their body
-  and region, and the observer's plane is a special case inside the 3D builder.
+That hid distant floor and ceiling cells behind nearer cells in the same slab,
+made humanoids look from their feet, and could not represent the occlusion caused
+by waist-high walls, lintels and pit rims consistently. The model below replaces
+both gameplay scene builders and those surface probes. Historical comparisons
+later in this guide retain the measurements that justified the replacement.
 
 ## Goals and non-goals
 
@@ -67,7 +49,7 @@ has its centre at `(2x, 2y, 2z)` and its faces on the odd planes `2x ± 1`,
 A sight line always starts at the **centre of one eye cell**. The body
 definition names that cell:
 
-- `BodySpec` gains an `eye` offset, which must be one of its `cells`.
+- `BodySpec` includes an `eye` offset, which must be one of its `cells`.
 - Every actor and archetype `body` declaration must declare `eye`, including
   single-cell bodies. The offline validator rejects a body without one, so no
   creature silently looks from its feet.
@@ -200,7 +182,7 @@ join must still produce the same scene as the unsplit room, including its bevels
 
 This is an authorized compatibility-breaking change to both the protocol and the
 save format: the observation shape changes, updates become deltas, and `BodySpec`
-gains `eye`. Following the compatibility policy, older saves are rejected rather
+requires `eye`. Following the compatibility policy, older saves are rejected rather
 than migrated, and version bumps are recorded in the roadmap.
 
 ## Performance plan
@@ -235,8 +217,8 @@ exactly the same results as the layer below.
    sight lines a blocker at a given offset cuts are the same wherever the
    observer stands, so they could be precomputed as bitmasks per piece of the
    cube. Lines running exactly along seams between pieces make this delicate.
-   Layer 2 already beats the current builder, so this layer is deferred unless
-   measurements call for it.
+   The initial measurements justified layers 2 and 4; this layer remains
+   deferred unless later measurements call for it.
 4. **Scene cache** (`World::eye_scene`; the builder alone is
    `World::eye_scene_uncached`). Scenes are keyed by eye location, frame and
    radius. Validity is tracked per region rather than per chunk:
@@ -260,8 +242,8 @@ exactly the same results as the layer below.
      and a loaded world starts empty. It keeps at most 512 scenes, then
      empties and refills on demand.
 
-   Region streaming doesn't unload regions yet. When it does, unloading a
-   region is a topology change.
+   Region detachment invalidates scenes that depend on the detached region.
+   Scenes with unrelated dependencies remain reusable.
 
 Only the layers the measurements justify are added. Measure with an extended
 `fov_bench` that covers `volume_scene` and the new builder, and compare release
@@ -283,9 +265,9 @@ not make those items worse.
   one-cell creature, a two-cell humanoid with `eye = [0,0,1]` (the most
   important case), and a three-cell giant with `eye = [0,0,2]`. A standard room has only two
   cells of headroom, so giant fixtures use halls at least three cells tall.
-  There, the giant looks over obstacles that block a humanoid. Most diagnostic scenarios omit `body` and so only test one-cell
-  observers. New diagnostic fixtures declare two-cell and three-cell observers,
-  and the sight process tests drive real clients with a two-cell observer.
+  There, the giant looks over obstacles that block a humanoid. The diagnostic
+  packages explicitly select one-, two- and three-cell bodies;
+  the sight process tests drive real clients at all three heights.
 - **Scenario cases:** full floor and ceiling in an open room, waist-high wall,
   lintel, pit rim, airborne actor, observers of different heights seeing each
   other (including one-way sight), closed and open doors, diagonal blockers,
@@ -336,7 +318,62 @@ not make those items worse.
   two-cell humanoid: only the giant sees the creature behind the wall.
 - *Server:* repeated occurrences through a portal loop stay disclosed through
   the server (`crates/server/tests/it/place_hints.rs`).
-- Every case in the verification plan is now covered.
+- *Geometry predicates:* the reference segment predicate is checked against an
+  independent exact-rational oracle that partitions at surface crossings and
+  tests interval midpoints. All 64 exposed-face masks and all 15,625 ordered
+  endpoint pairs on the doubled-coordinate grid `[-2,2]^3` are covered:
+  1,000,000 cases including face, edge, vertex and degenerate contact.
+- *Exhaustive obstacle patterns:* all 512 three-by-three blocker patterns run
+  through the 3D builder at each eye height, checking every open-cell pair for
+  reciprocity and every scene against the exact reference. The legacy 2D test
+  remains as reference coverage.
+- *Height closeout:* supplemental tests retain the original two-cell fixtures
+  and add three-cell doors, every portal rotation with split-room equivalence
+  and reciprocity, pits, low lintels, diagonal blockers, stairs, repeated cycle
+  occurrences and one-sided body sight at all three eye heights. Simulation
+  tests cover upright and sideways bodies of every height.
+
+## Closeout audit
+
+The October 2026 audit found stale client-work claims and missing exhaustive
+predicate and height/presentation evidence. It adds verification and a third
+selectable diagnostic character; gameplay, wire and save formats are unchanged.
+The original compatibility breaks were already implemented.
+
+| Requirement | Authoritative coverage |
+| --- | --- |
+| Exact geometry and accelerated equivalence | `sight3d.rs` predicate unit test; world `sight3d` tests for randomized rooms, portals, cycles, stairs and the dungeon |
+| Eye positions, body frames and observer heights | Simulation `sight` tests; world height matrices; real-client `test_sight_process.py` |
+| Reciprocity and reviewed 2D differences | Random-volume and rotated split-room reciprocity; exact bevel-tip classification of every extra open cell; historical wall differences below |
+| Floors, ceilings, missing geometry and client presentation | Shared `surfaces` tests, world open-room/height tests, text examination, native tile assertions and captured native frames |
+| Updates, disclosure and recovery | Protocol/client delta suites, server opaque repeated-occurrence tests, package invariants for retry/restart/rewind, and sight save/resume acceptance |
+| Existing gameplay and performance | Dungeon/native acceptance and checkpoint suites; retained sight comparisons below and the open limitations in the [performance plan](performance-persistence.md#open-work) |
+
+The native review includes the humanoid before and after opening a tall door,
+its head-height view, and giant spectator views. Floors and ceilings fill their
+disclosed slices, hidden items appear only after the door opens, and hovering
+actors appear at their disclosed heights. The compact height panels remain the
+existing UI; redesign is outside 3s.
+
+Local Windows verification passed the complete debug runner: 965 Rust tests,
+313 Python/application tests, formatting, all-target Clippy, architecture and
+strict private rustdoc. Final acceptance additions were rechecked with formatting,
+all-target Clippy and seven sight/documentation checks. Optimized world/simulation
+coverage passed 236 Rust tests, and both optimized sight process cases passed,
+including restart at every observer height. No test was ignored or waived.
+Native captures were reviewed separately. Windows/Linux debug/release CI remains
+the required publication gate.
+
+The first closeout CI run exposed an inherited native burst test that submitted
+another action before authoritative admission reopened. Its producer now waits
+for readiness while running independently of the native reader. The acceptance
+requirements remain 160 executed actions, responsive native input, equal final
+state, bounded history and network events, and the exact saved checkpoint.
+
+This audit changes no production sight algorithm or latency-sensitive behavior,
+so it makes no new performance claim.
+Dense-falling physics and unexplained save tails remain tracked under deferred
+3p with their original targets; closing sight does not close those findings.
 
 ## Decisions
 
@@ -363,7 +400,9 @@ occlusion masks (layer 3) haven't been needed.
 
 The reference is `World::eye_scene_reference`, in `crates/world/src/sight3d.rs`,
 with tests in `crates/world/tests/it/sight3d.rs`. Gameplay uses the accelerated,
-cached `World::eye_scene`.
+cached `World::eye_scene`. The comparisons below record the September 2026
+implementation: `main` names the baseline used then, and the intermediate
+regressions are retained alongside their fixes.
 
 - **Portals and rotations.** A room split across a join looks identical to the
   unsplit room from both sides under all 24 cube rotations, including sideways
@@ -387,15 +426,16 @@ cached `World::eye_scene`.
   whose corner peeks out from behind another; 3D requires a visible face centre.
 - **Speed.** Release build, range 8, mean time per scene, from `fov_bench`:
 
-  | Case | 2D shadowcasting | Current voxel builder | 3D reference | 3D accelerated |
+  | Case | 2D shadowcasting | Previous voxel builder | 3D reference | 3D accelerated |
   | --- | --- | --- | --- | --- |
   | Room, humanoid eye | 10 µs | 307 µs | 881 µs | 124 µs |
   | Three-cell hall, giant eye | 13 µs | 426 µs | 1,028 µs | 166 µs |
   | First-dungeon layout, room centre | 28 µs | 470 µs | 1,133 µs | 208 µs |
   | First-dungeon layout, in a doorway | 25 µs | 452 µs | 1,125 µs | 271 µs |
 
-  The accelerated scene is about twice as fast as the voxel builder the dungeon
-  uses today. It's still slower than 2D shadowcasting, which sees far less.
+  In that comparison, the accelerated scene took about half the time of the
+  previous voxel builder. It remained slower than 2D shadowcasting, which sees
+  far less.
   Profiling showed that routes across joins dominated until plain steps
   skipped the topology lookups.
 - **Gameplay comparison against `main`.** Release `perf_compare.py`, three
@@ -463,7 +503,7 @@ cached `World::eye_scene`.
   the 64-region case takes 1.6 s, against 1.9 s on `main`. Two static physics
   cases each had one slow save (p95 over nine saves of 0.72 and 0.76 s, against
   0.15 and 0.19 s on `main`). Every other save in those cases was normal. The
-  cause is unexplained and hasn't been investigated yet; saves write no sight
-  data, and this machine saves to an HDD. The dense-falling overrun was
+  cause remains unexplained; scene caches are not saved, and the measurement
+  machine writes saves to an HDD. The dense-falling overrun was
   already open on `main`; see
   [open work](performance-persistence.md#open-work).

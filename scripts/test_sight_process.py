@@ -49,6 +49,19 @@ class SightProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
         native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(native["state"], initial["state"])
+        tiles = {tuple(t["position"][axis] for axis in ("x", "y", "z")): t
+                 for t in native["map_tiles"]}
+        for z in (-1, 2):
+            self.assertEqual(tiles[(0, 0, z)]["glyph"], "#")
+            self.assertFalse(tiles[(0, 0, z)]["remembered"])
+        # Height browsing changes presentation, never simulation state.
+        higher = self.key(window, "map_higher")
+        self.assertEqual(higher["state"], initial["state"])
+        tiles = {tuple(t["position"][axis] for axis in ("x", "y", "z")): t
+                 for t in higher["map_tiles"]}
+        self.assertEqual(tiles[(-3, -1, 1)]["glyph"], "&")
+        lower = self.key(window, "map_lower")
+        self.assertEqual(lower["state"], initial["state"])
         self.key(window, "open_door")
         opened = self.key(window, "right")
         seen = opened["state"]["observation"]
@@ -68,7 +81,7 @@ class SightProcesses(ProcessTestCase):
         # The `sight-3d-giant` package, once per character: the same start,
         # hall and creature; only the selected character's body differs.
         creature = {"x": 5, "y": 0, "z": 1}
-        for character, giant in ((1, True), (2, False)):
+        for character, giant in ((1, True), (2, False), (4, False)):
             self.save = self.save.with_name(f"game-{character}.json")
             server = self.server(scenario="sight-3d-giant", character=character)
             client = self.launch("tor-client-headless", ["--connect", self.address, "--actor", str(character)])
@@ -84,14 +97,17 @@ class SightProcesses(ProcessTestCase):
             self.assertEqual(sorted(beyond), [4, 5, 6, 7] if giant else [])
             positions = [a["position"] for a in view["visible_actors"]]
             self.assertEqual(creature in positions, giant)
-            if giant:
-                window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"],
-                                     token=SPECTATOR_TOKEN)
-                native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
-                self.assertEqual(native["state"], state)
-                self.key(window, "escape")
-                self.assertEqual(window.child.wait(timeout=10), 0)
+            window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--actor", str(character)],
+                                 token=SPECTATOR_TOKEN)
+            native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
+            self.assertEqual(native["state"], state)
+            self.key(window, "escape")
+            self.assertEqual(window.child.wait(timeout=10), 0)
             client.stop(); server.stop()
+            resumed_server = self.server(scenario="sight-3d-giant", character=character)
+            resumed_client, resumed = self.client(SPECTATOR_TOKEN, actor=character)
+            self.assertEqual(resumed["state"], state)
+            resumed_client.stop(); resumed_server.stop()
 
 
 if __name__ == "__main__":

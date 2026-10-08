@@ -2,7 +2,7 @@
 # Three-dimensional sight at three eye heights in one hall: a three-cell giant
 # (the default) looks over a wall two cells high and sees a creature hovering
 # behind it; a two-cell humanoid, selected with --character 2 at the same
-# start, can't.
+# start, can't. A one-cell creature is selected with --character 4.
 format = 2
 id = "sight-3d-giant"
 version = "1.0"
@@ -13,4 +13,5 @@ zones = { "hall" = {  } }
 characters = [
   { "id" = 1, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0],[0,0,1],[0,0,2]], eye = [0,0,2], mass = 400 } },
   { "id" = 2, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0],[0,0,1]], eye = [0,0,1], mass = 80 } },
+  { "id" = 4, "anchor" = "1/start", "turn_ticks" = 100, body = { cells = [[0,0,0]], eye = [0,0,0], mass = 10 } },
 ]

@@ -129,6 +129,11 @@ These items stop 3p from closing:
   command. See [dungeon gameplay](dungeon.md#performance).
 - **Dense falling physics** (8 actors, 128 moving items) p95 is about 22.5 ms.
   See [physics](physics.md#performance).
+- **Isolated save tails in the 3s physics comparison.** Two static cases each
+  had one slow save among nine samples (p95 0.72 and 0.76 s). Their cause remains
+  unexplained; scene caches are not persisted. Keep these as unresolved evidence,
+  not a claim of a reproducible sight regression or a fixed storage problem. See
+  the [recorded sight comparison](sight-3d.md#reference-implementation-findings).
 
 Explicitly deferred scaling work (still measured, never an excuse for a
 regression within the current 8–256-region, 100–10,000-action envelope):
