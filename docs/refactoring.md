@@ -2650,3 +2650,52 @@ the eight documentation/certificate checks passed after historical version
 notes were clarified. Formatting, workspace all-target Clippy and changed
 Python lint passed. A final coherent debug publication gate and complete
 final-head Windows/Linux CI remain required. Earlier failed runs are retained.
+
+
+**Scoped interactions published and deployed (2026-10-08).**
+[PR #76](https://github.com/KCall360/thresholds-of-ruin/pull/76) merged as
+`86ec707` after all nine [exact-head CI checks](https://github.com/KCall360/thresholds-of-ruin/actions/runs/37714946438)
+passed on `f7031e7`, including full Windows/Linux debug and release coverage.
+Local unchanged-input evidence passed all 909 Rust tests and 299 of 300 Python
+tests; the sole native mouse failure was the expressly waived LockApp overlay.
+The runner-stopped architecture, strict Rust documentation and workspace Rust
+checks were completed separately without repeating the application suite.
+This is qualified local debug evidence, not an unqualified full local pass.
+
+The release binary build completed without a full local release suite. An
+immutable bundle preserves all 542 tested source files, committed blob identities,
+five executable hashes and matching scenario files. All 30 copied-binary
+real-client/save/restart/recovery/scoped-target smoke checks passed without
+rebuilding. The Text, ASCII and Text + ASCII Spectator launchers now use that
+bundle. Eight helper/config backups and all three existing shortcut files were
+verified; their helpers and shortcuts remain unchanged. Prior builds and saves
+remain available. Post-activation source and binary hashes matched the recorded
+candidate. No benchmark upload, release or scripting runtime was introduced.
+
+**Scenario source diagnostics (in development).** A separate branch keeps the
+published checkpoint fixed. A failing-first actual-validator regression
+reproduced missing coordinates for an unknown actor AI reference among repeated
+values, a decoy comment and Unicode. Typed missing-reference data now reaches the
+construction boundary without parsing error strings. The existing TOML parser
+locates the unique declaration and decoded reference value on the failure path;
+line/column calculation uses the exact UTF-8 source span. Missing, ambiguous or
+programmatically changed source references acquire no guessed coordinates.
+Manifest authoring bytes are optional diagnostic metadata excluded from save
+serialization; original coordinates are not fabricated for restored manifests.
+Successful construction does not acquire or parse diagnostic source. Validation
+precedence remains intact. Three source-span unit regressions, the real-validator
+regression, all 25 compiler/package tests and all 209 server unit tests passed;
+workspace all-target Clippy passed. The next actual-process run exposed one old
+AI-message expectation; it was corrected to require the precise location rather
+than remove the assertion. Authored actor/item archetype reference regressions
+then failed first and passed with the same parser-span mechanism. Archetype
+lookup now carries a typed missing-reference name, and all declaration context
+formatting uses one path. Diagnostic source acquisition preserves the original
+failure when source is unavailable. Five source/provenance unit regressions,
+all 211 server unit tests, all nine scenario process cases, workspace all-target
+Clippy and changed Python lint passed. Broader source-aware reference
+normalization, compiler diagnostics and publication verification remain in progress.
+
+All six original refactor sequences remain active, including recovery-envelope
+feasibility and measured persistence/restore/command tails. These published
+increments do not prove completion of those remaining requirements.
