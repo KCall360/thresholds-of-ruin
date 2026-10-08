@@ -430,6 +430,89 @@ mod refresh_tests {
     use tor_world::RegionId;
 
     #[test]
+    fn dense_rotated_navigation_matches_full_scan_and_preserves_old_boundaries() {
+        for cells in [2, 8] {
+            let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+            world
+                .add_chamber(tor_world::Region {
+                    id: RegionId(1),
+                    name: "dense-navigation".into(),
+                    bounds: tor_world::Extent::new(32, 8, 8).unwrap(),
+                })
+                .unwrap();
+            let mut game = Game::new(world, 42);
+            let actors: Vec<_> = (0..8)
+                .map(|n| {
+                    let actor = game
+                        .spawn_actor(
+                            Location {
+                                region: RegionId(1),
+                                position: Position {
+                                    x: 2 + n * 3,
+                                    y: 3,
+                                    z: 3,
+                                },
+                            },
+                            NonZeroU64::new(100).unwrap(),
+                        )
+                        .unwrap();
+                    game.set_body(
+                        actor,
+                        crate::BodySpec {
+                            cells: if cells == 2 {
+                                vec![[0, 0, 0], [0, 0, 1]]
+                            } else {
+                                (0..2)
+                                    .flat_map(|x| {
+                                        (0..2).flat_map(move |y| (0..2).map(move |z| [x, y, z]))
+                                    })
+                                    .collect()
+                            },
+                            eye: [0, 0, 1],
+                            mass: 80,
+                        },
+                    )
+                    .unwrap();
+                    actor
+                })
+                .collect();
+            for frame in [0, 5, 12, 23] {
+                let old = game.clone();
+                let old_navigation = old.navigation.clone();
+                for &actor in &actors {
+                    game.actors.get_mut(&actor).unwrap().orientation = frame;
+                }
+                let mut reference = game.clone();
+                reference.reference_refresh_navigation();
+                game.refresh_navigation();
+                assert_eq!(
+                    game.navigation, reference.navigation,
+                    "cells {cells}, frame {frame}"
+                );
+                assert_eq!(old.navigation, old_navigation);
+                for &actor in &actors {
+                    let destinations: Vec<_> = game.known_cells(actor).collect();
+                    assert!(!destinations.is_empty());
+                    for index in [0, destinations.len() / 2, destinations.len() - 1] {
+                        let destination = destinations[index];
+                        assert_eq!(
+                            game.travel_route(actor, destination),
+                            reference.travel_route(actor, destination),
+                            "cells {cells}, frame {frame}, actor {actor:?}"
+                        );
+                    }
+                }
+                let before = game.navigation.clone();
+                game.refresh_navigation();
+                assert_eq!(
+                    game.navigation, before,
+                    "repeated refresh must be idempotent"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn shared_search_matches_fresh_routes_across_target_orders_and_frames() {
         let mut world = tor_world::World::new(vec![], vec![]).unwrap();
         for id in 1..=2 {

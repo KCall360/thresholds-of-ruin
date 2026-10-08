@@ -4,16 +4,16 @@ This is the accepted refactor scope. Implementation proceeds in verified
 increments; a listed design is not a claim that it is implemented. Text-client
 improvements and a scripting runtime are deferred.
 
-As of 2026-10-08, PR #82 (`fd68f43`) and PR #83 (`45882f4`) are merged,
-with all nine respective Windows/Linux CI jobs successful. PR #82's immutable
-desktop release passed 43 copied-executable checks and is active; previous saves
-and builds remain retained. PR #83 adds queued-action completion measurements
-without changing runtime executables. The strict save-decoder candidate (`f985e0e`)
-reduces measured restore peak memory and preserves validation/recovery; its
-six-round release comparison passed. Final broad verification, CI, publication,
-checkpoint/flush and physics tail review, and the integrated requirements audit
-remain unfinished. Detailed increment notes below retain historical evidence;
-earlier pending states do not override this current status.
+As of 2026-10-08, the accepted implementation sequences below are published.
+The strict save-decoder checkpoint is merged after all nine exact-head CI jobs
+passed; its immutable desktop release passed 43 copied-executable checks and is
+active. The integrated review found no additional implementation gap in the
+accepted boundaries, index lifecycles, queued execution, wire recovery, scenario
+compilation or persistence work. A measured navigation lookup experiment was
+rejected; its behavioral equivalence test is retained. Final checkpoint debug
+verification and Windows/Linux debug/release CI remain required before closing
+the refactor. Detailed increment notes below retain historical evidence; earlier
+pending states do not override this current status.
 
 The command-boundary follow-up separates wire command/action conversion from
 journal types. Typed actor, item and door interaction references are scoped to
@@ -275,6 +275,59 @@ flush/restart samples remain weak tail evidence. These results support lower
 restore peak memory, not a broad latency improvement or closure of milestone 3p.
 Raw samples and failed diagnostic attempts remain local; no release assets or
 performance-ledger entries were published.
+
+## Integrated completion review (2026-10-08)
+
+The review covers all six accepted work sequences, including their lifecycle and
+failure contracts. Published checkpoints have complete Windows/Linux debug and
+release CI. The final review adds a dense multi-actor navigation equivalence test
+across body sizes and rotations, checking reference navigation, routes, snapshot
+isolation and repeated-refresh stability. Final-checkpoint verification remains
+pending; this review does not substitute for it.
+
+| Accepted sequence | Result of integrated review |
+| --- | --- |
+| Explicit boundaries | Wire adapters, backend action facts, native simulation outcomes, authoring/prepared representations and save-owned mappings have explicit owners. Private candidate state excludes history, receipt indexes and storage ownership; persistence admission precedes publication. No duplicate transaction or DTO layer is justified. |
+| Derived work | Boundary observations and AI decisions/routes are reused. Backend actor/item indexes use region-local keys and portal-resolved body cells; guarded mutation and load/replay/rewind/streaming reconstruction have reference tests. History indexes preserve privacy scopes. |
+| Scheduling and streams | Player, AI and travel intentions share simulation execution. Admission and completion remain distinct; execution revalidates current conditions. Receipt recovery, authority ordering, contextual resets, exact delta bases, atomic validation, complete snapshot assembly, bounded decoding and fair queued/inflight byte accounting are covered. |
+| Scenario compilation | Authoring types compile into immutable resolved content. Lazy references retain source diagnostics; dependencies are digest-pinned. Semantic seeds and named streams preserve stable identities independently of activation order. Certificates describe sampled validation honestly. |
+| Persistence and history | Explicit save schemas and independent version axes preserve wire independence. Immutable checkpoint pooling, strict decoding, atomic source/journal batches, uncertainty reconciliation and indexed privacy-filtered history are implemented. The decoder memory investigation produced the published improvement. Measurements do not justify additional compression, chunking or a restore-ownership rewrite. Portable export remains a future design. |
+| Latency and extension seams | Diagnostics are bounded and nonblocking; storage ownership and checkpoint/region acquisition have explicit attribution. Queued-client completion is measured separately from immediate acknowledgement. Restore and physics tails were investigated, including the rejected experiment below. Future scoped-query, typed-effect, scheduling, RNG, persistence and freeze/thaw contracts are documented without a runtime. |
+
+### Rejected navigation membership experiment
+
+A supplemental 24-row instrumented physics probe passed the original workload
+validator and exact recovery assertions. In the slowest five percent of dense
+falling commands, navigation refresh accounted for approximately 52–58% of
+exclusive profiled time, perception 18–19%, and simulation 22–30%. This identified
+a phase to investigate; it did not prove which navigation operation dominated.
+
+A fixed-hasher membership set was tried for exact `(region-local location,
+projected offset, rotation)` lookup, preserving ordered traversal and saved
+knowledge. It passed 229 affected world/simulation tests, all-target workspace
+Clippy and three real physics-process tests. A six-round standard interleaved
+release comparison validated all 12 runs across eight cases, with unchanged
+workload, operation and byte counts. It did not demonstrate a useful improvement,
+so the runtime change and supporting hash traits were removed. The independent
+behavioral test remains. No extra cache, threshold or fallback was introduced.
+
+| Command interval | n per side | Before p50 / p95 / max (ms) | Rejected candidate p50 / p95 / max (ms) |
+| --- | --- | --- | --- |
+| Dense falling, two-cell bodies | 1,152 | 0.060 / 11.574 / 19.362 | 0.063 / 12.297 / 23.447 |
+| Dense falling, eight-cell bodies | 1,152 | 0.087 / 11.676 / 24.893 | 0.085 / 11.813 / 25.070 |
+| Sparse falling, two-cell body | 144 | 0.179 / 2.515 / 2.664 | 0.176 / 2.559 / 2.667 |
+| Sparse falling, eight-cell body | 144 | 0.124 / 2.597 / 2.716 | 0.093 / 2.424 / 2.803 |
+
+Every dense two-cell round had higher candidate command p95; eight-cell falling
+p95 also increased in every round. Other intervals were mixed: dense two-cell
+resume p95 grew from 232.463 to 300.873 ms, and sparse static two-cell save maximum
+grew from 154.620 to 567.312 ms. Dense static two-cell save maximum decreased
+from 560.781 to 151.907 ms. These HDD-host diagnostics retain adverse samples
+and do not establish the cause of all timing variation or a broad speedup.
+Existing targets remain unchanged; dense falling still exceeds the command p95
+8 ms target. Continued physics/perception performance development belongs to the
+existing roadmap rather than repeated speculative changes in this refactor.
+Raw evidence remains local; no release asset or ledger result was published.
 
 ## Future scenario extension contracts
 

@@ -123,19 +123,21 @@ short worker-lock scope; lazy scenario compilation with source provenance, diges
 pinning, semantic generator seeds and named random streams; nonblocking diagnostics.
 Future scenario-extension contracts are documented without implementing a runtime.
 
-PR #82 is merged after all nine exact-head CI jobs passed. Its immutable desktop
-build is active and passed 43 copied-executable checks; previous builds and saves
-remain retained. PR #83 is merged after all nine exact-head CI jobs passed and
-adds actual queued-action outcome timing without changing runtime executables.
+PR #84 is merged after all nine exact-head CI jobs passed. Its immutable desktop
+release is active, with 43 copied-executable checks and verified source, binary,
+backup and launcher identities. Previous builds and saves remain retained.
+It lowers strict-decoder restore peak memory without changing saved formats or
+validation semantics; timing changes were mixed and adverse samples remain.
 
-The strict save-decoder checkpoint compares saved input against one canonical
-JSON tree rather than retaining a second input tree. Semantic equivalence, server
-unit/integration and actual-release recovery checks pass. Twelve exact-fixture
-restores show lower peak memory; the first small-fixture startup outlier remains
-part of the evidence. The standard six-round release comparison passed all 36 validators with unchanged
-operation and byte counts; timing changes were mixed and adverse samples remain.
-Broad checkpoint verification, CI, publication/deployment, measured tail review
-and the integrated requirement audit remain unfinished.
+The integrated six-sequence review is recorded in `docs/refactoring.md`.
+A navigation projection hash-membership experiment passed affected semantic and
+process tests but failed to demonstrate a useful six-round release improvement;
+its production changes were removed and its dense rotated equivalence test kept.
+All 12 benchmark validators passed, with unchanged operation and byte counts.
+Final checkpoint debug verification, publication and exact-head Windows/Linux
+CI remain before goal completion. Existing performance targets remain unchanged;
+no broad speedup is claimed. Do not add speculative caches or reopen measured
+experiments without new evidence.
 
 Use the updated [testing policy](docs/testing.md): affected tests during development,
 one broad local debug gate before push, targeted release measurements/checks as

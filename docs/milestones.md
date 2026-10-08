@@ -21,7 +21,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | --- | --- | --- |
 | Foundation | Complete | Rust workspace, architecture checks, GPL licensing, full Windows/Linux CI in independent debug/release profile jobs |
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
-| Saved gameplay intentions | In progress | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits, retained-state byte validation and bounded transport closure are published |
+| Saved gameplay intentions | Complete for current scope | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits, retained-state byte validation and bounded transport closure are published |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
 | Perception | In progress (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations; backend action facts and numeric save DTO mappings are independent of wire action types |
@@ -48,10 +48,13 @@ bounded recovery, opaque targets, safe wire integers, collection deltas, fair
 output accounting and bounded transport closure are published. Independent saved
 schemas, checkpoint sharing, atomic persistence, lazy prepared scenario content,
 source diagnostics and semantic named generation streams are implemented.
-Actual queued-action completion timing is published. A strict save-decoder
-optimization has passed focused recovery and release comparisons; final broad
-verification, CI, publication and the complete requirements audit remain.
-Measured save/physics tails remain unresolved; no broad speedup is claimed.
+Actual queued-action completion timing and the strict save-decoder memory
+improvement are published. The integrated requirement review found no further
+implementation gap in the accepted refactor scope. A navigation membership
+experiment showed no useful release improvement and was removed; its behavioral
+equivalence test remains. Final checkpoint verification and CI remain before
+closing the refactor. Save/physics tails and existing performance targets remain
+in scope for the roadmap; no broad speedup is claimed.
 Text-client product fixes and scripting implementation remain deferred.
 
 ## Completed milestones
