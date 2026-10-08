@@ -15,6 +15,7 @@ use crate::{scenario_package::Package, Failure};
 pub struct RegionMetadata {
     pub bounds: Extent,
     pub anchors: BTreeMap<String, Position>,
+    pub stair_anchors: BTreeSet<String>,
     pub zone: Option<String>,
     pub themes: BTreeSet<String>,
     pub outgoing: BTreeSet<RegionId>,
@@ -46,6 +47,22 @@ impl RegionCatalog {
     pub fn from_package(package: &Package) -> Result<Self, Failure> {
         let mut regions = BTreeMap::new();
         for region in &package.index.regions {
+            let generated: BTreeSet<_> = region.stair_anchors.iter().collect();
+            if generated.len() != region.stair_anchors.len()
+                || (!region.generated && !generated.is_empty())
+                || generated.iter().any(|name| {
+                    name.is_empty()
+                        || name.len() > 80
+                        || name.contains('/')
+                        || name.chars().any(char::is_control)
+                        || region.anchors.contains_key(*name)
+                })
+            {
+                return Err(invalid(format!(
+                    "Region {}: invalid generated stair anchors",
+                    region.id
+                )));
+            }
             let bounds =
                 Extent::new(region.size[0], region.size[1], region.size[2]).ok_or_else(|| {
                     invalid(format!("Region {}: invalid structural bounds", region.id))
@@ -81,6 +98,7 @@ impl RegionCatalog {
             let metadata = RegionMetadata {
                 bounds,
                 anchors,
+                stair_anchors: region.stair_anchors.iter().cloned().collect(),
                 zone: region.zone.clone(),
                 themes,
                 outgoing: BTreeSet::new(),
@@ -96,7 +114,7 @@ impl RegionCatalog {
         for region in &package.index.regions {
             let mut outgoing = BTreeSet::new();
             for to in &region.portals {
-                outgoing.insert(catalog.resolve_anchor(to)?.region);
+                outgoing.insert(catalog.anchor_region(to)?);
             }
             catalog
                 .regions
@@ -104,7 +122,46 @@ impl RegionCatalog {
                 .expect("indexed region")
                 .outgoing = outgoing;
         }
+        for (id, pair) in &package.manifest.stair_pairs {
+            if id.is_empty()
+                || id.len() > 80
+                || id.contains('/')
+                || id.chars().any(char::is_control)
+            {
+                return Err(invalid(format!("Invalid stair pair ID {id:?}")));
+            }
+            let upper = catalog.anchor_region(&pair.upper)?;
+            let lower = catalog.anchor_region(&pair.lower)?;
+            catalog
+                .regions
+                .get_mut(&upper)
+                .expect("resolved endpoint")
+                .outgoing
+                .insert(lower);
+            catalog
+                .regions
+                .get_mut(&lower)
+                .expect("resolved endpoint")
+                .outgoing
+                .insert(upper);
+        }
         Ok(catalog)
+    }
+
+    /// Region identity is known even when generation has not placed an anchor.
+    pub fn anchor_region(&self, anchor: &str) -> Result<RegionId, Failure> {
+        let missing = || invalid(format!("Missing structural anchor {anchor}"));
+        let (id, name) = anchor.split_once('/').ok_or_else(missing)?;
+        let region = RegionId(id.parse().map_err(|_| missing())?);
+        if id != region.0.to_string()
+            || !self
+                .regions
+                .get(&region)
+                .is_some_and(|r| r.anchors.contains_key(name) || r.stair_anchors.contains(name))
+        {
+            return Err(missing());
+        }
+        Ok(region)
     }
 
     pub fn region(&self, id: RegionId) -> Option<&RegionMetadata> {

@@ -1,0 +1,10 @@
+id = 2
+name = "Generated floor"
+size = [12, 8, 1]
+chamber = true
+
+[generate]
+generator = "rooms"
+version = 2
+rooms = [3, 6]
+stair_anchors = ["up", "down"]

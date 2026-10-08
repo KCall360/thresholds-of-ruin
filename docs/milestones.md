@@ -29,6 +29,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
 | Navigation and interaction | Complete (milestone 3) | Known-cell travel, interruption, prose and examination, clarification, compound pickup/doors, durable places, narration, stream recovery |
 | Authored scenarios | Complete (4a) | TOML packages, offline validation, pinned inputs |
+| Paired stairs | Implementation in progress | Stable pair declarations, independently generated endpoints, same-region pairs and persistent resolved links; verification pending |
 | Item knowledge | Complete (4b) | Compatible stacks, seeded appearances, character-owned identities |
 | Dungeon gameplay | Complete (4d) | Timed melee, typed damage, AI, death, retrieval and escape |
 | Region streaming | Complete (4e) | Regions built on demand, detached to disk, generated between authored ones; asset palettes |

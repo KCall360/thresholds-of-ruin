@@ -1,0 +1,5 @@
+id = 1
+name = "Upper floor"
+size = [5, 5, 1]
+chamber = true
+anchors = { stair = [1, 1, 0] }

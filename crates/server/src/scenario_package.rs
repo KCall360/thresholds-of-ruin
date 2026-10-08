@@ -74,6 +74,9 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    /// Stable connection identities, independent of endpoint coordinates.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stair_pairs: BTreeMap<String, StairPair>,
     #[serde(default)]
     pub factions: BTreeMap<String, std::collections::BTreeSet<String>>,
     #[serde(default)]
@@ -100,6 +103,12 @@ pub struct Manifest {
     pub assets: BTreeMap<String, Vec<String>>,
     /// Terrain assets of regions outside any zone, or in a zone without its own.
     pub terrain: Option<TerrainAssets>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StairPair {
+    pub upper: String,
+    pub lower: String,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -368,6 +377,8 @@ pub struct IndexedRegion {
     pub chamber: bool,
     pub zone: Option<String>,
     pub anchors: BTreeMap<String, [i32; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stair_anchors: Vec<String>,
     /// Each outgoing portal's destination anchor, in authored order.
     pub portals: Vec<String>,
     pub actors: Vec<IndexedActor>,
@@ -405,6 +416,10 @@ impl IndexedRegion {
             chamber: def.chamber,
             zone: def.zone.clone(),
             anchors: def.anchors.clone(),
+            stair_anchors: def
+                .generate
+                .as_ref()
+                .map_or_else(Vec::new, |g| g.stair_anchors.clone()),
             portals: def.portals.iter().map(|p| p.to.clone()).collect(),
             actors: def
                 .actors
@@ -1118,6 +1133,7 @@ fn corridor(
             hall.actors.clear();
             hall.items.clear();
             hall.generate = Some(crate::generator::Generate {
+                stair_anchors: vec![],
                 generator: crate::generator::ROOMS.into(),
                 version: crate::generator::ROOMS_VERSION,
                 salt: 0,
@@ -1884,11 +1900,13 @@ impl Package {
         let (actors, items, doors) = index.ceilings;
         game.reserve_identities(actors, items, doors);
         let all: Vec<&RegionDef> = defs.iter().map(|d| &**d).collect();
+        let anchors = resolved_anchors(&all);
         self.add_geometry(&mut game, &all)?;
         for r in &all {
-            self.add_structure(&mut game, r, &index.anchors)?;
+            self.add_structure(&mut game, r, &anchors)?;
+            self.add_stairs(&mut game, r.id, &index, &anchors)?;
         }
-        for (name, position) in &index.anchors {
+        for (name, position) in &anchors {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
@@ -1920,12 +1938,49 @@ impl Package {
     pub(crate) fn index(&self, seed: u64) -> Result<PackageIndex, Failure> {
         let definitions = Arc::new(PreparedDefinitions::new(&self.manifest, self.selected));
         let anchors = self.anchors()?;
-        let mut anchors_by_region: BTreeMap<u64, Vec<(String, Location)>> = BTreeMap::new();
-        for (name, at) in &anchors {
-            anchors_by_region
-                .entry(at.region.0)
-                .or_default()
-                .push((name.clone(), *at));
+        let mut stairs: BTreeMap<u64, Vec<StairExit>> = BTreeMap::new();
+        for (id, pair) in &self.manifest.stair_pairs {
+            require(
+                label(id) && !id.contains('/'),
+                format!("Invalid stair pair ID {id:?}"),
+            )?;
+            let endpoint = |field, name: &str| {
+                self.endpoint_region(name).map_err(|failure| {
+                    Origin::Manifest.reference_path(
+                        failure,
+                        self.manifest_text.as_deref(),
+                        &[
+                            PathSegment::Field("stair_pairs"),
+                            PathSegment::Key(id),
+                            PathSegment::Field(field),
+                        ],
+                        ReferenceValue::Text(name),
+                    )
+                })
+            };
+            let upper = endpoint("upper", &pair.upper)?;
+            let lower = endpoint("lower", &pair.lower)?;
+            for (from, direction, to) in [
+                (&pair.upper, Direction::Down, &pair.lower),
+                (&pair.lower, Direction::Up, &pair.upper),
+            ] {
+                let region = if direction == Direction::Down {
+                    upper
+                } else {
+                    lower
+                };
+                stairs.entry(region).or_default().push(StairExit {
+                    id: id.clone(),
+                    from: from.clone(),
+                    direction,
+                    to: to.clone(),
+                    destination: if direction == Direction::Down {
+                        lower
+                    } else {
+                        upper
+                    },
+                });
+            }
         }
         let mut spawns = BTreeMap::new();
         for c in &definitions.characters {
@@ -2023,7 +2078,7 @@ impl Package {
         Ok(PackageIndex {
             definitions,
             anchors,
-            anchors_by_region,
+            stairs,
             homes,
             spawns: spawns_by_region,
             ceilings,
@@ -2163,21 +2218,35 @@ impl Package {
         let r = index.region(self, region)?;
         self.check_region(&r)?;
         let mut shell: Vec<Arc<RegionDef>> = vec![r.clone()];
-        for to in r.portals.iter().filter_map(|p| index.anchors.get(&p.to)) {
-            if shell.iter().all(|s| s.id != to.region.0) {
-                shell.push(index.region(self, to.region.0)?);
+        let destinations = r
+            .portals
+            .iter()
+            .filter_map(|p| self.endpoint_region(&p.to).ok())
+            .chain(
+                index
+                    .stairs
+                    .get(&region)
+                    .into_iter()
+                    .flatten()
+                    .map(|s| s.destination),
+            );
+        for destination in destinations {
+            if shell.iter().all(|s| s.id != destination) {
+                shell.push(index.region(self, destination)?);
             }
         }
         shell.sort_by_key(|s| s.id);
         let files = shell.iter().map(|s| s.id).collect();
         let shell: Vec<&RegionDef> = shell.iter().map(|s| &**s).collect();
+        let anchors = resolved_anchors(&shell);
         let mut game = Game::new(
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
         self.add_geometry(&mut game, &shell)?;
-        self.add_structure(&mut game, &r, &index.anchors)?;
-        for (name, position) in index.anchors_by_region.get(&region).into_iter().flatten() {
+        self.add_structure(&mut game, &r, &anchors)?;
+        self.add_stairs(&mut game, region, index, &anchors)?;
+        for (name, position) in anchors.iter().filter(|(_, at)| at.region.0 == region) {
             require(
                 game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
@@ -2194,6 +2263,49 @@ impl Package {
     /// generator runs to learn its identities.
     pub(crate) fn declaring_reads_file(&self, region: u64) -> bool {
         self.index.region(region).is_some_and(|r| r.generated)
+    }
+
+    fn add_stairs(
+        &self,
+        game: &mut Game,
+        region: u64,
+        index: &PackageIndex,
+        anchors: &BTreeMap<String, Location>,
+    ) -> Result<(), Failure> {
+        for exit in index.stairs.get(&region).into_iter().flatten() {
+            let endpoint = |name: &str| {
+                anchors.get(name).copied().ok_or_else(|| {
+                    fail(format!(
+                        "Stair pair {}: unresolved endpoint {name}",
+                        exit.id
+                    ))
+                })
+            };
+            game.connect(
+                Passage {
+                    from: endpoint(&exit.from)?,
+                    direction: exit.direction,
+                    to: endpoint(&exit.to)?,
+                },
+                0,
+            )
+            .map_err(|e| fail(format!("Stair pair {}: {e:?}", exit.id)))?;
+        }
+        Ok(())
+    }
+
+    fn endpoint_region(&self, anchor: &str) -> Result<u64, Failure> {
+        let missing = || fail(format!("Missing stair/portal anchor {anchor}"));
+        let (id, name) = anchor.split_once('/').ok_or_else(missing)?;
+        let region: u64 = id.parse().map_err(|_| missing())?;
+        if id != region.to_string()
+            || !self.index.region(region).is_some_and(|r| {
+                r.anchors.contains_key(name) || r.stair_anchors.iter().any(|n| n == name)
+            })
+        {
+            return Err(missing());
+        }
+        Ok(region)
     }
 
     /// These regions, in package order, with their walls and openings.
@@ -2531,7 +2643,7 @@ impl Package {
 pub(crate) struct PackageIndex {
     definitions: Arc<PreparedDefinitions>,
     anchors: BTreeMap<String, Location>,
-    anchors_by_region: BTreeMap<u64, Vec<(String, Location)>>,
+    stairs: BTreeMap<u64, Vec<StairExit>>,
     /// Where each spawned actor starts.
     homes: BTreeMap<u64, Location>,
     /// Actors by the region they start in: identity, start, turn length.
@@ -2546,6 +2658,26 @@ pub(crate) struct PackageIndex {
     appearances: BTreeMap<String, String>,
     /// Region definitions handed out, for scaling contracts.
     lookups: std::cell::Cell<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct StairExit {
+    id: String,
+    from: String,
+    direction: Direction,
+    to: String,
+    destination: u64,
+}
+
+fn resolved_anchors(regions: &[&RegionDef]) -> BTreeMap<String, Location> {
+    regions
+        .iter()
+        .flat_map(|r| {
+            r.anchors
+                .iter()
+                .map(move |(name, p)| (format!("{}/{name}", r.id), loc(r.id, *p)))
+        })
+        .collect()
 }
 
 impl PackageIndex {
@@ -2633,6 +2765,170 @@ impl tor_simulation::RecordStore for PackageRecords {
 
 #[cfg(test)]
 mod tests {
+    fn stairs_package() -> Package {
+        read_package(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/paired-stairs"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn paired_stairs_resolve_identically_in_either_build_order() {
+        let package = stairs_package();
+        for seed in [0, 1, 42, u64::MAX] {
+            let forward = package.index(seed).unwrap();
+            let (upper, files) = package.build_region(seed, &forward, 1).unwrap();
+            assert_eq!(files, BTreeSet::from([1, 2]));
+            let (lower, _) = package.build_region(seed, &forward, 2).unwrap();
+            let reverse = package.index(seed).unwrap();
+            assert_eq!(package.build_region(seed, &reverse, 2).unwrap().0, lower);
+            assert_eq!(package.build_region(seed, &reverse, 1).unwrap().0, upper);
+        }
+    }
+
+    #[test]
+    fn paired_stairs_allow_same_region_and_both_directions_on_one_cell() {
+        let package = stairs_package();
+        let mut game = package.build(42, false).unwrap();
+        let actor = tor_simulation::ActorId(1);
+        game.teleport(actor, loc(3, [1, 1, 0])).unwrap();
+        let before = game.observe(actor).unwrap();
+        assert!(before.exits.iter().any(|e| e.direction == Direction::Up));
+        assert!(before.exits.iter().any(|e| e.direction == Direction::Down));
+        game.act(actor, tor_simulation::Action::Move(Direction::Down))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap().location, loc(3, [3, 3, 0]));
+        game.act(actor, tor_simulation::Action::Move(Direction::Up))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap().location, before.location);
+        assert_eq!(game.tick(), 200);
+    }
+
+    #[test]
+    fn paired_stairs_preserve_rotated_facing_and_existing_momentum() {
+        let mut game = stairs_package().build(42, false).unwrap();
+        let actor = tor_simulation::ActorId(1);
+        // Enter the stair from an existing rotated link. The pair must keep
+        // this facing rather than reset it to the destination region's axes.
+        game.connect(
+            Passage {
+                from: loc(1, [1, 1, 0]),
+                direction: Direction::Up,
+                to: loc(3, [1, 1, 0]),
+            },
+            1,
+        )
+        .unwrap();
+        game.act(actor, tor_simulation::Action::Move(Direction::Up))
+            .unwrap();
+        let frame = |game: &Game| {
+            let observation = game.observe(actor).unwrap();
+            observation
+                .visible_cells
+                .iter()
+                .find(|cell| cell.location == observation.location)
+                .unwrap()
+                .frame
+        };
+        assert_eq!(frame(&game), 1);
+        game.set_actor_velocity(actor, [1, 2, 0]).unwrap();
+        game.act(actor, tor_simulation::Action::Move(Direction::Down))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap().location, loc(3, [3, 3, 0]));
+        assert_eq!(frame(&game), 1);
+        assert_eq!(game.actor_motion(actor).unwrap().velocity, [1, 2, 0]);
+        game.act(actor, tor_simulation::Action::Move(Direction::East))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap().location, loc(3, [3, 4, 0]));
+    }
+
+    #[test]
+    fn paired_stair_blocked_arrival_checks_entire_body_without_consuming_time() {
+        let mut game = stairs_package().build(42, false).unwrap();
+        let actor = tor_simulation::ActorId(1);
+        game.teleport(actor, loc(3, [1, 1, 0])).unwrap();
+        game.set_body(
+            actor,
+            tor_simulation::BodySpec {
+                cells: vec![[0, 0, 0], [1, 0, 0]],
+                eye: [0; 3],
+                mass: 80,
+            },
+        )
+        .unwrap();
+        game.set_wall(loc(3, [4, 3, 0]), true).unwrap();
+        let before = game.clone();
+        assert!(game
+            .act(actor, tor_simulation::Action::Move(Direction::Down))
+            .is_err());
+        assert_eq!(game, before);
+        game.set_wall(loc(3, [4, 3, 0]), false).unwrap();
+        game.act(actor, tor_simulation::Action::Move(Direction::Down))
+            .unwrap();
+        assert_eq!(game.observe(actor).unwrap().location, loc(3, [3, 3, 0]));
+    }
+
+    #[test]
+    fn stair_pairs_reject_conflicting_exits_at_either_endpoint() {
+        let template = stairs_package();
+        for (upper, lower) in [("1/stair", "3/return"), ("3/return", "2/up")] {
+            let mut manifest = template.manifest.clone();
+            manifest.stair_pairs.insert(
+                "conflict".into(),
+                StairPair {
+                    upper: upper.into(),
+                    lower: lower.into(),
+                },
+            );
+            let temp = tempfile::tempdir().unwrap();
+            let definitions = template.region_defs().unwrap();
+            write_package(temp.path(), &manifest, &definitions).unwrap();
+            let package = read_package(temp.path()).unwrap();
+            assert!(package.build(42, false).is_err());
+        }
+    }
+
+    #[test]
+    fn paired_stair_occupied_arrival_is_atomic() {
+        let mut game = stairs_package().build(42, false).unwrap();
+        let actor = tor_simulation::ActorId(1);
+        game.teleport(actor, loc(3, [1, 1, 0])).unwrap();
+        game.spawn_actor(loc(3, [3, 3, 0]), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let before = game.clone();
+        assert!(game
+            .act(actor, tor_simulation::Action::Move(Direction::Down))
+            .is_err());
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn stair_pairs_reject_missing_endpoints_with_source_coordinates() {
+        let mut package = stairs_package();
+        package.manifest.stair_pairs.get_mut("first").unwrap().lower = "2/missing".into();
+        let error = package.index(42).unwrap_err();
+        assert!(error.message.contains("2/missing"), "{error}");
+        // Changed source must not invent coordinates for the replacement name.
+        assert!(error.message.contains("scenario.toml"), "{error}");
+        assert!(error.message.contains("stair"), "{error}");
+    }
+
+    #[test]
+    fn stair_pair_horizon_uses_generated_names_without_coordinates() {
+        let package = stairs_package();
+        let catalog = crate::region_streaming::RegionCatalog::from_package(&package).unwrap();
+        assert_eq!(catalog.anchor_region("2/up").unwrap(), RegionId(2));
+        assert!(catalog.resolve_anchor("2/up").is_err());
+        let ids = |values: &[u64]| values.iter().copied().map(RegionId).collect();
+        assert_eq!(
+            catalog.plan(&ids(&[1]), 1, &ids(&[])).unwrap().required,
+            ids(&[1, 2])
+        );
+        assert_eq!(
+            catalog.plan(&ids(&[3]), 1, &ids(&[])).unwrap().required,
+            ids(&[2, 3])
+        );
+    }
     #[test]
     fn appearance_pools_cannot_encode_hidden_identity_through_physical_class() {
         let path =

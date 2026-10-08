@@ -1,0 +1,5 @@
+id = 3
+name = "Folded floor"
+size = [5, 5, 1]
+chamber = true
+anchors = { stair = [1, 1, 0], return = [3, 3, 0] }
