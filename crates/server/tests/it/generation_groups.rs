@@ -73,6 +73,110 @@ fn path(
 }
 
 #[test]
+fn group_publication_and_saved_rows_are_independent_of_preparation_scheduling() {
+    let mut scenario = support::load("rogue-exploration", 42);
+    scenario.streaming = Some(Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    let defs = definitions(scenario.package.as_ref().unwrap(), 1);
+    let down = defs[&9].anchors["down"];
+    let mut moves = path(&defs, 1, (13, 3), (down[0] + 52, down[1] + 14));
+    moves.extend([Direction::Down, Direction::Up]);
+    let directory = tempfile::tempdir().unwrap();
+    let observation = |engine: &Engine| {
+        let mut seen = engine.state(ActorId(1)).unwrap().observation;
+        // Fresh saves have distinct privacy scopes, while generated identities
+        // and terrain must be identical. Only the character is in this package.
+        let scope = engine.target_scope(ActorId(1));
+        let canonical = tor_server::wire_adapter::TargetScope::new(
+            uuid::Uuid::nil(),
+            tor_simulation::ActorId(1),
+        );
+        assert_eq!(seen.self_target, scope.actor(tor_simulation::ActorId(1)));
+        seen.self_target = canonical.actor(tor_simulation::ActorId(1));
+        assert!(seen.visible_actors.is_empty());
+        assert!(seen.ground_items.is_empty());
+        assert!(seen.inventory.is_empty());
+        assert!(seen.combat.is_none());
+        for cell in &mut seen.visible_cells {
+            assert!(cell.door.is_none());
+            cell.key.clear();
+        }
+        seen
+    };
+    let residency = |engine: &Engine| {
+        let counts = engine.region_counts().unwrap();
+        // Restart discards the storage cache and read counters; lifecycle
+        // membership must remain exactly the same.
+        (
+            counts.active,
+            counts.frozen,
+            counts.detached,
+            counts.unbuilt,
+        )
+    };
+    for checkpoint_interval in [0, 1] {
+        let mut expected = None;
+        for mode in ["demand", "prepared", "racing"] {
+            let save = directory
+                .path()
+                .join(format!("{checkpoint_interval}-{mode}.db"));
+            let policy = SavePolicy {
+                checkpoint_interval,
+                ..SavePolicy::default()
+            };
+            let mut engine =
+                Engine::open_with_policy(&save, scenario.clone(), policy.clone()).unwrap();
+            if mode != "demand" {
+                engine.start_preloading();
+            }
+            let mut observations = vec![observation(&engine)];
+            let mut memberships = vec![residency(&engine)];
+            for direction in &moves {
+                if mode == "prepared" {
+                    engine.settle_preloading();
+                }
+                support::act(
+                    &mut engine,
+                    Action::Move {
+                        direction: *direction,
+                    },
+                )
+                .unwrap();
+                observations.push(observation(&engine));
+                memberships.push(residency(&engine));
+            }
+            engine.flush().unwrap();
+            drop(engine);
+            let resumed = Engine::open_with_policy(&save, Scenario::two_room(0), policy).unwrap();
+            assert_eq!(observation(&resumed), *observations.last().unwrap());
+            assert_eq!(residency(&resumed), *memberships.last().unwrap());
+            drop(resumed);
+            let connection = rusqlite::Connection::open(&save).unwrap();
+            let mut query = connection
+                .prepare("SELECT record, frame FROM regions ORDER BY record")
+                .unwrap();
+            let rows: Vec<(i64, Vec<u8>)> = query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(!rows.is_empty());
+            let actual = (observations, memberships, rows);
+            if let Some(expected) = &expected {
+                assert_eq!(
+                    &actual, expected,
+                    "checkpoint {checkpoint_interval}, {mode}"
+                );
+            } else {
+                expected = Some(actual);
+            }
+        }
+    }
+}
+
+#[test]
 fn corruption_of_a_detached_members_pinned_source_rejects_group_recovery() {
     let mut scenario = support::load("rogue-exploration", 42);
     scenario.streaming = Some(Streaming {

@@ -58,6 +58,10 @@ eviction with terrain edits, journal-only and checkpoint recovery, all 26 floors
 in both directions, generation rewind within the ordinary retained window, and
 authored entrances linked to generated anchors. Actual clients exercise headless
 exploration, adventure text, native ASCII stairs, spectators, and reconnects.
+Synchronous demand, settled preparation, and racing preparation produce identical
+observations, lifecycle membership, and saved region rows, with journal-only and
+per-command checkpoint saves. Player and spectator process responses keep
+generation metadata and undisclosed floor identifiers private.
 
 Run `cargo run -p tor-server --release --example rogue_bench -- 5` for JSONL
 diagnostics. The workload measures pure generation of all floors, then the same

@@ -94,6 +94,7 @@ class RogueExplorationProcess(ProcessTestCase):
     def test_headless_exploration_stair_round_trip_resume_and_spectator(self):
         server = self.server(scenario="rogue-exploration")
         player, welcome = self.client()
+        self.assert_private_floor_metadata(welcome["state"])
         departure = explore_to_stairs(self, player, welcome["state"])
         origin = underfoot(departure)["key"]
         arrived = self.act(player, {"type": "move", "direction": "down"})
@@ -101,6 +102,7 @@ class RogueExplorationProcess(ProcessTestCase):
         self.assertTrue(underfoot(arrived["state"])["stairs_up"])
         observer, watched = self.client(token=SPECTATOR_TOKEN, observe=True)
         self.assertEqual(watched["state"], arrived["state"])
+        self.assert_private_floor_metadata(watched["state"])
         self.flush_save()
         player.stop()
         observer.stop()
@@ -108,9 +110,22 @@ class RogueExplorationProcess(ProcessTestCase):
         self.server()
         player, resumed = self.client()
         self.assertEqual(resumed["state"], arrived["state"])
+        self.assert_private_floor_metadata(resumed["state"])
         returned = self.act(player, {"type": "move", "direction": "up"})
         self.assertIsNone(returned["error"])
         self.assertEqual(underfoot(returned["state"])["key"], origin)
+
+    def assert_private_floor_metadata(self, state):
+        encoded = json.dumps(state)
+        # Generation and named destinations are backend structure. Neither a
+        # player nor a spectator receives the untouched final floor or its
+        # generation manifest while exploring the first two floors.
+        for hidden in ("Depth 26", "floor-26", "234/up", "234/down",
+                       "generation_groups", "named_anchors", "named_stairs",
+                       '"region"', '"recipe"'):
+            self.assertNotIn(hidden, encoded)
+        for cell in state["observation"]["visible_cells"]:
+            self.assertEqual(set(cell["position"]), {"x", "y", "z"})
 
     def test_adventure_uses_generated_floor_stairs(self):
         self.server(scenario="rogue-exploration")
