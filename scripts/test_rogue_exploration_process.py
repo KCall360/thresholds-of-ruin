@@ -1,8 +1,10 @@
 """Explore generated floors through actual clients using disclosed cells only."""
 from collections import deque
+import json
+import subprocess
 import unittest
 
-from process_harness import ProcessTestCase, SPECTATOR_TOKEN
+from process_harness import ProcessTestCase, SPECTATOR_TOKEN, SUFFIX
 
 
 DIRECTIONS = [(-1, 0, "west"), (1, 0, "east"),
@@ -58,6 +60,18 @@ def explore_to_stairs(test, player, state):
 
 
 class RogueExplorationProcess(ProcessTestCase):
+    def test_extreme_room_entry_is_a_structured_authoring_error(self):
+        from build_rogue_exploration import build
+        root = self.directory / "invalid-entry"
+        build(root)
+        region = root / "regions/1.toml"
+        region.write_text(region.read_text(encoding="utf-8").replace(
+            "start = [13, 3, 0]", "start = [-2147483648, 3, 0]"), encoding="utf-8")
+        result = subprocess.run([self.bin / ("tor-scenario" + SUFFIX),
+                                 "validate", root], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Room entries", json.loads(result.stderr)["error"]["message"])
+
     def test_authored_entry_and_group_stair_round_trip(self):
         from build_rogue_exploration import build
         root = self.directory / "mixed-entry"

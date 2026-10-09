@@ -180,13 +180,19 @@ impl RecipeRun<'_> {
             .iter()
             .filter(|(name, _)| !boundary.is_some_and(|b| b.contains(name)))
         {
+            if at[2] != 0
+                || !(1..size[0] - 1).contains(&at[0])
+                || !(1..size[1] - 1).contains(&at[1])
+            {
+                return Err(fail(format!(
+                    "Region {}: Room entries must lie inside the slot margin on the floor plane",
+                    def.id
+                )));
+            }
             x_low = x_low.max(at[0] - w + 1);
             x_high = x_high.min(at[0]);
             y_low = y_low.max(at[1] - h + 1);
             y_high = y_high.min(at[1]);
-            if at[2] != 0 {
-                return Err(fail("Room entries must be on the floor plane"));
-            }
         }
         if x_low > x_high || y_low > y_high {
             return Err(fail(
@@ -402,6 +408,21 @@ pub fn materialize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extreme_authored_entries_return_validation_errors_without_overflow() {
+        let (group, recipe, defs) = fixture();
+        for at in [
+            [i32::MIN, 3, 0],
+            [13, i32::MIN, 0],
+            [i32::MAX, 3, 0],
+            [0, 3, 0],
+        ] {
+            let mut defs = defs.clone();
+            defs[0].anchors.insert("start".into(), at);
+            assert!(materialize("floor-1", &group, &recipe, defs, 42).is_err());
+        }
+    }
 
     #[test]
     fn carved_floor_rejects_disconnection_and_open_exterior() {

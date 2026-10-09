@@ -69,13 +69,13 @@ preparation budget remains 32 record equivalents. Residency follows ordinary
 horizons and pins, including both ends of a stair. Timing samples are diagnostic;
 the report validator and process test enforce completeness and work-count bounds.
 
-The initial Windows release diagnostic run used machine fingerprint `6a1878811f37`
+The Windows release diagnostic run used machine fingerprint `6a1878811f37`
 (Core i7-9750H, Windows 11, NTFS HDD) and five seeds (130 floor generations)
 and five expeditions per acquisition/storage mode. Pure generation measured
-0.530/0.773/1.505 ms p50/p95/max. The complete transition publishing a demanded
-floor measured 6.763/7.790/7.790 ms in memory and 6.803/7.850/7.850 ms with durable
+0.549/0.685/1.900 ms p50/p95/max. The complete transition publishing a demanded
+floor measured 6.886/8.091/8.091 ms in memory and 6.894/8.210/8.210 ms with durable
 storage. With settled preparation those transitions measured
-0.495/1.490/1.490 ms and 0.445/1.397/1.397 ms, respectively; each distribution has
+0.436/1.419/1.419 ms and 0.467/1.456/1.456 ms, respectively; each distribution has
 five samples. Prepared acquisition itself measured 0.006 ms median, with no
 synchronous floor build. Racing preparation also completed before demand in
 these runs. Every expedition published one additional nine-record group; maximum
@@ -83,10 +83,10 @@ loaded residency was nine and maximum resident record count was 27.
 
 The ordinary streaming comparison used two interleaved rounds, 280 commands per
 side and storage mode, against the paired-stairs baseline. Memory command time
-changed from 0.232/0.402/0.574 to 0.234/0.405/0.631 ms p50/p95/max. Durable command
-time changed from 0.245/0.408/0.727 to 0.256/0.495/0.783 ms. Deterministic work
+changed from 0.230/0.382/0.554 to 0.237/0.396/0.588 ms p50/p95/max. Durable command
+time changed from 0.247/0.474/1.241 to 0.253/0.481/1.156 ms. Deterministic work
 counts and observation bytes matched, and no runs failed. These short-run timing
-observations are diagnostic, including the durable p95 increase; they are not
+observations are diagnostic; they are not
 acceptance thresholds or published headline measurements. Raw samples remain
 local pending authorization to publish release assets.
 
@@ -95,6 +95,6 @@ measured the following diagnostics after each expedition:
 
 | Acquisition mode | n | p50 ms | p95 ms | max ms |
 | --- | ---: | ---: | ---: | ---: |
-| Synchronous demand | 5 | 124.535 | 125.994 | 125.994 |
-| Settled preparation | 5 | 113.240 | 443.417 | 443.417 |
-| Racing preparation | 5 | 110.495 | 113.514 | 113.514 |
+| Synchronous demand | 5 | 112.984 | 415.784 | 415.784 |
+| Settled preparation | 5 | 112.466 | 147.399 | 147.399 |
+| Racing preparation | 5 | 145.783 | 188.322 | 188.322 |
