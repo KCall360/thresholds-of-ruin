@@ -821,7 +821,16 @@ not used. The release delivery binaries and diagnostic examples were built
 from the same production inputs. Subsequent edits only updated diagnostic
 and verification prose. The final diff passed whitespace checks.
 
-Final-commit Windows/Linux debug/release CI, stable-system persistence acceptance,
-and the three desktop launcher checks remain pending. No release or raw
-performance asset has been published. Passing functional checks do not resolve
-the provisional disk timing findings above.
+The Text, ASCII, and Text + ASCII Spectator desktop launchers passed real
+connection/output checks against the `lighting-fa2c03a` deployment. All five
+binary hashes and 237 Rogue content files match the isolated build/source.
+Each launch created and retained a fresh save, preserved prior saves and live
+games, used the expected executable targets, and cleaned up its owned processes.
+The spectator used its separate credential and connected without control.
+Desktop configuration, credentials, saves, and deployment records remain
+outside Git.
+
+Final-commit Windows/Linux debug/release CI and stable-system persistence
+acceptance remain merge gates. No release or raw performance asset has been
+published. Passing functional checks do not resolve the provisional disk timing
+findings above.
