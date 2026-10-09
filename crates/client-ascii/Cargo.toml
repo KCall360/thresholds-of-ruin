@@ -15,7 +15,7 @@ tor-protocol.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-minifb = { version = "0.28", default-features = false, features = ["x11"] }
+minifb = { version = "0.29", default-features = false, features = ["x11"] }
 font8x8 = "0.3"
 
 [dev-dependencies]
