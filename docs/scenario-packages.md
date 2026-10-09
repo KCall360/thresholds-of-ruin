@@ -330,3 +330,13 @@ A participating character without an explicit combat record receives the default
 combat attributes when the package defines an objective. This keeps objective-only
 packages observable in both clients, including immediate victory at the start.
 Packages without combat or objectives retain the noncombat diagnostic behavior.
+
+## Cell illumination
+
+Regions accept `lit = true` (the default), or `lit = false`, plus sparse overrides:
+`lighting = [{ at = [4, 2, 1], lit = true }]`. Coordinates must lie within the
+region's stored bounds (including a chamber's shell). Duplicate cell overrides
+are rejected. Illumination is independent of terrain and survives region eviction,
+resume, replay and rewind. See [three-dimensional sight](sight-3d.md#ambient-illumination-and-local-awareness)
+for how lighting controls perception and [generation recipes](generation-recipes.md)
+for generated room lighting.

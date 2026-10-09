@@ -325,6 +325,7 @@ mod tests {
         let (_, ai) = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(ai.target, Some((ActorId(1), at(1, 1, 1), 0)));
         game.combat.ai.insert(ActorId(2), ai);
+        game.set_region_light(RegionId(2), false).unwrap();
         game.teleport(ActorId(1), at(2, 4, 2)).unwrap();
         let (_, remembered) = game.choose_ai(ActorId(2)).unwrap();
         assert_eq!(remembered.target, Some((ActorId(1), at(1, 1, 1), 0)));

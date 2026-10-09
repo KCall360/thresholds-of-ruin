@@ -471,7 +471,7 @@ impl App {
             if let Some(position) = self
                 .state
                 .as_ref()
-                .and_then(|s| crate::render::visible_cell_at_level(s, x, y, self.map_level))
+                .and_then(|s| crate::render::known_cell_at_level(s, x, y, self.map_level))
             {
                 return self.travel_to(position);
             }
@@ -944,17 +944,16 @@ impl App {
             self.status = "Travel requires permission to admit an action.".into();
             return Effect::None;
         }
-        let Some(cell) =
-            state.state().observation.visible_cells.iter().find(|c| {
-                c.position == position && !c.wall && c.door.as_ref().is_none_or(|d| d.open)
-            })
+        let Some(cell) = state
+            .map_cell(position)
+            .filter(|c| !c.wall && c.door.as_ref().is_none_or(|d| d.open))
         else {
-            self.status = "Select a visible floor cell.".into();
+            self.status = "Select a known floor cell.".into();
             return Effect::None;
         };
         let command = Command::Travel {
             expected_revision: state.state().revision,
-            destination: cell.key.clone(),
+            destination: cell.key,
         };
         self.travel_cursor = None;
         self.command(command)

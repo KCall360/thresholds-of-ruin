@@ -357,10 +357,10 @@ fn an_edit_invalidates_only_scenes_that_read_its_region() {
     check(&branch, false, "the clone's own edit");
     check(
         &world,
-        false,
-        "the original's scene was replaced by the clone's",
+        true,
+        "the original's valid scene survives a clone's different geometry",
     );
-    check(&branch, false, "and the clone's by the original's");
+    check(&branch, true, "both validated versions remain reusable");
 
     world
         .add_region(Region {
@@ -373,7 +373,7 @@ fn an_edit_invalidates_only_scenes_that_read_its_region() {
 }
 
 #[test]
-fn detaching_invalidates_only_scenes_that_list_the_region() {
+fn detaching_invalidates_scene_reads_and_bounded_height_proofs() {
     let mut world = fixture(6);
     let view = (at(1, 6, 4, 0), 0, 8);
     let check = |world: &World, cached: bool, context: &str| {
@@ -392,9 +392,16 @@ fn detaching_invalidates_only_scenes_that_list_the_region() {
     // The view enters regions 1 and 2, so it lists them and region 3, which
     // region 2 links to. Regions 5 and 6 are out of range.
     check(&world, false, "first view");
+    let (eye, frame, radius) = view;
+    let loaded = world.eye_scene_regions(eye, frame, radius).unwrap();
+    assert!(!loaded.contains(&RegionId(5)) && !loaded.contains(&RegionId(6)));
     let five = world.detach_region(RegionId(5)).unwrap();
     let six = world.detach_region(RegionId(6)).unwrap();
-    check(&world, true, "detaching unlisted regions");
+    check(
+        &world,
+        false,
+        "detaching a region used only by the bounded height proof",
+    );
     world.attach_region(six).unwrap();
     check(&world, true, "attaching an unlisted region");
 
@@ -413,7 +420,7 @@ fn detaching_invalidates_only_scenes_that_list_the_region() {
     world.attach_region(two).unwrap();
     check(&world, false, "attaching it again");
     world.attach_region(five).unwrap();
-    check(&world, true, "attaching the last unlisted region");
+    check(&world, false, "attaching the missing height-proof endpoint");
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -446,4 +453,23 @@ fn checkpoint_worlds_that_differ_only_in_doors_do_not_share_scenes() {
         loaded[0].eye_scene(eye, frame, radius),
         loaded[1].eye_scene(eye, frame, radius)
     );
+}
+
+#[test]
+fn general_resolver_does_not_depend_on_unlisted_far_region_availability() {
+    // Larger physical components deliberately skip the bounded height proof.
+    let mut world = fixture(33);
+    let (eye, frame, radius) = (at(1, 6, 4, 0), 0, 8);
+    let scene = world.eye_scene(eye, frame, radius);
+    assert!(!world
+        .eye_scene_regions(eye, frame, radius)
+        .unwrap()
+        .contains(&RegionId(33)));
+    let held = world.detach_region(RegionId(33)).unwrap();
+    assert!(world.eye_scene_cached(eye, frame, radius));
+    assert_eq!(world.eye_scene(eye, frame, radius), scene);
+    assert_eq!(scene, world.eye_scene_uncached(eye, frame, radius));
+    world.attach_region(held).unwrap();
+    assert!(world.eye_scene_cached(eye, frame, radius));
+    assert_eq!(world.eye_scene(eye, frame, radius), scene);
 }

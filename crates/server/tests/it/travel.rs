@@ -120,7 +120,7 @@ fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
         .unwrap()
         .key
         .clone();
-    for index in 0..15 {
+    for index in 0..17 {
         let revision = engine.revision(ActorId(1)).unwrap();
         command(
             &mut engine,
@@ -140,7 +140,7 @@ fn previously_seen_offscreen_destinations_remain_routable_after_restart() {
         .iter()
         .any(|c| c.key == origin));
     let route = engine.travel_route(ActorId(1), &origin).unwrap();
-    assert_eq!(route.len(), 15);
+    assert_eq!(route.len(), 17);
     drop(engine);
     let engine = Engine::open(&path, Scenario::two_room(0)).unwrap();
     assert_eq!(engine.travel_route(ActorId(1), &origin).unwrap(), route);

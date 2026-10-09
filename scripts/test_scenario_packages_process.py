@@ -454,8 +454,8 @@ class ScenarioPackageProcesses(ProcessTestCase):
         ]
         cases.extend([
             ('actor-faction', 'tests/generated-filler', 'regions/1.toml',
-             'anchors = { start = [2, 2, 0], east = [11, 2, 0] }',
-             'anchors = { start = [2, 2, 0], east = [11, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], combat = { name = "guard", faction = "missing" } }]',
+             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }',
+             'anchors = { start = [2, 2, 0], east = [19, 2, 0] }\nactors = [{ id = 17, at = [4, 2, 0], combat = { name = "guard", faction = "missing" } }]',
              '"missing"', 'faction'),
             ('default-character', 'tests/generated-filler', 'scenario.toml',
              'default_character = 1', 'default_character = 99', '99', 'selected character'),

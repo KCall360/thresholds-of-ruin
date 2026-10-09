@@ -3,8 +3,30 @@ use tor_world::{Direction, Location, Position, Region, RegionId};
 
 use crate::{ActorId, Game, GameError, ItemId, ItemLocation};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SceneWitness {
+    world: tor_world::PerceptionSnapshot,
+    location: Location,
+    orientation: u8,
+    body: tor_world::Shared<crate::BodySpec>,
+    disclosed: bool,
+}
+
+/// Derived actor scenes for streaming pins. Shared across candidate clones,
+/// bounded, omitted from saves and ignored by simulation equality.
+type SceneEntries = std::collections::BTreeMap<ActorId, (SceneWitness, Vec<tor_world::SightCell>)>;
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ActorScenes(std::sync::Arc<std::sync::Mutex<SceneEntries>>);
+
+impl PartialEq for ActorScenes {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for ActorScenes {}
+
 /// Manhattan sight range in cells, measured from the eye cell.
-pub(crate) const SIGHT_RANGE: u8 = 8;
+pub(crate) const SIGHT_RANGE: u8 = 16;
 
 /// Where the scene places the landing of the abstract stair the actor stands
 /// on: straight up or down, just beyond any physically visible offset, so it
@@ -449,6 +471,50 @@ impl Game {
     /// offsets. Sight starts at the centre of the body's eye cell; offsets are
     /// relative to the actor's reference cell in its body frame.
     pub fn scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
+        let scene = self.compute_scene(id)?;
+        let witness = self.scene_witness(id)?;
+        let mut cache = self.lifecycle.scenes.0.lock().expect("actor scene cache");
+        if cache.len() >= 512 && !cache.contains_key(&id) {
+            cache.pop_first();
+        }
+        cache.insert(id, (witness, scene.clone()));
+        Ok(scene)
+    }
+
+    fn scene_witness(&self, id: ActorId) -> Result<SceneWitness, GameError> {
+        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
+        Ok(SceneWitness {
+            world: self.world.perception_snapshot(),
+            location: actor.location,
+            orientation: actor.orientation,
+            body: actor.body.clone(),
+            disclosed: self.alive(id) || self.combat.selected == Some(id),
+        })
+    }
+
+    /// Streaming consumes the same result as observations, without requesting
+    /// another actor scene when all perception inputs remain unchanged.
+    pub(crate) fn streaming_scene(
+        &self,
+        id: ActorId,
+    ) -> Result<Vec<tor_world::SightCell>, GameError> {
+        let witness = self.scene_witness(id)?;
+        if let Some((cached, scene)) = self
+            .lifecycle
+            .scenes
+            .0
+            .lock()
+            .expect("actor scene cache")
+            .get(&id)
+        {
+            if *cached == witness {
+                return Ok(scene.clone());
+            }
+        }
+        self.scene(id)
+    }
+
+    fn compute_scene(&self, id: ActorId) -> Result<Vec<tor_world::SightCell>, GameError> {
         if !self.alive(id) && self.combat.selected != Some(id) && self.actors.contains_key(&id) {
             return Ok(Vec::new());
         }
@@ -461,12 +527,15 @@ impl Game {
         // The body frame is carried across any portal inside the body, so
         // eye-frame offsets are body-frame offsets from the eye cell.
         let [ex, ey, ez] = body.eye;
-        let mut scene = self.world.eye_scene(eye, eye_frame, SIGHT_RANGE);
+        let mut scene = self
+            .world
+            .illuminated_eye_scene(eye, eye_frame, SIGHT_RANGE);
         for cell in &mut scene {
             cell.offset.x += ex;
             cell.offset.y += ey;
             cell.offset.z += ez;
         }
+        let mut scene = merge_perception(self.local_awareness(id), scene);
         // Abstract stair links are traversal, not geometry: standing on one
         // discloses its landing as a separate occurrence beyond physical sight.
         for direction in [Direction::Up, Direction::Down] {
@@ -492,6 +561,41 @@ impl Game {
         Ok(scene)
     }
 
+    pub(crate) fn local_awareness(&self, id: ActorId) -> Vec<tor_world::SightCell> {
+        let Some(actor) = self.actors.get(&id) else {
+            return Vec::new();
+        };
+        let body = &actor.body;
+        let mut scene = Vec::new();
+        if let Some(occupied) = self.body_cells(actor.location, actor.orientation, body) {
+            let mut occupied: Vec<_> = body.cells.iter().copied().zip(occupied).collect();
+            occupied.sort_by_key(|(offset, _)| *offset);
+            // Authored cell order must not let a neighbour projection replace
+            // another occupied cell at a join with different reverse geometry.
+            for &(offset, (location, frame)) in &occupied {
+                scene.push(tor_world::SightCell {
+                    location,
+                    rotation: frame,
+                    offset: Position {
+                        x: offset[0],
+                        y: offset[1],
+                        z: offset[2],
+                    },
+                    wall: self.world.is_wall(location),
+                });
+            }
+            for (offset, (location, frame)) in occupied {
+                for mut cell in self.world.neighborhood_scene(location, frame) {
+                    cell.offset.x += offset[0];
+                    cell.offset.y += offset[1];
+                    cell.offset.z += offset[2];
+                    scene.push(cell);
+                }
+            }
+        }
+        scene
+    }
+
     /// The loaded actor's eye cell and frame, if its body resolves.
     pub(crate) fn eye(&self, id: ActorId) -> Option<(Location, u8)> {
         let actor = self.actors.get(&id)?;
@@ -504,6 +608,18 @@ impl Game {
         self.body_cells(actor.location, actor.orientation, body)
             .map(|cells| cells[eye_index])
     }
+}
+
+/// Local awareness takes precedence over eye projection in the body chart.
+/// Stable ordering keeps occupied cells (first in local awareness) authoritative.
+pub(crate) fn merge_perception(
+    mut local: Vec<tor_world::SightCell>,
+    distant: Vec<tor_world::SightCell>,
+) -> Vec<tor_world::SightCell> {
+    local.extend(distant);
+    local.sort_by_key(|cell| cell.offset);
+    local.dedup_by_key(|cell| cell.offset);
+    local
 }
 
 /// Initial authored appearance catalog. These cosmetic stubs do not add item rules.
@@ -530,6 +646,55 @@ mod tests {
             region: RegionId(region),
             position: Position { x, y, z: 0 },
         }
+    }
+
+    #[test]
+    fn streaming_reuses_only_scenes_with_identical_perception_inputs() {
+        let mut game = Game::two_room_in_stone(42);
+        let actor = game
+            .spawn_actor(at(1, 0, 0), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let initial = game.scene(actor).unwrap();
+        let calls = crate::diagnostics::work_counts().scenes;
+        assert_eq!(game.streaming_scene(actor).unwrap(), initial);
+        assert_eq!(crate::diagnostics::work_counts().scenes, calls);
+        let mut candidate = game.clone();
+        let target = at(1, 2, 0);
+        assert!(initial.iter().any(|cell| cell.location == target));
+        candidate.set_cell_light(target, false).unwrap();
+        let dark = candidate.streaming_scene(actor).unwrap();
+        assert!(!dark.iter().any(|cell| cell.location == target));
+        assert_eq!(crate::diagnostics::work_counts().scenes, calls + 1);
+        assert_eq!(game.streaming_scene(actor).unwrap(), initial);
+        candidate.set_cell_light(target, true).unwrap();
+        candidate.set_wall(at(1, 1, 0), true).unwrap();
+        assert!(!candidate
+            .streaming_scene(actor)
+            .unwrap()
+            .iter()
+            .any(|cell| cell.location == target));
+        candidate.set_wall(at(1, 1, 0), false).unwrap();
+        candidate
+            .set_body(
+                actor,
+                crate::BodySpec {
+                    cells: vec![[0, 0, 0], [1, 0, 0]],
+                    eye: [0, 0, 0],
+                    mass: 80,
+                },
+            )
+            .unwrap();
+        candidate.set_cell_light(target, false).unwrap();
+        // Extending the body puts the dark target in its immediate neighbourhood.
+        assert!(candidate
+            .streaming_scene(actor)
+            .unwrap()
+            .iter()
+            .any(|cell| cell.location == target));
+        assert_eq!(
+            candidate.streaming_scene(actor).unwrap(),
+            candidate.scene(actor).unwrap()
+        );
     }
 
     #[test]

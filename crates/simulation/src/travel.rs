@@ -41,6 +41,117 @@ pub struct TravelStep {
 
 type Node = (Location, u8);
 
+type Offset = (i32, i32, i32);
+type ProjectedCell = (Location, u8, bool);
+
+/// Read-only chart lookup for one perception boundary. Compact scenes use a
+/// bounded rectangular index; widely separated stair/portal offsets stay sparse.
+struct ProjectedCells {
+    values: Vec<ProjectedCell>,
+    index: OffsetIndex,
+}
+
+enum OffsetIndex {
+    Dense {
+        origin: Offset,
+        size: [usize; 3],
+        slots: Vec<usize>,
+    },
+    Sparse(std::collections::HashMap<Offset, usize>),
+}
+
+impl OffsetIndex {
+    fn new(offsets: &[Offset]) -> Self {
+        let dense = offsets.first().and_then(|&(x, y, z)| {
+            let mut lo = [x, y, z];
+            let mut hi = lo;
+            for &(x, y, z) in offsets {
+                for (axis, value) in [x, y, z].into_iter().enumerate() {
+                    lo[axis] = lo[axis].min(value);
+                    hi[axis] = hi[axis].max(value);
+                }
+            }
+            let size = [0, 1, 2].map(|axis| (i64::from(hi[axis]) - i64::from(lo[axis]) + 1) as u64);
+            let volume = size.into_iter().try_fold(1u64, u64::checked_mul)?;
+            // At most eight index slots per disclosed cell, capped at 2 MiB
+            // on a 64-bit host. Sparse scenes never allocate their bounding box.
+            if volume > offsets.len().saturating_mul(8).min(262_144) as u64 {
+                return None;
+            }
+            Some(Self::Dense {
+                origin: (lo[0], lo[1], lo[2]),
+                size: size.map(|n| n as usize),
+                slots: vec![usize::MAX; volume as usize],
+            })
+        });
+        let Some(mut index) = dense else {
+            return Self::Sparse(
+                offsets
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(i, p)| (p, i))
+                    .collect(),
+            );
+        };
+        for (i, offset) in offsets.iter().enumerate() {
+            let slot = index
+                .dense_slot(offset)
+                .expect("authored offset lies in its bounds");
+            if let Self::Dense { slots, .. } = &mut index {
+                slots[slot] = i;
+            }
+        }
+        index
+    }
+
+    fn dense_slot(&self, &(x, y, z): &Offset) -> Option<usize> {
+        let Self::Dense { origin, size, .. } = self else {
+            return None;
+        };
+        let delta = [
+            i64::from(x) - i64::from(origin.0),
+            i64::from(y) - i64::from(origin.1),
+            i64::from(z) - i64::from(origin.2),
+        ];
+        if (0..3).any(|axis| delta[axis] < 0 || delta[axis] >= size[axis] as i64) {
+            return None;
+        }
+        let [x, y, z] = delta.map(|n| n as usize);
+        Some((x * size[1] + y) * size[2] + z)
+    }
+
+    fn get(&self, offset: &Offset) -> Option<usize> {
+        match self {
+            Self::Dense { slots, .. } => {
+                let value = slots[self.dense_slot(offset)?];
+                (value != usize::MAX).then_some(value)
+            }
+            Self::Sparse(map) => map.get(offset).copied(),
+        }
+    }
+}
+
+impl ProjectedCells {
+    fn new(scene: &[tor_world::SightCell], world: &tor_world::World) -> Self {
+        let offsets: Vec<_> = scene
+            .iter()
+            .map(|c| (c.offset.x, c.offset.y, c.offset.z))
+            .collect();
+        Self {
+            index: OffsetIndex::new(&offsets),
+            values: scene
+                .iter()
+                .map(|c| (c.location, c.rotation, world.opaque(c.location)))
+                .collect(),
+        }
+    }
+
+    fn get(&self, offset: &Offset) -> Option<&ProjectedCell> {
+        self.values.get(self.index.get(offset)?)
+    }
+}
+
 /// One ordered search shared by targets in a single read-only decision.
 pub(crate) struct RouteSearch<'a> {
     actor: &'a crate::Actor,
@@ -169,6 +280,44 @@ fn linked_offset(
 }
 
 impl Game {
+    /// Whether the scene changes the inputs used to learn connections. The
+    /// caller must separately account for geometry edits. Translating a chart
+    /// preserves its disclosed adjacencies; abstract stairs are conservative
+    /// because their landing offsets are anchored to the observer's origin.
+    pub fn navigation_scene_changed(
+        &self,
+        before: &[tor_world::SightCell],
+        after: &[tor_world::SightCell],
+    ) -> bool {
+        if before.len() != after.len() {
+            return true;
+        }
+        let Some((first, next)) = before.first().zip(after.first()) else {
+            return false;
+        };
+        let delta = |a: Position, b: Position| {
+            [
+                i64::from(b.x) - i64::from(a.x),
+                i64::from(b.y) - i64::from(a.y),
+                i64::from(b.z) - i64::from(a.z),
+            ]
+        };
+        let translation = delta(first.offset, next.offset);
+        if before.iter().zip(after).any(|(a, b)| {
+            a.location != b.location
+                || a.rotation != b.rotation
+                || a.wall != b.wall
+                || delta(a.offset, b.offset) != translation
+        }) {
+            return true;
+        }
+        translation != [0; 3]
+            && after.iter().any(|cell| {
+                self.world.is_stair(cell.location, Direction::Up)
+                    || self.world.is_stair(cell.location, Direction::Down)
+            })
+    }
+
     /// Capture only connections whose two ends appear adjacent in the perceived
     /// scene. Merely knowing two cells never reveals an unseen link between them.
     pub fn refresh_navigation(&mut self) {
@@ -179,77 +328,102 @@ impl Game {
     }
 
     /// Reuse a scene produced by this game at the current decision boundary.
-    /// This is backend-only; caller-supplied protocol data must never enter here.
+    /// The scene has unique offsets, as produced by `Game::scene`. This is
+    /// backend-only; caller-supplied protocol data must never enter here.
     pub fn refresh_navigation_scene(&mut self, id: ActorId, scene: &[tor_world::SightCell]) {
         self.refresh_places(id, scene);
         let knowledge = self.navigation.entry(id).or_default();
-        let visible: BTreeSet<_> = scene.iter().map(|c| c.location).collect();
-        let projected: BTreeSet<_> = scene
+        let mut sources: Vec<_> = scene.iter().collect();
+        // Stable grouping retains the chart's last valid proposal for aliases.
+        sources.sort_by_key(|cell| cell.location);
+        let location_key =
+            |at: Location| (at.region.0, at.position.x, at.position.y, at.position.z);
+        let disclosed: std::collections::HashSet<_> = scene
             .iter()
-            .filter(|c| !c.wall)
-            .map(|c| (c.location, c.offset, c.rotation))
+            .map(|cell| location_key(cell.location))
             .collect();
-        // Inspect only edges originating in the visible scene, never all remembered
-        // topology. Preserve stale edges when either end is undisclosed.
-        let mut edges = BTreeMap::new();
-        for &from in &visible {
-            for direction in DIRECTIONS {
-                if knowledge
-                    .edges
-                    .get(&(from, direction))
-                    .is_some_and(|(to, _)| visible.contains(to))
-                {
-                    edges.insert((from, direction), None);
-                }
-            }
-        }
+        // Membership only: hashing never determines an authoritative order.
+        let projected = ProjectedCells::new(scene, &self.world);
+        let mut adjacency = self.world.adjacency();
+        let mut edges = Vec::new();
         // Travel only ever uses known walkable cells, so a cell is remembered
         // once it has been seen walkable. It is then kept, marked opaque if it
         // closes, so places and links stay valid. Floors, ceilings and walls
         // that were never walkable aren't stored; routing treats them exactly
         // like unknown cells.
         let mut cells = BTreeMap::new();
-        for cell in scene {
-            let opaque = self.world.opaque(cell.location);
-            match knowledge.cells.get(&cell.location) {
+        for group in sources.chunk_by(|a, b| a.location == b.location) {
+            let from = group[0].location;
+            let offset = group[0].offset;
+            let opaque = projected
+                .get(&(offset.x, offset.y, offset.z))
+                .expect("source is disclosed")
+                .2;
+            match knowledge.cells.get(&from) {
                 Some(&known) if known != opaque => {
-                    cells.insert(cell.location, opaque);
+                    cells.insert(from, opaque);
                 }
                 None if !opaque => {
-                    cells.insert(cell.location, false);
+                    cells.insert(from, false);
                 }
                 _ => {}
             }
-            if opaque {
-                continue;
-            }
-            for direction in DIRECTIONS {
-                let local = direction.rotated(cell.rotation);
-                if matches!(local, Direction::Up | Direction::Down)
-                    && self.world.passage(cell.location, local).is_none()
-                    && !self.world.is_stair(cell.location, local)
-                {
-                    continue;
+            let mut proposed = [None; 6];
+            for cell in group.iter().filter(|_| !opaque) {
+                for direction in DIRECTIONS {
+                    let local = direction.rotated(cell.rotation);
+                    if matches!(local, Direction::Up | Direction::Down)
+                        && self.world.passage(cell.location, local).is_none()
+                        && !self.world.is_stair(cell.location, local)
+                    {
+                        continue;
+                    }
+                    let offset =
+                        linked_offset(&self.world, &self.actors[&id].body, cell, direction, local);
+                    let Some(&(seen, frame, target_opaque)) =
+                        projected.get(&(offset.x, offset.y, offset.z))
+                    else {
+                        continue;
+                    };
+                    if target_opaque {
+                        continue;
+                    }
+                    let Some((to, turns)) = adjacency.resolve(cell.location, local) else {
+                        continue;
+                    };
+                    // Cached scene opacity validates admission; both ends appear in this
+                    // scene, so no undisclosed topology enters navigation knowledge.
+                    if seen == to && frame == tor_world::compose_rotation(cell.rotation, turns) {
+                        let bit = DIRECTIONS
+                            .iter()
+                            .position(|direction| *direction == local)
+                            .expect("rotations preserve cardinal directions");
+                        proposed[bit] = Some((to, turns));
+                    }
                 }
-                let Some(to) = self.world.step(cell.location, local) else {
-                    continue;
-                };
-                let turns = self.world.crossing_rotation(cell.location, local);
-                let offset =
-                    linked_offset(&self.world, &self.actors[&id].body, cell, direction, local);
-                // Both ends of a remembered link must be remembered cells.
-                if (!self.world.opaque(to) || knowledge.cells.contains_key(&to))
-                    && projected.contains(&(
-                        to,
-                        offset,
-                        tor_world::compose_rotation(cell.rotation, turns),
-                    ))
+            }
+            // Compare each source once. Undisclosed old endpoints stay stale;
+            // valid new proposals replace them. Avoid provisional deletions,
+            // duplicate proposals and sorting the whole edge patch.
+            let mut previous = [None; 6];
+            if let Some(bucket) = knowledge.edges.region(from.region) {
+                for (&(_, direction), &value) in
+                    bucket.range((from, Direction::North)..=(from, Direction::Down))
                 {
-                    edges.insert((cell.location, local), Some((to, turns)));
+                    if let Some(bit) = DIRECTIONS.iter().position(|d| *d == direction) {
+                        previous[bit] = Some(value);
+                    }
+                }
+            }
+            for (bit, direction) in DIRECTIONS.into_iter().enumerate() {
+                let next = proposed[bit].or_else(|| {
+                    previous[bit].filter(|(to, _)| !disclosed.contains(&location_key(*to)))
+                });
+                if next != previous[bit] {
+                    edges.push(((from, direction), next));
                 }
             }
         }
-        edges.retain(|key, value| knowledge.edges.get(key) != value.as_ref());
         if !cells.is_empty() || !edges.is_empty() {
             // Copy-on-write detaches only when knowledge actually changes.
             let knowledge = &mut **knowledge;
@@ -432,6 +606,254 @@ mod refresh_tests {
     use tor_world::RegionId;
 
     #[test]
+    fn translated_chart_reuse_matches_full_navigation_at_every_rotation() {
+        let open = tor_world::World::new(
+            vec![tor_world::Region {
+                id: RegionId(1),
+                name: "open".into(),
+                bounds: tor_world::Extent::new(7, 5, 3).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap();
+        for (fixture, template) in [
+            Game::new(open, 42),
+            Game::region_corridor(42, 2),
+            Game::two_room_in_stone(42),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for dark in [false, true] {
+                for frame in 0..24 {
+                    let mut game = template.clone();
+                    game.set_region_light(RegionId(1), !dark).unwrap();
+                    let actor = game
+                        .spawn_actor(
+                            Location {
+                                region: RegionId(1),
+                                position: Position { x: 2, y: 1, z: 0 },
+                            },
+                            NonZeroU64::new(100).unwrap(),
+                        )
+                        .unwrap();
+                    game.actors.get_mut(&actor).unwrap().orientation = frame;
+                    let before = game.scene(actor).unwrap();
+                    game.refresh_navigation();
+                    let destinations: Vec<_> = before
+                        .iter()
+                        .filter(|c| !c.wall)
+                        .map(|c| c.location)
+                        .take(8)
+                        .collect();
+                    for destination in destinations {
+                        let mut moved = game.clone();
+                        if moved.teleport(actor, destination).is_err() {
+                            continue;
+                        }
+                        let after = moved.scene(actor).unwrap();
+                        let mut reference = moved.clone();
+                        reference.reference_refresh_navigation();
+                        if moved.navigation_scene_changed(&before, &after) {
+                            moved.refresh_navigation_scene(actor, &after);
+                        }
+                        assert_eq!(
+                            moved.navigation, reference.navigation,
+                            "fixture {fixture}, dark {dark}, frame {frame}, at {destination:?}"
+                        );
+                        let known: Vec<_> = reference.known_cells(actor).collect();
+                        for index in [0, known.len() / 2, known.len().saturating_sub(1)] {
+                            if let Some(&target) = known.get(index) {
+                                assert_eq!(
+                                    moved.travel_route(actor, target),
+                                    reference.travel_route(actor, target)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chart_translation_handles_extreme_offsets_and_keeps_stairs_conservative() {
+        let mut game = Game::region_corridor(42, 1);
+        let location = Location {
+            region: RegionId(1),
+            position: Position { x: 2, y: 1, z: 0 },
+        };
+        let cell = tor_world::SightCell {
+            location,
+            rotation: 0,
+            wall: false,
+            offset: Position {
+                x: i32::MIN,
+                y: 0,
+                z: 0,
+            },
+        };
+        let translated = tor_world::SightCell {
+            offset: Position {
+                x: i32::MAX,
+                y: 0,
+                z: 0,
+            },
+            ..cell
+        };
+        assert!(!game.navigation_scene_changed(&[cell], &[translated]));
+        game.register_named_anchors(
+            RegionId(1),
+            BTreeMap::from([("landing".into(), Position { x: 4, y: 1, z: 0 })]),
+        )
+        .unwrap();
+        game.connect_named_stair(
+            location,
+            Direction::Down,
+            tor_world::NamedAnchor {
+                region: RegionId(1),
+                name: "landing".into(),
+            },
+        )
+        .unwrap();
+        assert!(game.navigation_scene_changed(&[cell], &[translated]));
+        assert!(!game.navigation_scene_changed(&[cell], &[cell]));
+        assert!(game.navigation_scene_changed(&[cell], &[]));
+    }
+
+    #[test]
+    fn bounded_offset_index_matches_hash_lookup_for_dense_sparse_and_extreme_charts() {
+        let dense: Vec<_> = (-2..=2)
+            .flat_map(|x| (-2..=2).flat_map(move |y| (-2..=2).map(move |z| (x, y, z))))
+            .collect();
+        for (offsets, is_dense) in [
+            (dense, true),
+            (vec![(0, 0, 0), (2, 0, 0), (0, 0, 0)], true),
+            (vec![(0, 0, 0), (1000, 1000, 1000)], false),
+            (
+                vec![
+                    (i32::MIN, i32::MIN, i32::MIN),
+                    (i32::MAX, i32::MAX, i32::MAX),
+                ],
+                false,
+            ),
+            (vec![], false),
+        ] {
+            let index = OffsetIndex::new(&offsets);
+            assert_eq!(matches!(index, OffsetIndex::Dense { .. }), is_dense);
+            let reference: std::collections::HashMap<_, _> = offsets
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(i, p)| (p, i))
+                .collect();
+            for offset in offsets
+                .iter()
+                .chain([(1, 0, 0), (3, 0, 0), (i32::MIN, 0, 0), (i32::MAX, 0, 0)].iter())
+            {
+                assert_eq!(index.get(offset), reference.get(offset).copied());
+            }
+            if let OffsetIndex::Dense { slots, .. } = index {
+                assert!(slots.len() <= offsets.len() * 8 && slots.len() <= 262_144);
+            }
+        }
+    }
+
+    #[test]
+    fn disclosed_membership_keeps_navigation_independent_of_scene_order() {
+        let mut game = Game::two_room_in_stone(42);
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 4, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let mut scene = game.scene(actor).unwrap();
+        let mut ordered = game.clone();
+        ordered.refresh_navigation_scene(actor, &scene);
+        scene.reverse();
+        game.refresh_navigation_scene(actor, &scene);
+        assert_eq!(game.navigation, ordered.navigation);
+        for destination in game.known_cells(actor) {
+            assert_eq!(
+                game.travel_route(actor, destination),
+                ordered.travel_route(actor, destination)
+            );
+        }
+    }
+
+    #[test]
+    fn grouped_sources_match_full_scan_for_rotated_portal_aliases_and_stale_links() {
+        let at = |x, y| Location {
+            region: RegionId(1),
+            position: Position { x, y, z: 0 },
+        };
+        let mut world = tor_world::World::new(
+            vec![tor_world::Region {
+                id: RegionId(1),
+                name: "aliases".into(),
+                bounds: tor_world::Extent::new(5, 3, 2).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap();
+        world
+            .connect(
+                tor_world::Passage {
+                    from: at(4, 1),
+                    direction: Direction::East,
+                    to: at(2, 0),
+                },
+                1,
+            )
+            .unwrap();
+        world
+            .connect(
+                tor_world::Passage {
+                    from: at(2, 0),
+                    direction: Direction::North,
+                    to: at(4, 1),
+                },
+                3,
+            )
+            .unwrap();
+        let mut game = Game::new(world, 42);
+        let actor = game
+            .spawn_actor(at(2, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let scene = game.scene(actor).unwrap();
+        assert!(
+            scene.len()
+                > scene
+                    .iter()
+                    .map(|c| c.location)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+        );
+        for frame in [0, 1, 5, 12, 23] {
+            game.actors.get_mut(&actor).unwrap().orientation = frame;
+            for dark in [false, true, false] {
+                game.set_region_light(RegionId(1), !dark).unwrap();
+                let mut reference = game.clone();
+                reference.reference_refresh_navigation();
+                game.refresh_navigation();
+                assert_eq!(
+                    game.navigation, reference.navigation,
+                    "frame {frame}, dark {dark}"
+                );
+            }
+        }
+        game.set_wall(at(3, 1), true).unwrap();
+        let mut reference = game.clone();
+        reference.reference_refresh_navigation();
+        game.refresh_navigation();
+        assert_eq!(game.navigation, reference.navigation);
+    }
+
+    #[test]
     fn dense_rotated_navigation_matches_full_scan_and_preserves_old_boundaries() {
         for cells in [2, 8] {
             let mut world = tor_world::World::new(vec![], vec![]).unwrap();
@@ -512,6 +934,46 @@ mod refresh_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn expanded_navigation_refresh_preserves_dark_stale_edges_and_reveals_edits() {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        world
+            .add_chamber(tor_world::Region {
+                id: RegionId(1),
+                name: "lighted knowledge".into(),
+                bounds: tor_world::Extent::new(36, 5, 2).unwrap(),
+            })
+            .unwrap();
+        let mut game = Game::new(world, 42);
+        let cell = |x| Location {
+            region: RegionId(1),
+            position: Position { x, y: 2, z: 0 },
+        };
+        let actor = game
+            .spawn_actor(cell(2), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let refresh = |game: &mut Game| {
+            let mut reference = game.clone();
+            reference.reference_refresh_navigation();
+            game.refresh_navigation();
+            assert_eq!(game.navigation, reference.navigation);
+        };
+        refresh(&mut game);
+        assert_eq!(game.navigation[&actor].cells.get(&cell(14)), Some(&false));
+        let old = game.clone();
+        game.set_region_light(RegionId(1), false).unwrap();
+        game.set_wall(cell(14), true).unwrap();
+        refresh(&mut game);
+        assert_eq!(game.navigation[&actor].cells.get(&cell(14)), Some(&false));
+        assert_eq!(old.navigation[&actor].cells.get(&cell(14)), Some(&false));
+        game.set_cell_light(cell(14), true).unwrap();
+        refresh(&mut game);
+        assert_eq!(game.navigation[&actor].cells.get(&cell(14)), Some(&true));
+        game.set_wall(cell(14), false).unwrap();
+        refresh(&mut game);
+        assert_eq!(game.navigation[&actor].cells.get(&cell(14)), Some(&false));
     }
 
     #[test]

@@ -442,8 +442,8 @@ fn control_loss_and_wizard_changes_stop_jobs() {
 fn harmless_discoveries_do_not_interrupt_travel() {
     let (mut service, mut client) = fixture();
     setup(&mut service, &mut client, "room 4 20 1 1 Long corridor");
-    setup(&mut service, &mut client, "item tablet 4 9 0 0");
-    setup(&mut service, &mut client, "place 4 10 0 0 on");
+    setup(&mut service, &mut client, "item tablet 4 17 0 0");
+    setup(&mut service, &mut client, "place 4 18 0 0 on");
     setup(&mut service, &mut client, "teleport 1 4 0 0 0");
     let before = service.engine.observation(ActorId(1)).unwrap();
     assert!(before.ground_items.is_empty());
@@ -470,7 +470,7 @@ fn harmless_discoveries_do_not_interrupt_travel() {
 fn a_newly_seen_other_actor_interrupts_before_another_step() {
     let (mut service, mut client) = fixture();
     setup(&mut service, &mut client, "room 4 20 1 1 Long corridor");
-    setup(&mut service, &mut client, "actor 100 4 9 0 0");
+    setup(&mut service, &mut client, "actor 100 4 17 0 0");
     setup(&mut service, &mut client, "teleport 1 4 0 0 0");
     assert!(service
         .engine

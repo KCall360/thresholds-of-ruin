@@ -103,9 +103,11 @@ performance acceptance remain required before this stage is declared complete.
 
 ## Stage B — Complete layout and perception features incrementally
 
-Add configurable omitted slots, optional extra connections, maze carving,
-depth-dependent lighting and secrets through shared generation stages. Implement
-lit cells/rooms and ordinary-perception discovery plus timed search. Add shared
+Depth-dependent room lighting and dark corridors are implemented using the shared
+per-cell lighting/perception system. Add configurable omitted slots, maze carving
+and secrets through shared generation stages; optional extra connections already
+exist in the exploration recipe. Secret discovery and timed search remain later
+increments. Add shared
 blindness/invisibility/disguise/hallucination as their effect support becomes
 available; do not delay earlier usable layout increments for all conditions.
 

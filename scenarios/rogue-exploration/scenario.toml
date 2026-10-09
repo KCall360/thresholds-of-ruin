@@ -1,14 +1,14 @@
 format = 2
 id = "rogue-exploration"
 version = "1.0"
-ruleset = "interactions-v25"
+ruleset = "interactions-v26"
 default_character = 1
 [[characters]]
 id = 1
 anchor = "1/start"
 turn_ticks = 100
 [generation_recipes.exploration]
-version = 1
+version = 2
 [[generation_recipes.exploration.stages]]
 id = "stone"
 version = 1
@@ -42,6 +42,13 @@ id = "stairs"
 version = 1
 [generation_recipes.exploration.stages.operation]
 kind = "stairs"
+[[generation_recipes.exploration.stages]]
+id = "lighting"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "room_lighting"
+darkness_roll = 10
+darkness_start = 1
 [generation_groups."floor-1"]
 depth = 1
 recipe = "exploration"

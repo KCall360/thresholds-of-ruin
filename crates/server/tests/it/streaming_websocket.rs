@@ -114,7 +114,7 @@ impl Player {
 
 /// Steps east from the start to the middle of hall 5, where hall 6 (and the
 /// guard in it) is loaded but out of sight.
-const TO_HALL_5: usize = 88;
+const TO_HALL_5: usize = 80;
 
 #[tokio::test]
 async fn a_spectator_whose_actor_leaves_the_loaded_world_is_detached_not_the_player() {

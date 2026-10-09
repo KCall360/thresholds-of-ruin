@@ -1,0 +1,951 @@
+{
+  "ai-interactions": {
+    "actors": [],
+    "package": {
+      "certificate": {
+        "content_hash": "6490aea85c6e35856362050dba52df87c308169cf497c94727bd0f86627a1ceb",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
+        "files": {
+          "index.json": "38b3e70ca784912c333eba18839d65a55212b85226a1425db8ff270d9f84ed4e",
+          "scenario.toml": "8fa3f4d6ad9999deb99f46dd0bd791a8eb5b793cc187ae285780ed491d544214"
+        },
+        "model_hash": "8a5e70686a70fe50f06ffaa204736176d4f18b266c29938f2068d7ab5bf0d100",
+        "regions": 1,
+        "ruleset": "interactions-v26",
+        "validator": "tor-scenario-11"
+      },
+      "directory": null,
+      "manifest": {
+        "ai_profiles": {
+          "tactical": {
+            "flee_percent": 25,
+            "memory_ticks": 1000
+          }
+        },
+        "appearance_pools": {
+          "potions": {
+            "appearances": [
+              "red potion"
+            ],
+            "asset": null,
+            "confounding": true
+          },
+          "rings": {
+            "appearances": [
+              "silver ring"
+            ],
+            "asset": null,
+            "confounding": true
+          }
+        },
+        "archetypes": {
+          "healing": {
+            "anatomy": null,
+            "appearance_pool": "potions",
+            "asset": null,
+            "body": null,
+            "class": "potion",
+            "combat": null,
+            "consumable": {
+              "effects": [
+                {
+                  "amount": 10,
+                  "type": "heal"
+                }
+              ]
+            },
+            "equipment": null,
+            "identity": "healing",
+            "name": "potion of healing",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          },
+          "hidden_ring": {
+            "anatomy": null,
+            "appearance_pool": "rings",
+            "asset": null,
+            "body": null,
+            "class": "ring",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 5,
+              "reductions": {},
+              "slot": "ring"
+            },
+            "identity": "protection",
+            "name": "ring of protection",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "mail": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "armor",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 3,
+              "reductions": {},
+              "slot": "body_armor"
+            },
+            "identity": null,
+            "name": "mail",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "old_mail": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "armor",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 1,
+              "reductions": {},
+              "slot": "body_armor"
+            },
+            "identity": null,
+            "name": "old mail",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "old_ring": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "ring",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 2,
+              "reductions": {},
+              "slot": "ring"
+            },
+            "identity": null,
+            "name": "old ring",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "ring": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "ring",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 3,
+              "reductions": {},
+              "slot": "ring"
+            },
+            "identity": null,
+            "name": "ring",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          }
+        },
+        "assets": {},
+        "characters": [
+          {
+            "ai": null,
+            "anatomy": null,
+            "anchor": "1/start",
+            "asset": null,
+            "body": null,
+            "combat": {
+              "attack": {
+                "bonus": 1000,
+                "damage": {
+                  "vital": 15
+                },
+                "recovery": 99,
+                "wind_up": 1
+              },
+              "defense": 10,
+              "faction": "delvers",
+              "immunities": [],
+              "max_hp": 100,
+              "name": "delver",
+              "reductions": {}
+            },
+            "id": 1,
+            "known_identities": [],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          }
+        ],
+        "default_character": 1,
+        "factions": {
+          "delvers": [
+            "ruin"
+          ],
+          "ruin": [
+            "delvers"
+          ]
+        },
+        "format": 2,
+        "id": "ai-interactions",
+        "objective": null,
+        "ruleset": "interactions-v26",
+        "terrain": null,
+        "themes": [],
+        "version": "1.0",
+        "zones": {}
+      },
+      "selected": 1,
+      "validated": true
+    },
+    "regions": 1,
+    "seed": 42,
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    },
+    "workload_version": null
+  },
+  "diagnostic": {
+    "actors": [
+      {
+        "position": {
+          "region": 1,
+          "x": 2,
+          "y": 4,
+          "z": 0
+        },
+        "turn_ticks": 100
+      },
+      {
+        "position": {
+          "region": 1,
+          "x": 6,
+          "y": 1,
+          "z": 0
+        },
+        "turn_ticks": 100
+      }
+    ],
+    "package": null,
+    "regions": 8,
+    "seed": 42,
+    "streaming": null,
+    "workload_version": 1
+  },
+  "first-dungeon": {
+    "actors": [],
+    "package": {
+      "certificate": {
+        "content_hash": "a883a09b14847642ca404cd72bfa42307208204dad86538ae8268a5bdfb7fbfd",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
+        "files": {
+          "index.json": "f9b60ee13575d89fed902eb99f57aaf76bebc852b69d562f6296ea7a04401a4e",
+          "scenario.toml": "97c9e24716e044a86445b8c9943845206616a4969c97e7ac53b0dccdf2abce76"
+        },
+        "model_hash": "90cf48ee6f83b501dc672cb0a4bd7d192eda8bd08227e799895e3c414b2a95ff",
+        "regions": 5,
+        "ruleset": "interactions-v26",
+        "validator": "tor-scenario-11"
+      },
+      "directory": null,
+      "manifest": {
+        "ai_profiles": {
+          "tactical": {
+            "flee_percent": 25,
+            "memory_ticks": 1000
+          }
+        },
+        "appearance_pools": {},
+        "archetypes": {
+          "guardian": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 120
+            },
+            "class": "misc",
+            "combat": {
+              "attack": {
+                "bonus": 3,
+                "damage": {
+                  "impact": 4
+                },
+                "recovery": 70,
+                "wind_up": 130
+              },
+              "defense": 12,
+              "faction": "ruin",
+              "immunities": [],
+              "max_hp": 18,
+              "name": "stone guardian",
+              "reductions": {
+                "impact": 2
+              }
+            },
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": null,
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "scout": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 60
+            },
+            "class": "misc",
+            "combat": {
+              "attack": {
+                "bonus": 1,
+                "damage": {
+                  "keen": 2
+                },
+                "recovery": 50,
+                "wind_up": 80
+              },
+              "defense": 9,
+              "faction": "ruin",
+              "immunities": [],
+              "max_hp": 10,
+              "name": "ruin scout",
+              "reductions": {}
+            },
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": null,
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "wisp": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "misc",
+            "combat": {
+              "attack": {
+                "bonus": 2,
+                "damage": {
+                  "energy": 3
+                },
+                "recovery": 80,
+                "wind_up": 70
+              },
+              "defense": 10,
+              "faction": "ruin",
+              "immunities": [
+                "energy"
+              ],
+              "max_hp": 8,
+              "name": "ember wisp",
+              "reductions": {}
+            },
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": null,
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          }
+        },
+        "assets": {},
+        "characters": [
+          {
+            "ai": null,
+            "anatomy": null,
+            "anchor": "1/exit",
+            "asset": null,
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 80
+            },
+            "combat": {
+              "attack": {
+                "bonus": 5,
+                "damage": {
+                  "keen": 7
+                },
+                "recovery": 40,
+                "wind_up": 60
+              },
+              "defense": 12,
+              "faction": "delvers",
+              "immunities": [],
+              "max_hp": 50,
+              "name": "delver",
+              "reductions": {}
+            },
+            "id": 1,
+            "known_identities": [],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          }
+        ],
+        "default_character": 1,
+        "factions": {
+          "delvers": [
+            "ruin"
+          ],
+          "neutral": [],
+          "ruin": [
+            "delvers"
+          ]
+        },
+        "format": 2,
+        "id": "first-dungeon",
+        "objective": {
+          "anchor": "1/exit",
+          "continue_play": false,
+          "disclosed": true,
+          "item": 100
+        },
+        "ruleset": "interactions-v26",
+        "terrain": null,
+        "themes": [
+          "ruined-stone",
+          "scavengers"
+        ],
+        "version": "1.0",
+        "zones": {}
+      },
+      "selected": 1,
+      "validated": true
+    },
+    "regions": 5,
+    "seed": 42,
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    },
+    "workload_version": null
+  },
+  "interactions": {
+    "actors": [],
+    "package": {
+      "certificate": {
+        "content_hash": "52730e0cbeedf7c289e995b267b5d6b6901035a01ac8058cf2f0f9094254b5f9",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
+        "files": {
+          "index.json": "74f1d57a75b415ead8a439e00a5ca31ffc56863226ccb76bb0531bde47e6f0cb",
+          "scenario.toml": "2a1e3f92068fc485c1508cdf5328d0e8f3e5c708aed9f7019eed65916362c1e6"
+        },
+        "model_hash": "a0a40e48b6ad0e592ea1fe4184e0390b92b342df10991ea028c37a7bf1d7541d",
+        "regions": 1,
+        "ruleset": "interactions-v26",
+        "validator": "tor-scenario-11"
+      },
+      "directory": null,
+      "manifest": {
+        "ai_profiles": {},
+        "appearance_pools": {
+          "potions": {
+            "appearances": [
+              "red potion"
+            ],
+            "asset": null,
+            "confounding": true
+          },
+          "rings": {
+            "appearances": [
+              "silver ring"
+            ],
+            "asset": null,
+            "confounding": false
+          }
+        },
+        "archetypes": {
+          "band": {
+            "anatomy": null,
+            "appearance_pool": "rings",
+            "asset": null,
+            "body": null,
+            "class": "ring",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 1,
+              "reductions": {},
+              "slot": "ring"
+            },
+            "identity": "protection",
+            "name": "ring of protection",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "healing": {
+            "anatomy": null,
+            "appearance_pool": "potions",
+            "asset": null,
+            "body": null,
+            "class": "potion",
+            "combat": null,
+            "consumable": {
+              "effects": [
+                {
+                  "amount": 5,
+                  "type": "heal"
+                }
+              ]
+            },
+            "equipment": null,
+            "identity": "healing",
+            "name": "potion of healing",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          },
+          "mail": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "armor",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": null,
+              "defense": 3,
+              "reductions": {
+                "impact": 2
+              },
+              "slot": "body_armor"
+            },
+            "identity": null,
+            "name": "mail",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "poison": {
+            "anatomy": null,
+            "appearance_pool": "potions",
+            "asset": null,
+            "body": null,
+            "class": "potion",
+            "combat": null,
+            "consumable": {
+              "effects": [
+                {
+                  "components": {
+                    "vital": 8
+                  },
+                  "type": "damage"
+                }
+              ]
+            },
+            "equipment": null,
+            "identity": "poison",
+            "name": "potion of poison",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          },
+          "sword": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "weapon",
+            "combat": null,
+            "consumable": null,
+            "equipment": {
+              "attack": {
+                "bonus": 4,
+                "damage": {
+                  "keen": 6
+                },
+                "recovery": 40,
+                "wind_up": 60
+              },
+              "defense": 0,
+              "reductions": {},
+              "slot": "weapon"
+            },
+            "identity": null,
+            "name": "sword",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          }
+        },
+        "assets": {},
+        "characters": [
+          {
+            "ai": null,
+            "anatomy": {
+              "slots": [
+                "weapon",
+                "body_armor",
+                "ring",
+                "ring"
+              ]
+            },
+            "anchor": "1/start",
+            "asset": null,
+            "body": null,
+            "combat": {
+              "attack": {
+                "bonus": 2,
+                "damage": {
+                  "impact": 4
+                },
+                "recovery": 40,
+                "wind_up": 60
+              },
+              "defense": 10,
+              "faction": "neutral",
+              "immunities": [],
+              "max_hp": 30,
+              "name": "figure",
+              "reductions": {}
+            },
+            "id": 1,
+            "known_identities": [],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          }
+        ],
+        "default_character": 1,
+        "factions": {},
+        "format": 2,
+        "id": "interactions",
+        "objective": null,
+        "ruleset": "interactions-v26",
+        "terrain": null,
+        "themes": [],
+        "version": "1.0",
+        "zones": {}
+      },
+      "selected": 1,
+      "validated": true
+    },
+    "regions": 1,
+    "seed": 42,
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    },
+    "workload_version": null
+  },
+  "items": {
+    "actors": [],
+    "package": {
+      "certificate": {
+        "content_hash": "86e7f1ce6bc098ce707f50d69b97d782226014a511e07a10682b9f2e2be63cc0",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
+        "files": {
+          "index.json": "627d7475f237af746d70dacd2d21432a773dbfb78190f5834f7db0dabebc1d84",
+          "scenario.toml": "cd183eb6b2896647ca98aabe2731b42f987513e1b198227a7b4c16fed0726fd4"
+        },
+        "model_hash": "c59896e39b365ff24f0ae8ecdbc494585cca90dafd8936ed10dcb18b30416708",
+        "regions": 1,
+        "ruleset": "interactions-v26",
+        "validator": "tor-scenario-11"
+      },
+      "directory": null,
+      "manifest": {
+        "ai_profiles": {},
+        "appearance_pools": {
+          "potions": {
+            "appearances": [
+              "red potion"
+            ],
+            "asset": null,
+            "confounding": true
+          }
+        },
+        "archetypes": {
+          "arrow": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "weapon",
+            "combat": null,
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": "arrow",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          },
+          "healing": {
+            "anatomy": null,
+            "appearance_pool": "potions",
+            "asset": null,
+            "body": null,
+            "class": "potion",
+            "combat": null,
+            "consumable": null,
+            "equipment": null,
+            "identity": "healing",
+            "name": "potion of healing",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          },
+          "poison": {
+            "anatomy": null,
+            "appearance_pool": "potions",
+            "asset": null,
+            "body": null,
+            "class": "potion",
+            "combat": null,
+            "consumable": null,
+            "equipment": null,
+            "identity": "poison",
+            "name": "potion of poison",
+            "properties": {},
+            "stackable": true,
+            "turn_ticks": null
+          }
+        },
+        "assets": {},
+        "characters": [
+          {
+            "ai": null,
+            "anatomy": null,
+            "anchor": "1/start",
+            "asset": null,
+            "body": null,
+            "combat": null,
+            "id": 1,
+            "known_identities": [],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          },
+          {
+            "ai": null,
+            "anatomy": null,
+            "anchor": "1/start",
+            "asset": null,
+            "body": null,
+            "combat": null,
+            "id": 2,
+            "known_identities": [
+              "healing"
+            ],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          }
+        ],
+        "default_character": 1,
+        "factions": {},
+        "format": 2,
+        "id": "items",
+        "objective": null,
+        "ruleset": "interactions-v26",
+        "terrain": null,
+        "themes": [],
+        "version": "1.0",
+        "zones": {}
+      },
+      "selected": 1,
+      "validated": true
+    },
+    "regions": 1,
+    "seed": 42,
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    },
+    "workload_version": null
+  },
+  "two-room": {
+    "actors": [],
+    "package": {
+      "certificate": {
+        "content_hash": "4611e2018bfa027c1afad3240ffbf9ea4bb2648b6036e345609465e2a33c1060",
+        "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof",
+        "files": {
+          "index.json": "bee1a394db851dec4719dbb6cd6aa8accf5e393d669b04820b0d22da9592ebf6",
+          "scenario.toml": "d39b0d0b3965d2900b73f692ccdd970c9e5c073029ffe5bfa5ea87814d7bd8c5"
+        },
+        "model_hash": "3a69792f1f3992f50fc66bd0b71c4bb1eb4e328c133322c129978c7cd1d34623",
+        "regions": 2,
+        "ruleset": "interactions-v26",
+        "validator": "tor-scenario-11"
+      },
+      "directory": null,
+      "manifest": {
+        "ai_profiles": {},
+        "appearance_pools": {},
+        "archetypes": {
+          "tablet": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "misc",
+            "combat": null,
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": "stone tablet",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          },
+          "token": {
+            "anatomy": null,
+            "appearance_pool": null,
+            "asset": null,
+            "body": null,
+            "class": "misc",
+            "combat": null,
+            "consumable": null,
+            "equipment": null,
+            "identity": null,
+            "name": "copper token",
+            "properties": {},
+            "stackable": false,
+            "turn_ticks": null
+          }
+        },
+        "assets": {},
+        "characters": [
+          {
+            "ai": null,
+            "anatomy": null,
+            "anchor": "1/start",
+            "asset": null,
+            "body": {
+              "cells": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ],
+              "eye": [
+                0,
+                0,
+                1
+              ],
+              "mass": 80
+            },
+            "combat": null,
+            "id": 1,
+            "known_identities": [],
+            "turn_ticks": 100,
+            "unselected": "omit",
+            "velocity": null
+          }
+        ],
+        "default_character": 1,
+        "factions": {},
+        "format": 2,
+        "id": "two-room",
+        "objective": null,
+        "ruleset": "interactions-v26",
+        "terrain": null,
+        "themes": [
+          "stone"
+        ],
+        "version": "1.1",
+        "zones": {
+          "entry": {
+            "terrain": null,
+            "themes": null
+          }
+        }
+      },
+      "selected": 1,
+      "validated": true
+    },
+    "regions": 2,
+    "seed": 42,
+    "streaming": {
+      "active_radius": 1,
+      "load_radius": 2
+    },
+    "workload_version": null
+  }
+}

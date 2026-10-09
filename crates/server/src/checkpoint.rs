@@ -589,14 +589,14 @@ mod tests {
                 },
             )
             .unwrap();
-        walk(&mut engine, Direction::East, 68);
+        walk(&mut engine, Direction::East, 76);
         assert_eq!(engine.region_counts().unwrap().detached, 2);
         engine.flush().unwrap();
         // The next command learns what the checkpoint wrote; then memory
         // lets go of it.
         walk(&mut engine, Direction::East, 1);
         engine.regions.as_mut().unwrap().evict_durable();
-        walk(&mut engine, Direction::West, 69);
+        walk(&mut engine, Direction::West, 77);
         assert!(engine.region_counts().unwrap().records_read >= 2);
     }
 

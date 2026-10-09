@@ -1,7 +1,9 @@
 """Actual clients exercise checkpoint rotation, crash rollback and restart."""
 import sqlite3
+import json
 import unittest
 
+from checkpoint_payload import decode_checkpoint_payload
 from process_harness import ProcessTestCase, SPECTATOR_TOKEN
 
 
@@ -21,6 +23,12 @@ class CheckpointProcesses(ProcessTestCase):
         self.assertIsNone(self.request(player, {"type": "save"})["error"])
         with sqlite3.connect(self.save) as db:
             self.assertEqual(db.execute("SELECT sequence FROM checkpoint").fetchone()[0], 16)
+            payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
+            raw = decode_checkpoint_payload(payload)
+            checkpoint = json.loads(raw)
+            self.assertEqual(checkpoint["version"], 25)
+            self.assertEqual(checkpoint["sequence"], 16)
+            self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)
             self.assertEqual(db.execute("SELECT count(*) FROM journal WHERE sequence>0").fetchone()[0], 4)
         for _ in range(3):

@@ -6,9 +6,11 @@ publishing it creates ordinary detached region records in stable member order.
 Only the settled loading horizon and simulation pins attach members. Membership
 does not extend either horizon or keep terrain resident.
 
-Recipes are versioned, typed declarations with six ordered, uniquely named
-stages: stone fill, grid partition, rooms, connected graph, corridors, and
-stairs. Stage streams derive from the game seed, group identity, stage identity
+Recipes are versioned, typed declarations. Version 1 has six ordered, uniquely
+named stages: stone fill, grid partition, rooms, connected graph, corridors, and
+stairs. Version 2 appends room lighting with configurable `darkness_roll`
+(1–10,000) and `darkness_start` (depth offset). Earlier geometry stages keep their
+version-1 random streams. Stage streams derive from the game seed, group identity, stage identity
 and version, and semantic inputs. Generation performs no I/O and allocates no
 runtime record identities. Worker scheduling does not affect generated output.
 
@@ -47,8 +49,11 @@ rewriting, attaching, or retaining the source floor. The source's named link tra
 with its ordinary region record.
 
 The `rogue-exploration` package contains 26 reversible floors, starts on floor 1,
-and has no upward exit on floor 1 or downward stair on floor 26. Creatures, items,
-survival mechanics, and victory are reserved for later content increments.
+and has no upward exit on floor 1 or downward stair on floor 26. Room lighting uses `darkness_roll = 10` and `darkness_start = 1`: a room is dark
+when a zero-based roll is below depth minus one. Corridors outside room footprints
+remain dark. Lit rooms include both open body-height cells and their enclosing
+solid surfaces. A lighting-only edit does not change corridors or stair positions.
+Creatures, items, survival mechanics, and victory are reserved for later increments.
 
 ## Verification and diagnostics
 
@@ -73,32 +78,38 @@ preparation budget remains 32 record equivalents. Residency follows ordinary
 horizons and pins, including both ends of a stair. Timing samples are diagnostic;
 the report validator and process test enforce completeness and work-count bounds.
 
-The Windows release diagnostic run used machine fingerprint `6a1878811f37`
-(Core i7-9750H, Windows 11, NTFS HDD) and five seeds (130 floor generations)
-and five expeditions per acquisition/storage mode. Pure generation measured
-0.549/0.685/1.900 ms p50/p95/max. The complete transition publishing a demanded
-floor measured 6.886/8.091/8.091 ms in memory and 6.894/8.210/8.210 ms with durable
-storage. With settled preparation those transitions measured
-0.436/1.419/1.419 ms and 0.467/1.456/1.456 ms, respectively; each distribution has
-five samples. Prepared acquisition itself measured 0.006 ms median, with no
-synchronous floor build. Racing preparation also completed before demand in
-these runs. Every expedition published one additional nine-record group; maximum
-loaded residency was nine and maximum resident record count was 27.
+The lighting release diagnostic used machine fingerprint `6a1878811f37`
+(Core i7-9750H, Windows 11, NTFS HDD), five seeds and 130 floor generations.
+Pure generation measured 0.592/1.269/3.499 ms p50/p95/max. The complete
+range-16 expedition, including cold acquisition, measured:
 
-The ordinary streaming comparison used two interleaved rounds, 280 commands per
-side and storage mode, against the paired-stairs baseline. Memory command time
-changed from 0.230/0.382/0.554 to 0.237/0.396/0.588 ms p50/p95/max. Durable command
-time changed from 0.247/0.474/1.241 to 0.253/0.481/1.156 ms. Deterministic work
-counts and observation bytes matched, and no runs failed. These short-run timing
-observations are diagnostic; they are not
-acceptance thresholds or published headline measurements. Raw samples remain
-local pending authorization to publish release assets.
+| Acquisition mode | Storage | n | p50 ms | p95 ms | max ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Synchronous demand | Memory | 348 | 3.135 | 6.107 | 21.920 |
+| Synchronous demand | Durable | 348 | 3.095 | 6.224 | 15.903 |
+| Settled preparation | Memory | 348 | 3.065 | 5.621 | 9.688 |
+| Settled preparation | Durable | 348 | 3.143 | 6.438 | 12.787 |
+| Racing preparation | Memory | 348 | 3.063 | 5.465 | 9.523 |
+| Racing preparation | Durable | 348 | 3.105 | 6.314 | 11.165 |
+
+Every expedition committed exactly one additional nine-record group. Maximum
+loaded residency was 11 regions, maximum resident record count was 26, and
+encoded observations ranged from 12,499 to 100,880 bytes. Cold demand is
+included in the action distributions. Racing preparation completed before
+demand in these runs.
+These are current-workload diagnostics, not a matched prior-version comparison;
+ordinary interleaved release comparisons are described in the
+[performance harness](performance-harness.md#lighting-and-range-diagnostics).
+Raw measurements remain local; release asset publication requires separate
+authorization.
 
 Durable flush barriers, including queued journal and region-row persistence,
 measured the following diagnostics after each expedition:
 
 | Acquisition mode | n | p50 ms | p95 ms | max ms |
 | --- | ---: | ---: | ---: | ---: |
-| Synchronous demand | 5 | 112.984 | 415.784 | 415.784 |
-| Settled preparation | 5 | 112.466 | 147.399 | 147.399 |
-| Racing preparation | 5 | 145.783 | 188.322 | 188.322 |
+| Synchronous demand | 5 | 120.777 | 125.409 | 125.409 |
+| Settled preparation | 5 | 117.923 | 261.244 | 261.244 |
+| Racing preparation | 5 | 120.721 | 163.750 | 163.750 |
+
+These short flush distributions do not resolve the existing save-tail findings.

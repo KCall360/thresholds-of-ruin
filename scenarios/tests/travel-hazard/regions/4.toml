@@ -3,4 +3,4 @@ size = [20, 1, 1]
 name = "Hazard corridor"
 chamber = false
 anchors = { "start" = [0, 0, 0] }
-actors = [{ "id" = 2, "at" = [9, 0, 0], "turn_ticks" = 100 }]
+actors = [{ "id" = 2, "at" = [17, 0, 0], "turn_ticks" = 100 }]

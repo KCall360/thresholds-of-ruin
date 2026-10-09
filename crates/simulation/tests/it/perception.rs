@@ -149,3 +149,49 @@ fn an_actors_asset_is_disclosed_with_it_and_to_itself() {
         Err(GameError::UnknownActor)
     );
 }
+
+#[test]
+fn lighting_combines_body_awareness_with_distant_visual_perception() {
+    let mut game = Game::new(
+        tor_world::World::new(
+            vec![Region {
+                id: RegionId(1),
+                name: "dark hall".into(),
+                bounds: Extent::new(40, 7, 4).unwrap(),
+            }],
+            vec![],
+        )
+        .unwrap(),
+        42,
+    );
+    let actor = game
+        .spawn_actor(cell(1, 2, 3, 1), NonZeroU64::new(100).unwrap())
+        .unwrap();
+    game.set_body(
+        actor,
+        tor_simulation::BodySpec {
+            cells: vec![[0, 0, 0], [0, 0, 1]],
+            eye: [0, 0, 1],
+            mass: 80,
+        },
+    )
+    .unwrap();
+    game.set_region_light(RegionId(1), false).unwrap();
+    game.set_cell_light(cell(1, 14, 3, 2), true).unwrap();
+    let seen = game.scene(actor).unwrap();
+    for z in 0..=3 {
+        for y in 2..=4 {
+            for x in 1..=3 {
+                assert!(
+                    seen.iter().any(|c| c.location == cell(1, x, y, z)),
+                    "local {x},{y},{z}"
+                );
+            }
+        }
+    }
+    assert!(seen.iter().any(|c| c.location == cell(1, 14, 3, 2)));
+    assert!(!seen.iter().any(|c| c.location == cell(1, 8, 3, 2)));
+    game.refresh_navigation();
+    assert!(game.known_cells(actor).any(|c| c == cell(1, 14, 3, 2)));
+    assert!(!game.known_cells(actor).any(|c| c == cell(1, 8, 3, 2)));
+}

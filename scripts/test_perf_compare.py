@@ -75,6 +75,18 @@ class CaseParsing(unittest.TestCase):
 
 
 class Scheduling(unittest.TestCase):
+    def test_balanced_rounds_reverse_each_pair_without_changing_coverage(self):
+        units = compare.parse_cases(["physics", "combat"], 5)
+        for order in ("balanced", "head-first"):
+            actual = [(r, u.id, side) for r, u, side in compare.schedule(units, 4, order)]
+            expected = []
+            for round_index in range(1, 5):
+                sides = ("head", "base") if order == "head-first" or round_index % 2 == 0 else ("base", "head")
+                expected.extend((round_index, unit.id, side) for unit in units for side in sides)
+            self.assertEqual(expected, actual)
+        with self.assertRaises(ValueError):
+            compare.schedule(units, 2, "unknown")
+
     def test_rounds_interleave_base_and_head(self):
         units = compare.parse_cases(["r8-a1-h100-memory", "combat"], 5)
         order = [(r, u.id, side) for r, u, side in compare.schedule(units, 2)]
@@ -228,7 +240,8 @@ class Processes(unittest.TestCase):
 
 
 class ComparisonOwnership(unittest.TestCase):
-    def run_comparison(self, directory, *, build=False, failed_run=False, interrupted=False, shared_target=False):
+    def run_comparison(self, directory, *, build=False, failed_run=False, interrupted=False, shared_target=False,
+                       order="base-first"):
         head, base = directory / "head", directory / "base"
         head_target = directory / "head-cache" if build else head / "target"
         if shared_target:
@@ -274,8 +287,9 @@ class ComparisonOwnership(unittest.TestCase):
 
         machine = {"fingerprint": "fixture", "cpu": "fixture", "ram_gib": 1,
                    "os": "fixture", "os_build": "fixture", "storage": {"type": "fixture", "model": "fixture"}}
-        args = ["baseline", "--case", "r8-a1-h100-memory", "--rounds", "1",
+        args = ["baseline", "--case", "r8-a1-h100-memory", "--rounds", "1", "--order", order,
                 "--output", str(output), "--temp-dir", str(parent)]
+        printed = io.StringIO()
         if not build:
             args.append("--no-build")
         with patch.object(compare, "ROOT", head), patch.object(compare, "git", git), \
@@ -283,9 +297,18 @@ class ComparisonOwnership(unittest.TestCase):
                 patch.object(compare, "competing_processes", return_value=[]), \
                 patch.object(compare.perf_ledger, "probe_machine", return_value=machine), \
                 patch.object(compare.subprocess, "run", side_effect=execute), \
-                patch.dict(os.environ, {"CARGO_TARGET_DIR": str(head_target)}), redirect_stdout(io.StringIO()):
+                patch.dict(os.environ, {"CARGO_TARGET_DIR": str(head_target)}), redirect_stdout(printed):
             code = compare.main(args)
+        self.comparison_stdout = printed.getvalue()
         return code, output, parent, sentinel, saves
+
+    def test_printed_summary_reports_the_selected_pair_order(self):
+        for order, label in [("base-first", "ABAB"), ("head-first", "BABA"), ("balanced", "ABBA")]:
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as directory:
+                code, output, _, _, _ = self.run_comparison(Path(directory), order=order)
+                self.assertEqual(code, 0)
+                self.assertIn(f"1 {label} rounds", self.comparison_stdout)
+                self.assertEqual(json.loads((output / "comparison.json").read_text())["order"], label)
 
     def test_successful_comparison_preserves_caller_storage_and_cleans_only_owned_saves(self):
         with tempfile.TemporaryDirectory() as directory:

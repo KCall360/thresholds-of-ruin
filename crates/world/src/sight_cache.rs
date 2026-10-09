@@ -11,7 +11,7 @@ use std::{
 
 use crate::{Location, RegionId, Shared, SightCell};
 
-/// Scenes kept before the cache is emptied and refilled on demand.
+/// Maximum retained scene versions, including versions shared by clones.
 const CAPACITY: usize = 512;
 
 static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
@@ -20,7 +20,17 @@ fn fresh() -> u64 {
     NEXT_VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
-type Key = (Location, u8, u8);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SightMode {
+    Geometry,
+    Illuminated,
+    Neighborhood,
+}
+type Key = (Location, u8, u8, SightMode);
+/// Multiple immutable world versions may share one viewpoint. The serial
+/// orders retained versions; geometry/light witnesses still decide validity.
+type Scenes = BTreeMap<(Key, u64), Entry>;
+const VERSIONS_PER_VIEW: usize = 4;
 
 /// Opaque, process-local geometry witness for derived backend caches.
 /// It is neither a world identity nor persisted simulation state.
@@ -30,11 +40,21 @@ pub struct GeometrySnapshot {
     regions: Shared<BTreeMap<RegionId, u64>>,
 }
 
+/// Process-local witness for geometry and illumination dependent results.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PerceptionSnapshot {
+    geometry: GeometrySnapshot,
+    illumination: Shared<BTreeMap<RegionId, u64>>,
+}
+
 struct Entry {
     topology: u64,
     /// Every region the scene read, with its version when the scene was built.
     regions: Vec<(RegionId, u64)>,
     cells: Vec<SightCell>,
+    /// Geometry witnesses used only for acceleration, never loading pins.
+    proof: Vec<(RegionId, u64)>,
+    lighting: Vec<(RegionId, u64)>,
     /// The regions of the visible cells, in order.
     visible: Vec<RegionId>,
 }
@@ -76,7 +96,11 @@ pub(crate) struct SightCache {
     /// detached or attached. A region absent here is unchanged since
     /// `topology` was drawn.
     regions: Shared<BTreeMap<RegionId, u64>>,
-    scenes: Arc<Mutex<BTreeMap<Key, Entry>>>,
+    scenes: Arc<Mutex<Scenes>>,
+    illumination: Shared<BTreeMap<RegionId, u64>>,
+    /// Availability witnesses for bounded height proofs; terrain and doors
+    /// do not affect these metadata-only proofs.
+    availability: Shared<BTreeMap<RegionId, u64>>,
     /// Reach searches, which depend on the same geometry as scenes.
     reaches: Arc<Mutex<BTreeMap<ReachKey, ReachEntry>>>,
     /// Exit distance fields, likewise.
@@ -89,6 +113,8 @@ impl Default for SightCache {
             topology: fresh(),
             regions: Shared::default(),
             scenes: Arc::default(),
+            illumination: Shared::default(),
+            availability: Shared::default(),
             reaches: Arc::default(),
             fields: Arc::default(),
         }
@@ -110,16 +136,36 @@ impl std::fmt::Debug for SightCache {
 }
 
 impl SightCache {
+    fn scene<'a>(&self, scenes: &'a Scenes, key: Key) -> Option<&'a Entry> {
+        scenes
+            .range((key, 0)..=(key, u64::MAX))
+            .rev()
+            .map(|(_, entry)| entry)
+            .find(|entry| self.valid(entry))
+    }
     pub(crate) fn geometry_snapshot(&self) -> GeometrySnapshot {
         GeometrySnapshot {
             topology: self.topology,
             regions: self.regions.clone(),
         }
     }
+
+    pub(crate) fn perception_snapshot(&self) -> PerceptionSnapshot {
+        PerceptionSnapshot {
+            geometry: self.geometry_snapshot(),
+            illumination: self.illumination.clone(),
+        }
+    }
     /// Invalidates every scene, including in clones that share the cache.
     pub(crate) fn topology_changed(&mut self) {
         self.topology = fresh();
         self.regions = Shared::default();
+        self.availability = Shared::default();
+    }
+
+    pub(crate) fn region_presence_changed(&mut self, region: RegionId) {
+        self.region_changed(region);
+        self.availability.insert(region, fresh());
     }
 
     pub(crate) fn region_changed(&mut self, region: RegionId) {
@@ -130,8 +176,17 @@ impl SightCache {
         self.regions.get(&region).copied().unwrap_or(0)
     }
 
+    pub(crate) fn lighting_changed(&mut self, region: RegionId) {
+        self.illumination.insert(region, fresh());
+    }
+
     fn valid(&self, entry: &Entry) -> bool {
-        self.current(entry.topology, &entry.regions)
+        entry.lighting.iter().all(|(region, version)| {
+            self.illumination.get(region).copied().unwrap_or(0) == *version
+        }) && self.current(entry.topology, &entry.regions)
+            && entry.proof.iter().all(|(region, version)| {
+                self.availability.get(region).copied().unwrap_or(0) == *version
+            })
     }
 
     fn current(&self, topology: u64, regions: &[(RegionId, u64)]) -> bool {
@@ -144,8 +199,8 @@ impl SightCache {
     /// The regions a still-valid cached scene's visible cells are in.
     pub(crate) fn visible(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<RegionId>> {
         let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = scenes.get(&(eye, frame, radius))?;
-        self.valid(entry).then(|| entry.visible.clone())
+        let entry = self.scene(&scenes, (eye, frame, radius, SightMode::Geometry))?;
+        Some(entry.visible.clone())
     }
 
     /// A still-valid cached reach.
@@ -210,24 +265,42 @@ impl SightCache {
     }
 
     pub(crate) fn get(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<SightCell>> {
+        self.get_mode(eye, frame, radius, SightMode::Geometry)
+    }
+
+    pub(crate) fn get_mode(
+        &self,
+        eye: Location,
+        frame: u8,
+        radius: u8,
+        mode: SightMode,
+    ) -> Option<Vec<SightCell>> {
         let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = scenes.get(&(eye, frame, radius))?;
-        self.valid(entry).then(|| entry.cells.clone())
+        let entry = self.scene(&scenes, (eye, frame, radius, mode))?;
+        Some(entry.cells.clone())
     }
 
     /// The regions a still-valid cached scene read.
     pub(crate) fn regions(&self, eye: Location, frame: u8, radius: u8) -> Option<Vec<RegionId>> {
+        self.regions_mode(eye, frame, radius, SightMode::Geometry)
+    }
+
+    pub(crate) fn regions_mode(
+        &self,
+        eye: Location,
+        frame: u8,
+        radius: u8,
+        mode: SightMode,
+    ) -> Option<Vec<RegionId>> {
         let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = scenes.get(&(eye, frame, radius))?;
-        self.valid(entry)
-            .then(|| entry.regions.iter().map(|&(region, _)| region).collect())
+        let entry = self.scene(&scenes, (eye, frame, radius, mode))?;
+        Some(entry.regions.iter().map(|&(region, _)| region).collect())
     }
 
     pub(crate) fn contains(&self, eye: Location, frame: u8, radius: u8) -> bool {
         let scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
-        scenes
-            .get(&(eye, frame, radius))
-            .is_some_and(|entry| self.valid(entry))
+        self.scene(&scenes, (eye, frame, radius, SightMode::Geometry))
+            .is_some()
     }
 
     /// `regions` must name every region whose terrain or doors the scene read.
@@ -238,11 +311,42 @@ impl SightCache {
         radius: u8,
         regions: impl IntoIterator<Item = RegionId>,
         cells: &[SightCell],
+        proof: &[RegionId],
     ) {
+        self.insert_mode(
+            (eye, frame, radius, SightMode::Geometry),
+            regions,
+            cells,
+            proof,
+        );
+    }
+
+    pub(crate) fn insert_mode(
+        &self,
+        key: Key,
+        regions: impl IntoIterator<Item = RegionId>,
+        cells: &[SightCell],
+        proof: &[RegionId],
+    ) {
+        let (_, _, _, mode) = key;
         let mut visible: Vec<_> = cells.iter().map(|c| c.location.region).collect();
         visible.sort();
         visible.dedup();
+        let regions: Vec<_> = regions.into_iter().collect();
+        let lighting = if mode == SightMode::Illuminated {
+            regions
+                .iter()
+                .map(|r| (*r, self.illumination.get(r).copied().unwrap_or(0)))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let entry = Entry {
+            proof: proof
+                .iter()
+                .map(|region| (*region, self.availability.get(region).copied().unwrap_or(0)))
+                .collect(),
+            lighting,
             topology: self.topology,
             regions: regions
                 .into_iter()
@@ -252,9 +356,98 @@ impl SightCache {
             visible,
         };
         let mut scenes = self.scenes.lock().unwrap_or_else(|e| e.into_inner());
-        if scenes.len() >= CAPACITY && !scenes.contains_key(&(eye, frame, radius)) {
-            scenes.clear();
+        if self.scene(&scenes, key).is_some() {
+            return;
         }
-        scenes.insert((eye, frame, radius), entry);
+        let versions: Vec<_> = scenes
+            .range((key, 0)..=(key, u64::MAX))
+            .map(|(key, _)| *key)
+            .collect();
+        if versions.len() >= VERSIONS_PER_VIEW {
+            scenes.remove(&versions[0]);
+        }
+        // Capacity counts versions, not viewpoints, keeping the original
+        // memory bound even when tentative games share a viewpoint.
+        if scenes.len() >= CAPACITY {
+            let oldest = *scenes
+                .keys()
+                .min_by_key(|(_, serial)| *serial)
+                .expect("cache at capacity is nonempty");
+            scenes.remove(&oldest);
+        }
+        scenes.insert((key, fresh()), entry);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Position;
+
+    #[test]
+    fn capacity_evicts_oldest_scene_without_flushing_recent_views() {
+        let cache = SightCache::default();
+        let eye = |x| Location {
+            region: RegionId(1),
+            position: Position { x, y: 0, z: 0 },
+        };
+        for x in 0..=CAPACITY as i32 {
+            cache.insert_mode(
+                (eye(x), 0, 16, SightMode::Geometry),
+                [RegionId(1)],
+                &[],
+                &[],
+            );
+        }
+        assert!(!cache.contains(eye(0), 0, 16));
+        assert!(cache.contains(eye(1), 0, 16));
+        assert!(cache.contains(eye(CAPACITY as i32), 0, 16));
+        assert_eq!(cache.scenes.lock().unwrap().len(), CAPACITY);
+    }
+
+    #[test]
+    fn scene_versions_preserve_clone_reuse_with_bounded_retention() {
+        let eye = Location {
+            region: RegionId(1),
+            position: Position { x: 0, y: 0, z: 0 },
+        };
+        for mode in [
+            SightMode::Geometry,
+            SightMode::Illuminated,
+            SightMode::Neighborhood,
+        ] {
+            let mut cache = SightCache::default();
+            let mut branches = Vec::new();
+            for _ in 0..6 {
+                if mode == SightMode::Illuminated {
+                    cache.lighting_changed(eye.region);
+                } else {
+                    cache.region_changed(eye.region);
+                }
+                cache.insert_mode((eye, 0, 16, mode), [eye.region], &[], &[]);
+                branches.push(cache.clone());
+            }
+            assert_eq!(cache.scenes.lock().unwrap().len(), VERSIONS_PER_VIEW);
+            for (i, branch) in branches.iter().enumerate() {
+                assert_eq!(branch.get_mode(eye, 0, 16, mode).is_some(), i >= 2);
+            }
+            for x in 1..=600 {
+                cache.insert_mode(
+                    (
+                        Location {
+                            position: Position { x, ..eye.position },
+                            ..eye
+                        },
+                        0,
+                        16,
+                        mode,
+                    ),
+                    [eye.region],
+                    &[],
+                    &[],
+                );
+                assert!(cache.scenes.lock().unwrap().len() <= CAPACITY);
+            }
+        }
     }
 }

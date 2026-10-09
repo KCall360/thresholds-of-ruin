@@ -41,17 +41,7 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
         {
             continue;
         }
-        view.visible_cells.push(tor_protocol::CellView {
-            key: cell.key.clone(),
-            position: p,
-            wall: cell.wall,
-            stairs_up: cell.stairs_up,
-            stairs_down: cell.stairs_down,
-            place_hint: cell.place_hint,
-            door: cell.door.clone(),
-            material: cell.material.clone(),
-            asset: None,
-        });
+        view.visible_cells.push(cell.cell_view());
         view.ground_items.extend(cell.ground_items.iter().cloned());
     }
     view
@@ -165,27 +155,21 @@ pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) ->
     tiles
 }
 
-pub fn visible_cell_at(
+pub fn known_cell_at(
     state: &tor_client_common::ClientState,
     x: usize,
     y: usize,
 ) -> Option<tor_protocol::Position> {
-    visible_cell_at_level(state, x, y, 0)
+    known_cell_at_level(state, x, y, 0)
 }
-pub fn visible_cell_at_level(
+pub fn known_cell_at_level(
     state: &tor_client_common::ClientState,
     x: usize,
     y: usize,
     level: i32,
 ) -> Option<tor_protocol::Position> {
     let position = cell_at_level(&display_observation(state), x, y, level)?;
-    state
-        .state()
-        .observation
-        .visible_cells
-        .iter()
-        .find(|c| c.position == position)
-        .map(|c| c.position)
+    state.map_cell(position).map(|c| c.position)
 }
 
 pub struct Canvas {

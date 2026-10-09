@@ -7,16 +7,17 @@ def build(root: Path) -> None:
     regions.mkdir(parents=True, exist_ok=True)
     manifest = [
         'format = 2', 'id = "rogue-exploration"', 'version = "1.0"',
-        'ruleset = "interactions-v25"', 'default_character = 1',
+        'ruleset = "interactions-v26"', 'default_character = 1',
         '[[characters]]', 'id = 1',
         'anchor = "1/start"', 'turn_ticks = 100',
-        '[generation_recipes.exploration]', 'version = 1',
+        '[generation_recipes.exploration]', 'version = 2',
     ]
     for identity, kind, parameters in [
         ("stone", "stone_fill", []), ("slots", "grid_partition", []),
         ("rooms", "rooms", ['width = [4, 24]', 'height = [3, 5]']),
         ("connections", "connected_graph", ['extra = [0, 2]']),
         ("corridors", "corridors", []), ("stairs", "stairs", []),
+        ("lighting", "room_lighting", ["darkness_roll = 10", "darkness_start = 1"]),
     ]:
         manifest += ['[[generation_recipes.exploration.stages]]',
                      f'id = "{identity}"', 'version = 1',

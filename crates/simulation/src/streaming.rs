@@ -114,6 +114,19 @@ pub enum TransitionError {
     RecordUnavailable(RegionId),
 }
 
+/// A tentative attachment can reveal several pins at once. Keep that complete
+/// set internally; the public atomic operation still reports its first error.
+enum TransitionFailure {
+    Error(TransitionError),
+    Requirements(RegionTransition),
+}
+
+impl From<TransitionError> for TransitionFailure {
+    fn from(error: TransitionError) -> Self {
+        Self::Error(error)
+    }
+}
+
 /// Identity of a detached region's record. The game allocates these in
 /// order, so replay reproduces them, and a record never changes after it's
 /// made, so the identity also names its content. See
@@ -358,6 +371,8 @@ impl RegionRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Lifecycle {
+    #[serde(skip)]
+    pub(crate) scenes: crate::observation::ActorScenes,
     points: BTreeMap<ReferencePointId, ReferencePoint>,
     next_point: u64,
     /// Loaded regions whose time is stopped.
@@ -380,6 +395,7 @@ pub(crate) struct Lifecycle {
 impl Default for Lifecycle {
     fn default() -> Self {
         Self {
+            scenes: crate::observation::ActorScenes::default(),
             points: BTreeMap::new(),
             next_point: 1,
             frozen: BTreeSet::new(),
@@ -654,7 +670,8 @@ impl Game {
                     let view = self
                         .eye(*id)
                         .and_then(|(eye, frame)| {
-                            self.world.eye_scene_regions(eye, frame, SIGHT_RANGE)
+                            self.world
+                                .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
                         })
                         .unwrap_or_default();
                     let reach = self.reach_regions(*id);
@@ -692,13 +709,31 @@ impl Game {
                 if let Some((eye, frame, stairs)) = self.observer_eye(point.target) {
                     // Everything an observer sees is active; everything its
                     // view reads is loaded, so the view is exact.
-                    need.active.extend(self.world.eye_scene_visible_regions(
-                        eye,
-                        frame,
-                        SIGHT_RANGE,
-                    ));
+                    let actor = match point.target {
+                        ReferenceTarget::Actor(id) => Some(id),
+                        ReferenceTarget::Item(id) => {
+                            match self.items.get(&id).map(|i| i.location) {
+                                Some(ItemLocation::Carried(actor)) => Some(actor),
+                                _ => None,
+                            }
+                        }
+                        ReferenceTarget::Location(_) => None,
+                    };
+                    let scene = if let Some(actor) = actor {
+                        self.streaming_scene(actor).unwrap_or_default()
+                    } else {
+                        crate::observation::merge_perception(
+                            self.world.neighborhood_scene(eye, frame),
+                            self.world.illuminated_eye_scene(eye, frame, SIGHT_RANGE),
+                        )
+                    };
+                    need.active
+                        .extend(scene.into_iter().map(|cell| cell.location.region));
                     need.active.extend(stairs.iter().copied());
-                    if let Some(regions) = self.world.eye_scene_regions(eye, frame, SIGHT_RANGE) {
+                    if let Some(regions) =
+                        self.world
+                            .illuminated_eye_scene_regions(eye, frame, SIGHT_RANGE)
+                    {
                         need.loaded.extend(regions);
                     }
                 }
@@ -877,16 +912,14 @@ impl Game {
             return Ok((t, TransitionReport::default(), work));
         }
         loop {
-            match self.apply_region_transition(&t, records) {
+            match self.try_region_transition(&t, records) {
                 Ok(report) => return Ok((t, report, work)),
-                Err(TransitionError::MustBeActive(region)) if !t.active.contains(&region) => {
-                    t.active.insert(region);
-                    t.loaded.insert(region);
+                Err(TransitionFailure::Requirements(need)) => {
+                    t.active.extend(need.active);
+                    t.loaded.extend(need.loaded);
+                    t.loaded.extend(t.active.iter().copied());
                 }
-                Err(TransitionError::MustBeLoaded(region)) if !t.loaded.contains(&region) => {
-                    t.loaded.insert(region);
-                }
-                Err(error) => return Err(error),
+                Err(TransitionFailure::Error(error)) => return Err(error),
             }
         }
     }
@@ -904,8 +937,32 @@ impl Game {
         t: &RegionTransition,
         records: &mut dyn RecordStore,
     ) -> Result<TransitionReport, TransitionError> {
+        self.try_region_transition(t, records)
+            .map_err(|failure| match failure {
+                TransitionFailure::Error(error) => error,
+                TransitionFailure::Requirements(need) => {
+                    if let Some(region) = need.active.difference(&t.active).next() {
+                        TransitionError::MustBeActive(*region)
+                    } else {
+                        TransitionError::MustBeLoaded(
+                            *need
+                                .loaded
+                                .difference(&t.loaded)
+                                .next()
+                                .expect("unsatisfied pin"),
+                        )
+                    }
+                }
+            })
+    }
+
+    fn try_region_transition(
+        &mut self,
+        t: &RegionTransition,
+        records: &mut dyn RecordStore,
+    ) -> Result<TransitionReport, TransitionFailure> {
         if let Some(region) = t.active.difference(&t.loaded).next() {
-            return Err(TransitionError::ActiveNotLoaded(*region));
+            return Err(TransitionError::ActiveNotLoaded(*region).into());
         }
         let mut next = self.clone();
         // Regions the game doesn't know yet are declared from the store's
@@ -958,11 +1015,8 @@ impl Game {
             }
         }
         let need = next.region_requirements(&t.active, &t.loaded);
-        if let Some(region) = need.active.difference(&t.active).next() {
-            return Err(TransitionError::MustBeActive(*region));
-        }
-        if let Some(region) = need.loaded.difference(&t.loaded).next() {
-            return Err(TransitionError::MustBeLoaded(*region));
+        if !need.active.is_subset(&t.active) || !need.loaded.is_subset(&t.loaded) {
+            return Err(TransitionFailure::Requirements(need));
         }
         if !report.built.is_empty() {
             // A character may start where the objective is met, as it would
@@ -1455,6 +1509,74 @@ mod tests {
     use tor_world::Position;
 
     #[test]
+    fn attaching_an_observer_batches_all_newly_discovered_pins() {
+        struct Reads {
+            records: MemoryRecords,
+            counts: BTreeMap<RecordId, usize>,
+        }
+        impl RecordStore for Reads {
+            fn put(&mut self, id: RecordId, record: Shared<RegionRecord>) {
+                self.records.put(id, record);
+            }
+            fn get(&mut self, id: RecordId) -> Option<Shared<RegionRecord>> {
+                *self.counts.entry(id).or_default() += 1;
+                self.records.get(id)
+            }
+        }
+        let mut game = Game::region_corridor(1, 7);
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(4),
+                    position: Position { x: 6, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        let mut store = Reads {
+            records: MemoryRecords::default(),
+            counts: BTreeMap::new(),
+        };
+        game.transition_regions(&sets(&[], &[]), &mut store)
+            .unwrap();
+        let observer_record = game
+            .detached_records()
+            .find(|(r, _)| *r == RegionId(4))
+            .unwrap()
+            .1;
+        game.add_reference_point(ReferencePoint {
+            target: ReferenceTarget::Actor(actor),
+            active_radius: Some(0),
+            load_radius: Some(0),
+            observes: true,
+        })
+        .unwrap();
+        let (sets, _) = game
+            .transition_regions(&sets(&[4], &[4]), &mut store)
+            .unwrap();
+        assert_eq!(
+            sets.active,
+            BTreeSet::from([RegionId(3), RegionId(4), RegionId(5)])
+        );
+        assert_eq!(
+            sets.loaded,
+            BTreeSet::from([
+                RegionId(2),
+                RegionId(3),
+                RegionId(4),
+                RegionId(5),
+                RegionId(6)
+            ])
+        );
+        assert!(
+            store.counts[&observer_record] <= 3,
+            "observer reread {} times",
+            store.counts[&observer_record]
+        );
+        assert!(game.lifecycle_state_valid());
+    }
+
+    #[test]
     fn thawing_shifts_ai_memory_so_it_cannot_expire_while_frozen() {
         let at = |region, x| Location {
             region: RegionId(region),
@@ -1503,7 +1625,7 @@ mod tests {
             .spawn_actor(at(1, 2), NonZeroU64::new(100).unwrap())
             .unwrap();
         let other = game
-            .spawn_actor(at(3, 5), NonZeroU64::new(100).unwrap())
+            .spawn_actor(at(4, 5), NonZeroU64::new(100).unwrap())
             .unwrap();
         game.configure_run(player, BTreeSet::from([player]), None, BTreeMap::new())
             .unwrap();
@@ -1511,7 +1633,7 @@ mod tests {
         let mut records = MemoryRecords::default();
         game.transition_regions(&sets(&[1], &[1]), &mut records)
             .unwrap();
-        assert_eq!(game.region_state(RegionId(3)), Some(RegionState::Detached));
+        assert_eq!(game.region_state(RegionId(4)), Some(RegionState::Detached));
         (game, other, records)
     }
 
@@ -1531,18 +1653,18 @@ mod tests {
 
         // A record that's valid on its own but lost an actor the directory
         // still places in its region, as a damaged store might return.
-        let three = RegionId(3);
+        let four = RegionId(4);
         let mut damaged = MemoryRecords::default();
         for (region, id) in game.detached_records() {
             let mut record = (*records.get(id).unwrap()).clone();
-            if region == three {
+            if region == four {
                 assert!(record.actors.remove(&other).is_some());
                 record.stamps.remove(&other);
                 record.ai.remove(&other);
                 record.navigation.remove(&other);
                 record.displaced.remove(&other);
-                assert!(record.valid_contents(three, game.tick()));
-                assert!(!record.matches_directory(three, &game.lifecycle.directory));
+                assert!(record.valid_contents(four, game.tick()));
+                assert!(!record.matches_directory(four, &game.lifecycle.directory));
             }
             damaged.put(id, Shared::new(record));
         }
@@ -1552,7 +1674,7 @@ mod tests {
         let error = game
             .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut damaged)
             .unwrap_err();
-        assert_eq!(error, TransitionError::InvalidRecord(three));
+        assert_eq!(error, TransitionError::InvalidRecord(four));
         assert_eq!(game, before);
     }
 
@@ -1561,14 +1683,14 @@ mod tests {
         let (mut game, _, mut records) = detached_corridor();
         let (_, lost) = game
             .detached_records()
-            .find(|(region, _)| *region == RegionId(3))
+            .find(|(region, _)| *region == RegionId(4))
             .unwrap();
         records.retain(|id| id != lost);
         let before = game.clone();
         let error = game
             .transition_regions(&sets(&[1, 2, 3, 4], &[1, 2, 3, 4]), &mut records)
             .unwrap_err();
-        assert_eq!(error, TransitionError::RecordUnavailable(RegionId(3)));
+        assert_eq!(error, TransitionError::RecordUnavailable(RegionId(4)));
         assert_eq!(game, before);
     }
 
@@ -2016,7 +2138,7 @@ mod tests {
     #[test]
     fn attach_checks_a_record_as_thoroughly_as_restore() {
         let (mut game, other, mut records) = detached_corridor();
-        let three = RegionId(3);
+        let three = RegionId(4);
         let mut damaged = MemoryRecords::default();
         for (region, id) in game.detached_records() {
             let mut record = (*records.get(id).unwrap()).clone();
@@ -2033,5 +2155,73 @@ mod tests {
             .unwrap_err();
         assert_eq!(error, TransitionError::InvalidRecord(three));
         assert_eq!(game, before);
+    }
+    #[test]
+    fn observing_points_activate_the_same_cells_as_merged_actor_perception() {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        for id in 1..=3 {
+            world
+                .add_chamber(Region {
+                    id: RegionId(id),
+                    name: "shaft".into(),
+                    bounds: tor_world::Extent::new(3, 3, 2).unwrap(),
+                })
+                .unwrap();
+        }
+        let at = |region, z| Location {
+            region: RegionId(region),
+            position: Position { x: 1, y: 1, z },
+        };
+        for (from, direction, to) in [
+            (at(1, 1), Direction::Up, at(2, 0)),
+            (at(2, 0), Direction::Down, at(3, 1)),
+        ] {
+            world
+                .connect_portal_area(
+                    tor_world::Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                    1,
+                    1,
+                )
+                .unwrap();
+        }
+        world.set_region_light(RegionId(3), false).unwrap();
+        let mut game = Game::new(world, 42);
+        let actor = game
+            .spawn_actor(at(1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.set_body(
+            actor,
+            crate::BodySpec {
+                cells: vec![[0, 0, 0], [0, 0, 1]],
+                eye: [0, 0, 1],
+                mass: 80,
+            },
+        )
+        .unwrap();
+        game.add_reference_point(ReferencePoint {
+            target: ReferenceTarget::Actor(actor),
+            active_radius: Some(0),
+            load_radius: Some(0),
+            observes: true,
+        })
+        .unwrap();
+        let perceived: BTreeSet<_> = game
+            .scene(actor)
+            .unwrap()
+            .iter()
+            .map(|cell| cell.location.region)
+            .collect();
+        assert_eq!(perceived, BTreeSet::from([RegionId(1), RegionId(2)]));
+        let need = game.point_requirements();
+        assert_eq!(need.active, perceived);
+        assert!(
+            need.loaded.contains(&RegionId(3)),
+            "dark geometry still needs to be read"
+        );
     }
 }

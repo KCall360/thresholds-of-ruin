@@ -23,6 +23,22 @@ pub struct RememberedCell {
     pub stairs_down: bool,
 }
 
+impl RememberedCell {
+    pub fn cell_view(&self) -> CellView {
+        CellView {
+            key: self.key.clone(),
+            position: self.position,
+            wall: self.wall,
+            stairs_up: self.stairs_up,
+            stairs_down: self.stairs_down,
+            place_hint: self.place_hint,
+            door: self.door.clone(),
+            material: self.material.clone(),
+            asset: None,
+        }
+    }
+}
+
 /// Shared presentation state for all frontends. Older history pages can be
 /// requested separately; this model retains at most the latest 100 entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +100,23 @@ impl ClientState {
     /// Ambiguous/disconnected views start a new chart; at most 4096 cells are kept.
     pub fn map_memory(&self) -> impl Iterator<Item = &RememberedCell> {
         self.map_memory.cells.values()
+    }
+
+    /// Current disclosure wins over aligned stale map memory. This never
+    /// manufactures knowledge from an unaligned historical sighting.
+    pub fn map_cell(&self, position: Position) -> Option<CellView> {
+        self.state()
+            .observation
+            .visible_cells
+            .iter()
+            .find(|c| c.position == position)
+            .cloned()
+            .or_else(|| {
+                self.map_memory
+                    .cells
+                    .get(&(position.x, position.y, position.z))
+                    .map(RememberedCell::cell_view)
+            })
     }
 
     /// A validated snapshot establishes a new stream boundary atomically.

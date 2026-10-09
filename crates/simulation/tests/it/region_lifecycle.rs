@@ -48,7 +48,38 @@ fn fighter(game: &mut Game, id: ActorId, faction: &str) {
 
 /// A four-region corridor with the character in region 1.
 fn corridor() -> (Game, ActorId) {
-    let mut game = Game::region_corridor(7, 4);
+    // Keep distant lifecycle subjects outside the expanded visual horizon.
+    let mut world = World::new(
+        (1..=4)
+            .map(|id| Region {
+                id: RegionId(id),
+                name: format!("Corridor {id}"),
+                bounds: Extent::new(24, 3, 1).unwrap(),
+            })
+            .collect(),
+        vec![],
+    )
+    .unwrap();
+    for id in 1..4 {
+        for (from, direction, to) in [
+            (at(id, 23, 0), Direction::East, at(id + 1, 0, 0)),
+            (at(id + 1, 0, 0), Direction::West, at(id, 23, 0)),
+        ] {
+            world
+                .connect_area(
+                    Passage {
+                        from,
+                        direction,
+                        to,
+                    },
+                    0,
+                    3,
+                    1,
+                )
+                .unwrap();
+        }
+    }
+    let mut game = Game::new(world, 7);
     let player = game.spawn_actor(at(1, 2, 1), ticks(100)).unwrap();
     fighter(&mut game, player, "player");
     (game, player)
@@ -355,7 +386,7 @@ fn active_item_work_and_equipment_survive_frozen_and_detached_checkpoints() {
 fn paused_native_portal_attack_keeps_required_regions_active_without_losing_progress() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
-    let attacker = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
+    let attacker = game.spawn_actor(at(3, 23, 1), ticks(100)).unwrap();
     let target = game.spawn_actor(at(4, 0, 1), ticks(12)).unwrap();
     fighter(&mut game, attacker, "a");
     fighter(&mut game, target, "b");
@@ -406,7 +437,7 @@ fn paused_native_portal_attack_keeps_required_regions_active_without_losing_prog
 fn pins_reject_transitions_without_changing_the_game() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
-    let edge = game.spawn_actor(at(2, 11, 1), ticks(100)).unwrap();
+    let edge = game.spawn_actor(at(2, 23, 1), ticks(100)).unwrap();
     run(&mut game, player, &[]);
     game.add_reference_point(ReferencePoint {
         target: ReferenceTarget::Actor(edge),
@@ -445,9 +476,9 @@ fn pins_reject_transitions_without_changing_the_game() {
 fn an_observer_keeps_everything_it_sees_active() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
-    game.teleport(player, at(1, 6, 1)).unwrap();
+    game.teleport(player, at(1, 20, 1)).unwrap();
     run(&mut game, player, &[]);
-    // Sight from x = 6 reaches two cells into region 2.
+    // Sight from x = 20 reaches into region 2.
     let visible: BTreeSet<_> = game
         .scene(player)
         .unwrap()
@@ -469,7 +500,7 @@ fn an_observer_keeps_everything_it_sees_active() {
 fn a_body_spanning_a_portal_pins_both_regions() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
-    let wide = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
+    let wide = game.spawn_actor(at(3, 23, 1), ticks(100)).unwrap();
     game.set_body(
         wide,
         BodySpec {
@@ -495,7 +526,7 @@ fn a_body_spanning_a_portal_pins_both_regions() {
 fn a_frozen_attack_keeps_its_target_loaded() {
     let mut records = MemoryRecords::default();
     let (mut game, player) = corridor();
-    let attacker = game.spawn_actor(at(3, 11, 1), ticks(100)).unwrap();
+    let attacker = game.spawn_actor(at(3, 23, 1), ticks(100)).unwrap();
     let target = game.spawn_actor(at(4, 0, 1), ticks(100)).unwrap();
     fighter(&mut game, attacker, "a");
     fighter(&mut game, target, "b");

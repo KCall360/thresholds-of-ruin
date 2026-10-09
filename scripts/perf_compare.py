@@ -129,10 +129,14 @@ def parse_cases(cases, cycles):
     return list(units.values())
 
 
-def schedule(units, rounds):
-    """Interleaved ABAB order: within each round, every unit runs base then head."""
+def schedule(units, rounds, order="base-first"):
+    """Keep pairs adjacent; optionally reverse them to diagnose order effects."""
+    if order not in ("base-first", "head-first", "balanced"):
+        raise ValueError("Unknown comparison order")
     return [(round_index, unit, side) for round_index in range(1, rounds + 1)
-            for unit in units for side in ("base", "head")]
+            for unit in units for side in
+            (("head", "base") if order == "head-first" or
+             (order == "balanced" and round_index % 2 == 0) else ("base", "head"))]
 
 
 def _add_count(counts, name, value):
@@ -356,6 +360,8 @@ def main(argv=None):
     parser.add_argument("base", help="Git ref to compare against (built in a worktree)")
     parser.add_argument("--case", action="append", required=True, dest="cases")
     parser.add_argument("--rounds", type=int, default=3, help="interleaved base/head pairs (default 3)")
+    parser.add_argument("--order", choices=("base-first", "head-first", "balanced"), default="base-first",
+                        help="pair order; balanced reverses even rounds to diagnose order effects")
     parser.add_argument("--cycles", type=int, default=5, help="latency_bench --cycles (default 5)")
     parser.add_argument("--output", type=Path, help="new run directory")
     parser.add_argument("--temp-dir", type=Path,
@@ -420,7 +426,7 @@ def main(argv=None):
 
         runs, extracted, failures = [], defaultdict(lambda: defaultdict(list)), []
         versions = defaultdict(dict)
-        for round_index, unit, side in schedule(units, args.rounds):
+        for round_index, unit, side in schedule(units, args.rounds, args.order):
             name = f"{unit.id.replace(':', '-')}-r{round_index}-{side}"
             output = run_dir / "raw" / f"{name}.jsonl"
             stderr = run_dir / "raw" / f"{name}.stderr.log"
@@ -471,7 +477,8 @@ def main(argv=None):
         comparison = {
             "tool_version": 1,
             "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-            "order": "ABAB", "rounds": args.rounds, "machine": machine, "rustc": rustc,
+            "order": {"base-first": "ABAB", "head-first": "BABA", "balanced": "ABBA"}[args.order],
+            "rounds": args.rounds, "machine": machine, "rustc": rustc,
             "temp_dir": str(temp_root), "competing_processes": busy,
             "build_targets": {side: str(target) for side, target in targets.items()},
             "sides": {"base": {"ref": args.base, "commit": base_commit, "dirty": False},
@@ -488,7 +495,7 @@ def main(argv=None):
 
     print()
     print(f"base {args.base} {base_commit[:12]}  vs  head {head_commit[:12]}{' (dirty)' if head_dirty else ''}; "
-          f"{args.rounds} ABAB rounds; timings in ms, pooled over rounds")
+          f"{args.rounds} {comparison['order']} rounds; timings in ms, pooled over rounds")
     for unit in units:
         for group, result in results[unit.id].items():
             workload = result["workload"].get("head") or result["workload"].get("base") or {}

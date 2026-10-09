@@ -45,7 +45,7 @@ Items elsewhere in the room remain out of reach until you move onto their cell.
 | Space or period | Wait one action |
 | O / C, then a direction | Open / close the adjacent door using arrows or HJKL/YUBN; no door means a local message and no ticks |
 | G / D | Pick up at your feet / drop from inventory; Up/Down selects, digits set a count, Enter confirms (blank = whole stack) |
-| `_` / left mouse click | Select a visible travel destination / travel to the clicked floor cell |
+| `_` / left mouse click | Select a perceived or remembered travel destination / travel to the clicked floor cell |
 | Any key during a journey | Show the rest of the journey at once; journeys can't be cancelled |
 | `[` / `]` | Show journey steps more slowly / quickly (`--pace <ms>` sets the start, default 75) |
 | F3 / R | Acquire / release actor control |
@@ -237,3 +237,13 @@ instead of attacking. The header shows exact own HP and attack progress; visible
 enemies have qualitative injury descriptions. Space continues saved recovery
 when unready, or performs an ordinary wait when ready. Repeat an interrupted
 attack to resume valid preparation. Victory/death remain visible after restart.
+
+Travel selection and left click accept currently perceived or remembered walkable
+map cells on the selected height slice. Current observations override stale
+memory. Unknown cells, remembered walls and known closed doors are rejected;
+the server handles stale obstacles and routes using actor knowledge.
+
+Travel selection and left click accept perceived or remembered walkable map cells
+on the selected height slice. Current observations override stale memory. Unknown
+cells, remembered walls and known closed doors are rejected; the server handles
+stale obstacles and routes using actor knowledge.

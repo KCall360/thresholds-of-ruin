@@ -280,10 +280,19 @@ struct Stage {
 enum Operation {
     StoneFill,
     GridPartition,
-    Rooms { width: [u32; 2], height: [u32; 2] },
-    ConnectedGraph { extra: [u32; 2] },
+    Rooms {
+        width: [u32; 2],
+        height: [u32; 2],
+    },
+    ConnectedGraph {
+        extra: [u32; 2],
+    },
     Corridors,
     Stairs,
+    RoomLighting {
+        darkness_roll: u32,
+        darkness_start: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -667,9 +676,9 @@ mod tests {
     use serde_json::Value;
 
     fn current_scenarios() -> BTreeMap<String, Value> {
-        // Captured from the current v24 writer. Only machine-specific package
+        // Captured from the current v25 writer. Only machine-specific package
         // directories are normalized to null; this is not an old-save reader.
-        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v24.json")).unwrap()
+        serde_json::from_str(include_str!("../fixtures/saved-scenarios-v25.json")).unwrap()
     }
 
     #[test]

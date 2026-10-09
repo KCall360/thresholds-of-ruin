@@ -9,9 +9,10 @@ region names, and frontend language.
 Press `_` to select a destination. Arrows/HJKL/YUBN move the cursor, `<`/`>` change its
 relative height, Enter starts travel, and Escape cancels selection. Selection is
 free and clears on a changed observation, branch, or lost control. Alternatively,
-left-click a visible floor cell to travel immediately. Clicks use the same map
+left-click a perceived or remembered walkable map cell to travel immediately. Clicks use the same map
 layout as rendering, including stair panels and resized-window letterboxing.
-Walls, undisclosed cells, and panels outside the map are not destinations.
+Walls, cells never disclosed, known closed doors, and panels outside the map are
+not destinations. Current observations override stale remembered contents.
 
 Only the server ends a journey; there's no way to cancel one. While a journey
 is shown, any key shows the rest of it at once, and `[` and `]` show steps more
@@ -20,8 +21,9 @@ steps. Spectators can observe progress but cannot start travel. The [text advent
 object intentions through this backend travel. Its explicit `--script` mode
 preserves one-cell commands and diagnostic output.
 
-ASCII selects currently visible cells. The backend also accepts previously
-perceived cell keys, so frontends can use travel underneath higher-level
+ASCII selects currently perceived and aligned remembered map cells, using the
+last disclosed opaque key. The backend accepts these previously perceived keys,
+so frontends can use travel underneath higher-level
 intentions such as going east to a location or approaching a key. The travel service itself never performs a manipulation on arrival; the text
 client can issue a separately validated pickup after checking interruption state.
 
@@ -44,6 +46,38 @@ Orientation is part of the search state, including rotated joins and self-loops.
 Stairs require a disclosed explicit connection. Neither hidden current terrain
 nor unknown connections can supply a shortcut. Stale routes are validated through
 ordinary movement one step at a time; a blocked attempt stops without rerouting.
+
+At action boundaries, navigation refresh runs only when world geometry or the
+observer's scene changes. Entity motion, disclosure and readiness still receive
+their normal observation comparisons. Same-tick physics scheduler handoffs do not
+refresh an unchanged map; falls, movement and door changes refresh the observers
+whose navigation inputs changed.
+
+Navigation refresh indexes the shared scene by its unique projected offsets, then
+compares six proposed links per source cell. Stable source grouping preserves
+the chart's proposal order for repeated portal occurrences and builds only actual
+changes, avoiding duplicate deletion/reinsertion proposals. Hash lookup is used
+only for membership; ordered sources preserve deterministic updates. Existing edges are read
+through a source-cell range in their region bucket, so refresh does not scan all
+remembered topology. Undisclosed endpoints retain stale links, while disclosed
+terrain edits are checked against the ordinary world step rules. Reference-refresh
+tests compare dense rotated populations, repeated rotated portal occurrences,
+lighting changes, stale obstacles, and
+retained prior boundaries.
+
+Sight and navigation share the world's region bounds and exit-plane geometry.
+Area joins retain one geometry proof plane per axis, direction and coordinate,
+while the ordinary topology resolver retains every individual endpoint. This
+avoids repeated plane checks without changing routing at passage boundaries.
+A read-only adjacency batch reuses those facts for ordinary steps, retaining the
+world resolver for joins and stairs. Opacity is captured once from the shared
+perception scene; both endpoints must be disclosed and walkable before a link is
+learned. The batch borrows the world, so edits cannot invalidate it while in use.
+Compact perception charts use a dense offset index for neighboring-cell lookup.
+It allocates at most eight slots per disclosed cell and 262,144 slots in total;
+widely separated offsets use a sparse index instead. Holes remain unknown, and
+both indices preserve the same occurrence precedence and rotations. Indexing
+does not change the order in which navigation knowledge is updated.
 
 ## Execution and interruption
 
@@ -123,6 +157,17 @@ entry `id`, opaque `destination`, `completed_steps`, and `phase`: `active`,
 Headless frames expose the same status for scripted clients.
 
 ## Compatibility and verification
+
+Checkpoint navigation pools retain shared region ownership. Remembered cells
+store their region once per pool entry and group explicit z/opacity entries in
+ordered x/y columns. Plain edge masks use the same coordinate columns; unusual
+links retain full endpoints and rotations. Each decoded cell has an explicit
+encoded entry. Decoding rejects empty columns, duplicate or unsorted
+coordinates and invalid opacity values; ordinary navigation validation still
+checks world bounds. This preserves stale terrain knowledge while limiting the
+persistence cost of the expanded perception range.
+Restore contexts reuse navigation validation only for the same immutable decoded
+navigation/world pair; actor membership remains checked in every restored state.
 
 Only the current ruleset is supported. Start a fresh game after an incompatible
 revision; saves are not migrated.

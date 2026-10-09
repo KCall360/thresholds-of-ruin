@@ -96,6 +96,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::json!({"kind":"generation", "sample":sample,
                 "depth":depth, "records":generated.len(), "elapsed":elapsed})
             );
+            if sample == 0 && [1, 6, 11].contains(&depth) {
+                floor_perception(&generated, depth);
+            }
             if depth == 1 {
                 first = Some(generated);
             }
@@ -151,7 +154,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "{}",
                         serde_json::json!({"kind":"acquisition", "sample":sample,
                         "mode":mode, "durable":durable, "step":step, "profile":profile,
-                        "residency":counts})
+                        "residency":counts,
+                        "observation_bytes":serde_json::to_vec(&engine.state(actor)?)?.len()})
                     );
                 }
                 assert_eq!(groups, 1);
@@ -167,4 +171,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+/// The actual generated floor's cells in one physical chart; chunk boundaries
+/// introduce no geometric discontinuity. Compare fresh illumination-filtered
+/// scenes at each accepted radius, with one and eight observer positions.
+fn floor_perception(defs: &BTreeMap<u64, scenario_package::RegionDef>, depth: u32) {
+    use tor_world::{Extent, Location, Position, Region, RegionId, World};
+    let mut world = World::new(vec![], vec![]).unwrap();
+    world
+        .add_chamber(Region {
+            id: RegionId(1),
+            name: "generated floor".into(),
+            bounds: Extent::new(78, 21, 2).unwrap(),
+        })
+        .unwrap();
+    world.set_region_light(RegionId(1), false).unwrap();
+    let mut eyes = Vec::new();
+    for (slot, def) in defs.values().enumerate() {
+        let (dx, dy) = ((slot % 3) as i32 * 26, (slot / 3) as i32 * 7);
+        let at = |[x, y, z]: [i32; 3]| Location {
+            region: RegionId(1),
+            position: Position {
+                x: x + dx,
+                y: y + dy,
+                z,
+            },
+        };
+        for wall in &def.walls {
+            world.set_wall(at(*wall), true).unwrap();
+        }
+        for light in &def.lighting {
+            world.set_cell_light(at(light.at), light.lit).unwrap();
+        }
+        let walls: BTreeSet<_> = def.walls.iter().copied().collect();
+        let eye = (0..7)
+            .flat_map(|y| (0..26).map(move |x| [x, y, 1]))
+            .find(|p| !walls.contains(p))
+            .unwrap();
+        eyes.push(at(eye));
+    }
+    for radius in [8u8, 12, 16] {
+        for observers in [1usize, 8] {
+            let mut timings = Vec::new();
+            let mut cells = 0;
+            for _ in 0..20 {
+                let before = Instant::now();
+                for eye in eyes.iter().take(observers) {
+                    cells +=
+                        std::hint::black_box(world.illuminated_eye_scene_uncached(*eye, 0, radius))
+                            .len();
+                }
+                timings.push(before.elapsed().as_secs_f64() * 1000.0);
+            }
+            timings.sort_by(f64::total_cmp);
+            println!(
+                "{}",
+                serde_json::json!({"kind":"perception","depth":depth,"radius":radius,
+            "observers":observers,"n":timings.len(),"p50_ms":timings[10],"p95_ms":timings[18],
+            "max_ms":timings[19],"cells":cells})
+            );
+        }
+    }
 }

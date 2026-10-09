@@ -126,7 +126,7 @@ mod tests {
     use tor_world::Direction;
 
     #[test]
-    fn rotated_join_reveals_and_hides_named_entities_and_cells_in_both_directions() {
+    fn rotated_join_preserves_named_entities_and_cells_at_expanded_range() {
         let mut game = game(42, 8).unwrap();
         let actor = game
             .spawn_actor(at(1, [4, 0, 1]), NonZeroU64::new(100).unwrap())
@@ -136,7 +136,7 @@ mod tests {
             view.ground_items.iter().any(|i| i.name == name)
         };
         assert!(has(&before, "rotated hide marker"));
-        assert!(!has(&before, "rotated reveal marker"));
+        assert!(has(&before, "rotated reveal marker"));
         let result = game.act(actor, Action::Move(Direction::North)).unwrap();
         assert_eq!(
             result.kind,
@@ -146,7 +146,7 @@ mod tests {
             }
         );
         let after = game.observe(actor).unwrap();
-        assert!(!after
+        assert!(after
             .visible_cells
             .iter()
             .any(|c| c.location == at(1, [4, 8, 1])));

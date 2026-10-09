@@ -255,9 +255,10 @@ class AdventureProcesses(ProcessTestCase):
         # Regression: after a fight, "take corpse" walked over and then gave
         # up because the character was still recovering.
         self.server(scenario="first-dungeon")
-        player, _ = self.adventure()
+        player, welcome = self.adventure()
+        self.assertIn("ruin scout", welcome)
         self.assertEqual(
-            "You set off east. A ruin scout comes into view to the east, and you stop warily.\n> ",
+            "You set off east. Something catches your eye, and you stop warily.\n> ",
             self.say(player, "east"),
         )
         fight = []
@@ -363,4 +364,3 @@ class AdventureProcesses(ProcessTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

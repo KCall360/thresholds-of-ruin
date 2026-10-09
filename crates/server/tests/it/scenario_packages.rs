@@ -99,12 +99,24 @@ fn invalid_references_geometry_versions_and_unsupported_mechanics_have_diagnosti
         ),
         (
             "scenario.toml",
-            "interactions-v25",
+            "interactions-v26",
             "missing-v1",
             "dependency",
         ),
         ("scenario.toml", "1/start", "1/missing", "anchor"),
         ("regions", "size = [6, 3, 2]", "size = [0, 3, 2]", "bounds"),
+        (
+            "regions",
+            "size = [6, 3, 2]",
+            "size = [6, 3, 2]\nlighting = [{at=[99,0,0],lit=true}]",
+            "lighting",
+        ),
+        (
+            "regions",
+            "size = [6, 3, 2]",
+            "size = [6, 3, 2]\nlighting = [{at=[1,1,0],lit=true},{at=[1,1,0],lit=false}]",
+            "lighting",
+        ),
         ("regions", "2/landing", "999/landing", "anchor"),
         (
             "regions",

@@ -133,10 +133,10 @@ class RogueExplorationProcess(ProcessTestCase):
         explore_to_stairs(self, player, welcome["state"])
         player.stop()
         adventure, welcome = self.adventure()
-        self.assertIn("stairs down", welcome)
+        self.assertIn("Stairs lead down.", welcome)
         down = self.say(adventure, "down")
         self.assertTrue(down.startswith("You go down.\n"), down)
-        self.assertIn("stairs up", down)
+        self.assertIn("Stairs lead up.", down)
         self.assertTrue(self.say(adventure, "up").startswith("You go up.\n"))
 
 

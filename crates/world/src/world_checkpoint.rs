@@ -32,6 +32,7 @@ fn same_geometry(a: &World, b: &World) -> bool {
         region_gravity,
         cell_gravity,
         terrain,
+        lighting,
         chambers,
         place_hints,
         absent,
@@ -47,6 +48,7 @@ fn same_geometry(a: &World, b: &World) -> bool {
         && region_gravity == &b.region_gravity
         && cell_gravity == &b.cell_gravity
         && terrain == &b.terrain
+        && lighting == &b.lighting
         && chambers == &b.chambers
         && place_hints == &b.place_hints
         && absent == &b.absent

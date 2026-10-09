@@ -25,8 +25,10 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   regression test that fails first. Write them in the same change, following
   the [testing policy](docs/testing.md). Tiers only choose which existing tests
   run; a green tier doesn't count if the tests for the change are missing.
-- During development, run the failing regression first, then affected unit,
-  integration and process tests after each meaningful change. At a stable,
+- During development, run the failing regression first, then affected unit
+  tests during edits. Run affected integration and actual-process
+  tests at completed behavior checkpoints and repeat them when later edits affect
+  that behavior. At a stable,
   cohesive checkpoint, run `scripts/verify.py quick`; a required higher tier
   can cover that checkpoint without a preceding duplicate quick run.
 - Before every push, pass the default `push` tier or `full`. A successful full
@@ -85,7 +87,8 @@ On the maintainer's Windows machine:
   the hashes a fresh checkout receives. Keep `.gitattributes` LF rules intact.
 - Native mouse tests need interactive desktop permission. A sandbox denial
   (for example of `SetCursorPos` or temp-directory access) is an environment
-  failure: rerun with the needed access and report it.
+  failure: rerun with the needed access and report it, except for the explicitly
+  permitted local native mouse exception below.
 - System Python doesn't include Pillow; scripts that need it use the bundled
   runtime Python.
 
@@ -126,3 +129,10 @@ Preserve the original dirty interactions checkout; it contains unpublished work
 that is not the published main baseline. Keep future work isolated where needed.
 Do not weaken native tests or infer a waiver from historical checkpoint notes.
 Desktop deployment remains separate from publishing documentation.
+
+### Local native mouse exception
+
+The maintainer permits only `test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click`
+to fail locally without blocking verification. Record it as a waived local failure,
+never a pass. Do not remove or weaken the test. CI must run and pass it; unrelated
+failures remain blocking. Use the verification tool’s explicit local waiver option.

@@ -11,8 +11,8 @@ The current tree is a playable development build. The default game is the
 authored five-chamber dungeon in `scenarios/first-dungeon`: explore, fight,
 retrieve the dawn seal, and escape.
 
-**Current formats:** protocol **32**, save format **24**, ruleset
-**`interactions-v25`**, scenario validator **`tor-scenario-10`**. The server rejects
+**Current formats:** protocol **32**, save format **25**, ruleset
+**`interactions-v26`**, scenario validator **`tor-scenario-11`**. The server rejects
 any other protocol, save format, or ruleset rather than migrating it. Other
 documents refer to these as "current" instead of repeating the numbers, and
 `scripts/test_documentation.py` checks that these values match the code.
@@ -23,7 +23,7 @@ documents refer to these as "current" instead of repeating the numbers, and
 | Simulation | Complete for current scope | Explicit actors, deterministic scheduling, cardinal/diagonal movement, wait, quantity-aware pickup/drop, inventory, doors, stairs |
 | Saved gameplay intentions | Complete for current scope | Simulation queue, session admission/execution, linked journal records, typed receipts, ordered lifecycle updates, pending snapshots, client input guards, queued-work suspension and paused-attack recovery; autonomous decisions use the shared queue path; native travel admission/execution and restart settlement are published; stream contexts, exact bases and bounded resynchronization are published; bounded typed decoding is published; complete encoded observation selection and admission ownership are published; ordered collection edits, retained-state byte validation and bounded transport closure are published |
 | Geometry and physics | Complete for current scope | Bounded 3D regions, all 24 portal rotations, finite stone volumes, multi-cell bodies, gravity, actor-relative scenes |
-| Perception | Complete (3s) | Three-dimensional sight from declared eye cells, floors and ceilings as seen solid cells, opaque cell keys, stale client memory |
+| Perception | Complete (3s) | Three-dimensional sight from declared eye cells, per-cell ambient lighting, body-local awareness, range 16, opaque cell keys and stale client memory |
 | Server and persistence | Complete for current scope | Local authenticated WebSockets, play that runs until it needs input, background journal, checkpoints, replay, history and annotations; backend action facts and numeric save DTO mappings are independent of wire action types |
 | Clients | Complete for current scope | Text, native ASCII, and JSON-lines headless clients using shared disclosed state |
 | Access and development | Complete for current scope | Control transfer, enforced spectators, wizard authorization, setup commands, 128-boundary rewind with retained branches |
@@ -225,7 +225,8 @@ Generate a whole floor when it enters the loading horizon. Extend the existing
 streaming and semantic-stream generator foundations with reusable declarative
 recipes and coordinated floor groups; do not wait for all mobs/items/effects.
 
-Add omitted rooms, mazes, lighting, secrets, traps and content as shared support
+Room lighting and dark corridors are implemented; add omitted rooms, mazes,
+secrets, traps and content as shared support
 arrives. Standard TOR systems cover builds/progression/CR, effects/defenses,
 survival, anatomy equipment, knowledge and ranged/perception behavior. Rogue
 supplies its roster and distinctive abilities; TOR supplies mechanics. Runtime

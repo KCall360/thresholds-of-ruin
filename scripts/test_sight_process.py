@@ -72,7 +72,7 @@ class SightProcesses(ProcessTestCase):
         self.key(window, "escape")
         self.assertEqual(window.child.wait(timeout=10), 0)
         text.stop(); observer.stop(); server.stop()
-        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v25")
+        self.assertEqual(inspect_save(self.save)["ruleset"], "interactions-v26")
         self.server(scenario="sight-3d")
         _, resumed = self.client(SPECTATOR_TOKEN)
         self.assertEqual(resumed["state"], opened["state"])
@@ -94,7 +94,9 @@ class SightProcesses(ProcessTestCase):
             # the cell in its lee; the humanoid sees nothing there.
             beyond = [c["position"]["x"] for c in view["visible_cells"]
                       if c["position"]["y"] == 0 and c["position"]["z"] <= 1 and c["position"]["x"] > 2]
-            self.assertEqual(sorted(beyond), [4, 5, 6, 7] if giant else [])
+            self.assertEqual(sorted(beyond), [4, 5, 6, 7, 8] if giant else [])
+            if giant:
+                self.assertTrue(self.cell(view, 8, 0, 1)["wall"])
             positions = [a["position"] for a in view["visible_actors"]]
             self.assertEqual(creature in positions, giant)
             window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation", "--actor", str(character)],

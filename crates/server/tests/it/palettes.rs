@@ -81,7 +81,7 @@ fn east(engine: &mut Engine) {
 }
 
 /// From the start into the first cave, and across it into the second.
-const INTO_CAVE: usize = 10;
+const INTO_CAVE: usize = 18;
 const ACROSS_CAVE: usize = 24;
 
 #[test]

@@ -1,12 +1,12 @@
 {
-  "validator": "tor-scenario-10",
-  "ruleset": "interactions-v25",
-  "content_hash": "2169273e30b9922af4a9d1f0c1b29fdcaefa9b20a3b1206463f84ad889367078",
+  "validator": "tor-scenario-11",
+  "ruleset": "interactions-v26",
+  "content_hash": "fafc1c0c35c3e44f0b3fec0d788b71c7756415b207b05b65b2f6c0ed71b976b7",
   "files": {
-    "index.json": "657c17d8f738dede5cd3f3f79b8a4316edabd2b01ca4ba832091cad5e8a8371d",
-    "scenario.toml": "fc017ef333ebf9bc83662ba9942740e4c33d046957e6fafecc5ccf10f93ea57a"
+    "index.json": "47d9311a6264a7bada45ae24d797fa40522b6949664849f94d37a98c26fd9b9d",
+    "scenario.toml": "bce89affcdac3d6929ac906dca5f5319709baa58874b75461cd6dc9ed206bea6"
   },
   "regions": 3,
-  "model_hash": "ce5c0bb28f0bf9da3bc786ba4f6cf6bf3eeb1649815581dd7b1ca01728eb6979",
+  "model_hash": "5ca4ceb9a07a4c149a01f53fbef4bd8d33956408b5e380801c7c848f0a17e899",
   "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
 }

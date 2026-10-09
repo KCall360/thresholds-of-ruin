@@ -35,7 +35,7 @@ Goals:
   portal rotations, cycles and repeated occurrences.
 - Cost within the observation performance budget.
 
-Non-goals: lighting, sound, transparency or partial visibility, posture changes
+Non-goals: light propagation, sound, transparency or partial visibility, posture changes
 of the eye, and continuous stair meshes.
 
 ## Model
@@ -115,8 +115,42 @@ A target point is visible when:
 
 Range is the Manhattan distance, in cells, from the eye cell to the target cell
 along the resolved route. Portal crossings consume distance as they do today.
-The game uses a range of 8, and the world API caps it at 16. At range 8 there
-are 833 candidate offsets, compared with about 145 on a single plane.
+The game uses a range of 16, matching the world API cap. At range 16 there
+are 6,017 candidate offsets; range 8 has 833. These are geometric candidates,
+not a guarantee of perception.
+
+### Ambient illumination and local awareness
+
+Every cell has boolean ambient illumination, independent of terrain. Authored
+regions default to lit and may specify a dark default plus sparse overrides.
+Occupied cells take precedence when local neighbourhoods or an eye projection
+resolve the same body-chart offset differently at a one-way physical join.
+The merge is independent of authored body-cell order. Streaming activation uses
+this same merged actor scene; geometry needed to compute it may remain loaded
+without being perceived or active.
+
+Beyond local awareness, only illuminated targets within range and line of sight
+are perceived. Dark air remains transparent: a lit room may be seen across a dark
+corridor. Target eligibility is checked before expensive occlusion tests.
+
+Actors always perceive occupied cells and all 26 immediate neighbors around
+every body cell, including vertical and diagonal neighbors. This awareness does
+not require illumination or eye line of sight, and does not disclose beyond the
+neighboring cells. Physical joins carry these neighborhoods through their frames.
+Local awareness and distant sight share the resulting actor-specific scene used
+for items, actors, places, navigation knowledge and AI. Stale map memory remains.
+
+Geometric scenes and illuminated scenes share the exact occlusion implementation
+but have distinct cache entries. Lighting edits invalidate only illumination
+versions; geometry witnesses and geometric caches remain valid. Detached regions
+carry their defaults and overrides in ordinary region records. Checkpoints,
+replay and rewind preserve lighting. Streaming activates perceived regions and
+loads geometry/lighting dependencies needed to resolve the scene exactly.
+
+Clients retain their presentation: illumination changes disclosure rather than
+adding brightness flags, shading, or movement narration. Portable lights and
+light propagation are deferred. The current save/ruleset versions reject older
+incompatible saves; see the roadmap.
 
 ### Symmetry
 
@@ -237,19 +271,62 @@ exactly the same results as the layer below.
      two worlds that hold the same version for a region hold the same content
      there, however they diverged. Restoring a checkpoint clones one geometry
      per instance and then replaces its doors, so each restored world draws a
-     new topology version.
+     new topology version. A viewpoint can retain up to four validated scene
+     versions so before/after comparisons do not overwrite each other's useful
+     results. Geometry, illumination and presence witnesses still govern every
+     lookup; retaining a version never permits stale disclosure.
    - **Not world content.** The cache is ignored by equality and never saved,
-     and a loaded world starts empty. It keeps at most 512 scenes, then
-     empties and refills on demand.
+     and a loaded world starts empty. It keeps at most 512 scene versions,
+     evicting the oldest when a new scene would exceed that limit. Reaching
+     capacity does not flush other useful viewpoints.
 
    Region detachment invalidates scenes that depend on the detached region.
    Scenes with unrelated dependencies remain reusable.
+
+   Streaming observing points reuse the actor's combined scene, including body
+   neighbourhoods and abstract stair landings. This derived cache retains at
+   most 512 actors and validates geometry, illumination, residency, location,
+   orientation, body and whether the actor is disclosed. Candidate clones share
+   it, but validate their own witnesses; a candidate edit cannot leak a scene
+   into the original game. It is omitted from saves and simulation equality.
+   An unchanged resting wait therefore needs no new actor scene for its pins.
+
+   Navigation also distinguishes a changed disclosure from a translated chart.
+   With unchanged geometry, a uniform translation that preserves each cell's
+   identity, rotation and opacity preserves its disclosed connections. It needs
+   no navigation rebuild. Abstract stairs remain conservative because their
+   separate landing offsets are anchored to the observer's origin.
 
 Only the layers the measurements justify are added. Measure with an extended
 `fov_bench` that covers `volume_scene` and the new builder, and compare release
 builds with `scripts/perf_compare.py`. Observation cost already contributes to
 open [performance items](performance-persistence.md#open-work), so the change must
 not make those items worse.
+
+The accelerated resolver also proves a shared height slab for small physical
+components, then omits candidate offsets outside it. The proof examines at most
+32 regions and requires equal storage heights, height-preserving join rotations
+and anchors, and no physical exits along that axis. Unloaded regions end their
+proof branch, just as exact geometry routes cannot enter them; their presence
+remains a witness so attaching them recomputes the proof. Translated heights
+and larger components use the general resolver. Abstract stairs remain
+outside physical sight. Successful proofs record every inspected region as a
+cache-invalidation witness; these witnesses do not keep distant regions loaded.
+Only actual terrain-read dependencies pin residency. Proof witnesses track region
+availability separately: far-away wall, door and lighting edits do not invalidate
+a height proof, while detaching or attaching an inspected region does. Topology
+changes invalidate both the proof and scene.
+Reference-equivalence tests cover all 24 observer frames, changed-height joins,
+and detach/reload. This optimization applies to ordinary world geometry.
+
+Straight sight segments inside a proven transparent convex region interior skip
+ray traversal. The proof checks only that region's terrain overrides and doors;
+solid overrides or any closed door disable it. Chamber edge/corner surfaces and paths crossing exit planes retain exact rays. An
+enclosing solid face directly adjacent to the box is also proven visible; edge
+and corner surfaces retain exact rays. The eye must lie inside the box, and
+other targets must lie inside or immediately across one exposed face. Geometry-version invalidation and
+reference comparisons cover doors and internal wall edits.
+
 
 ## Verification plan
 

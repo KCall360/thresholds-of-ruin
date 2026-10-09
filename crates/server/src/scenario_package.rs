@@ -26,8 +26,8 @@ use sha2::{Digest, Sha256};
 use tor_simulation::Game;
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
 
-pub const RULESET: &str = "interactions-v25";
-const VALIDATOR: &str = "tor-scenario-10";
+pub const RULESET: &str = "interactions-v26";
+const VALIDATOR: &str = "tor-scenario-11";
 /// The manifest and the validator's files are bounded to this.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 /// The package layout this version reads: `scenario.toml`, one file per
@@ -233,9 +233,24 @@ pub struct NamedPlace {
     pub name: String,
 }
 
+fn default_lit() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellLight {
+    pub at: [i32; 3],
+    pub lit: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegionDef {
+    #[serde(default = "default_lit")]
+    pub lit: bool,
+    #[serde(default)]
+    pub lighting: Vec<CellLight>,
     pub id: u64,
     pub name: String,
     pub size: [i32; 3],
@@ -2688,6 +2703,16 @@ impl Package {
             .map_err(|e| fail(format!("Region {}: {e:?}", r.id)))?;
         }
         for r in regions {
+            game.set_region_light(RegionId(r.id), r.lit)
+                .map_err(|e| fail(format!("Region {} lighting: {e:?}", r.id)))?;
+            let mut seen = BTreeSet::new();
+            for light in &r.lighting {
+                if !seen.insert(light.at) {
+                    return Err(fail(format!("Region {} duplicate lighting cell", r.id)));
+                }
+                game.set_cell_light(loc(r.id, light.at), light.lit)
+                    .map_err(|e| fail(format!("Region {} lighting: {e:?}", r.id)))?;
+            }
             for p in &r.walls {
                 game.set_wall(loc(r.id, *p), true)
                     .map_err(|e| fail(format!("Region {} wall: {e:?}", r.id)))?;
