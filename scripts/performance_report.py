@@ -57,9 +57,17 @@ def validate_region_acquisition(profile, required=False):
     assert isinstance(acquisition, dict)
     for name in ('fallback_reads', 'fallback_builds', 'prepared_reads', 'prepared_builds'):
         assert type(acquisition.get(name)) is int and acquisition[name] >= 0, name
+    groups = ('groups_committed', 'prepared_groups', 'demand_groups')
+    has_groups = any(name in acquisition for name in groups)
+    if has_groups:
+        for name in groups:
+            assert type(acquisition.get(name)) is int and acquisition[name] >= 0, name
+        assert acquisition['groups_committed'] == acquisition['prepared_groups'] + acquisition['demand_groups']
+    committed = acquisition['groups_committed'] if has_groups else 0
+    prepared = acquisition['prepared_groups'] if has_groups else 0
     assert acquisition['fallback_reads'] + acquisition['prepared_reads'] == profile['region_records_read']
-    assert acquisition['fallback_builds'] + acquisition['prepared_builds'] == profile['regions_built']
-    assert acquisition['prepared_reads'] + acquisition['prepared_builds'] == profile['regions_prepared']
+    assert acquisition['fallback_builds'] + acquisition['prepared_builds'] + 9*committed == profile['regions_built']
+    assert acquisition['prepared_reads'] + acquisition['prepared_builds'] + 9*prepared == profile['regions_prepared']
 
     def nanos(value):
         assert isinstance(value, dict)
@@ -69,9 +77,43 @@ def validate_region_acquisition(profile, required=False):
 
     read = nanos(acquisition.get('fallback_read'))
     build = nanos(acquisition.get('fallback_build'))
-    assert read + build <= nanos(profile.get('region_transition')), 'Nested timings exceed transition'
+    group_wait = nanos(acquisition.get('group_wait')) if has_groups else 0
+    group_build = nanos(acquisition.get('group_build')) if has_groups else 0
+    assert read + build + group_wait + group_build <= nanos(profile.get('region_transition')), 'Nested timings exceed transition'
     assert acquisition['fallback_reads'] or read == 0
     assert acquisition['fallback_builds'] or build == 0
+    assert committed or group_wait == 0
+    assert not has_groups or acquisition['demand_groups'] or group_build == 0
+
+
+def validate_rogue(rows):
+    """Complete floor generation and streaming diagnostics, with work bounds."""
+    metadata = [row for row in rows if row['kind'] == 'rogue']
+    assert len(metadata) == 1
+    meta = metadata[0]
+    assert meta['version'] == 1 and meta['floors'] == 26
+    assert meta['records_per_floor'] == 9 and meta['prepared_limit'] == 32
+    assert type(meta['samples']) is int and meta['samples'] > 0
+    expected = set(itertools.product(range(meta['samples']), range(1, 27)))
+    generation = [row for row in rows if row['kind'] == 'generation']
+    assert len(generation) == len(expected)
+    assert {(row['sample'], row['depth']) for row in generation} == expected
+    assert all(row['records'] == 9 for row in generation)
+    ends = [row for row in rows if row['kind'] == 'rogue_end']
+    cases = set(itertools.product(range(meta['samples']), ('demand', 'prepared', 'racing'), (False, True)))
+    key = lambda row: (row['sample'], row['mode'], row['durable'])
+    assert len(ends) == len(cases) and {key(row) for row in ends} == cases
+    acquisitions = [row for row in rows if row['kind'] == 'acquisition']
+    assert all(key(row) in cases for row in acquisitions)
+    for end in ends:
+        samples = [row for row in acquisitions if key(row) == key(end)]
+        assert [row['step'] for row in samples] == list(range(end['steps']))
+        assert end['groups'] == 1
+        assert sum(row['profile']['region_acquisition']['groups_committed'] for row in samples) == 1
+        for row in samples:
+            validate_region_acquisition(row['profile'], required=True)
+            counts = row['residency']
+            assert counts['active'] + counts['frozen'] < 18
 
 
 def validate_stream(rows, case):

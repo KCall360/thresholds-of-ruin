@@ -1,0 +1,223 @@
+format = 2
+id = "rogue-exploration"
+version = "1.0"
+ruleset = "interactions-v25"
+default_character = 1
+[[characters]]
+id = 1
+anchor = "1/start"
+turn_ticks = 100
+[generation_recipes.exploration]
+version = 1
+[[generation_recipes.exploration.stages]]
+id = "stone"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "stone_fill"
+[[generation_recipes.exploration.stages]]
+id = "slots"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "grid_partition"
+[[generation_recipes.exploration.stages]]
+id = "rooms"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "rooms"
+width = [4, 24]
+height = [3, 5]
+[[generation_recipes.exploration.stages]]
+id = "connections"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "connected_graph"
+extra = [0, 2]
+[[generation_recipes.exploration.stages]]
+id = "corridors"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "corridors"
+[[generation_recipes.exploration.stages]]
+id = "stairs"
+version = 1
+[generation_recipes.exploration.stages.operation]
+kind = "stairs"
+[generation_groups."floor-1"]
+depth = 1
+recipe = "exploration"
+members = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+[stair_pairs."descent-1"]
+upper = "9/down"
+lower = "10/up"
+[generation_groups."floor-2"]
+depth = 2
+recipe = "exploration"
+members = [10, 11, 12, 13, 14, 15, 16, 17, 18]
+[stair_pairs."descent-2"]
+upper = "18/down"
+lower = "19/up"
+[generation_groups."floor-3"]
+depth = 3
+recipe = "exploration"
+members = [19, 20, 21, 22, 23, 24, 25, 26, 27]
+[stair_pairs."descent-3"]
+upper = "27/down"
+lower = "28/up"
+[generation_groups."floor-4"]
+depth = 4
+recipe = "exploration"
+members = [28, 29, 30, 31, 32, 33, 34, 35, 36]
+[stair_pairs."descent-4"]
+upper = "36/down"
+lower = "37/up"
+[generation_groups."floor-5"]
+depth = 5
+recipe = "exploration"
+members = [37, 38, 39, 40, 41, 42, 43, 44, 45]
+[stair_pairs."descent-5"]
+upper = "45/down"
+lower = "46/up"
+[generation_groups."floor-6"]
+depth = 6
+recipe = "exploration"
+members = [46, 47, 48, 49, 50, 51, 52, 53, 54]
+[stair_pairs."descent-6"]
+upper = "54/down"
+lower = "55/up"
+[generation_groups."floor-7"]
+depth = 7
+recipe = "exploration"
+members = [55, 56, 57, 58, 59, 60, 61, 62, 63]
+[stair_pairs."descent-7"]
+upper = "63/down"
+lower = "64/up"
+[generation_groups."floor-8"]
+depth = 8
+recipe = "exploration"
+members = [64, 65, 66, 67, 68, 69, 70, 71, 72]
+[stair_pairs."descent-8"]
+upper = "72/down"
+lower = "73/up"
+[generation_groups."floor-9"]
+depth = 9
+recipe = "exploration"
+members = [73, 74, 75, 76, 77, 78, 79, 80, 81]
+[stair_pairs."descent-9"]
+upper = "81/down"
+lower = "82/up"
+[generation_groups."floor-10"]
+depth = 10
+recipe = "exploration"
+members = [82, 83, 84, 85, 86, 87, 88, 89, 90]
+[stair_pairs."descent-10"]
+upper = "90/down"
+lower = "91/up"
+[generation_groups."floor-11"]
+depth = 11
+recipe = "exploration"
+members = [91, 92, 93, 94, 95, 96, 97, 98, 99]
+[stair_pairs."descent-11"]
+upper = "99/down"
+lower = "100/up"
+[generation_groups."floor-12"]
+depth = 12
+recipe = "exploration"
+members = [100, 101, 102, 103, 104, 105, 106, 107, 108]
+[stair_pairs."descent-12"]
+upper = "108/down"
+lower = "109/up"
+[generation_groups."floor-13"]
+depth = 13
+recipe = "exploration"
+members = [109, 110, 111, 112, 113, 114, 115, 116, 117]
+[stair_pairs."descent-13"]
+upper = "117/down"
+lower = "118/up"
+[generation_groups."floor-14"]
+depth = 14
+recipe = "exploration"
+members = [118, 119, 120, 121, 122, 123, 124, 125, 126]
+[stair_pairs."descent-14"]
+upper = "126/down"
+lower = "127/up"
+[generation_groups."floor-15"]
+depth = 15
+recipe = "exploration"
+members = [127, 128, 129, 130, 131, 132, 133, 134, 135]
+[stair_pairs."descent-15"]
+upper = "135/down"
+lower = "136/up"
+[generation_groups."floor-16"]
+depth = 16
+recipe = "exploration"
+members = [136, 137, 138, 139, 140, 141, 142, 143, 144]
+[stair_pairs."descent-16"]
+upper = "144/down"
+lower = "145/up"
+[generation_groups."floor-17"]
+depth = 17
+recipe = "exploration"
+members = [145, 146, 147, 148, 149, 150, 151, 152, 153]
+[stair_pairs."descent-17"]
+upper = "153/down"
+lower = "154/up"
+[generation_groups."floor-18"]
+depth = 18
+recipe = "exploration"
+members = [154, 155, 156, 157, 158, 159, 160, 161, 162]
+[stair_pairs."descent-18"]
+upper = "162/down"
+lower = "163/up"
+[generation_groups."floor-19"]
+depth = 19
+recipe = "exploration"
+members = [163, 164, 165, 166, 167, 168, 169, 170, 171]
+[stair_pairs."descent-19"]
+upper = "171/down"
+lower = "172/up"
+[generation_groups."floor-20"]
+depth = 20
+recipe = "exploration"
+members = [172, 173, 174, 175, 176, 177, 178, 179, 180]
+[stair_pairs."descent-20"]
+upper = "180/down"
+lower = "181/up"
+[generation_groups."floor-21"]
+depth = 21
+recipe = "exploration"
+members = [181, 182, 183, 184, 185, 186, 187, 188, 189]
+[stair_pairs."descent-21"]
+upper = "189/down"
+lower = "190/up"
+[generation_groups."floor-22"]
+depth = 22
+recipe = "exploration"
+members = [190, 191, 192, 193, 194, 195, 196, 197, 198]
+[stair_pairs."descent-22"]
+upper = "198/down"
+lower = "199/up"
+[generation_groups."floor-23"]
+depth = 23
+recipe = "exploration"
+members = [199, 200, 201, 202, 203, 204, 205, 206, 207]
+[stair_pairs."descent-23"]
+upper = "207/down"
+lower = "208/up"
+[generation_groups."floor-24"]
+depth = 24
+recipe = "exploration"
+members = [208, 209, 210, 211, 212, 213, 214, 215, 216]
+[stair_pairs."descent-24"]
+upper = "216/down"
+lower = "217/up"
+[generation_groups."floor-25"]
+depth = 25
+recipe = "exploration"
+members = [217, 218, 219, 220, 221, 222, 223, 224, 225]
+[stair_pairs."descent-25"]
+upper = "225/down"
+lower = "226/up"
+[generation_groups."floor-26"]
+depth = 26
+recipe = "exploration"
+members = [226, 227, 228, 229, 230, 231, 232, 233, 234]

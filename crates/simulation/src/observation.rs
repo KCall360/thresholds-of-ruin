@@ -317,16 +317,19 @@ impl Game {
                         Direction::Down,
                     ]
                     .into_iter()
-                    .filter_map(move |direction| self.world.passage(location, direction))
+                    .filter(move |direction| {
+                        self.world.passage(location, *direction).is_some()
+                            || self.world.is_stair(location, *direction)
+                    })
+                    .map(move |direction| ExitView {
+                        location,
+                        direction,
+                    })
                 })
                 .filter(|exit| {
-                    !self.world.is_wall(exit.from)
+                    !self.world.is_wall(exit.location)
                         && (!matches!(exit.direction, Direction::Up | Direction::Down)
-                            || self.world.is_stair(exit.from, exit.direction))
-                })
-                .map(|exit| ExitView {
-                    location: exit.from,
-                    direction: exit.direction,
+                            || self.world.is_stair(exit.location, exit.direction))
                 })
                 .collect(),
             known_places: actor
@@ -468,18 +471,20 @@ impl Game {
         // discloses its landing as a separate occurrence beyond physical sight.
         for direction in [Direction::Up, Direction::Down] {
             if self.world.is_stair(actor.location, direction) {
-                let passage = self
-                    .world
-                    .passage(actor.location, direction)
-                    .expect("stair link");
+                let Some(to) = self.world.link_destination(actor.location, direction) else {
+                    continue;
+                };
+                if !self.world.contains(to) {
+                    continue;
+                }
                 scene.push(tor_world::SightCell {
-                    location: passage.to,
+                    location: to,
                     rotation: tor_world::compose_rotation(
                         actor.orientation,
                         self.world.crossing_rotation(actor.location, direction),
                     ),
                     offset: stair_landing_offset(body, direction),
-                    wall: self.world.is_wall(passage.to),
+                    wall: self.world.is_wall(to),
                 });
             }
         }

@@ -227,6 +227,7 @@ impl Game {
                 let local = direction.rotated(cell.rotation);
                 if matches!(local, Direction::Up | Direction::Down)
                     && self.world.passage(cell.location, local).is_none()
+                    && !self.world.is_stair(cell.location, local)
                 {
                     continue;
                 }
@@ -392,6 +393,7 @@ impl Game {
                     let local = direction.rotated(cell.rotation);
                     if matches!(local, Direction::Up | Direction::Down)
                         && self.world.passage(cell.location, local).is_none()
+                        && !self.world.is_stair(cell.location, local)
                     {
                         continue;
                     }

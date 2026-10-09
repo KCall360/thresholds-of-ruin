@@ -16,7 +16,7 @@ Milestone 4e is complete. It implemented:
 The current per-region generator and asset-palette delivery are also implemented;
 see [generated regions](scenario-packages.md#generated-regions) and
 [asset palettes](protocol.md#asset-palettes). General procedural recipes and
-multi-region generation groups are planned in the [Rogue scenario plan](rogue-scenario-plan.md).
+multi-region generation groups are described in [generation recipes](generation-recipes.md).
 
 ## Inspect a horizon
 

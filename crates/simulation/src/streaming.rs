@@ -738,7 +738,7 @@ impl Game {
             let stairs = [Direction::Up, Direction::Down]
                 .into_iter()
                 .filter(|d| self.world.is_stair(at, *d))
-                .filter_map(|d| self.world.passage(at, d).map(|p| p.to.region))
+                .filter_map(|d| self.world.stair_region(at, d))
                 .collect();
             Some((eye, frame, stairs))
         };
@@ -1085,6 +1085,59 @@ impl Game {
         Ok(())
     }
 
+    /// Atomically publish newly generated regions as ordinary detached records.
+    /// Allocation follows region order, independent of preparation order. No
+    /// member is attached or activated by registration. Store writes happen only
+    /// after the entire batch has passed validation.
+    pub fn register_generated_regions(
+        &mut self,
+        mut batch: Vec<(UnbuiltRegion, RegionRecord)>,
+        records: &mut dyn RecordStore,
+    ) -> Result<(), TransitionError> {
+        batch.sort_by_key(|(definition, _)| definition.region.id);
+        let mut next = self.clone();
+        let mut made = Vec::with_capacity(batch.len());
+        for (definition, record) in batch {
+            let region = definition.region.id;
+            let invalid = TransitionError::InvalidRecord(region);
+            if !record.valid_contents(region, next.tick)
+                || record.stamps.values().any(|stamp| *stamp != 0)
+                || record.identities() != definition.identities
+            {
+                return Err(invalid);
+            }
+            if !next.world.knows_region(region) {
+                next.add_unbuilt_region(
+                    definition.region,
+                    definition.chamber,
+                    definition.identities,
+                )
+                .map_err(|_| invalid)?;
+            }
+            if !next.lifecycle.unbuilt.remove(&region)
+                || next.world.known_region(region) != Some(record.world.region())
+                || !record.matches_directory(region, &next.lifecycle.directory)
+            {
+                return Err(invalid);
+            }
+            let id = RecordId(next.lifecycle.next_record);
+            next.world
+                .publish_region_anchors(&record.world)
+                .map_err(|_| invalid)?;
+            next.lifecycle.next_record = id.0.checked_add(1).ok_or(invalid)?;
+            next.lifecycle.detached.insert(region, id);
+            made.push((id, Shared::new(record)));
+        }
+        if !next.lifecycle_state_valid() {
+            return Err(TransitionError::InvalidRecord(RegionId(0)));
+        }
+        *self = next;
+        for (id, record) in made {
+            records.put(id, record);
+        }
+        Ok(())
+    }
+
     /// Declare a region the store's source can build.
     fn declare_unbuilt(
         &mut self,
@@ -1258,17 +1311,18 @@ impl Game {
         let unavailable = TransitionError::RecordUnavailable(region);
         let record = if self.lifecycle.unbuilt.remove(&region) {
             let record = records.build(region).ok_or(unavailable)?;
-            // Its links may lead to regions the game doesn't know yet.
-            for target in record.world.linked_regions() {
-                if target != region && !self.world.knows_region(target) {
-                    self.declare_unbuilt(target, records).map_err(|_| invalid)?;
-                }
-            }
             Shared::new(record)
         } else {
             let id = self.lifecycle.detached.remove(&region).ok_or(invalid)?;
             records.get(id).ok_or(unavailable)?
         };
+        // Newly generated detached records can also link to as-yet-unknown
+        // regions. Declaration does not build or activate their destinations.
+        for target in record.world.linked_regions() {
+            if target != region && !self.world.knows_region(target) {
+                self.declare_unbuilt(target, records).map_err(|_| invalid)?;
+            }
+        }
         // Checked here, not only on restore, because restore never reads
         // records, and a built record must hold exactly the identities its
         // source declared.
@@ -1621,6 +1675,74 @@ mod tests {
             game.add_unbuilt_region(region, false, identities).unwrap();
         }
         (template, game, far)
+    }
+
+    #[test]
+    fn generated_batch_commits_detached_and_streams_independently() {
+        let (template, mut game, _) = unbuilt_corridor();
+        let mut source = TemplateSource {
+            template,
+            records: MemoryRecords::default(),
+            lose: None,
+        };
+        let batch = (1..=4)
+            .rev()
+            .map(|id| {
+                let region = RegionId(id);
+                (
+                    source.unbuilt(region).unwrap(),
+                    source.build(region).unwrap(),
+                )
+            })
+            .collect();
+        game.register_generated_regions(batch, &mut source).unwrap();
+        assert!(game.loaded_regions().next().is_none());
+        assert_eq!(game.detached_records().count(), 4);
+        assert_eq!(game.detached_record(RegionId(1)), Some(RecordId(1)));
+        game.transition_regions(&sets(&[1], &[1]), &mut source)
+            .unwrap();
+        // Existing body/perception pins can additionally keep the adjoining
+        // region; registration must not pin the complete batch.
+        assert!(game.loaded_regions().count() < 4);
+        assert!(game.loaded_regions().any(|id| id == RegionId(1)));
+        assert_eq!(game.region_state(RegionId(4)), Some(RegionState::Detached));
+        let before = game.clone();
+        let duplicate = vec![(
+            source.unbuilt(RegionId(1)).unwrap(),
+            source.build(RegionId(1)).unwrap(),
+        )];
+        assert!(game
+            .register_generated_regions(duplicate, &mut source)
+            .is_err());
+        assert_eq!(game, before);
+    }
+
+    #[test]
+    fn invalid_generated_batch_does_not_publish_any_member() {
+        let (template, mut game, _) = unbuilt_corridor();
+        let mut source = TemplateSource {
+            template,
+            records: MemoryRecords::default(),
+            lose: None,
+        };
+        let mut batch = (1..=4)
+            .map(|id| {
+                let region = RegionId(id);
+                (
+                    source.unbuilt(region).unwrap(),
+                    source.build(region).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        batch[3].1.actors.clear();
+        batch[3].1.stamps.clear();
+        // Region 3 owns the actor; removing it invalidates that member.
+        batch[2].1.actors.clear();
+        batch[2].1.stamps.clear();
+        let before = game.clone();
+        assert!(game.register_generated_regions(batch, &mut source).is_err());
+        assert_eq!(game, before);
+        assert!(source.records.ids().next().is_none());
     }
 
     /// A game that knows no regions declares each from the source only when

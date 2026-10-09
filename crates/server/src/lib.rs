@@ -5,6 +5,7 @@ mod adapt;
 mod developer;
 mod diagnostics;
 mod engine;
+pub mod generation_recipe;
 pub mod generator;
 mod history_index;
 mod outbound;

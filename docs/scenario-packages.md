@@ -110,6 +110,11 @@ and the pinned region sources support deterministic replay. Revisits do not
 reroll positions. `scenarios/tests/paired-stairs` demonstrates generated endpoints,
 same-region traversal, and a cell with stairs in both directions.
 
+Generation groups can retain a named destination until its floor publishes its
+anchors. The current group does not read the destination source or generate its
+room early. See [generation recipes and groups](generation-recipes.md) for the
+preparation, publication, and independent streaming contracts.
+
 Actors, items, and doors have positive numeric IDs, unique within their entity
 kind. Array order does not assign identities. Doors specify `at`, `open`, and `height` (default 1). Validation rejects a door
 that doesn't fit, or that leaves its walled doorway open above it; see

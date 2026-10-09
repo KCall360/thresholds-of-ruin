@@ -1,5 +1,5 @@
 import unittest
-from performance_report import PRELOAD_BOUNDS, SPEC, STREAM_BOUNDS, expected_actions, validate, validate_work
+from performance_report import PRELOAD_BOUNDS, SPEC, STREAM_BOUNDS, expected_actions, validate, validate_work, validate_region_acquisition
 
 
 class PerformanceReportTests(unittest.TestCase):
@@ -164,6 +164,21 @@ def stream_rows(cycles=1, preloading=False, **work):
 
 
 class StreamingValidationTests(unittest.TestCase):
+    def test_group_acquisition_counts_nine_records_and_nested_wait(self):
+        profile = self.acquisition_rows()[1]['profile']
+        profile.update(regions_built=21, regions_prepared=11)
+        acquisition = profile['region_acquisition']
+        acquisition.update(groups_committed=2, prepared_groups=1, demand_groups=1,
+                           group_wait=dict(secs=0, nanos=2), group_build=dict(secs=0, nanos=3))
+        validate_region_acquisition(profile, required=True)
+        acquisition['groups_committed'] = 3
+        with self.assertRaises(AssertionError):
+            validate_region_acquisition(profile, required=True)
+        acquisition['groups_committed'] = 2
+        acquisition['group_wait']['nanos'] = 20
+        with self.assertRaises(AssertionError):
+            validate_region_acquisition(profile, required=True)
+
     def acquisition_rows(self):
         rows = stream_rows()
         rows[0]['region_acquisition_version'] = 1

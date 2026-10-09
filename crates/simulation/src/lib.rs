@@ -491,6 +491,19 @@ impl Game {
             .map_err(|_| GameError::InvalidLocation)
     }
 
+    /// Establish a terrain-preserving join across horizontal region faces.
+    pub fn connect_boundary_area(
+        &mut self,
+        passage: Passage,
+        turns: u8,
+        width: u16,
+        height: u16,
+    ) -> Result<(), GameError> {
+        self.world
+            .connect_boundary_area(passage, turns, width, height)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
     pub fn add_region(&mut self, region: Region) -> Result<(), GameError> {
         self.world
             .add_region(region)
@@ -506,6 +519,27 @@ impl Game {
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), GameError> {
         self.world
             .connect(passage, quarter_turns)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn connect_named_stair(
+        &mut self,
+        from: Location,
+        direction: Direction,
+        to: tor_world::NamedAnchor,
+    ) -> Result<(), GameError> {
+        self.world
+            .connect_named_stair(from, direction, to)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
+    pub fn register_named_anchors(
+        &mut self,
+        region: RegionId,
+        anchors: BTreeMap<String, tor_world::Position>,
+    ) -> Result<(), GameError> {
+        self.world
+            .register_named_anchors(region, anchors)
             .map_err(|_| GameError::InvalidLocation)
     }
 
