@@ -564,6 +564,23 @@ impl Game {
             .map_err(|_| GameError::InvalidLocation)
     }
 
+    /// Process-local geometry witness for derived backend work. Lighting and
+    /// entity motion do not change it; terrain, doors and topology do.
+    pub fn geometry_snapshot(&self) -> tor_world::GeometrySnapshot {
+        self.world.geometry_snapshot()
+    }
+
+    pub fn set_region_light(&mut self, region: RegionId, lit: bool) -> Result<(), GameError> {
+        self.world
+            .set_region_light(region, lit)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+    pub fn set_cell_light(&mut self, at: Location, lit: bool) -> Result<(), GameError> {
+        self.world
+            .set_cell_light(at, lit)
+            .map_err(|_| GameError::InvalidLocation)
+    }
+
     pub fn set_wall(&mut self, location: Location, wall: bool) -> Result<(), GameError> {
         if wall
             && (self.occupied(location)

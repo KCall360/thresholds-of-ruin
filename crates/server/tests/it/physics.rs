@@ -200,3 +200,117 @@ fn resting_gravity_wait_uses_readiness_fast_path() {
         [0; 3]
     );
 }
+
+#[test]
+fn unsettled_physics_refreshes_navigation_only_when_its_inputs_change() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/physics");
+    let template = scenario_package::load(&root, 42, None, false).unwrap();
+    let package = template.package.as_ref().unwrap();
+    let mut regions = package.region_defs().unwrap();
+    regions[0].actors.push(scenario_package::Actor {
+        anatomy: None,
+        known_identities: vec![],
+        combat: None,
+        id: 2,
+        at: [5, 2, 6],
+        archetype: None,
+        turn_ticks: Some(100),
+        controller: "external".into(),
+        ai: None,
+        body: None,
+        velocity: None,
+    });
+    let directory = tempfile::tempdir().unwrap();
+    scenario_package::write_package(directory.path(), &package.manifest, &regions).unwrap();
+    scenario_package::validate(directory.path()).unwrap();
+    let mut engine =
+        Engine::memory(scenario_package::load(directory.path(), 42, None, false).unwrap()).unwrap();
+    for (step, (actor, refreshes)) in [(ActorId(1), 0), (ActorId(2), 0), (ActorId(1), 0)]
+        .into_iter()
+        .enumerate()
+    {
+        let (_, profile) = engine
+            .command_profiled(
+                "test",
+                "test",
+                actor,
+                &format!("wait-{step}"),
+                &engine.branch().clone(),
+                Command::Act {
+                    expected_revision: engine.revision(actor).unwrap(),
+                    action: Action::Wait,
+                },
+            )
+            .unwrap();
+        if step > 0 {
+            assert!(
+                profile.scene_calls > 0,
+                "unsettled physics still requires perception"
+            );
+        }
+        assert_eq!(profile.navigation_refreshes, refreshes);
+        if step == 1 {
+            for id in engine.actors() {
+                assert!(
+                    engine
+                        .state(id)
+                        .unwrap()
+                        .observation
+                        .motion
+                        .unwrap()
+                        .displaced
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn translating_an_unchanged_visible_chart_does_not_refresh_navigation() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/physics");
+    let template = scenario_package::load(&root, 42, None, false).unwrap();
+    let package = template.package.as_ref().unwrap();
+    let mut regions = package.region_defs().unwrap();
+    regions[0].size = [5, 5, 1];
+    regions[0].chamber = false;
+    regions[0].gravity = None;
+    regions[0].anchors.insert("start".into(), [1, 1, 0]);
+    regions[0].items.clear();
+    let mut manifest = package.manifest.clone();
+    manifest.characters[0].body = None;
+    let directory = tempfile::tempdir().unwrap();
+    scenario_package::write_package(directory.path(), &manifest, &regions).unwrap();
+    scenario_package::validate(directory.path()).unwrap();
+    let mut engine =
+        Engine::memory(scenario_package::load(directory.path(), 42, None, false).unwrap()).unwrap();
+    let actor = ActorId(1);
+    let before = engine.state(actor).unwrap().observation;
+    let (_, profile) = engine
+        .command_profiled(
+            "test",
+            "test",
+            actor,
+            "translate",
+            &engine.branch().clone(),
+            Command::Act {
+                expected_revision: engine.revision(actor).unwrap(),
+                action: Action::Move {
+                    direction: tor_server::journal::Direction::East,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(profile.navigation_refreshes, 0);
+    let after = engine.state(actor).unwrap().observation;
+    let origin_key = |observation: &tor_protocol::Observation| {
+        observation
+            .visible_cells
+            .iter()
+            .find(|cell| cell.position == observation.position)
+            .unwrap()
+            .key
+            .clone()
+    };
+    assert_ne!(origin_key(&before), origin_key(&after));
+    assert_eq!(before.visible_cells.len(), after.visible_cells.len());
+}

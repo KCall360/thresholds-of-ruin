@@ -13,3 +13,5 @@ mod shadowcasting;
 mod sight3d;
 mod sight_cache;
 mod visibility;
+
+mod lighting;

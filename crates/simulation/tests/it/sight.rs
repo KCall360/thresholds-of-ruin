@@ -168,3 +168,85 @@ fn upright_bodies_of_every_height_see_from_their_eye_and_keep_offsets_at_the_fee
         );
     }
 }
+
+#[test]
+fn occupied_cells_win_when_eye_projection_conflicts_at_a_one_way_physical_join() {
+    let mut expected_scene: Option<Vec<tor_world::SightCell>> = None;
+    for reversed in [false, true] {
+        let mut world = tor_world::World::new(vec![], vec![]).unwrap();
+        for id in 1..=2 {
+            world
+                .add_chamber(Region {
+                    id: RegionId(id),
+                    name: "shaft".into(),
+                    bounds: Extent::new(3, 3, 2).unwrap(),
+                })
+                .unwrap();
+        }
+        let feet = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 1 },
+        };
+        let eye = Location {
+            region: RegionId(2),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        world
+            .connect_portal_area(
+                Passage {
+                    from: feet,
+                    direction: Direction::Up,
+                    to: eye,
+                },
+                0,
+                1,
+                1,
+            )
+            .unwrap();
+        let mut game = Game::new(world, 42);
+        let id = game
+            .spawn_actor(feet, NonZeroU64::new(100).unwrap())
+            .unwrap();
+        let mut spec = body(2, [0, 0, 1]);
+        if reversed {
+            spec.cells.reverse();
+        }
+        game.set_body(id, spec).unwrap();
+        let scene = game.scene(id).unwrap();
+        for (offset, location) in [(0, feet), (1, eye)] {
+            let cell = scene
+                .iter()
+                .find(|c| {
+                    c.offset
+                        == Position {
+                            x: 0,
+                            y: 0,
+                            z: offset,
+                        }
+                })
+                .unwrap();
+            assert_eq!(
+                cell.location, location,
+                "authored order reversed: {reversed}"
+            );
+            assert!(!cell.wall);
+        }
+        if let Some(expected) = &expected_scene {
+            assert_eq!(scene.len(), expected.len());
+            for (cell, expected) in scene.iter().zip(expected) {
+                assert_eq!(cell, expected, "body cell order must not change perception");
+            }
+        } else {
+            expected_scene = Some(scene.clone());
+        }
+        let observation = game.observe(id).unwrap();
+        assert!(observation
+            .visible_cells
+            .iter()
+            .any(|c| c.location == feet && !c.wall));
+        assert!(observation
+            .visible_cells
+            .iter()
+            .any(|c| c.location == eye && !c.wall));
+    }
+}

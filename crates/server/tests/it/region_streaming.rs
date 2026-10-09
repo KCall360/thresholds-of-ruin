@@ -11,7 +11,7 @@ use tor_server::{
 
 /// The checked-in seven-hall corridor, with radii of zero so that only what
 /// the pins require stays loaded. Each hall is 20x3x1; the character starts
-/// at x = 2 in hall 1 and a pebble lies at x = 8. Sight (8 cells) from the
+/// at x = 2 in hall 1 and a pebble lies at x = 8. Sight (16 cells) from the
 /// middle of a hall stays inside it.
 fn corridor() -> Scenario {
     let root =
@@ -25,7 +25,7 @@ fn corridor() -> Scenario {
 }
 
 /// Steps east from the start to the middle of hall 4.
-const TO_HALL_4: usize = 68;
+const TO_HALL_4: usize = 76;
 
 fn walk(engine: &mut Engine, direction: Direction, steps: usize, sequence: &mut usize) {
     for _ in 0..steps {
@@ -73,11 +73,11 @@ fn a_package_game_streams_regions_through_disk_and_replays_exactly() {
     let mut sequence = 0;
     walk(&mut engine, Direction::East, TO_HALL_4, &mut sequence);
     let far = counts(&engine);
-    // In hall 4: halls 3 and 5 are loaded around it, 1 and 2 detached, and
-    // 6 and 7 still unbuilt.
+    // Range 16 also sees hall 5: halls 3 and 6 are loaded around them,
+    // halls 1 and 2 detach, and hall 7 remains unbuilt.
     assert_eq!(
         (far.active, far.frozen, far.detached, far.unbuilt),
-        (1, 2, 2, 2),
+        (2, 2, 2, 1),
         "{far:?}"
     );
     engine.flush().unwrap();
@@ -97,7 +97,7 @@ fn a_package_game_streams_regions_through_disk_and_replays_exactly() {
     let back = counts(&engine);
     assert_eq!(
         (back.active, back.frozen, back.detached),
-        (1, 1, 3),
+        (1, 1, 4),
         "{back:?}"
     );
     assert!(back.records_read >= 2, "{back:?}");
@@ -139,6 +139,98 @@ fn replaying_a_streaming_game_from_its_start_reproduces_it() {
     assert_eq!(engine.recovery_profile().records_replayed, TO_HALL_4 + 40);
     assert_eq!(engine.state(ActorId(1)).unwrap(), before);
     assert_eq!(counts(&engine).detached, regions.detached);
+}
+
+#[test]
+fn lighting_survives_eviction_checkpoint_journal_replay_and_rewind() {
+    use tor_server::journal::{Position, WizardOperation};
+    let directory = tempfile::tempdir().unwrap();
+    let package = corridor().package.unwrap();
+    let mut regions = package.region_defs().unwrap();
+    regions[0].lit = false;
+    regions[0].lighting = vec![scenario_package::CellLight {
+        at: [8, 1, 0],
+        lit: true,
+    }];
+    let authored = directory.path().join("package");
+    scenario_package::write_package(&authored, &package.manifest, &regions).unwrap();
+    scenario_package::validate(&authored).unwrap();
+    let mut scenario = scenario_package::load(&authored, 5, None, false).unwrap();
+    scenario.streaming = Some(Streaming {
+        active_radius: 0,
+        load_radius: 0,
+    });
+    for interval in [0, 4] {
+        let save = directory.path().join(format!("lighting-{interval}.db"));
+        let policy = SavePolicy {
+            checkpoint_interval: interval,
+            ..SavePolicy::default()
+        };
+        let mut engine = Engine::open_with_policy(&save, scenario.clone(), policy.clone()).unwrap();
+        let initial = engine.state(ActorId(1)).unwrap().observation;
+        assert!(initial
+            .visible_cells
+            .iter()
+            .any(|cell| { cell.position == tor_protocol::Position { x: 6, y: 0, z: 0 } }));
+        assert!(!initial
+            .visible_cells
+            .iter()
+            .any(|cell| { cell.position == tor_protocol::Position { x: 2, y: 0, z: 0 } }));
+        engine.enable_wizard().unwrap();
+        let mut sequence = 0;
+        walk(&mut engine, Direction::East, TO_HALL_4, &mut sequence);
+        assert!(counts(&engine).detached > 0);
+        engine.flush().unwrap();
+        let far = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        let mut engine =
+            Engine::open_with_policy(&save, Scenario::two_room(0), policy.clone()).unwrap();
+        assert_eq!(engine.state(ActorId(1)).unwrap(), far);
+        if interval == 0 {
+            assert!(engine.recovery_profile().records_replayed > 0);
+        } else {
+            assert!(engine.recovery_profile().checkpoint_sequence > 0);
+        }
+        engine.enable_wizard().unwrap();
+        let expected_revision = engine.revision(ActorId(1)).unwrap();
+        act(
+            &mut engine,
+            "back-to-dark-room",
+            Command::Wizard {
+                expected_revision,
+                operation: WizardOperation::Teleport {
+                    actor: ActorId(1),
+                    position: Position {
+                        region: 1,
+                        x: 2,
+                        y: 1,
+                        z: 0,
+                    },
+                },
+            },
+        );
+        if interval > 0 {
+            assert!(counts(&engine).records_read > 0);
+        }
+        let back = engine.state(ActorId(1)).unwrap().observation;
+        assert_eq!(back.visible_cells, initial.visible_cells);
+        assert_eq!(back.ground_items, initial.ground_items);
+        let expected_revision = engine.revision(ActorId(1)).unwrap();
+        act(
+            &mut engine,
+            "rewind-dark-room",
+            Command::Wizard {
+                expected_revision,
+                operation: WizardOperation::Rewind { target: None },
+            },
+        );
+        assert_eq!(engine.state(ActorId(1)).unwrap().observation, initial);
+        engine.flush().unwrap();
+        let expected = engine.state(ActorId(1)).unwrap();
+        drop(engine);
+        let engine = Engine::open_with_policy(&save, Scenario::two_room(0), policy).unwrap();
+        assert_eq!(engine.state(ActorId(1)).unwrap(), expected);
+    }
 }
 
 fn act(engine: &mut Engine, id: &str, command: Command) -> tor_server::CommandResult {
@@ -224,7 +316,7 @@ fn records_made_after_a_rewind_never_reuse_an_identity() {
     let mut engine = Engine::open_with_policy(&save, scenario, policy).unwrap();
     assert_eq!(engine.state(ActorId(1)).unwrap(), before);
     walk(&mut engine, Direction::West, TO_HALL_4, &mut sequence);
-    assert_eq!(counts(&engine).detached, 3);
+    assert_eq!(counts(&engine).detached, 4);
     assert!(counts(&engine).records_read >= 2);
     engine.flush().unwrap();
 }
@@ -246,7 +338,7 @@ fn a_wizard_can_teleport_into_a_region_that_was_never_built() {
                 actor: ActorId(1),
                 position: tor_server::journal::Position {
                     region: 7,
-                    x: 10,
+                    x: 16,
                     y: 1,
                     z: 0,
                 },
@@ -347,12 +439,12 @@ fn a_game_holds_only_the_regions_it_played_however_large_the_package() {
         let out = directory.path().join(format!("corridor-{halls}"));
         let scenario = scenario_package::streaming_corridor(&root, &out, halls, 5).unwrap();
         let mut engine = Engine::memory(scenario).unwrap();
-        let start = engine.profile_checkpoint_encoding().unwrap().0;
+        let start = engine.profile_checkpoint_json_encoding().unwrap().0;
         let mut sequence = 0;
         walk(&mut engine, Direction::East, TO_HALL_4, &mut sequence);
-        let far = engine.profile_checkpoint_encoding().unwrap().0;
+        let far = engine.profile_checkpoint_json_encoding().unwrap().0;
         walk(&mut engine, Direction::West, TO_HALL_4, &mut sequence);
-        let back = engine.profile_checkpoint_encoding().unwrap().0;
+        let back = engine.profile_checkpoint_json_encoding().unwrap().0;
         (start, far, back)
     };
     let small = held(16);
@@ -403,7 +495,7 @@ fn generated_regions_cost_the_same_however_large_the_package() {
                 *total += count;
             }
         }
-        let bytes = engine.profile_checkpoint_encoding().unwrap().0;
+        let bytes = engine.profile_checkpoint_json_encoding().unwrap().0;
         (totals, bytes)
     };
     let small = work(16);

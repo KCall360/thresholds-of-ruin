@@ -29,11 +29,11 @@ SCENARIO = "streaming-corridor"
 # row, so walking east from the start hall's portal always crosses it.
 GENERATED = "generated-filler"
 # From the start into the first cave, and through both caves to the far hall.
-INTO_CAVE = 12
+INTO_CAVE = 20
 THROUGH_CAVES = 35
 # From the start (x = 2 in hall 1) to the middle of hall 4. There, at the
 # default radii, hall 1 is detached and hall 6 is built but frozen.
-TO_HALL_4 = 68
+TO_HALL_4 = 76
 
 
 class StreamingProcesses(ProcessTestCase):

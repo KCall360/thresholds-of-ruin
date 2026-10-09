@@ -5,7 +5,9 @@
 //! directly, stepping plain cells without topology lookups, caching each
 //! cell's state and exposed faces once per scene, walking only the cells along
 //! each sight line, and testing a blocker's cube before its bevels.
+use crate::geometry::{axis_sign, RegionInfo};
 use crate::sight3d::Fraction;
+use crate::sight_cache::SightMode;
 use crate::{compose_rotation, Direction, Location, Position, RegionId, SightCell, Terrain, World};
 
 const UNRESOLVED: u8 = 0;
@@ -17,67 +19,6 @@ const WALL: u8 = 4;
 /// Set in `faces` once a cell's exposed faces are known.
 const FACES_KNOWN: u8 = 0x40;
 
-/// A region's storage bounds and exit planes. A step is plain (an ordinary
-/// neighbour in the same region) unless it leaves storage or starts on an
-/// exit plane in that exit's direction. Only those steps can be redirected by
-/// a passage or by rim projection, so only they need topology lookups.
-struct RegionInfo {
-    id: RegionId,
-    lo: [i64; 3],
-    hi: [i64; 3],
-    /// Axis, sign, and plane coordinate of each exit.
-    exits: Vec<(usize, i64, i64)>,
-    /// Where the exits lead. Rim projection reads terrain there even when the
-    /// step stays in this region, so a scene depends on these regions too.
-    neighbours: Vec<RegionId>,
-}
-
-impl RegionInfo {
-    fn new(world: &World, id: RegionId) -> Option<Self> {
-        let bounds = world.region(id)?.bounds;
-        let (w, d, h) = bounds.dimensions();
-        let lo = [bounds.origin.x, bounds.origin.y, bounds.origin.z].map(i64::from);
-        let mut neighbours: Vec<_> = world.exits(id).map(|p| p.to.region).collect();
-        neighbours.sort();
-        neighbours.dedup();
-        Some(Self {
-            id,
-            lo,
-            hi: [
-                lo[0] + i64::from(w) - 1,
-                lo[1] + i64::from(d) - 1,
-                lo[2] + i64::from(h) - 1,
-            ],
-            exits: world
-                .exits(id)
-                .filter_map(|p| {
-                    let (axis, sign) = axis_sign(p.direction)?;
-                    let from = p.from.position;
-                    Some((axis, sign, i64::from([from.x, from.y, from.z][axis])))
-                })
-                .collect(),
-            neighbours,
-        })
-    }
-
-    fn plain(&self, at: [i64; 3], axis: usize, sign: i64) -> bool {
-        let next = at[axis] + sign;
-        next >= self.lo[axis]
-            && next <= self.hi[axis]
-            && !self
-                .exits
-                .iter()
-                .any(|&(a, s, c)| a == axis && s == sign && c == at[axis])
-    }
-}
-
-fn axis_sign(direction: Direction) -> Option<(usize, i64)> {
-    let (dx, dy, dz) = direction.delta();
-    let delta = [dx, dy, dz];
-    let axis = delta.iter().position(|v| *v != 0)?;
-    (delta.iter().filter(|v| **v != 0).count() == 1).then_some((axis, i64::from(delta[axis])))
-}
-
 struct Scene<'a> {
     world: &'a World,
     eye: Location,
@@ -86,11 +27,20 @@ struct Scene<'a> {
     reach: i32,
     side: usize,
     state: Vec<u8>,
+    unoccluded: Vec<bool>,
     faces: Vec<u8>,
     slot: Vec<u32>,
     resolved: Vec<(Location, u8)>,
     /// Index 0 is the eye's region.
     regions: Vec<RegionInfo>,
+}
+
+struct BuiltScene {
+    cells: Vec<SightCell>,
+    /// Regions whose resolved terrain is needed for exact disclosure.
+    read: Option<Vec<RegionId>>,
+    /// Additional geometry witnesses for a successful acceleration proof.
+    proof: Vec<RegionId>,
 }
 
 impl Scene<'_> {
@@ -116,7 +66,7 @@ impl Scene<'_> {
     /// region whose bounding box spans no exit plane is a plain offset and is
     /// computed directly. Other routes are walked, with topology lookups only
     /// for steps that could be redirected.
-    fn route(&mut self, o: [i32; 3]) -> Option<(Location, u8)> {
+    fn route(&mut self, o: [i32; 3]) -> Option<(Location, u8, bool)> {
         let eye = &self.regions[0];
         let v = crate::rotate_vector(self.frame, o.map(i64::from));
         let target = [0, 1, 2].map(|a| self.origin[a] + v[a]);
@@ -143,9 +93,11 @@ impl Scene<'_> {
                     ..self.eye
                 },
                 self.frame,
+                true,
             ));
         }
         self.walk(o)
+            .map(|(location, frame)| (location, frame, false))
     }
 
     /// [`World::geometry_route`] with plain steps taken arithmetically.
@@ -233,9 +185,13 @@ impl Scene<'_> {
     }
 
     fn resolve(&mut self, i: usize, o: [i32; 3]) -> u8 {
-        let Some((location, rotation)) = self.route(o) else {
+        let Some((location, rotation, plain)) = self.route(o) else {
             return MISSING;
         };
+        // A straight segment wholly inside a convex transparent box cannot
+        // meet a blocker. Portal routes and solid surfaces retain exact rays.
+        self.unoccluded[i] =
+            plain && self.regions[0].unoccluded(self.eye.position, location.position);
         self.slot[i] = self.resolved.len() as u32;
         self.resolved.push((location, rotation));
         if matches!(self.world.terrain(location), Some(Terrain::Solid(_))) {
@@ -387,6 +343,80 @@ impl Scene<'_> {
 }
 
 impl World {
+    /// Lit targets use the same occlusion rule; unlit cells remain transparent.
+    pub fn illuminated_eye_scene(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
+        if let Some(cells) = self
+            .sight
+            .get_mode(eye, frame, radius, SightMode::Illuminated)
+        {
+            return cells;
+        }
+        let BuiltScene {
+            cells,
+            read: regions,
+            proof,
+        } = self.build_eye_scene(eye, frame, radius, true);
+        if let Some(regions) = regions {
+            self.sight.insert_mode(
+                (eye, frame, radius, SightMode::Illuminated),
+                regions,
+                &cells,
+                &proof,
+            );
+        }
+        cells
+    }
+    pub fn illuminated_eye_scene_regions(
+        &self,
+        eye: Location,
+        frame: u8,
+        radius: u8,
+    ) -> Option<Vec<RegionId>> {
+        if let Some(regions) = self
+            .sight
+            .regions_mode(eye, frame, radius, SightMode::Illuminated)
+        {
+            return Some(regions);
+        }
+        self.illuminated_eye_scene(eye, frame, radius);
+        self.sight
+            .regions_mode(eye, frame, radius, SightMode::Illuminated)
+    }
+    /// Unoccluded local awareness, resolved through geometry rather than movement.
+    pub fn neighborhood_scene(&self, at: Location, frame: u8) -> Vec<SightCell> {
+        if let Some(cells) = self.sight.get_mode(at, frame, 1, SightMode::Neighborhood) {
+            return cells;
+        }
+        let mut cells = Vec::new();
+        for z in -1..=1 {
+            for y in -1..=1 {
+                for x in -1..=1 {
+                    if let Some((location, rotation)) = self.geometry_route(at, frame, [x, y, z]) {
+                        if self.contains(location) {
+                            cells.push(SightCell {
+                                location,
+                                rotation,
+                                offset: Position { x, y, z },
+                                wall: self.is_wall(location),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        let regions: std::collections::BTreeSet<_> = std::iter::once(at.region)
+            .chain(cells.iter().map(|c| c.location.region))
+            .flat_map(|id| std::iter::once(id).chain(self.linked_regions(id)))
+            .collect();
+        self.sight.insert_mode(
+            (at, frame, 1, SightMode::Neighborhood),
+            regions,
+            &cells,
+            &[],
+        );
+        cells
+    }
+
     /// Exact 3D sight from the centre of `eye`, with offsets relative to the eye
     /// cell in the observer's `frame`. Stair landings are not included; abstract
     /// stair links are traversal, not geometry. Identical to
@@ -397,9 +427,14 @@ impl World {
         if let Some(cells) = self.sight.get(eye, frame, radius) {
             return cells;
         }
-        let (cells, regions) = self.build_eye_scene(eye, frame, radius);
+        let BuiltScene {
+            cells,
+            read: regions,
+            proof,
+        } = self.build_eye_scene(eye, frame, radius, false);
         if let Some(regions) = regions {
-            self.sight.insert(eye, frame, radius, regions, &cells);
+            self.sight
+                .insert(eye, frame, radius, regions, &cells, &proof);
         }
         cells
     }
@@ -411,10 +446,14 @@ impl World {
         if let Some(regions) = self.sight.regions(eye, frame, radius) {
             return Some(regions);
         }
-        let (cells, regions) = self.build_eye_scene(eye, frame, radius);
+        let BuiltScene {
+            cells,
+            read: regions,
+            proof,
+        } = self.build_eye_scene(eye, frame, radius, false);
         if let Some(regions) = &regions {
             self.sight
-                .insert(eye, frame, radius, regions.iter().copied(), &cells);
+                .insert(eye, frame, radius, regions.iter().copied(), &cells, &proof);
         }
         regions
     }
@@ -437,12 +476,86 @@ impl World {
 
     /// [`World::eye_scene`] without reuse, for tests and measurements.
     pub fn eye_scene_uncached(&self, eye: Location, frame: u8, radius: u8) -> Vec<SightCell> {
-        self.build_eye_scene(eye, frame, radius).0
+        self.build_eye_scene(eye, frame, radius, false).cells
+    }
+
+    /// Fresh illumination-filtered geometry, for diagnostics and equivalence checks.
+    pub fn illuminated_eye_scene_uncached(
+        &self,
+        eye: Location,
+        frame: u8,
+        radius: u8,
+    ) -> Vec<SightCell> {
+        self.build_eye_scene(eye, frame, radius, true).cells
     }
 
     /// Whether [`World::eye_scene`] would reuse a scene. Diagnostic only.
     pub fn eye_scene_cached(&self, eye: Location, frame: u8, radius: u8) -> bool {
         self.sight.contains(eye, frame, radius)
+    }
+
+    /// A bounded physical component can prove that no route leaves its height
+    /// slab. Rotated or translated joins that change height, missing regions,
+    /// and larger components fall back to the general resolver. The cap keeps
+    /// this proof independent of total world size; all inspected regions are
+    /// dependencies when the proof succeeds.
+    fn sight_slab(
+        &self,
+        eye: Location,
+        frame: u8,
+    ) -> (Option<(i64, i64)>, std::collections::BTreeSet<RegionId>) {
+        const MAX_REGIONS: usize = 32;
+        let up = crate::rotate_vector(frame, [0, 0, 1]);
+        let axis = up.iter().position(|v| *v != 0).unwrap();
+        let sign = up[axis];
+        let mut pending = vec![eye.region];
+        let mut read = std::collections::BTreeSet::new();
+        let mut slab = None;
+        while let Some(id) = pending.pop() {
+            if !read.insert(id) {
+                continue;
+            }
+            if read.len() > MAX_REGIONS {
+                return (None, read);
+            }
+            let Some(region) = self.region(id) else {
+                // Geometry routes cannot enter an unloaded region. End this
+                // branch, retaining its presence witness so attachment retries
+                // the proof before newly reachable geometry can be disclosed.
+                continue;
+            };
+            let origin = region.bounds.origin;
+            let lo = i64::from([origin.x, origin.y, origin.z][axis]);
+            let (w, d, h) = region.bounds.dimensions();
+            let bounds = (lo, lo + i64::from([w, d, h][axis]) - 1);
+            if slab.is_some_and(|previous| previous != bounds) {
+                return (None, read);
+            }
+            slab = Some(bounds);
+            for passage in self.exits(id) {
+                if self.is_stair(passage.from, passage.direction) {
+                    continue;
+                }
+                let from = passage.from.position;
+                let to = passage.to.position;
+                let delta = passage.direction.delta();
+                let turns = self.crossing_rotation(passage.from, passage.direction);
+                if [delta.0, delta.1, delta.2][axis] != 0
+                    || [from.x, from.y, from.z][axis] != [to.x, to.y, to.z][axis]
+                    || crate::rotate_vector(turns, up) != up
+                {
+                    return (None, read);
+                }
+                pending.push(passage.to.region);
+            }
+        }
+        let origin = i64::from([eye.position.x, eye.position.y, eye.position.z][axis]);
+        let bounds = slab.map(|(lo, hi)| {
+            let a = (lo - origin) * sign;
+            let b = (hi - origin) * sign;
+            (a.min(b), a.max(b))
+        });
+        (bounds, read)
     }
 
     /// The scene, and every region whose terrain or doors it read. There are
@@ -452,15 +565,24 @@ impl World {
         eye: Location,
         frame: u8,
         radius: u8,
-    ) -> (Vec<SightCell>, Option<Vec<RegionId>>) {
+        illuminated: bool,
+    ) -> BuiltScene {
         if !self.walkable(eye) {
-            return (vec![], Some(vec![eye.region]));
+            return BuiltScene {
+                cells: vec![],
+                read: Some(vec![eye.region]),
+                proof: vec![],
+            };
         }
         let radius = i32::from(radius.min(16));
         let reach = radius + 2;
         let side = (2 * reach + 1) as usize;
         let Some(eye_region) = RegionInfo::new(self, eye.region) else {
-            return (vec![], None);
+            return BuiltScene {
+                cells: vec![],
+                read: None,
+                proof: vec![],
+            };
         };
         let p = eye.position;
         let mut scene = Scene {
@@ -471,13 +593,18 @@ impl World {
             reach,
             side,
             state: vec![UNRESOLVED; side * side * side],
+            unoccluded: vec![false; side * side * side],
             faces: vec![0; side * side * side],
             slot: vec![0; side * side * side],
             resolved: Vec::new(),
             regions: vec![eye_region],
         };
+        let (slab, slab_regions) = self.sight_slab(eye, frame);
         let mut cells = Vec::new();
         for z in -radius..=radius {
+            if slab.is_some_and(|(lo, hi)| i64::from(z) < lo || i64::from(z) > hi) {
+                continue;
+            }
             let rz = radius - z.abs();
             for y in -rz..=rz {
                 let ry = rz - y.abs();
@@ -487,8 +614,15 @@ impl World {
                     if state == MISSING {
                         continue;
                     }
+                    let index = scene.index(o).expect("target lies within reach");
+                    let (target, _) = scene.resolved[scene.slot[index] as usize];
+                    if illuminated && self.is_lit(target) != Some(true) {
+                        continue;
+                    }
                     let centre = o.map(|v| 2 * i64::from(v));
-                    let visible = if state == EMPTY {
+                    let visible = if scene.unoccluded[index] {
+                        true
+                    } else if state == EMPTY {
                         scene.sees(centre)
                     } else {
                         let bits = scene.exposed_faces(o);
@@ -524,6 +658,69 @@ impl World {
             .collect();
         regions.sort();
         regions.dedup();
-        (cells, Some(regions))
+        let proof = if slab.is_some() {
+            slab_regions
+                .into_iter()
+                .filter(|region| regions.binary_search(region).is_err())
+                .collect()
+        } else {
+            vec![]
+        };
+        BuiltScene {
+            cells,
+            read: Some(regions),
+            proof,
+        }
+    }
+}
+
+#[cfg(test)]
+mod slab_tests {
+    use super::*;
+
+    #[test]
+    fn missing_regions_end_height_proof_branches_until_attached() {
+        let at = |region, x| Location {
+            region: RegionId(region),
+            position: Position { x, y: 1, z: 0 },
+        };
+        let mut world = World::new(
+            vec![
+                crate::Region {
+                    id: RegionId(1),
+                    name: "near".into(),
+                    bounds: crate::Extent::new(3, 3, 2).unwrap(),
+                },
+                crate::Region {
+                    id: RegionId(2),
+                    name: "taller".into(),
+                    bounds: crate::Extent::new(3, 3, 5).unwrap(),
+                },
+            ],
+            vec![crate::Passage {
+                from: at(1, 2),
+                direction: Direction::East,
+                to: at(2, 0),
+            }],
+        )
+        .unwrap();
+        let eye = at(1, 1);
+        assert!(world.sight_slab(eye, 0).0.is_none());
+        let detached = world.detach_region(RegionId(2)).unwrap();
+        let (bounds, witnesses) = world.sight_slab(eye, 0);
+        assert_eq!(bounds, Some((0, 1)));
+        assert!(witnesses.contains(&RegionId(2)));
+        assert_eq!(
+            world.eye_scene(eye, 0, 16),
+            world.eye_scene_reference(eye, 0, 16)
+        );
+        assert!(world.sight.get(eye, 0, 16).is_some());
+        world.attach_region(detached).unwrap();
+        assert!(world.sight.get(eye, 0, 16).is_none());
+        assert!(world.sight_slab(eye, 0).0.is_none());
+        assert_eq!(
+            world.eye_scene(eye, 0, 16),
+            world.eye_scene_reference(eye, 0, 16)
+        );
     }
 }

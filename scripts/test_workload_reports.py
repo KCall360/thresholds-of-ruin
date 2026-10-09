@@ -101,6 +101,50 @@ class PhysicsReports(unittest.TestCase):
             physics_performance_report.summarize(rows)
 
 
+    def test_optional_physics_profiles_validate_counts_and_phase_durations(self):
+        rows = self.rows()
+        profile = {key: {"secs": 0, "nanos": 100} for key in
+                   ("authoritative_total", "perception", "navigation_refresh", "simulation_transition")}
+        profile.update(actors_observed=0, perception_calls=0, scene_calls=0)
+        for row in rows:
+            row["profiles"] = [copy.deepcopy(profile) for _ in row["command_ms"]]
+        physics_performance_report.summarize(rows)
+        for mutate in (lambda rs: rs[0]["profiles"].pop(),
+                       lambda rs: rs[0]["profiles"][0]["perception"].update(nanos=-1),
+                       lambda rs: rs[0]["profiles"][0].update(scene_calls=-1)):
+            broken = copy.deepcopy(rows)
+            mutate(broken)
+            with self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(broken)
+
+    def test_optional_checkpoint_diagnostics_reject_invalid_size_and_time(self):
+        rows = self.rows()
+        for row in rows:
+            row["checkpoint_profile"] = dict(bytes=123, ms=.2, status={})
+        physics_performance_report.summarize(rows)
+        for changes in (dict(bytes=0), dict(bytes=True), dict(ms=float('nan')),
+                        dict(ms=-1), dict(status=[])):
+            broken = copy.deepcopy(rows)
+            broken[0]["checkpoint_profile"].update(changes)
+            with self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(broken)
+
+    def test_optional_commit_timing_is_a_bounded_part_of_the_successful_batch(self):
+        rows = self.rows()
+        for row in rows:
+            row["checkpoint_profile"] = dict(bytes=123, ms=.2,
+                status=dict(last_commit_ms=10, last_batch_ms=20))
+        physics_performance_report.summarize(rows)
+        for status in (dict(last_commit_ms=-1, last_batch_ms=20),
+                       dict(last_commit_ms=True, last_batch_ms=20),
+                       dict(last_commit_ms=21, last_batch_ms=20),
+                       dict(last_commit_ms=10), dict(last_commit_ms=10, last_batch_ms=float('nan'))):
+            broken = copy.deepcopy(rows)
+            broken[0]["checkpoint_profile"]["status"] = status
+            with self.assertRaises(InvalidWorkload):
+                physics_performance_report.summarize(broken)
+
+
 class ClientPerformanceReport(unittest.TestCase):
     def test_native_profile_rejects_unbounded_or_invalid_work(self):
         profile = dict(version=1, network_events=16, apply_ms=2, draw_ms=1,

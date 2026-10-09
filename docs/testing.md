@@ -206,7 +206,7 @@ without a duplicate run on unchanged inputs:
 
 | Tier | Required | What it runs | Why it matters |
 | --- | --- | --- | --- |
-| Focused checks | After each meaningful development change | The regression, affected unit/integration tests and relevant actual-process scenarios, run directly | Establish a failing reproduction first and give fast feedback while the change is still evolving |
+| Focused checks | During edits and at completed behavior checkpoints | Failing behavior/regression and affected unit tests during edits; affected integration and actual-process scenarios when the behavior is complete, repeated after changes affecting it | Establish a failing reproduction first and give fast feedback while retaining complete coverage before merge |
 | `quick` | At a stable, cohesive checkpoint, unless a required higher tier covers it | Formatting, clippy and debug tests for the affected packages, the dependency check, the Python tool tests, and the affected process tests | Catch broader regressions after focused checks and architectural review, before moving to another checkpoint |
 | `push` (default) | **Before every push**, unless a successful full run covers the same unchanged inputs and configuration | Every debug check CI runs | Catches regressions anywhere in the workspace and in any client before publishing the branch; CI checks release behavior before merge |
 | `full` | Required when CI cannot run or on request; otherwise optional | Everything CI runs on one platform, debug and release | A local full run covers the local push gate and can investigate either profile; both-platform CI is still required before merging |
@@ -225,10 +225,11 @@ This changes CI scheduling, not test selection or individual test deadlines.
 
 ### Development loop
 
-For the active architecture refactor, batch a cohesive change through focused
+Batch a cohesive change through focused
 checks and architectural review before starting a broad tier. Run the new
 regression against the failing implementation first, apply the fix, then run
-its affected unit, integration and process scenarios. Expand the focused set
+its affected unit tests. Run affected integration and process scenarios when
+the behavior is complete; repeat them when later changes affect it. Expand the focused set
 when a failure or changed boundary warrants it. Do not run quick, push and full
 back to back merely because all three commands exist. Run one broad debug
 `push` gate per stable PR checkpoint; a successful unchanged full run also
@@ -501,3 +502,18 @@ Profiling never replaces the correctness tests above.
   [performance ledger](performance-harness.md#performance-ledger), and
   summarize the results, cases, and limitations in the relevant feature guide.
   See [publishing raw measurements](performance-harness.md#publishing-raw-measurements).
+
+## Focused iteration and local mouse exception
+
+During individual edits, run failing behavior/regression tests and affected unit
+tests. Run integration and real-process acceptance tests at completed behavior
+checkpoints, repeating them after changes to the covered behavior. Run quick at
+cohesive subsystem checkpoints, rather than after every small edit. Coverage at
+every changed layer remains required before merge; push and final-commit
+Windows/Linux debug/release CI gates remain mandatory.
+
+The maintainer authorizes a local-only waiver for the native underscore/mouse
+travel test. `python scripts/verify.py push --waive-local-mouse` records that
+exact test as a waived
+local failure if it fails, preserving its diagnostics. It never waives another
+test, a build failure, or any CI failure. CI runs the unchanged test normally.

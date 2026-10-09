@@ -26,6 +26,13 @@ interleaved on this machine: base, head, base, head, for `--rounds` pairs
 tree. Failed or rejected runs are kept, excluded from the tables, and make the
 script exit nonzero.
 
+Use `--order balanced` to reverse each pair on even rounds, or
+`--order head-first` for every pair, when investigating order-dependent disk or
+warm-up effects. These options preserve workload and sample coverage; the
+comparison records the selected order. Keep failed comparisons as evidence.
+Use an even number of balanced rounds to give both binaries equal coverage in
+each position.
+
 The baseline always builds into its own worktree's `target` directory. The head
 uses `CARGO_TARGET_DIR` when set, resolved relative to the head worktree, or its
 local `target` directory otherwise. Both directories are passed explicitly to
@@ -474,10 +481,14 @@ Use `.exe` on Windows and explicitly select the save volume with TMP/TEMP.
 traces now attach a real save before any exploration. Successful completion flushes
 and reloads the ordinary save and compares final state. Each completion includes
 save size, flush/restart timing, saved-prefix/replay counts, and an offline count
-of the current checkpoint JSON. The counting writer does not allocate the encoded
-payload, does not write it, and does not bypass the real 64 MiB cap. Its duration
-includes capture and deduplication, outside action/flush timings. It uses an
-equal-length dummy save UUID and the ordinary workload's record count as sequence.
+of the current logical checkpoint JSON. The counting writer does not allocate a
+payload or write a save. Its duration includes capture and deduplication, outside
+action/flush timings. Scale comparisons and JSON headroom budgets use this logical
+count, independent of compression. A separate compressed counting diagnostic uses
+the same streaming encoder and 64 MiB limit as storage. It uses the durable save
+identity when attached, or a dummy UUID for an unattached estimate, and the ordinary
+workload's record count as sequence; attached counts match stored payload bytes.
+Save status reports the actual compressed checkpoint bytes.
 
 Interval 64 supplies a stress comparison and a successful eight-region checkpoint.
 An incomplete traversal emits failure records, which the report validator
@@ -718,3 +729,99 @@ Inserted values count encoded candidate contents, not all allocations or client
 copying. Full versus selected is a method comparison, not a prior-version latency
 claim. Keep raw samples local until publication is authorized, and retain the
 ordinary interleaved release engine comparison for scheduling and persistence tails.
+
+## Lighting and range diagnostics
+
+For lighting diagnostics, `fov_bench` reports fresh sight at ranges 8, 12 and 16
+in open space, pillars, rotated joins, portal cycles, long rooms and dark
+corridors, with one and eight observers. `rogue_bench` adds the same ranges for
+generated floors at depths 1, 6 and 11; these isolated geometry samples flatten
+chunk coordinates, while its ordinary action/acquisition rows retain actual
+chunk streaming and observation byte counts. Keep n/p50/p95/max for each row.
+`physics_bench --profile` additionally retains per-command production phase
+profiles and perception work counts, plus checkpoint encoding size/time and
+completed save status outside measured action and barrier intervals. The default workload and matched baseline
+comparisons remain unprofiled; use the optional instrumented run to locate costs,
+not to replace those timing comparisons.
+The completed status reports `last_commit_ms`, the SQLite commit-call portion of
+`last_batch_ms`; checkpoint encoding remains separately reported. The physics
+process acceptance test validates these metrics against the completed durable
+prefix, and the report validator rejects malformed or inconsistent durations.
+
+The current Windows release range diagnostic uses machine fingerprint
+`6a1878811f37` (Core i7-9750H, Windows 11, NTFS HDD). For eight-observer fresh
+geometry batches, each entry below is **n; p50/p95/max ms**. Adaptive sampling
+makes n differ between cases; these are isolated geometry timings, not action
+latency or a matched prior-version comparison.
+
+| Geometry | Range 8 | Range 12 | Range 16 |
+| --- | --- | --- | --- |
+| Open space | 4241; 0.109/0.152/0.805 | 1434; 0.377/0.459/0.808 | 853; 0.619/0.755/1.056 |
+| Rotated join | 1500; 0.330/0.349/2.435 | 580; 0.832/0.970/1.176 | 266; 1.963/2.080/2.250 |
+| Portal cycle | 2978; 0.167/0.176/0.228 | 1301; 0.374/0.468/0.746 | 706; 0.682/0.842/0.967 |
+| Long room | 1715; 0.289/0.297/0.492 | 724; 0.648/0.830/1.064 | 465; 1.112/1.283/1.603 |
+| Dark corridor | 2994; 0.165/0.175/0.261 | 1479; 0.329/0.405/0.656 | 879; 0.537/0.718/0.885 |
+
+Generated-floor lighting diagnostics measured 20 fresh batches of eight observers
+per entry, reported as **p50/p95/max ms**:
+
+| Floor depth | Range 8 | Range 12 | Range 16 |
+| --- | --- | --- | --- |
+| 1 | 0.937/1.254/1.272 | 2.758/2.936/3.803 | 4.493/4.723/4.928 |
+| 6 | 0.786/0.805/0.811 | 2.268/2.380/2.390 | 3.894/4.079/4.121 |
+| 11 | 0.319/0.323/0.324 | 0.937/1.035/1.043 | 1.416/1.534/1.696 |
+
+These generated-floor geometry calls exclude body-local awareness; the completely
+dark depth-11 floor therefore discloses no nonlocal cells. Actual gameplay retains
+occupied and adjacent cells. The [generation guide](generation-recipes.md#verification-and-diagnostics)
+records full streamed action timings, residency, traffic and durable barriers.
+
+### PR #90 release comparison and remaining gate
+
+The October 9 comparison uses merged PR #90 (`2b5d1a6`) as the baseline,
+balanced ABBA order, and the same machine fingerprint. Four rounds covering all
+nine delivery workloads produced 72 successful runs. Every action workload met
+the existing p95 < 8 ms and max < 33 ms targets. Dense falling physics improved
+from roughly 11.9 ms to 3.8 ms at p95. Restart and stored database sizes improved;
+expanded disclosure increases observation traffic as expected.
+
+Persistence acceptance remains pending. A separate six-round recheck of physics
+and `r64-a8-h100-durable` retained these unresolved results. Each entry is
+**n; p50/p95/max ms**, baseline to current implementation:
+
+| Save workload | PR #90 | Cell lighting |
+| --- | --- | --- |
+| 8 actors, 2 body cells, static | 18; 113.035/920.542/920.542 | 18; 708.433/1635.697/1635.697 |
+| 8 actors, 8 body cells, static | 18; 122.840/470.025/470.025 | 18; 657.106/1759.819/1759.819 |
+| 64 regions, 8 actors, durable flush | 6; 632.638/1561.629/1561.629 | 6; 842.570/1794.751/1794.751 |
+
+All recheck workload validators passed. Dense static save sizes fell from
+1,929,216/2,002,944 bytes to 491,520 bytes; the 64-region database fell from
+3,940,352 to 3,252,224 bytes. Optional profiling separates checkpoint encoding
+from commit time, and an ignored diagnostic VFS localized the long intervals
+to SQLite file synchronization. The underlying operating-system cause is
+unresolved. Production durability remains DELETE journal mode with EXTRA
+synchronization.
+
+Recorded temporary paths confirm that both sides wrote saves and journals to
+F:, with binaries, build outputs, and the task Cargo cache also on F:. The
+maintainer subsequently reported C: failures and system stalls. Those stalls
+can distort disk timing even when workload files are on F:, so persistence
+intervals above remain provisional. Repeat acceptance measurements on F: with
+stable system conditions. These results do not waive existing persistence
+findings or satisfy the merge performance gate. Raw cohorts remain local
+pending separate release-asset authorization.
+
+### Functional verification checkpoint
+
+The complete Windows debug push tier passed on October 9: 1,084 Rust tests,
+355 Python/application tests, formatting, Clippy, architecture checks, and
+rustdoc. The named native mouse test passed; the opt-in local exception was
+not used. The release delivery binaries and diagnostic examples were built
+from the same production inputs. Subsequent edits only updated diagnostic
+and verification prose. The final diff passed whitespace checks.
+
+Final-commit Windows/Linux debug/release CI, stable-system persistence acceptance,
+and the three desktop launcher checks remain pending. No release or raw
+performance asset has been published. Passing functional checks do not resolve
+the provisional disk timing findings above.

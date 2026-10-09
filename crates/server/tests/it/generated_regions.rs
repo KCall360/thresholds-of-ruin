@@ -24,7 +24,7 @@ fn caves(seed: u64) -> Scenario {
 }
 
 /// From the start into the first cave, then across it into the second.
-const INTO_CAVE: usize = 10;
+const INTO_CAVE: usize = 18;
 const ACROSS_CAVE: usize = 24;
 
 fn command_as(

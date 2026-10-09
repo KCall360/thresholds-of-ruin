@@ -2,6 +2,8 @@
 from pathlib import Path
 import tempfile
 import json
+import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
@@ -143,6 +145,26 @@ class MissingTests(unittest.TestCase):
 
 
 class Tiers(unittest.TestCase):
+    def test_failed_push_is_never_reported_as_complete(self):
+        for code in (0, 1):
+            with tempfile.TemporaryDirectory() as directory, \
+                    patch.object(verify, "ROOT", Path(directory)), \
+                    patch.object(verify.subprocess, "run") as commands, \
+                    patch.object(verify, "changes", return_value=([], "")), \
+                    patch.object(verify, "free_memory_gb", return_value=8), \
+                    patch.object(verify, "running_builds", return_value=[]), \
+                    patch.object(verify, "plan", return_value=[("check", ["check"], {})]), \
+                    patch.object(verify, "run_step", return_value={
+                        "step": "check", "code": code, "seconds": 0, "log": None, "note": ""}), \
+                    redirect_stdout(StringIO()) as output:
+                commands.return_value.stdout = json.dumps(metadata())
+                self.assertEqual(code, verify.main(["push", "--jobs", "1"]))
+                if code:
+                    self.assertNotIn("Local debug push gate complete", output.getvalue())
+                    self.assertIn("Local debug push gate FAILED", output.getvalue())
+                else:
+                    self.assertIn("Local debug push gate complete", output.getvalue())
+
     def names(self, tier, affected=(), process=()):
         return [name for name, _, _ in verify.plan(tier, set(affected), list(process))]
 
@@ -220,6 +242,63 @@ class Tiers(unittest.TestCase):
         steps = {n: c for n, c, _ in verify.plan("quick", set(), [])}
         self.assertIn("test_verify", steps["python-tools"])
         self.assertFalse(any(arg.endswith("process") for arg in steps["python-tools"]))
+
+
+class LocalMouseWaiver(unittest.TestCase):
+    def test_exact_failure_is_waivable_only_with_local_opt_in(self):
+        name = verify.LOCAL_MOUSE_TEST
+        method = name.rsplit(".", 1)[1]
+        text = f"FAIL: {method} ({name})\nRan 3 tests in 1s\nFAILED (failures=1)\n"
+        command = ["python", "-m", "unittest"]
+        self.assertTrue(verify.waivable_mouse_failure(1, command, text, True, False))
+        for enabled, ci in [(False, False), (True, True)]:
+            self.assertFalse(verify.waivable_mouse_failure(1, command, text, enabled, ci))
+        self.assertFalse(verify.waivable_mouse_failure(101, command, text, True, False))
+        self.assertFalse(verify.waivable_mouse_failure(1, ["cargo", "test"], text, True, False))
+        mixed = text.replace("FAILED (failures=1)", "FAIL: other (test_other.Tests.other)\nFAILED (failures=2)")
+        self.assertFalse(verify.waivable_mouse_failure(1, command, mixed, True, False))
+        self.assertFalse(verify.waivable_mouse_failure(1, command, text.replace(name, "test_other.Tests.other"), True, False))
+
+
+class LocalMouseGate(unittest.TestCase):
+    def test_cli_cannot_enable_local_waiver_in_ci(self):
+        with patch.dict(verify.os.environ, {"CI": "true"}), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                verify.main(["push", "--waive-local-mouse"])
+        self.assertEqual(error.exception.code, 2)
+        with patch.dict(verify.os.environ, {}, clear=True), redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                verify.main(["full", "--ci-profile", "debug", "--waive-local-mouse"])
+        self.assertEqual(error.exception.code, 2)
+
+    def test_step_preserves_failure_and_reports_exact_local_waiver(self):
+        failure = ("FAIL: test_native_underscore_and_mouse_click "
+                   "(test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click)\n"
+                   "FAILED (failures=1)\n")
+        def failed(command, **kwargs):
+            kwargs["stdout"].write(failure)
+            return type("Result", (), {"returncode": 1})()
+        with tempfile.TemporaryDirectory() as directory, patch.object(verify.subprocess, "run", failed):
+            with patch.dict(verify.os.environ, {}, clear=True):
+                enabled = verify.run_step("mouse", ["python", "-m", "unittest"],
+                    {"TOR_LOCAL_MOUSE_WAIVER":"1"}, Path(directory), 1, False)
+                self.assertEqual(enabled["code"], 0)
+                self.assertTrue(enabled["note"].startswith("WAIVED local failure:"))
+                blocked = verify.run_step("mouse", ["python", "-m", "unittest"],
+                    {}, Path(directory), 1, False)
+                self.assertEqual(blocked["code"], 1)
+            with patch.dict(verify.os.environ, {"CI":"true"}):
+                ci = verify.run_step("mouse", ["python", "-m", "unittest"],
+                    {"TOR_LOCAL_MOUSE_WAIVER":"1"}, Path(directory), 1, False)
+                self.assertEqual(ci["code"], 1)
+
+
+    def test_actual_cli_rejects_local_mouse_waiver_before_ci_runs(self):
+        result = subprocess.run([sys.executable,str(Path(verify.__file__)),"full",
+            "--ci-profile","debug","--waive-local-mouse"],capture_output=True,text=True)
+        self.assertEqual(result.returncode,2)
+        self.assertIn("local only",result.stderr)
+        self.assertNotIn("packages:",result.stdout)
 
 
 if __name__ == "__main__":

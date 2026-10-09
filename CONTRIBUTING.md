@@ -25,9 +25,10 @@ Every change must be tested, and the full policy is in
 Every feature and bug fix adds its tests to the suite in the same change. The
 tiered checks run the suite faster, but they can only run tests that exist.
 
-- During the TDD loop, run the failing regression and affected unit,
-  integration and actual-process tests directly. Run `python scripts/verify.py
-  quick` at stable, cohesive checkpoints, or cover the checkpoint with a
+- During the TDD loop, run the failing behavior/regression and affected unit
+  tests directly. Run affected integration and actual-process tests when each
+  behavior is complete; repeat them if subsequent edits affect that behavior.
+  Run `python scripts/verify.py quick` at stable, cohesive checkpoints, or cover the checkpoint with a
   required higher tier.
 - Before every push, pass `python scripts/verify.py` (the `push` tier) or
   `python scripts/verify.py full`. A successful full run covers the push gate
@@ -44,6 +45,11 @@ tiered checks run the suite faster, but they can only run tests that exist.
 
 See the [testing policy](docs/testing.md#running-the-checks) for what each tier
 runs and why. Report any check you couldn't run.
+
+The sole local exception is the native travel underscore/mouse test, enabled
+with `--waive-local-mouse` and reported as a waived failure. It remains required
+in CI; every other failure remains blocking. See the
+[exact exception](docs/testing.md#focused-iteration-and-local-mouse-exception).
 
 ## Architecture rules
 

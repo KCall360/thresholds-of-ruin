@@ -214,6 +214,8 @@ pub struct World {
     cell_gravity: Shared<BTreeMap<Location, [i32; 3]>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     terrain: Shared<BTreeMap<Location, Terrain>>,
+    #[serde(default)]
+    pub(crate) lighting: Shared<BTreeMap<RegionId, crate::lighting::RegionLight>>,
     /// Carved interior extents also locate join apertures; storage includes a shell.
     chambers: Shared<BTreeMap<RegionId, Extent>>,
     /// Authored place hints, each with its authored name ("" when it has
@@ -323,6 +325,10 @@ impl World {
     pub fn geometry_snapshot(&self) -> crate::GeometrySnapshot {
         self.sight.geometry_snapshot()
     }
+    /// Invalidates derived perception when geometry, residency or light changes.
+    pub fn perception_snapshot(&self) -> crate::PerceptionSnapshot {
+        self.sight.perception_snapshot()
+    }
     /// Authored portal endpoints must remain clear of solid terrain. Closed
     /// doors are ordinary gameplay state and do not invalidate a package.
     pub fn authored_links_clear(&self) -> bool {
@@ -396,6 +402,14 @@ impl World {
                         && self.door_entry(cell).map(|(base, _)| base) == Some(*location)
                 })
                 && self.door_cells(*location).count() == usize::from(door.height)
+        }) && self.lighting.iter().all(|(region, light)| {
+            self.region(*region).is_some()
+                && light.cells.keys().all(|position| {
+                    self.contains(Location {
+                        region: *region,
+                        position: *position,
+                    })
+                })
         }) && self.terrain.keys().all(|location| self.contains(*location))
             && self
                 .place_hints
@@ -548,6 +562,7 @@ impl World {
             region_gravity: Shared::default(),
             cell_gravity: Shared::default(),
             terrain: Shared::new(BTreeMap::new()),
+            lighting: Shared::default(),
             chambers: Shared::new(BTreeMap::new()),
             place_hints: Shared::new(BTreeMap::new()),
             absent: Shared::default(),
@@ -583,6 +598,29 @@ impl World {
         self.chambers.insert(id, interior);
         self.sight.topology_changed();
         Ok(())
+    }
+
+    /// Convex ordinary space with no internal blocker. Only this region's
+    /// overrides are inspected; chamber shells are outside the returned box.
+    /// A closed door conservatively disables the proof for the entire region.
+    pub(crate) fn transparent_box(&self, id: RegionId) -> Option<Extent> {
+        let bounds = *self.chambers.get(&id).unwrap_or(&self.region(id)?.bounds);
+        let endpoint = |value| Location {
+            region: id,
+            position: Position {
+                x: value,
+                y: value,
+                z: value,
+            },
+        };
+        let range = endpoint(i32::MIN)..=endpoint(i32::MAX);
+        if self.terrain.range(range.clone()).any(|(at, terrain)| {
+            bounds.contains(at.position) && matches!(terrain, Terrain::Solid(_))
+        }) || self.doors.range(range).any(|(_, door)| !door.open)
+        {
+            return None;
+        }
+        Some(bounds)
     }
 
     pub fn terrain(&self, location: Location) -> Option<Terrain> {

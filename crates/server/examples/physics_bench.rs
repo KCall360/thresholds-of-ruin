@@ -6,6 +6,7 @@ use tor_server::journal::Action;
 use tor_server::{journal::Command, scenario_package, Engine, SavePolicy, Scenario};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let profiling = std::env::args().any(|arg| arg == "--profile");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/tests/physics");
     let template = scenario_package::load(&root, 42, None, false)?;
     for (actors, items, cells) in [(1, 1, 2), (8, 128, 2), (1, 1, 8), (8, 128, 8)] {
@@ -97,6 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut canvas = tor_client_ascii::render::Canvas::default();
                 let before = tor_simulation::diagnostics::work_counts();
                 let mut command_ms = Vec::new();
+                let mut profiles = Vec::new();
                 let mut apply_ms = Vec::new();
                 let mut draw_ms = Vec::new();
                 let mut sequence = 0;
@@ -104,18 +106,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let actor = ActorId(turn % actors + 1);
                     let revision = engine.revision(actor)?;
                     let start = Instant::now();
-                    engine.command(
-                        "physics-benchmark",
-                        "physics-v1",
-                        actor,
-                        &format!("{turn}"),
-                        &engine.branch().clone(),
-                        Command::Act {
-                            expected_revision: revision,
-                            action: Action::Wait,
-                        },
-                    )?;
+                    let command = Command::Act {
+                        expected_revision: revision,
+                        action: Action::Wait,
+                    };
+                    let profile = if profiling {
+                        Some(
+                            engine
+                                .command_profiled(
+                                    "physics-benchmark",
+                                    "physics-v1",
+                                    actor,
+                                    &format!("{turn}"),
+                                    &engine.branch().clone(),
+                                    command,
+                                )?
+                                .1,
+                        )
+                    } else {
+                        engine.command(
+                            "physics-benchmark",
+                            "physics-v1",
+                            actor,
+                            &format!("{turn}"),
+                            &engine.branch().clone(),
+                            command,
+                        )?;
+                        None
+                    };
                     command_ms.push(start.elapsed().as_secs_f64() * 1000.);
+                    if let Some(profile) = profile {
+                        profiles.push(profile);
+                    }
                     let state = engine.state(player)?;
                     // Like live delivery, do not emit unchanged observer states
                     // when another actor acts at the same simulation timestamp.
@@ -150,6 +172,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let start = Instant::now();
                 engine.flush()?;
                 let save_ms = start.elapsed().as_secs_f64() * 1000.;
+                let checkpoint_profile = if profiling {
+                    let (bytes, elapsed) = engine.profile_checkpoint_encoding()?;
+                    Some(
+                        serde_json::json!({"bytes":bytes,"ms":elapsed.as_secs_f64()*1000.,"status":engine.save_status()}),
+                    )
+                } else {
+                    None
+                };
                 drop(engine);
                 let saved_bytes = std::fs::metadata(&path)?.len();
                 let start = Instant::now();
@@ -158,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 assert_eq!(resumed.state(player)?, expected);
                 println!(
                     "{}",
-                    serde_json::json!({"workload":"physics","version":1,"actors":actors,"items":items,"cells":cells,"falling":falling,"sample":sample,"command_ms":command_ms,"client_apply_ms":apply_ms,"client_draw_ms":draw_ms,"save_ms":save_ms,"resume_ms":resume_ms,"saved_bytes":saved_bytes,"disclosed_bytes":disclosed_bytes,"physics_steps":after.physics_steps-before.physics_steps,"body_cells":after.body_cells-before.body_cells,"scenes":after.scenes-before.scenes})
+                    serde_json::json!({"workload":"physics","version":1,"actors":actors,"items":items,"cells":cells,"falling":falling,"sample":sample,"command_ms":command_ms,"profiles":profiles,"checkpoint_profile":checkpoint_profile,"client_apply_ms":apply_ms,"client_draw_ms":draw_ms,"save_ms":save_ms,"resume_ms":resume_ms,"saved_bytes":saved_bytes,"disclosed_bytes":disclosed_bytes,"physics_steps":after.physics_steps-before.physics_steps,"body_cells":after.body_cells-before.body_cells,"scenes":after.scenes-before.scenes})
                 );
             }
         }

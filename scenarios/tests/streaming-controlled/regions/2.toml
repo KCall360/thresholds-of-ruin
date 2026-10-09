@@ -1,5 +1,5 @@
 id = 2
 name = "Hall 2"
-size = [20, 3, 1]
-anchors = { west = [0, 0, 0], east = [19, 0, 0], start = [2, 1, 0] }
-portals = [{ at = [19, 0, 0], direction = "east", to = "3/west", width = 3 }, { at = [0, 0, 0], direction = "west", to = "1/east", width = 3 }]
+size = [32, 3, 1]
+anchors = { west = [0, 0, 0], east = [31, 0, 0], start = [2, 1, 0] }
+portals = [{ at = [31, 0, 0], direction = "east", to = "3/west", width = 3 }, { at = [0, 0, 0], direction = "west", to = "1/east", width = 3 }]

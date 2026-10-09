@@ -12,6 +12,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+#[path = "checkpoint_codec.rs"]
+pub(crate) mod checkpoint_codec;
 #[path = "save_codec.rs"]
 mod codec;
 #[path = "journal_lock.rs"]
@@ -31,7 +33,7 @@ pub(crate) fn encode_region(
 pub use codec::MAX_PAYLOAD;
 use codec::{crc32c, decode, decode_region, strict};
 
-const MAX_CHECKPOINT: usize = 64 * MAX_PAYLOAD;
+const MAX_CHECKPOINT: usize = checkpoint_codec::LIMIT;
 const APP_ID: i64 = 0x544f524a;
 /// SQLite `user_version`: the save format, as `ARCHIVE_VERSION`.
 const SAVE_FORMAT: i64 = crate::engine::ARCHIVE_VERSION as i64;
@@ -184,6 +186,8 @@ pub struct SaveStatus {
     /// Application bytes committed, not physical filesystem writes.
     pub journal_bytes: u64,
     pub last_batch_ms: u64,
+    /// SQLite commit time for the last successful batch, within last_batch_ms.
+    pub last_commit_ms: u64,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -470,22 +474,7 @@ fn write_region_rows(conn: &Connection, rows: &[(u64, Vec<u8>)]) -> Result<(), F
 use rusqlite::OptionalExtension;
 
 fn encode_checkpoint(checkpoint: &DiskCheckpoint) -> Result<Vec<u8>, Failure> {
-    struct Bounded(Vec<u8>);
-    impl std::io::Write for Bounded {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if self.0.len().saturating_add(bytes.len()) > MAX_CHECKPOINT {
-                return Err(std::io::Error::other("checkpoint exceeds size limit"));
-            }
-            self.0.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut writer = Bounded(Vec::new());
-    serde_json::to_writer(&mut writer, checkpoint).map_err(|_| storage_failure())?;
-    Ok(writer.0)
+    checkpoint_codec::write_json(checkpoint, Vec::new()).map_err(|_| storage_failure())
 }
 
 fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure> {
@@ -511,7 +500,8 @@ fn read_checkpoint(conn: &Connection) -> Result<Option<DiskCheckpoint>, Failure>
     if crc32c(bytes.iter().copied()) != checksum {
         return Err(invalid_archive());
     }
-    let checkpoint: DiskCheckpoint = strict(&bytes)?;
+    let decoded = checkpoint_codec::decode(&bytes).map_err(|_| invalid_archive())?;
+    let checkpoint: DiskCheckpoint = strict(&decoded)?;
     if checkpoint.sequence != sequence as u64 {
         return Err(invalid_archive());
     }
@@ -780,6 +770,9 @@ struct Owner {
 #[derive(Clone, Debug)]
 pub(crate) struct Store(Arc<Owner>);
 impl Store {
+    pub(crate) fn save_id(&self) -> &str {
+        &self.0.save_id
+    }
     /// Open a save, or create it from `initial`: the archive, and the region
     /// files its regions so far were built from. Also returns the regions
     /// whose files the save holds.
@@ -1183,6 +1176,8 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 (b.len() + regions.rows.iter().map(|r| r.1.len()).sum::<usize>()) as u64
             })
             .unwrap_or(0);
+        let mut commit_started = None;
+        let mut commit_ms = 0;
         let outcome = encoded.and_then(|encoded| {
             if conn.is_none() {
                 conn = Some(connection(&path)?);
@@ -1195,7 +1190,18 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                     .zip(encoded.as_ref())
                     .map(|((seq, _), (bytes, _))| (*seq, bytes.as_slice())),
                 encoded.as_ref().map(|(_, regions)| regions),
-                |_, _| Ok(()),
+                |_, stage| {
+                    if stage == "before_commit" {
+                        commit_started = Some(Instant::now());
+                    } else if stage == "after_commit" {
+                        commit_ms = commit_started
+                            .expect("commit has started")
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX)) as u64;
+                    }
+                    Ok(())
+                },
             )
         });
         let mut s = shared.state.lock().unwrap();
@@ -1236,6 +1242,7 @@ fn run_worker(shared: Arc<Shared>, conn: Connection, path: PathBuf) {
                 s.status.batches += 1;
                 s.status.last_batch_ms =
                     start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                s.status.last_commit_ms = commit_ms;
                 s.oldest = s.pending.front().map(|p| p.queued);
             }
             Err(_) => {
@@ -1265,6 +1272,22 @@ mod tests {
     use crate::journal::Action;
     use crate::{Engine, Scenario};
     use tor_protocol::ActorId;
+
+    #[test]
+    fn navigation_heavy_checkpoints_have_compact_storage_payloads() {
+        let engine = Engine::memory(Scenario::performance(42, 8, 8).unwrap()).unwrap();
+        let checkpoint = Checkpoint::capture(&engine).encode("compression-test", 1);
+        let json = serde_json::to_vec(&checkpoint).unwrap();
+        assert!(json.len() > 1024);
+        let stored = encode_checkpoint(&checkpoint).unwrap();
+        assert!(
+            stored.len() * 2 < json.len(),
+            "stored {} bytes for {} bytes of checkpoint JSON",
+            stored.len(),
+            json.len()
+        );
+        assert_eq!(checkpoint_codec::decode(&stored).unwrap(), json);
+    }
 
     #[test]
     fn generated_records_commit_atomically_without_a_checkpoint() {
@@ -1702,6 +1725,12 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("crash.db");
             let (bytes, expected) = checkpoint_fixture(&path);
+            // A valid level-zero envelope preserves the deliberate page spill
+            // and torn-extension stress even when normal checkpoints compress
+            // into the database's existing free pages.
+            let decoded = checkpoint_codec::decode(&bytes).unwrap();
+            let checkpoint: DiskCheckpoint = strict(&decoded).unwrap();
+            let bytes = checkpoint_codec::write_uncompressed_json(&checkpoint).unwrap();
             let original_size = std::fs::metadata(&path).unwrap().len();
             std::fs::write(path.with_extension("checkpoint"), bytes).unwrap();
             let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -1756,7 +1785,7 @@ mod tests {
         }
     }
     /// Steps from the corridor's start to the middle of hall 4.
-    const TO_HALL_4: usize = 68;
+    const TO_HALL_4: usize = 76;
 
     fn corridor() -> Scenario {
         let root =
@@ -1803,6 +1832,7 @@ mod tests {
         engine.flush().unwrap();
         let status = engine.save_status();
         assert_eq!(status.accepted_sequence, status.durable_sequence);
+        assert!(status.last_commit_ms <= status.last_batch_ms);
         let source_count: i64 = connection(&path)
             .unwrap()
             .query_row("SELECT COUNT(*) FROM region_sources", [], |row| row.get(0))
@@ -2122,7 +2152,7 @@ mod tests {
             );
             walk(&mut recovered, crate::journal::Direction::West, TO_HALL_4);
             let counts = recovered.region_counts().unwrap();
-            assert_eq!(counts.detached, 3, "{stage}");
+            assert_eq!(counts.detached, 4, "{stage}");
             assert_eq!(
                 counts.records_read,
                 if committed { 2 } else { 0 },

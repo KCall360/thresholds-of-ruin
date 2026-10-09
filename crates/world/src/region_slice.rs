@@ -33,6 +33,7 @@ pub struct RegionSlice {
     cell_gravity: BTreeMap<Location, [i32; 3]>,
     #[serde(with = "crate::checkpoint_map")]
     terrain: BTreeMap<Location, Terrain>,
+    lighting: Option<crate::lighting::RegionLight>,
     #[serde(with = "crate::checkpoint_map")]
     place_hints: BTreeMap<Location, String>,
 }
@@ -97,6 +98,14 @@ impl RegionSlice {
                 .cell_gravity
                 .iter()
                 .all(|(at, g)| inside(at) && valid_gravity(*g))
+            && self.lighting.as_ref().is_none_or(|light| {
+                light.cells.keys().all(|position| {
+                    inside(&Location {
+                        region: id,
+                        position: *position,
+                    })
+                })
+            })
             && self.terrain.keys().all(inside)
             && self.place_hints.keys().all(inside)
     }
@@ -280,6 +289,7 @@ impl World {
             region_gravity,
             cell_gravity,
             terrain,
+            lighting,
             chambers,
             place_hints,
             absent,
@@ -304,6 +314,7 @@ impl World {
             solid_boundaries: take_set(solid_boundaries, id),
             cell_gravity: take_region(cell_gravity, id),
             terrain: take_region(terrain, id),
+            lighting: lighting.remove(&id),
             place_hints: take_region(place_hints, id),
             region,
         };
@@ -315,7 +326,7 @@ impl World {
         }
         regions.remove(&id);
         absent.insert(id, slice.region.clone());
-        sight.region_changed(id);
+        sight.region_presence_changed(id);
         Ok(slice)
     }
 
@@ -346,6 +357,7 @@ impl World {
             solid_boundaries,
             cell_gravity,
             terrain,
+            lighting,
             place_hints,
         } = slice;
         self.absent.remove(&id);
@@ -353,6 +365,9 @@ impl World {
             self.named_stairs.extend(named_stairs);
         }
         self.regions.insert(id, region);
+        if let Some(light) = lighting {
+            self.lighting.insert(id, light);
+        }
         if let Some(chamber) = chamber {
             self.chambers.insert(id, chamber);
         }
@@ -383,7 +398,7 @@ impl World {
         if !place_hints.is_empty() {
             self.place_hints.extend(place_hints);
         }
-        self.sight.region_changed(id);
+        self.sight.region_presence_changed(id);
         Ok(())
     }
 }

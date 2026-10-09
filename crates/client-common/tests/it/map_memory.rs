@@ -291,3 +291,23 @@ fn overflowing_delta_preserves_the_entire_client_model() {
         assert_eq!(client.state().revision, 1);
     }
 }
+
+#[test]
+fn known_map_lookup_preserves_opaque_memory_keys_and_prefers_current_terrain() {
+    let target = Position { x: 1, y: 0, z: 0 };
+    let mut client =
+        ClientState::from_snapshot(snapshot(&[("here", 0, 0), ("opaque-remembered", 1, 0)], 0))
+            .unwrap();
+    advance(&mut client, snapshot(&[("here", 0, 0)], 1));
+    assert_eq!(client.map_cell(target).unwrap().key, "opaque-remembered");
+    assert!(client.map_cell(Position { z: 1, ..target }).is_none());
+    assert!(client.map_cell(Position { x: 99, ..target }).is_none());
+    let mut now = snapshot(&[("here", 0, 0), ("fresh-wall", 1, 0)], 2);
+    Arc::make_mut(&mut now.state).observation.visible_cells[1].wall = true;
+    advance(&mut client, now);
+    let cell = client.map_cell(target).unwrap();
+    assert_eq!(cell.key, "fresh-wall");
+    assert!(cell.wall);
+    advance(&mut client, snapshot(&[("here", 0, 0)], 3));
+    assert!(client.map_cell(target).unwrap().wall);
+}

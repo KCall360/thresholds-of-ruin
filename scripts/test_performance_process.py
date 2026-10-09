@@ -9,20 +9,39 @@ from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
-    def test_rogue_benchmark_preserves_floor_work_and_residency_bounds(self):
-        from performance_report import validate_rogue
-        build = ['cargo', 'build', '-p', 'tor-server', '--example', 'rogue_bench', '--locked']
+    def benchmark(self, name, args, timeout):
+        build = ['cargo', 'build', '-p', 'tor-server', '--example', name, '--locked']
         if os.environ.get('TOR_TEST_PROFILE', 'debug') == 'release':
             build.append('--release')
-        with (self.directory/'rogue-build.log').open('w', encoding='utf-8') as log:
+        with (self.directory/f'{name}-build.log').open('w', encoding='utf-8') as log:
             subprocess.run(build, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=600)
-        with (self.directory/'rogue.jsonl').open('w', encoding='utf-8') as log, (self.directory/'rogue-stderr.log').open('w', encoding='utf-8') as errors:
-            subprocess.run([self.bin/'examples'/('rogue_bench'+SUFFIX), '1'],
-                           cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=180)
-        rows = [json.loads(line) for line in (self.directory/'rogue.jsonl').read_text(encoding='utf-8').splitlines()]
+        output = self.directory/f'{name}.jsonl'
+        with output.open('w', encoding='utf-8') as log, (self.directory/f'{name}-stderr.log').open('w', encoding='utf-8') as errors:
+            subprocess.run([self.bin/'examples'/(name+SUFFIX), *args],
+                           cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=timeout)
+        return [json.loads(line) for line in output.read_text(encoding='utf-8').splitlines()]
+
+    def test_rogue_benchmark_preserves_floor_work_and_residency_bounds(self):
+        from performance_report import validate_rogue
+        rows = self.benchmark('rogue_bench', ['1'], 180)
         validate_rogue(rows)
         with self.assertRaises(AssertionError):
             validate_rogue(rows[:-1])
+
+    def test_physics_benchmark_reports_completed_durable_commit_timings(self):
+        from physics_performance_report import summarize
+        rows = self.benchmark('physics_bench', ['--profile'], 600)
+        summarize(rows)
+        self.assertEqual(len(rows), 24)
+        for row in rows:
+            status = row['checkpoint_profile']['status']
+            self.assertEqual(status['accepted_sequence'], status['durable_sequence'])
+            self.assertEqual(status['pending_bytes'], 0)
+            self.assertFalse(status['saving'])
+            self.assertIsNone(status['error'])
+            self.assertGreaterEqual(status['checkpoints'], 1)
+            self.assertGreaterEqual(status['last_commit_ms'], 0)
+            self.assertLessEqual(status['last_commit_ms'], status['last_batch_ms'])
 
     def test_multiphase_attack_timing_reaches_authoritative_outcome_and_fresh_context(self):
         self.server(scenario="dungeon-loop", seed=None)

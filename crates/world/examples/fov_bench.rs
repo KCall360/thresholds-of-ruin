@@ -109,7 +109,20 @@ fn main() {
         }
     }
     let fixture = latency_fixture(5);
-    println!("scenario,radius,builder,mean_us");
+    let long_room = chamber(49, 7, 2);
+    let mut dark_corridor = chamber(49, 3, 2);
+    dark_corridor.set_region_light(RegionId(1), false).unwrap();
+    for x in 18..25 {
+        for y in -1..=3 {
+            for z in -1..=2 {
+                dark_corridor
+                    .set_cell_light(lift(at(1, x, y), z), true)
+                    .unwrap();
+            }
+        }
+    }
+
+    println!("scenario,radius,builder,n,p50_us,p95_us,max_us");
     let planar = [
         ("open", open, at(1, 32, 32)),
         ("pillars", pillars, at(1, 32, 32)),
@@ -117,12 +130,37 @@ fn main() {
         ("cycle", cycle, at(1, 1, 1)),
     ];
     for (name, world, origin) in &planar {
-        for radius in [8, 16] {
+        for radius in [8, 12, 16] {
             report(name, radius, "shadow", || {
                 world.shadow_scene(*origin, 0, radius)
             });
             report(name, radius, "eye", || {
                 world.eye_scene_uncached(*origin, 0, radius)
+            });
+            report(name, radius, "illuminated", || {
+                world.illuminated_eye_scene_uncached(*origin, 0, radius)
+            });
+            let observers: Vec<_> = world
+                .neighborhood_scene(*origin, 0)
+                .into_iter()
+                .filter(|cell| !cell.wall)
+                .take(8)
+                .map(|cell| (cell.location, cell.rotation))
+                .collect();
+            report(name, radius, "observers8", || {
+                observers
+                    .iter()
+                    .flat_map(|(at, frame)| {
+                        world.illuminated_eye_scene_uncached(*at, *frame, radius)
+                    })
+                    .collect()
+            });
+            let mut dark = world.clone();
+            for region in world.loaded_regions() {
+                dark.set_region_light(region, false).unwrap();
+            }
+            report(name, radius, "dark", || {
+                dark.illuminated_eye_scene_uncached(*origin, 0, radius)
             });
         }
     }
@@ -148,6 +186,27 @@ fn main() {
         report(name, 8, "eye_reference", || {
             world.eye_scene_reference(eye, 0, 8)
         });
+    }
+    for radius in [8, 12, 16] {
+        for (name, world, eye) in [
+            ("long_room", &long_room, lift(at(1, 10, 3), 1)),
+            ("dark_corridor", &dark_corridor, lift(at(1, 10, 1), 1)),
+        ] {
+            report(name, radius, "illuminated", || {
+                world.illuminated_eye_scene_uncached(eye, 0, radius)
+            });
+            report(name, radius, "observers8", || {
+                (0..8)
+                    .flat_map(|x| {
+                        world.illuminated_eye_scene_uncached(
+                            lift(at(1, 10 + x, eye.position.y), 1),
+                            0,
+                            radius,
+                        )
+                    })
+                    .collect()
+            });
+        }
     }
     // The latency fixture's plain rooms, seen from a middle region: a low wall
     // with a door, a stair, a straight join and a rotated join. Single-cell
@@ -237,14 +296,21 @@ fn lift(mut location: Location, z: i32) -> Location {
     location
 }
 
-/// Repeat for at least half a second and print the mean scene time.
+/// Complete fresh or cached scenes; timings are diagnostics, never unit gates.
 fn report(name: &str, radius: u8, builder: &str, mut scene: impl FnMut() -> Vec<SightCell>) {
     let start = Instant::now();
-    let mut runs = 0u32;
-    while runs < 10 || start.elapsed().as_secs_f64() < 0.5 {
+    let mut samples = Vec::new();
+    while samples.len() < 10 || start.elapsed().as_secs_f64() < 0.5 {
+        let before = Instant::now();
         black_box(scene());
-        runs += 1;
+        samples.push(before.elapsed().as_secs_f64() * 1e6);
     }
-    let mean = start.elapsed().as_secs_f64() * 1e6 / f64::from(runs);
-    println!("{name},{radius},{builder},{mean:.1}");
+    samples.sort_by(f64::total_cmp);
+    let n = samples.len();
+    println!(
+        "{name},{radius},{builder},{n},{:.1},{:.1},{:.1}",
+        samples[n / 2],
+        samples[((n as f64 * 0.95).ceil() as usize - 1).min(n - 1)],
+        samples[n - 1]
+    );
 }

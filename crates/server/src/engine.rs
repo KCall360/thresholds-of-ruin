@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 24;
+pub(crate) const ARCHIVE_VERSION: u32 = 25;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 #[path = "command_request.rs"]
@@ -1989,11 +1989,21 @@ impl Engine {
         Ok(self)
     }
 
-    /// Measure the current format-6 checkpoint JSON without allocating its encoded
+    /// Measure the current compressed checkpoint without allocating its encoded
     /// payload or writing a save. Includes capture, deduplication and serialization;
     /// intended for offline diagnostics, outside measured action intervals. The
     /// production 64 MiB writer limit remains enforced independently.
     pub fn profile_checkpoint_encoding(&self) -> Result<(u64, Duration), Failure> {
+        self.profile_checkpoint_size(true)
+    }
+
+    /// Measure logical JSON size before compression, without allocating a payload.
+    /// Use this for state-size comparisons and budgets independent of compression.
+    pub fn profile_checkpoint_json_encoding(&self) -> Result<(u64, Duration), Failure> {
+        self.profile_checkpoint_size(false)
+    }
+
+    fn profile_checkpoint_size(&self, compressed: bool) -> Result<(u64, Duration), Failure> {
         struct Counter(u64);
         impl std::io::Write for Counter {
             fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -2011,11 +2021,19 @@ impl Engine {
             self.archive.wizard_game,
         );
         let encoded = snapshot.encode(
-            "00000000-0000-0000-0000-000000000000",
+            self.store
+                .as_ref()
+                .map(|store| store.save_id())
+                .unwrap_or("00000000-0000-0000-0000-000000000000"),
             self.archive.records.len() as u64,
         );
         let mut counter = Counter(0);
-        serde_json::to_writer(&mut counter, &encoded).map_err(|_| storage_failure())?;
+        if compressed {
+            crate::storage::checkpoint_codec::write_json(&encoded, &mut counter)
+                .map_err(|_| storage_failure())?;
+        } else {
+            serde_json::to_writer(&mut counter, &encoded).map_err(|_| storage_failure())?;
+        }
         Ok((counter.0, start.elapsed()))
     }
 
@@ -2180,15 +2198,7 @@ impl Engine {
     ) -> Result<tor_simulation::ActionOutcome, Failure> {
         let tick = self.game.tick();
         let mut navigation_refreshed = false;
-        let navigation_changed = match action {
-            Action::Move { .. } | Action::SetDoor { .. } => true,
-            Action::Attack { .. }
-            | Action::Equip { .. }
-            | Action::Unequip { .. }
-            | Action::Drink { .. } => false,
-            Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
-            Action::Take { .. } | Action::Drop { .. } => self.game.physics_enabled(),
-        };
+        let geometry = self.game.geometry_snapshot();
         let started = Instant::now();
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
@@ -2244,6 +2254,10 @@ impl Engine {
                 profile.revision_detection += started.elapsed();
             }
         }
+        // Navigation depends on geometry and each observer's scene, not the
+        // action kind or changes to entities/readiness. An unsettled same-tick
+        // physics handoff can change disclosure without changing known links.
+        let navigation_changed = candidate.game.geometry_snapshot() != geometry;
         for (actor, old) in before {
             let perception_started = Instant::now();
             let after = candidate.revision_view(actor)?;
@@ -2251,7 +2265,11 @@ impl Engine {
                 profile.perception += perception_started.elapsed();
                 profile.actors_observed += 1;
             }
-            if navigation_changed || after.scene != old.scene {
+            if navigation_changed
+                || candidate
+                    .game
+                    .navigation_scene_changed(&old.scene, &after.scene)
+            {
                 navigation_refreshed = true;
                 let started = Instant::now();
                 candidate

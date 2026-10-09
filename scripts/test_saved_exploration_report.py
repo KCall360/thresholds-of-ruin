@@ -12,7 +12,7 @@ class SavedExplorationReport(unittest.TestCase):
         profile = dict(version=1, network_events=1, apply_ms=1, draw_ms=1,
                        native_ms=1, capture_ms=0, previous_report_ms=0, turn_interval_ms=1)
         return dict(trace_version=spec["version"], seed=spec["seed"], regions=8,
-                    checkpoint_interval=64, actions=77, disclosed_cells=1243,
+                    checkpoint_interval=64, actions=77, disclosed_cells=1260,
                     checkpoint_sequence=128, checkpoint_bytes=1000000, tail_records=26,
                     journal_records=154,
                     restart_equal=True, continued_after_restart=True,
@@ -28,6 +28,7 @@ class SavedExplorationReport(unittest.TestCase):
         for key, value in (("checkpoint_sequence",0), ("checkpoint_bytes",67108865),
                            ("journal_records",77), ("journal_records",155),
                            ("tail_records",64), ("disclosed_cells",0),
+                           ("disclosed_cells",1243), ("disclosed_cells",1259), ("disclosed_cells",1261),
                            ("restart_equal",False), ("continued_after_restart",False),
                            ("actions",78), ("trace_version",99)):
             with self.assertRaises(AssertionError):

@@ -301,6 +301,17 @@ class Lock:
         self.path.unlink(missing_ok=True)
 
 
+LOCAL_MOUSE_TEST = "test_travel_process.TravelProcesses.test_native_underscore_and_mouse_click"
+
+
+def waivable_mouse_failure(code, command, text, enabled, ci):
+    """An explicit local exception for one test, never a suite/build exception."""
+    return (enabled and not ci and code == 1 and "unittest" in command
+            and python_failures(text) == [LOCAL_MOUSE_TEST]
+            and any(line in ("FAILED (failures=1)", "FAILED (errors=1)")
+                    for line in text.splitlines()))
+
+
 def run_step(name, command, env, logs, jobs, rerun):
     cwd = ROOT / env.pop("_cwd", ".")
     environment = {**os.environ, "CARGO_BUILD_JOBS": str(jobs), "CARGO_PROFILE_DEV_DEBUG": "0",
@@ -315,6 +326,11 @@ def run_step(name, command, env, logs, jobs, rerun):
     if code == 0:
         return result
     text = log.read_text(encoding="utf-8", errors="replace")
+    if waivable_mouse_failure(code, command, text,
+            env.get("TOR_LOCAL_MOUSE_WAIVER") == "1", bool(environment.get("CI"))):
+        result["code"] = 0
+        result["note"] = "WAIVED local failure: " + LOCAL_MOUSE_TEST
+        return result
     notes = []
     hint = environment_hint(text)
     if hint:
@@ -345,7 +361,11 @@ def main(argv=None):
     parser.add_argument("--keep-going", action="store_true", help="Run later steps after a failure")
     parser.add_argument("--allow-concurrent", action="store_true", help="Start even though other cargo/rustc processes are running")
     parser.add_argument("--dry-run", action="store_true", help="Print the selection and steps without running them")
+    parser.add_argument("--waive-local-mouse", action="store_true",
+                        help="Record only the native travel mouse test failure as locally waived; forbidden in CI")
     args = parser.parse_args(argv)
+    if args.waive_local_mouse and (args.ci_profile or os.environ.get("CI")):
+        parser.error("--waive-local-mouse is local only")
     if args.ci_profile and args.tier != "full":
         parser.error("--ci-profile requires the full tier")
     label = f"full-ci-{args.ci_profile}" if args.ci_profile else args.tier
@@ -372,6 +392,9 @@ def main(argv=None):
                  xvfb=sys.platform.startswith("linux") and not os.environ.get("DISPLAY"),
                  ci_profile=args.ci_profile)
 
+    if args.waive_local_mouse:
+        steps = [(name, command, {**env, "TOR_LOCAL_MOUSE_WAIVER": "1"})
+                 for name, command, env in steps]
     selection = "complete workspace" if args.ci_profile else f"{len(paths)} changed paths since {args.base}"
     print(f"tier {label}; {selection}; jobs {jobs} ({free:.1f} GB free)")
     if unknown:
@@ -401,11 +424,11 @@ def main(argv=None):
             result = run_step(name, command, dict(env), logs, jobs, args.rerun_failed)
             failed |= result["code"] != 0
             results.append(result)
-            print(f"  {name}: {'ok' if result['code'] == 0 else 'FAILED'} ({result['seconds']:.0f}s)", flush=True)
+            print(f"  {name}: {'WAIVED' if result['note'].startswith('WAIVED') else 'ok' if result['code'] == 0 else 'FAILED'} ({result['seconds']:.0f}s)", flush=True)
 
     lines = [f"{'step':16} {'result':8} {'time':>7}  note"]
     for r in results:
-        status = "not run" if r["code"] is None else "ok" if r["code"] == 0 else "FAILED"
+        status = "waived" if r["note"].startswith("WAIVED") else "not run" if r["code"] is None else "ok" if r["code"] == 0 else "FAILED"
         lines.append(f"{r['step']:16} {status:8} {r['seconds']:6.0f}s  {r['note']}")
     total = sum(r["seconds"] for r in results)
     lines.append(f"total {total / 60:.1f} min; logs in {logs.relative_to(ROOT).as_posix()}")
@@ -416,7 +439,8 @@ def main(argv=None):
     elif args.tier == "quick":
         lines.append("Run push or full before pushing; a successful full run covers the push gate for unchanged inputs and configuration. CI on both platforms is required before merging.")
     elif args.tier == "push":
-        lines.append("Local debug push gate complete. Full debug/release CI on both platforms is required before merging. "
+        status = "Local debug push gate FAILED; resolve failures before pushing. " if failed else "Local debug push gate complete. "
+        lines.append(status + "Full debug/release CI on both platforms is required before merging. "
                      "Run targeted local release checks for performance or release-specific behavior; use full when CI cannot run or on request.")
     else:
         lines.append("CI on both platforms is required before merging.")

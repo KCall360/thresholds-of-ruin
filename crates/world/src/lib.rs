@@ -1,11 +1,14 @@
 //! Region-local geometry, independent of rendering and transport.
 
 pub mod checkpoint_map;
+mod geometry;
+pub use geometry::Adjacency;
+mod lighting;
 mod scene;
 mod shadowcasting;
 mod topology;
 pub use scene::SightCell;
-pub use sight_cache::GeometrySnapshot;
+pub use sight_cache::{GeometrySnapshot, PerceptionSnapshot};
 mod material;
 pub use material::{Material, Terrain};
 

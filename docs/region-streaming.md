@@ -160,7 +160,11 @@ and loaded. `active` must be a subset of `loaded`; loaded regions outside
   after an action.
 - `Game::settle_region_transition` grows proposed sets until the pins that
   loaded state reveals hold. `Game::transition_regions` settles, applies, and
-  grows again when attaching a region reveals further pins.
+  grows again when attaching a region reveals further pins. Each retry adds
+  the complete newly discovered active and loaded sets together, avoiding
+  repeated attachment and perception work for individual pins. Tentative
+  games and detached records remain unpublished until every pin holds; the
+  public atomic application still reports the first unsatisfied pin.
 
 ### Pins
 

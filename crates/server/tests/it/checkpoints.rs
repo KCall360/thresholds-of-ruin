@@ -23,6 +23,7 @@ fn wait(engine: &mut Engine, id: &str) -> tor_server::CommandResult {
 fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
     let dir = tempdir().unwrap();
     let mut sizes = Vec::new();
+    let mut logical_sizes = Vec::new();
     for history in [1000, 10000] {
         let mut memory = Engine::memory(Scenario::two_room(42)).unwrap();
         memory.seed_profile_history(history).unwrap();
@@ -62,6 +63,7 @@ fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
         assert!(profile.exclusive_duration() <= profile.authoritative_total);
         engine.flush().unwrap();
         sizes.push(engine.save_status().checkpoint_bytes);
+        logical_sizes.push(engine.profile_checkpoint_json_encoding().unwrap().0);
         // Counting diagnostics use the production encoding without allocating a
         // second payload, and must agree byte-for-byte in size with the writer.
         assert_eq!(
@@ -78,6 +80,10 @@ fn checkpoint_size_and_action_io_do_not_scale_with_retained_history() {
     assert!(
         sizes[1] <= sizes[0] * 11 / 10,
         "checkpoint must not embed retained history: {sizes:?}"
+    );
+    assert!(
+        logical_sizes[1] <= logical_sizes[0] * 11 / 10,
+        "logical checkpoint must not embed retained history: {logical_sizes:?}"
     );
 }
 
@@ -208,6 +214,13 @@ fn checkpoint_preserves_queued_admissions_across_both_full_retained_windows() {
         )
         .unwrap();
     engine.flush().unwrap();
+    // Compact region-pooled terrain keeps the original checkpoint budget even
+    // with range 16 and both complete 64-actor admission windows retained.
+    let logical = engine.profile_checkpoint_json_encoding().unwrap().0;
+    assert!(
+        logical > 0 && logical < 1024 * 1024,
+        "shared queue checkpoint is {logical} logical JSON bytes"
+    );
     let bytes = engine.save_status().checkpoint_bytes;
     assert!(
         bytes > 0 && bytes < 1024 * 1024,

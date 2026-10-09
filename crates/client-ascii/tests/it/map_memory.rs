@@ -79,7 +79,7 @@ fn every_physical_class_draws_its_symbol_through_the_map_renderer() {
 }
 
 #[test]
-fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_visible_cells_only() {
+fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_known_cells() {
     let mut state = ClientState::from_snapshot(snapshot(false)).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
     let tiles = render::map_tiles(&state);
@@ -101,8 +101,16 @@ fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_visible_cel
             x: tile.center.0,
             y: tile.center.1
         }),
-        Effect::None
+        Effect::Request(tor_protocol::Request::Command {
+            context: app.state.as_ref().unwrap().input_context(),
+            branch: app.state.as_ref().unwrap().branch().clone(),
+            command: tor_protocol::Command::Travel {
+                expected_revision: 1,
+                destination: "1".into()
+            }
+        })
     );
+    app.ready();
     let mut canvas = render::Canvas::default();
     canvas.draw(&app);
     assert!(canvas.pixels.contains(&render::MEMORY_COLOR));
@@ -152,4 +160,70 @@ fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
     let mut app = App::new();
     app.set_state(state);
     render::Canvas::default().draw(&app);
+}
+
+#[test]
+fn remembered_travel_rejects_known_obstacles_unknown_slices_and_spectators() {
+    use tor_client_ascii::Key;
+    for kind in ["wall", "closed", "unknown", "other-slice", "spectator"] {
+        let mut initial = snapshot(false);
+        let cell = &mut Arc::make_mut(&mut initial.state).observation.visible_cells[1];
+        if kind == "wall" {
+            cell.wall = true;
+        }
+        if kind == "closed" {
+            cell.door = Some(
+                serde_json::from_value(
+                    serde_json::json!({"id":tor_protocol::DoorTarget::from_digest([1;32]),"name":"door","description":"","open":false,"reachable":false,"approaches":[]}),
+                )
+                .unwrap(),
+            );
+        }
+        if kind == "other-slice" {
+            cell.position.z = 1;
+        }
+        let mut state = ClientState::from_snapshot(initial).unwrap();
+        state.replace_snapshot(snapshot(true)).unwrap();
+        let mut app = App::new();
+        app.role = if kind == "spectator" {
+            AccessRole::Spectator
+        } else {
+            AccessRole::Player
+        };
+        app.set_state(state);
+        app.ready();
+        app.input(Input::Key { key: Key::Travel });
+        for _ in 0..if kind == "unknown" { 8 } else { 1 } {
+            app.input(Input::Key { key: Key::Right });
+        }
+        assert_eq!(
+            app.input(Input::Key { key: Key::Enter }),
+            Effect::None,
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn remembered_mouse_travel_uses_the_displayed_height_slice() {
+    let mut initial = snapshot(false);
+    Arc::make_mut(&mut initial.state).observation.visible_cells[1]
+        .position
+        .z = 1;
+    let mut state = ClientState::from_snapshot(initial).unwrap();
+    state.replace_snapshot(snapshot(true)).unwrap();
+    let tile = render::map_tiles_at_level(&state, 1)
+        .into_iter()
+        .find(|t| t.position.x == 1)
+        .unwrap();
+    assert!(tile.remembered);
+    let mut app = App::new();
+    app.role = AccessRole::Player;
+    app.map_level = 1;
+    app.set_state(state);
+    app.ready();
+    assert!(
+        matches!(app.input(Input::Click {x:tile.center.0,y:tile.center.1}),
+        Effect::Request(Request::Command {command:Command::Travel {destination,..},..}) if destination=="1")
+    );
 }

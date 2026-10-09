@@ -2,7 +2,7 @@
 format = 2
 id = "two-room"
 version = "1.1"
-ruleset = "interactions-v25"
+ruleset = "interactions-v26"
 default_character = 1
 themes = ["stone"]
 zones = { "entry" = {  } }

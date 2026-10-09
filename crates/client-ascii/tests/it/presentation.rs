@@ -590,6 +590,43 @@ fn travel_clicks_ignore_unknown_cells_and_spectators() {
 }
 
 #[test]
+fn travel_accepts_remembered_cells_with_keyboard_and_mouse() {
+    for mouse in [false, true] {
+        let mut client = state();
+        let mut snapshot = client.snapshot();
+        snapshot.context.epoch += 1;
+        Arc::make_mut(&mut snapshot.state)
+            .observation
+            .visible_cells
+            .retain(|c| c.key != "2:1");
+        client.replace_snapshot(snapshot).unwrap();
+        assert!(client.map_memory().any(|c| c.key == "2:1"));
+        let mut app = App::new();
+        app.role = AccessRole::Player;
+        app.set_state(client);
+        app.ready();
+        let effect = if mouse {
+            let (x, y) = tor_client_ascii::render::cell_center(
+                &state().state().observation,
+                Position { x: 2, y: 1, z: 0 },
+            )
+            .unwrap();
+            app.input(Input::Click { x, y })
+        } else {
+            app.input(Input::Key { key: Key::Travel });
+            app.input(Input::Key { key: Key::Right });
+            app.input(Input::Key { key: Key::Enter })
+        };
+        assert!(
+            matches!(effect, Effect::Request(Request::Command {
+            command: Command::Travel { destination, .. }, ..
+        }) if destination == "2:1"),
+            "mouse={mouse}"
+        );
+    }
+}
+
+#[test]
 fn rewind_clears_old_drafts_and_wizard_marker_changes_the_visible_frame() {
     let mut app = App::new();
     app.role = AccessRole::Player;

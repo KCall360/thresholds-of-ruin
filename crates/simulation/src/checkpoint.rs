@@ -58,6 +58,8 @@ pub struct RestoreContext<'a> {
     shared: &'a SharedState,
     worlds: BTreeMap<usize, Shared<World>>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
+    /// Validation is reusable only for these immutable decoded pool entries.
+    validated_navigation: BTreeSet<(usize, usize)>,
     items: BTreeMap<usize, crate::item_store::ItemStore>,
     actors: BTreeMap<usize, crate::actor_store::ActorStore>,
     intentions: crate::intention::checkpoint::Restore,
@@ -73,6 +75,7 @@ impl<'a> RestoreContext<'a> {
             shared,
             worlds: BTreeMap::new(),
             navigation: BTreeMap::new(),
+            validated_navigation: BTreeSet::new(),
             items: BTreeMap::new(),
             actors: BTreeMap::new(),
             intentions: crate::intention::checkpoint::Restore::default(),
@@ -96,7 +99,18 @@ impl<'a> RestoreContext<'a> {
         Some(world)
     }
 
-    fn navigation(&mut self, index: usize) -> Option<Shared<Navigation>> {
+    fn navigation(&mut self, index: usize, world: usize) -> Option<Shared<Navigation>> {
+        if !self.validated_navigation.contains(&(index, world)) {
+            if !self
+                .shared
+                .navigation
+                .get(index)?
+                .checkpoint_valid(self.shared.worlds.get(world)?)
+            {
+                return None;
+            }
+            self.validated_navigation.insert((index, world));
+        }
         if let Some(navigation) = self.navigation.get(&index) {
             return Some(navigation.clone());
         }
@@ -226,7 +240,7 @@ impl Game {
             navigation: snapshot
                 .navigation
                 .into_iter()
-                .map(|(actor, index)| Some((actor, context.navigation(index)?)))
+                .map(|(actor, index)| Some((actor, context.navigation(index, snapshot.world)?)))
                 .collect::<Option<_>>()?,
             seed: snapshot.seed,
             tick: snapshot.tick,
@@ -265,9 +279,10 @@ impl Game {
                 .items
                 .iter()
                 .any(|(id, item)| !game.item_state_valid(*id, item))
-            || game.navigation.iter().any(|(id, navigation)| {
-                !game.actors.contains_key(id) || !navigation.checkpoint_valid(&game.world)
-            })
+            || game
+                .navigation
+                .keys()
+                .any(|id| !game.actors.contains_key(id))
             || !game.world.checkpoint_valid(game.next_door_id)
         {
             return None;
@@ -345,6 +360,45 @@ mod tests {
     use super::*;
     use std::num::NonZeroU64;
     use tor_world::{Location, Position, RegionId};
+
+    #[test]
+    fn shared_navigation_validation_cannot_cross_world_bounds_or_actor_membership() {
+        let world = |width| {
+            let mut world = World::new(vec![], vec![]).unwrap();
+            world
+                .add_region(tor_world::Region {
+                    id: RegionId(1),
+                    name: "validation".into(),
+                    bounds: tor_world::Extent::new(width, 2, 1).unwrap(),
+                })
+                .unwrap();
+            world
+        };
+        let mut game = Game::new(world(8), 42);
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 0, y: 0, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        game.refresh_navigation();
+        assert!(game.known_cells(actor).any(|at| at.position.x == 6));
+        let mut shared = SharedState::default();
+        let valid = game.checkpoint(&mut shared);
+        let mut other_world = game.checkpoint(&mut shared);
+        shared.worlds.push(world(2));
+        other_world.world = shared.worlds.len() - 1;
+        let mut other_actor = game.checkpoint(&mut shared);
+        let index = other_actor.navigation.remove(&actor).unwrap();
+        other_actor.navigation.insert(ActorId(999), index);
+        let mut context = RestoreContext::new(&shared);
+        assert!(context.restore(valid).is_some());
+        assert!(context.restore(other_world).is_none());
+        assert!(context.restore(other_actor).is_none());
+    }
 
     #[test]
     fn repeated_boundaries_do_not_repeat_unchanged_actor_payloads() {
@@ -794,12 +848,93 @@ mod navigation_regions {
     #[serde(deny_unknown_fields)]
     struct Regions {
         places: Vec<RegionMap<Location, crate::PlaceName>>,
-        cells: Vec<RegionMap<Location, bool>>,
+        cells: Vec<CellRegion>,
         edges: Vec<EdgeRegion>,
         instances: Vec<Instance>,
     }
 
     type Edges = RegionMap<(Location, Direction), (Location, u8)>;
+    type Cells = RegionMap<Location, bool>;
+    /// Ordered x/y columns with explicit [z, value] entries. No implicit runs
+    /// or unbounded expansion: each decoded position has an encoded entry.
+    type Columns = Vec<(i32, i32, Vec<[i32; 2]>)>;
+
+    fn columns(entries: impl IntoIterator<Item = (tor_world::Position, i32)>) -> Columns {
+        let mut columns = Columns::new();
+        for (p, value) in entries {
+            match columns.last_mut() {
+                Some((x, y, values)) if (*x, *y) == (p.x, p.y) => values.push([p.z, value]),
+                _ => columns.push((p.x, p.y, vec![[p.z, value]])),
+            }
+        }
+        columns
+    }
+
+    fn expand_columns(columns: Columns) -> Option<Vec<(tor_world::Position, i32)>> {
+        let mut entries = Vec::new();
+        let mut previous = None;
+        for (x, y, values) in columns {
+            if values.is_empty() || previous.is_some_and(|p| p >= (x, y)) {
+                return None;
+            }
+            previous = Some((x, y));
+            let mut last_z = None;
+            for [z, value] in values {
+                if last_z.is_some_and(|last| last >= z) {
+                    return None;
+                }
+                last_z = Some(z);
+                entries.push((tor_world::Position { x, y, z }, value));
+            }
+        }
+        Some(entries)
+    }
+
+    /// Remembered opacity is independent of current terrain. Store the region
+    /// once per shared pool entry and retain each cell's exact stale value.
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CellRegion {
+        region: RegionId,
+        cells: Columns,
+    }
+
+    impl CellRegion {
+        fn encode(map: &Cells) -> Self {
+            Self {
+                region: map
+                    .iter()
+                    .next()
+                    .expect("pooled regions are nonempty")
+                    .0
+                    .region,
+                cells: columns(
+                    map.iter()
+                        .map(|(location, opaque)| (location.position, i32::from(*opaque))),
+                ),
+            }
+        }
+
+        fn decode(self) -> Option<Cells> {
+            if self.cells.is_empty() {
+                return None;
+            }
+            let mut map = Cells::default();
+            for (position, opaque) in expand_columns(self.cells)? {
+                if !(0..=1).contains(&opaque) {
+                    return None;
+                }
+                map.insert(
+                    Location {
+                        region: self.region,
+                        position,
+                    },
+                    opaque == 1,
+                );
+            }
+            Some(map)
+        }
+    }
 
     /// Link directions, in mask bit order.
     const DIRECTIONS: [Direction; 6] = [
@@ -813,14 +948,14 @@ mod navigation_regions {
 
     /// One pooled region of known links. Most links are plain: the ordinary
     /// neighbour in the same region with no rotation, fully determined by the
-    /// start cell and direction. Those are stored as `[x, y, z, mask]` with bit
+    /// start cell and direction. Those use coordinate columns and a mask with bit
     /// `i` for `DIRECTIONS[i]`; only the rest are stored in full. Decoding
     /// accepts exactly one encoding per map.
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct EdgeRegion {
         region: RegionId,
-        plain: Vec<[i32; 4]>,
+        plain: Columns,
         other: Vec<((Location, Direction), (Location, u8))>,
     }
 
@@ -858,10 +993,7 @@ mod navigation_regions {
             }
             Self {
                 region: region.expect("pooled regions are nonempty"),
-                plain: plain
-                    .into_iter()
-                    .map(|(p, mask)| [p.x, p.y, p.z, mask])
-                    .collect(),
+                plain: columns(plain),
                 other,
             }
         }
@@ -869,13 +1001,10 @@ mod navigation_regions {
         fn decode(self) -> Option<Edges> {
             let mut map = Edges::default();
             let mut count = 0usize;
-            let mut previous = None;
-            for [x, y, z, mask] in self.plain {
-                let position = tor_world::Position { x, y, z };
-                if !(1..64).contains(&mask) || previous.is_some_and(|p| p >= position) {
+            for (position, mask) in expand_columns(self.plain)? {
+                if !(1..64).contains(&mask) {
                     return None;
                 }
-                previous = Some(position);
                 let from = Location {
                     region: self.region,
                     position,
@@ -915,16 +1044,18 @@ mod navigation_regions {
         let mut cells = BTreeMap::new();
         let mut edges = BTreeMap::new();
         let mut edge_pool = Vec::new();
+        let mut cell_pool = Vec::new();
         for map in navigation {
             saved.instances.push(Instance {
                 places: map
                     .places
                     .checkpoint_regions(&mut saved.places, &mut places),
-                cells: map.cells.checkpoint_regions(&mut saved.cells, &mut cells),
+                cells: map.cells.checkpoint_regions(&mut cell_pool, &mut cells),
                 edges: map.edges.checkpoint_regions(&mut edge_pool, &mut edges),
             });
         }
         saved.edges = edge_pool.iter().map(EdgeRegion::encode).collect();
+        saved.cells = cell_pool.iter().map(CellRegion::encode).collect();
         saved.serialize(serializer)
     }
 
@@ -932,6 +1063,16 @@ mod navigation_regions {
         deserializer: D,
     ) -> Result<Vec<Navigation>, D::Error> {
         let saved = Regions::deserialize(deserializer)?;
+        let Some(cell_pool) = saved
+            .cells
+            .into_iter()
+            .map(CellRegion::decode)
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Err(serde::de::Error::custom(
+                "invalid checkpoint navigation cells",
+            ));
+        };
         let Some(edge_pool) = saved
             .edges
             .into_iter()
@@ -943,7 +1084,7 @@ mod navigation_regions {
             ));
         };
         if saved.places.iter().any(|map| !map.is_checkpoint_region())
-            || saved.cells.iter().any(|map| !map.is_checkpoint_region())
+            || cell_pool.iter().any(|map| !map.is_checkpoint_region())
             || edge_pool.iter().any(|map| !map.is_checkpoint_region())
         {
             return Err(serde::de::Error::custom(
@@ -955,7 +1096,7 @@ mod navigation_regions {
             .into_iter()
             .map(|instance| {
                 let places = RegionMap::restore_regions(&instance.places, &saved.places);
-                let cells = RegionMap::restore_regions(&instance.cells, &saved.cells);
+                let cells = RegionMap::restore_regions(&instance.cells, &cell_pool);
                 let edges = RegionMap::restore_regions(&instance.edges, &edge_pool);
                 match (cells, edges, places) {
                     (Some(cells), Some(edges), Some(places)) => Ok(Navigation {
@@ -984,6 +1125,70 @@ mod navigation_regions {
         }
 
         #[test]
+        fn remembered_opacity_round_trips_in_compact_cells() {
+            let mut map = Cells::default();
+            map.insert(at(7, -1, 2, 3), false);
+            map.insert(at(7, 4, 5, 6), true);
+            let encoded = CellRegion::encode(&map);
+            assert_eq!(encoded.region, RegionId(7));
+            assert_eq!(
+                encoded.cells,
+                vec![(-1, 2, vec![[3, 0]]), (4, 5, vec![[6, 1]])]
+            );
+            assert_eq!(encoded.decode(), Some(map));
+        }
+
+        #[test]
+        fn coordinate_columns_compact_dense_cells_without_implicit_expansion() {
+            let entries: Vec<_> = (-4..=4)
+                .flat_map(|x| {
+                    (-2..=2).flat_map(move |y| (-1..=8).map(move |z| (Position { x, y, z }, z & 1)))
+                })
+                .collect();
+            let encoded = columns(entries.clone());
+            assert_eq!(encoded.len(), 45);
+            let flat: Vec<_> = entries
+                .iter()
+                .map(|(p, value)| [p.x, p.y, p.z, *value])
+                .collect();
+            assert!(
+                serde_json::to_vec(&encoded).unwrap().len()
+                    < serde_json::to_vec(&flat).unwrap().len()
+            );
+            assert_eq!(expand_columns(encoded), Some(entries));
+            for malformed in [
+                vec![(0, 0, vec![])],
+                vec![(0, 0, vec![[0, 0]]), (0, 0, vec![[1, 1]])],
+                vec![(0, 1, vec![[0, 0]]), (0, 0, vec![[0, 0]])],
+                vec![(0, 0, vec![[1, 0], [0, 0]])],
+                vec![(0, 0, vec![[0, 0], [0, 1]])],
+            ] {
+                assert!(expand_columns(malformed).is_none());
+            }
+        }
+
+        #[test]
+        fn malformed_or_noncanonical_remembered_cells_are_rejected() {
+            for rows in [
+                vec![],
+                vec![[0, 0, 0, -1]],
+                vec![[0, 0, 0, 2]],
+                vec![[0, 0, 0, 0], [0, 0, 0, 1]],
+                vec![[1, 0, 0, 0], [0, 0, 0, 1]],
+            ] {
+                assert!(CellRegion {
+                    region: RegionId(1),
+                    cells: columns(
+                        rows.into_iter()
+                            .map(|[x, y, z, value]| (Position { x, y, z }, value))
+                    )
+                }
+                .decode()
+                .is_none());
+            }
+        }
+
+        #[test]
         fn links_round_trip_with_plain_masks_and_unusual_links_in_full() {
             let mut map = Edges::default();
             map.insert((at(1, 0, 0, 0), Direction::East), (at(1, 1, 0, 0), 0));
@@ -996,7 +1201,7 @@ mod navigation_regions {
             let encoded = EdgeRegion::encode(&map);
             assert_eq!(
                 encoded.plain,
-                vec![[0, 0, 0, 0b10 | 0b100], [0, 0, 1, 0b10_0000]]
+                vec![(0, 0, vec![[0, 0b10 | 0b100], [1, 0b10_0000]])]
             );
             assert_eq!(encoded.other.len(), 3);
             assert_eq!(encoded.decode(), Some(map));
@@ -1008,7 +1213,11 @@ mod navigation_regions {
             let decode = |plain: Vec<[i32; 4]>, other| {
                 EdgeRegion {
                     region: RegionId(1),
-                    plain,
+                    plain: columns(
+                        plain
+                            .into_iter()
+                            .map(|[x, y, z, value]| (Position { x, y, z }, value)),
+                    ),
                     other,
                 }
                 .decode()

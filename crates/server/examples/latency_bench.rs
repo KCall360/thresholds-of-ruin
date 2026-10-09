@@ -619,7 +619,7 @@ fn main() {
             let flush_ms = start.elapsed().as_secs_f64() * 1000.;
             let status = runner.engine.save_status();
             let (checkpoint_json_bytes, encoding_time) =
-                runner.engine.profile_checkpoint_encoding().unwrap();
+                runner.engine.profile_checkpoint_json_encoding().unwrap();
             let bytes = std::fs::metadata(&path).unwrap().len();
             // Release the save lock before exercising the ordinary load path.
             let old = std::mem::replace(

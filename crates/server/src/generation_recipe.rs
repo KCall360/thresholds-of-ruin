@@ -35,10 +35,19 @@ pub struct Stage {
 pub enum Operation {
     StoneFill,
     GridPartition,
-    Rooms { width: [u32; 2], height: [u32; 2] },
-    ConnectedGraph { extra: [u32; 2] },
+    Rooms {
+        width: [u32; 2],
+        height: [u32; 2],
+    },
+    ConnectedGraph {
+        extra: [u32; 2],
+    },
     Corridors,
     Stairs,
+    RoomLighting {
+        darkness_roll: u32,
+        darkness_start: u32,
+    },
 }
 
 fn fail(message: impl AsRef<str>) -> Failure {
@@ -46,8 +55,12 @@ fn fail(message: impl AsRef<str>) -> Failure {
 }
 
 pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
-    if recipe.version != 1 || recipe.stages.len() != 6 {
-        return Err(fail("Recipe version 1 requires six ordered stages"));
+    if !((recipe.version == 1 && recipe.stages.len() == 6)
+        || (recipe.version == 2 && recipe.stages.len() == 7))
+    {
+        return Err(fail(
+            "Recipe requires six ordered stages in version 1, seven in version 2",
+        ));
     }
     let mut names = BTreeSet::new();
     for (position, stage) in recipe.stages.iter().enumerate() {
@@ -67,6 +80,9 @@ pub(crate) fn check(recipe: &Recipe) -> Result<(), Failure> {
             | (Operation::GridPartition, 1)
             | (Operation::Corridors, 4)
             | (Operation::Stairs, 5) => true,
+            (Operation::RoomLighting { darkness_roll, .. }, 6) => {
+                (1..=10_000).contains(darkness_roll)
+            }
             (Operation::Rooms { width, height }, 2) => {
                 width[0] >= 3
                     && width[0] <= width[1]
@@ -106,7 +122,7 @@ fn stream(
     seed: u64,
     identity: &str,
     group: &GenerationGroup,
-    recipe: &Recipe,
+    _recipe: &Recipe,
     stage: &Stage,
     key: &str,
 ) -> Result<Rng, Failure> {
@@ -115,7 +131,8 @@ fn stream(
         seed,
         identity,
         group.depth,
-        recipe.version,
+        // Geometry stages retain their version-1 stream when lighting is appended.
+        1u32,
         stage,
         key,
     ))
@@ -387,6 +404,49 @@ pub fn materialize(
             }
         }
         run.stairs(def, &room_cells[slot])?;
+        if let Some(stage) = recipe.stages.get(6) {
+            let mut rng = stream(seed, identity, group, recipe, stage, &format!("room/{id}"))?;
+            def.lit = false;
+            def.lighting.clear();
+            let Operation::RoomLighting {
+                darkness_roll,
+                darkness_start,
+            } = stage.operation
+            else {
+                unreachable!()
+            };
+            if (rng.range(0, darkness_roll as i32 - 1) as u32)
+                >= group.depth.saturating_sub(darkness_start)
+            {
+                let mut illuminated = BTreeSet::new();
+                for &(x, y) in &room_cells[slot] {
+                    for z in 0..2 {
+                        illuminated.insert([x, y, z]);
+                        for [dx, dy, dz] in [
+                            [-1, 0, 0],
+                            [1, 0, 0],
+                            [0, -1, 0],
+                            [0, 1, 0],
+                            [0, 0, -1],
+                            [0, 0, 1],
+                        ] {
+                            let at = [x + dx, y + dy, z + dz];
+                            if at[2] < 0
+                                || at[2] >= 2
+                                || !open.contains(&(at[0] + offset.0, at[1] + offset.1))
+                            {
+                                illuminated.insert(at);
+                            }
+                        }
+                    }
+                }
+                def.lighting.extend(
+                    illuminated
+                        .into_iter()
+                        .map(|at| crate::scenario_package::CellLight { at, lit: true }),
+                );
+            }
+        }
         let walls: BTreeSet<_> = def.walls.iter().copied().collect();
         for name in def.anchors.keys().filter(|name| {
             !def.generate
@@ -518,6 +578,43 @@ mod tests {
     }
 
     #[test]
+    fn lighting_is_depth_dependent_deterministic_and_geometry_independent() {
+        let (mut group, mut recipe, defs) = fixture();
+        let baseline = materialize("floor", &group, &recipe, defs.clone(), 42).unwrap();
+        recipe.version = 2;
+        recipe.stages.push(Stage {
+            id: "lighting".into(),
+            version: 1,
+            operation: Operation::RoomLighting {
+                darkness_roll: 10,
+                darkness_start: 1,
+            },
+        });
+        let first = materialize("floor", &group, &recipe, defs.clone(), 42).unwrap();
+        let again = materialize("floor", &group, &recipe, defs.clone(), 42).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&first).unwrap(),
+            serde_json::to_vec(&again).unwrap()
+        );
+        for id in group.members {
+            assert_eq!(first[&id].walls, baseline[&id].walls);
+            assert_eq!(first[&id].anchors, baseline[&id].anchors);
+            assert!(!first[&id].lit);
+            assert!(!first[&id].lighting.is_empty());
+        }
+        group.depth = 11;
+        assert!(materialize("floor", &group, &recipe, defs.clone(), 42)
+            .unwrap()
+            .values()
+            .all(|d| d.lighting.is_empty()));
+        group.depth = u32::MAX;
+        assert!(materialize("floor", &group, &recipe, defs, 42)
+            .unwrap()
+            .values()
+            .all(|d| d.lighting.is_empty()));
+    }
+
+    #[test]
     fn stair_positions_are_isolated_from_graph_and_corridor_streams() {
         let (group, mut recipe, mut defs) = fixture();
         defs[0].generate = Some(toml::from_str("generator='group'\nversion=1\ngroup='floor-1'\nrooms=[1,1]\nstair_anchors=['up','down']\n").unwrap());
@@ -527,6 +624,73 @@ mod tests {
         let changed = materialize("floor-1", &group, &recipe, defs, 42).unwrap();
         assert_eq!(first[&1].anchors, changed[&1].anchors);
         assert_ne!(first[&1].anchors["up"], first[&1].anchors["down"]);
+    }
+
+    #[test]
+    fn room_rolls_light_whole_volumes_and_surfaces_but_leave_corridors_dark() {
+        let (mut group, mut recipe, defs) = fixture();
+        group.depth = 6;
+        recipe.version = 2;
+        recipe.stages.push(Stage {
+            id: "lighting".into(),
+            version: 1,
+            operation: Operation::RoomLighting {
+                darkness_roll: 10,
+                darkness_start: 1,
+            },
+        });
+        let mut lit_rooms = 0;
+        let mut dark_rooms = 0;
+        let mut dark_corridor_cells = 0;
+        for seed in 0..20 {
+            let run = RecipeRun {
+                identity: "floor",
+                group: &group,
+                recipe: &recipe,
+                seed,
+            };
+            let generated = materialize("floor", &group, &recipe, defs.clone(), seed).unwrap();
+            for def in &defs {
+                let room = run.room(def).unwrap();
+                let lit = run.rng(6, &format!("room/{}", def.id)).unwrap().range(0, 9) >= 5;
+                if lit {
+                    lit_rooms += 1;
+                } else {
+                    dark_rooms += 1;
+                }
+                let generated = &generated[&def.id];
+                assert!(!generated.lit);
+                let light: BTreeSet<_> = generated
+                    .lighting
+                    .iter()
+                    .map(|c| {
+                        assert!(c.lit);
+                        c.at
+                    })
+                    .collect();
+                let walls: BTreeSet<_> = generated.walls.iter().copied().collect();
+                for &(x, y) in &room.cells {
+                    for z in 0..2 {
+                        assert_eq!(light.contains(&[x, y, z]), lit);
+                    }
+                    assert_eq!(light.contains(&[x, y, -1]), lit);
+                    assert_eq!(light.contains(&[x, y, 2]), lit);
+                }
+                for y in 0..def.size[1] {
+                    for x in 0..def.size[0] {
+                        if !walls.contains(&[x, y, 0]) && !room.cells.contains(&(x, y)) {
+                            assert!(!light.contains(&[x, y, 0]));
+                            dark_corridor_cells += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            lit_rooms > 60 && dark_rooms > 60,
+            "independent 50% rolls across 180 rooms"
+        );
+        assert!(dark_corridor_cells > 0);
     }
 
     #[test]

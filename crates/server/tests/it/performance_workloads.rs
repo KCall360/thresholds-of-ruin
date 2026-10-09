@@ -355,11 +355,12 @@ fn explored_saved_fixture_checkpoint_matches_counting_diagnostic_and_reloads() {
         let before = engine.state(ActorId(1)).unwrap();
         let counts = engine.profile_counts();
         let measured = engine.profile_checkpoint_encoding().unwrap().0;
+        let logical = engine.profile_checkpoint_json_encoding().unwrap().0;
         assert_eq!(engine.state(ActorId(1)).unwrap(), before);
         assert_eq!(engine.profile_counts(), counts);
         assert!(
-            measured < 16 * 1024 * 1024,
-            "explored checkpoint must fit with headroom: {regions} regions, {measured} bytes"
+            logical < 16 * 1024 * 1024,
+            "explored checkpoint must fit with headroom: {regions} regions, {logical} logical bytes"
         );
         engine.flush().unwrap();
         assert_eq!(engine.save_status().checkpoint_sequence, counts.0 as u64);

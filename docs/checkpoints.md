@@ -125,9 +125,17 @@ contracts in the [refactor plan](refactoring.md#future-scenario-extension-contra
 Loading checks the format, SQLite integrity of the journal, history and
 checkpoint tables, contiguous frame sequence, row
 placement on the correct side of the checkpoint boundary, checksums, save identity,
-checkpoint record count, current ruleset and snapshot structure. Checkpoint JSON
-is capped at 64 MiB both during writing and before allocation on reading, with
-CRC32C covering the payload including save identity and sequence. Unknown/missing
+checkpoint record count, current ruleset and snapshot structure. The checkpoint
+storage payload has an eight-byte `TORC | version:u16=1 | reserved:u16=0`
+header, one zlib stream of JSON, and a four-byte little-endian decoded length.
+JSON is compressed into the bounded writer through a fixed 64 KiB input buffer;
+no second JSON payload is allocated. Batching avoids a compression call for each
+small JSON token, and draining the buffer propagates write errors. Both stored bytes and decoded JSON retain the 64 MiB cap. Loading
+validates the header and length before decoding, limits expansion to the declared
+size, and rejects truncation, trailing bytes and extra streams. CRC32C covers the
+complete storage envelope, including save identity and sequence in its JSON.
+The checkpoint's logical snapshot schema remains independent of this envelope.
+Unknown/missing
 fields and duplicate keys are rejected. A corrupt selected checkpoint fails
 closed; silently falling back could discard a saved prefix.
 
