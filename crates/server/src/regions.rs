@@ -59,6 +59,11 @@ pub(crate) struct TransitionWork {
 /// depend on worker timing; fallback timings exclude work done by that worker.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct RegionAcquisitionProfile {
+    pub groups_committed: usize,
+    pub prepared_groups: usize,
+    pub demand_groups: usize,
+    pub group_wait: Duration,
+    pub group_build: Duration,
     pub fallback_reads: usize,
     pub fallback_builds: usize,
     pub prepared_reads: usize,
@@ -69,6 +74,11 @@ pub struct RegionAcquisitionProfile {
 
 impl RegionAcquisitionProfile {
     pub(crate) fn add(&mut self, other: Self) {
+        self.groups_committed += other.groups_committed;
+        self.prepared_groups += other.prepared_groups;
+        self.demand_groups += other.demand_groups;
+        self.group_wait += other.group_wait;
+        self.group_build += other.group_build;
         self.fallback_reads += other.fallback_reads;
         self.fallback_builds += other.fallback_builds;
         self.prepared_reads += other.prepared_reads;
@@ -112,6 +122,7 @@ pub(crate) struct Regions {
     unsaved: BTreeSet<u64>,
     /// Why the last build or declaration failed, instead of a generic failure.
     failure: Option<Failure>,
+    group_needed: Option<u64>,
 }
 
 /// What the preloader was asked for, and the deterministic work of choosing it.
@@ -144,6 +155,7 @@ impl Regions {
             saved: BTreeSet::new(),
             unsaved: BTreeSet::new(),
             failure: None,
+            group_needed: None,
         })
     }
 
@@ -240,6 +252,15 @@ impl Regions {
         work.regions_expanded = plan.expanded_regions;
         work.links_examined = plan.examined_links;
         for region in plan.activate {
+            if let Some(owner) = self.index.group_owners.get(&region.0) {
+                if matches!(game.region_state(region), None | Some(RegionState::Unbuilt)) {
+                    let job = Job::Group(RegionId(*owner));
+                    if !work.jobs.contains(&job) {
+                        work.jobs.push(job);
+                    }
+                    continue;
+                }
+            }
             match game.region_state(region) {
                 Some(RegionState::Unbuilt) => work.jobs.push(Job::Build(region)),
                 Some(RegionState::Detached) => {
@@ -354,17 +375,102 @@ impl Regions {
         // Something changes: keep the game as it was, so callers can tell
         // which observers' views changed.
         work.before = Some(game.clone());
+        let mut next = game.clone();
+        let mut staged = made.clone();
         let reads = self.reads;
         let prepared = self.prepared;
         self.acquisition = profile.then(RegionAcquisitionProfile::default);
-        let mut store = Pending {
-            regions: self,
-            made,
+        let mut generated = Vec::new();
+        let mut group_files = BTreeSet::new();
+        self.group_needed = None;
+        let mut groups: BTreeSet<_> = settled
+            .loaded
+            .iter()
+            .filter(|region| {
+                matches!(
+                    next.region_state(**region),
+                    None | Some(RegionState::Unbuilt)
+                )
+            })
+            .filter_map(|region| self.index.group_owners.get(&region.0).copied())
+            .collect();
+        let result = loop {
+            for owner in std::mem::take(&mut groups) {
+                let started = self.acquisition.as_ref().map(|_| Instant::now());
+                let prepared = match &self.preload {
+                    Some(preload) => preload.demand_group(RegionId(owner))?,
+                    None => None,
+                };
+                if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started) {
+                    acquisition.group_wait += started.elapsed();
+                }
+                let started = self.acquisition.as_ref().map(|_| Instant::now());
+                let batch = match prepared {
+                    Some(batch) => {
+                        self.prepared += 9;
+                        if let Some(acquisition) = &mut self.acquisition {
+                            acquisition.prepared_groups += 1;
+                        }
+                        batch
+                    }
+                    None => {
+                        let batch =
+                            self.package
+                                .build_group(self.seed, &self.index, RegionId(owner))?;
+                        if let (Some(acquisition), Some(started)) = (&mut self.acquisition, started)
+                        {
+                            acquisition.demand_groups += 1;
+                            acquisition.group_build += started.elapsed();
+                        }
+                        batch
+                    }
+                };
+                generated.extend(
+                    batch
+                        .records
+                        .iter()
+                        .map(|(definition, _)| definition.region.id),
+                );
+                group_files.extend(batch.files);
+                let mut store = Pending {
+                    regions: self,
+                    made: &mut staged,
+                };
+                if next
+                    .register_generated_regions(batch.records, &mut store)
+                    .is_err()
+                {
+                    return Err(storage_failure());
+                }
+            }
+            let mut store = Pending {
+                regions: self,
+                made: &mut staged,
+            };
+            let result = next.transition_regions_counted(&settled, &mut store);
+            if result.is_err() {
+                if let Some(owner) = self.group_needed.take() {
+                    groups.insert(owner);
+                    continue;
+                }
+            }
+            break result;
         };
-        let result = game.transition_regions_counted(&settled, &mut store);
         work.acquisition = self.acquisition.take().unwrap_or_default();
         let failure = self.failure.take();
-        let (_, report, _) = result.map_err(|_| failure.unwrap_or_else(storage_failure))?;
+        let (_, mut report, _) = match result {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(failure.unwrap_or_else(storage_failure));
+            }
+        };
+        *game = next;
+        *made = staged;
+        self.need_files(group_files);
+        work.acquisition.groups_committed = generated.len() / 9;
+        report.built.extend(generated);
+        report.built.sort();
+        report.built.dedup();
         work.report = report;
         work.records_read = self.reads - reads;
         work.prepared = self.prepared - prepared;
@@ -410,6 +516,21 @@ impl Regions {
         });
     }
 
+    /// Journal-only commits can make ordinary detached records durable too.
+    pub(crate) fn appended(&mut self, on_disk: BTreeSet<RecordId>) {
+        self.durable.extend(on_disk);
+        let mut excess = self.resident.len().saturating_sub(CACHED_RECORDS);
+        let durable = &self.durable;
+        self.resident.retain(|id, _| {
+            if excess > 0 && durable.contains(id) {
+                excess -= 1;
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     /// Drop every record that's on disk from memory, as eviction would with
     /// enough records.
     #[cfg(test)]
@@ -420,6 +541,13 @@ impl Regions {
 
     pub(crate) fn resident_count(&self) -> usize {
         self.resident.len()
+    }
+
+    pub(crate) fn encoded_resident(&self) -> Result<Vec<(u64, Vec<u8>)>, Failure> {
+        self.resident
+            .iter()
+            .map(|(id, record)| Ok((id.0, crate::storage::encode_region(id.0, record)?)))
+            .collect()
     }
 }
 
@@ -449,6 +577,12 @@ impl RecordStore for Regions {
         Some(record)
     }
     fn build(&mut self, region: RegionId) -> Option<RegionRecord> {
+        // A pin discovered while attaching can demand another floor. Abort
+        // the tentative transition so its entire group publishes before retry.
+        if let Some(owner) = self.index.group_owners.get(&region.0) {
+            self.group_needed = Some(*owner);
+            return None;
+        }
         let (record, files) = match self
             .preload
             .as_ref()

@@ -1289,7 +1289,13 @@ impl Engine {
             || {
                 let engine = Self::memory(scenario)?;
                 let sources = engine.unsaved_sources()?;
-                Ok((engine.archive, sources))
+                let records = engine
+                    .regions
+                    .as_ref()
+                    .map(|regions| regions.encoded_resident())
+                    .transpose()?
+                    .unwrap_or_default();
+                Ok((engine.archive, sources, records))
             },
             policy,
             lock.clone(),
@@ -1960,9 +1966,15 @@ impl Engine {
             return Err(storage_failure());
         }
         let sources = self.unsaved_sources()?;
+        let records = self
+            .regions
+            .as_ref()
+            .map(|regions| regions.encoded_resident())
+            .transpose()?
+            .unwrap_or_default();
         let (store, _, _, saved) = crate::storage::Store::open(
             &path,
-            || Ok((self.archive.clone(), sources)),
+            || Ok((self.archive.clone(), sources, records)),
             policy,
             lock.clone(),
         )?;
@@ -2145,6 +2157,7 @@ impl Engine {
             if let Some((on_disk, watermark)) = store.take_written() {
                 regions.written(on_disk, watermark);
             }
+            regions.appended(store.take_appended());
         }
         let started = Instant::now();
         let candidate = Candidate::capture(self);
@@ -2719,7 +2732,7 @@ impl Engine {
                 None => Vec::new(),
             };
             copied = sources.iter().map(|(region, _)| *region).collect();
-            store.enqueue(record, sources, || {
+            store.enqueue_regions(record, sources, &candidate.made, || {
                 let capture_started = Instant::now();
                 let mut checkpoint = Checkpoint::capture_candidate(
                     candidate,

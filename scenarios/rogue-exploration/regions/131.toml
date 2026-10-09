@@ -1,0 +1,40 @@
+id = 131
+name = "Depth 15, slot 5"
+size = [26, 7, 2]
+chamber = true
+anchors = { west = [0, 0, 0], east = [25, 0, 0], north = [0, 0, 0], south = [0, 6, 0] }
+[[portals]]
+kind = "boundary"
+at = [0, 0, 0]
+direction = "west"
+to = "130/east"
+width = 7
+height = 2
+[[portals]]
+kind = "boundary"
+at = [25, 0, 0]
+direction = "east"
+to = "132/west"
+width = 7
+height = 2
+[[portals]]
+kind = "boundary"
+at = [0, 0, 0]
+direction = "north"
+to = "128/south"
+width = 26
+height = 2
+[[portals]]
+kind = "boundary"
+at = [0, 6, 0]
+direction = "south"
+to = "134/north"
+width = 26
+height = 2
+[generate]
+generator = "group"
+version = 1
+group = "floor-15"
+rooms = [1, 1]
+boundary_anchors = ["west", "east", "north", "south"]
+stair_anchors = []

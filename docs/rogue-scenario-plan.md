@@ -84,8 +84,9 @@ Shared prerequisites:
    persistence and supported-client traversal. Use ordinary movement timing;
    reject blocked arrivals without consuming time. Keep stair transport separate
    from falling; any scenario-specific backtracking gates need their own design.
-5. Author and validate the ordinary exploration scenario. Initial depth count,
-   dimensions and stair locations are implementation choices still to resolve.
+5. Author and validate the ordinary exploration scenario. The accepted foundation
+   uses 26 floors, each with a 3×3 grid of 26×7×2 regions; northwest owns the
+   upward/entry anchor and southeast owns the downward anchor.
    This stage has no Amulet victory, hunger or combat requirement.
 
 Acceptance: same seed and pinned recipe produce the same floor; stage streams
@@ -94,6 +95,11 @@ the next floor before descent; stair round trips return to matching anchors;
 revisits and save/resume retain generated state. Text/adventure, ASCII and
 headless clients can explore and traverse without receiving undisclosed floors.
 Measure generation/loading latency and persistence cost at representative scale.
+
+The isolated implementation follows [generation recipes and groups](generation-recipes.md).
+Group stairs retain named destinations until the destination floor is published;
+preparing one floor does not partially generate another. Verification and
+performance acceptance remain required before this stage is declared complete.
 
 ## Stage B — Complete layout and perception features incrementally
 

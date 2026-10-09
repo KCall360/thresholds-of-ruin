@@ -113,46 +113,65 @@ fn routes_cross_rotated_joins_and_preserve_view_directions() {
 
 #[test]
 fn explicit_stairs_are_known_connections_and_self_loops_terminate() {
-    use tor_world::{Extent, Passage, Region};
-    let mut game = Game::two_room(0);
-    game.add_region(Region {
-        id: RegionId(3),
-        name: "Upstairs".into(),
-        bounds: Extent::new(3, 3, 1).unwrap(),
-    })
-    .unwrap();
-    let landing = Location {
-        region: RegionId(3),
-        position: Position { x: 1, y: 1, z: 0 },
-    };
-    game.connect(
-        Passage {
-            from: cell(1, 1),
-            direction: Direction::Up,
-            to: landing,
-        },
-        0,
-    )
-    .unwrap();
-    game.connect(
-        Passage {
-            from: cell(2, 0),
-            direction: Direction::North,
-            to: cell(2, 0),
-        },
-        2,
-    )
-    .unwrap();
-    let actor = game
-        .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
+    for named in [false, true] {
+        use tor_world::{Extent, Passage, Region};
+        let mut game = Game::two_room(0);
+        game.add_region(Region {
+            id: RegionId(3),
+            name: "Upstairs".into(),
+            bounds: Extent::new(3, 3, 1).unwrap(),
+        })
         .unwrap();
-    game.refresh_navigation();
-    assert_eq!(
-        game.travel_route(actor, landing).unwrap()[0].direction,
-        Direction::Up
-    );
-    assert!(!game.travel_route(actor, cell(2, 0)).unwrap().is_empty());
-    assert!(game.travel_route(actor, cell(100, 0)).is_err());
+        let landing = Location {
+            region: RegionId(3),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        if named {
+            game.register_named_anchors(
+                RegionId(3),
+                std::collections::BTreeMap::from([("landing".into(), landing.position)]),
+            )
+            .unwrap();
+            game.connect_named_stair(
+                cell(1, 1),
+                Direction::Up,
+                tor_world::NamedAnchor {
+                    region: RegionId(3),
+                    name: "landing".into(),
+                },
+            )
+            .unwrap();
+        } else {
+            game.connect(
+                Passage {
+                    from: cell(1, 1),
+                    direction: Direction::Up,
+                    to: landing,
+                },
+                0,
+            )
+            .unwrap();
+        }
+        game.connect(
+            Passage {
+                from: cell(2, 0),
+                direction: Direction::North,
+                to: cell(2, 0),
+            },
+            2,
+        )
+        .unwrap();
+        let actor = game
+            .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
+            .unwrap();
+        game.refresh_navigation();
+        assert_eq!(
+            game.travel_route(actor, landing).unwrap()[0].direction,
+            Direction::Up
+        );
+        assert!(!game.travel_route(actor, cell(2, 0)).unwrap().is_empty());
+        assert!(game.travel_route(actor, cell(100, 0)).is_err());
+    }
 }
 
 #[test]

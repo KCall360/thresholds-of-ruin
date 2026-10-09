@@ -74,6 +74,10 @@ fn label(s: &str) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub generation_recipes: BTreeMap<String, crate::generation_recipe::Recipe>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub generation_groups: BTreeMap<String, crate::generation_recipe::GenerationGroup>,
     /// Stable connection identities, independent of endpoint coordinates.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub stair_pairs: BTreeMap<String, StairPair>,
@@ -368,6 +372,8 @@ pub struct RegionIndex {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct IndexedRegion {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_anchors: Vec<String>,
     pub id: u64,
     /// The region's file, relative to the package, and its SHA-256.
     pub file: String,
@@ -408,6 +414,10 @@ pub struct IndexedItem {
 impl IndexedRegion {
     fn of(def: &RegionDef, file: String, hash: String) -> Self {
         Self {
+            boundary_anchors: def
+                .generate
+                .as_ref()
+                .map_or_else(Vec::new, |g| g.boundary_anchors.clone()),
             id: def.id,
             file,
             hash,
@@ -785,6 +795,245 @@ fn model_hash(manifest: &Manifest, index: &RegionIndex) -> Result<String, Failur
 }
 
 impl Package {
+    fn check_generation_groups(&self) -> Result<(), Failure> {
+        for (id, recipe) in &self.manifest.generation_recipes {
+            require(
+                label(id) && !id.contains('/'),
+                "Invalid generation recipe identity",
+            )?;
+            crate::generation_recipe::check(recipe)?;
+        }
+        let mut members = BTreeSet::new();
+        for (id, group) in &self.manifest.generation_groups {
+            require(
+                label(id)
+                    && !id.contains('/')
+                    && group.depth > 0
+                    && self.manifest.generation_recipes.contains_key(&group.recipe),
+                "Invalid generation group metadata",
+            )?;
+            let mut size = None;
+            for region in group.members {
+                require(members.insert(region), "Duplicate generation group member")?;
+                let metadata = self
+                    .index
+                    .region(region)
+                    .ok_or_else(|| fail("Missing generation group member"))?;
+                require(
+                    metadata.generated
+                        && metadata.actors.is_empty()
+                        && metadata.items.is_empty()
+                        && metadata.doors.is_empty(),
+                    "Recipe members must be generated and declare no inhabitants",
+                )?;
+                if let Some(expected) = size {
+                    require(
+                        metadata.size == expected,
+                        "Unequal generation group member bounds",
+                    )?;
+                }
+                size = Some(metadata.size);
+            }
+        }
+        Ok(())
+    }
+
+    fn boundary_anchor(&self, name: &str) -> bool {
+        name.split_once('/').is_some_and(|(id, name)| {
+            id.parse::<u64>()
+                .ok()
+                .and_then(|id| self.index.region(id))
+                .is_some_and(|r| r.boundary_anchors.iter().any(|b| b == name))
+        })
+    }
+
+    fn group_definitions(
+        &self,
+        identity: &str,
+        seed: u64,
+    ) -> Result<BTreeMap<u64, RegionDef>, Failure> {
+        let group = self
+            .manifest
+            .generation_groups
+            .get(identity)
+            .ok_or_else(|| fail("Unknown generation group"))?;
+        let recipe = self
+            .manifest
+            .generation_recipes
+            .get(&group.recipe)
+            .ok_or_else(|| fail("Unknown generation recipe"))?;
+        let mut definitions = Vec::new();
+        for region in group.members {
+            let definition = self.region_def(region)?;
+            let generate = definition
+                .generate
+                .as_ref()
+                .ok_or_else(|| fail("Group member has no generator"))?;
+            require(
+                generate.group.as_deref() == Some(identity),
+                "Group member names a different generation group",
+            )?;
+            crate::generator::check(&definition, generate)?;
+            definitions.push((*definition).clone());
+        }
+        for (slot, definition) in definitions.iter().enumerate() {
+            let [width, height, clearance] = definition.size;
+            require(
+                clearance == 2 && definition.chamber,
+                "Grid members require a two-cell chamber interior",
+            )?;
+            let mut expected = BTreeMap::new();
+            if slot % 3 > 0 {
+                expected.insert(
+                    "west",
+                    (
+                        group.members[slot - 1],
+                        [0, 0, 0],
+                        [width - 1, 0, 0],
+                        height,
+                    ),
+                );
+            }
+            if slot % 3 < 2 {
+                expected.insert(
+                    "east",
+                    (
+                        group.members[slot + 1],
+                        [width - 1, 0, 0],
+                        [0, 0, 0],
+                        height,
+                    ),
+                );
+            }
+            if slot / 3 > 0 {
+                expected.insert(
+                    "north",
+                    (
+                        group.members[slot - 3],
+                        [0, 0, 0],
+                        [0, height - 1, 0],
+                        width,
+                    ),
+                );
+            }
+            if slot / 3 < 2 {
+                expected.insert(
+                    "south",
+                    (
+                        group.members[slot + 3],
+                        [0, height - 1, 0],
+                        [0, 0, 0],
+                        width,
+                    ),
+                );
+            }
+            require(
+                definition.portals.len() == expected.len(),
+                "Grid faces need exactly their neighboring boundary joins",
+            )?;
+            for portal in &definition.portals {
+                let (neighbor, from, to, span) = expected
+                    .remove(portal.direction.as_str())
+                    .ok_or_else(|| fail("Unexpected or duplicate grid boundary direction"))?;
+                let (id, name) = portal
+                    .to
+                    .split_once('/')
+                    .ok_or_else(|| fail("Invalid grid boundary destination"))?;
+                let destination = definitions
+                    .iter()
+                    .find(|d| d.id == neighbor)
+                    .expect("group neighbor");
+                require(
+                    id == neighbor.to_string()
+                        && destination.anchors.get(name) == Some(&to)
+                        && destination
+                            .generate
+                            .as_ref()
+                            .is_some_and(|g| g.boundary_anchors.iter().any(|a| a == name))
+                        && portal.kind.as_deref() == Some("boundary")
+                        && portal.at == from
+                        && portal.width == span as u16
+                        && portal.height == clearance as u16
+                        && portal.turns == 0
+                        && portal.rotation.is_none_or(|rotation| rotation == 0),
+                    "Grid boundary must cover the complete reciprocal face with identity mapping",
+                )?;
+            }
+        }
+        crate::generation_recipe::materialize(identity, group, recipe, definitions, seed)
+    }
+
+    pub(crate) fn build_group(
+        &self,
+        seed: u64,
+        index: &PackageIndex,
+        owner: RegionId,
+    ) -> Result<PreparedGroup, Failure> {
+        let identity = index
+            .groups
+            .get(&owner.0)
+            .ok_or_else(|| fail("Missing generation group owner"))?;
+        let group = &self.manifest.generation_groups[identity];
+        let definitions = self.group_definitions(identity, seed)?;
+        let shell: BTreeMap<u64, Arc<RegionDef>> = definitions
+            .into_iter()
+            .map(|(id, def)| (id, Arc::new(def)))
+            .collect();
+        let destinations: BTreeSet<_> = group
+            .members
+            .iter()
+            .flat_map(|id| {
+                index
+                    .stairs
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .map(|stair| stair.destination)
+            })
+            .collect();
+        let mut files: BTreeSet<_> = group.members.into_iter().collect();
+        let members: Vec<_> = group.members.iter().map(|id| &*shell[id]).collect();
+        let anchors = resolved_anchors(&members);
+        let mut game = Game::new(
+            World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
+            seed,
+        );
+        self.add_geometry(&mut game, &members)?;
+        for destination in destinations {
+            if !shell.contains_key(&destination) {
+                let declaration = self.unbuilt_region(index, destination)?;
+                if self.declaring_reads_file(destination) {
+                    files.insert(destination);
+                }
+                game.add_unbuilt_region(
+                    declaration.region,
+                    declaration.chamber,
+                    declaration.identities,
+                )
+                .map_err(|e| fail(format!("Group destination: {e:?}")))?;
+            }
+        }
+        for r in &members {
+            self.check_region(r)?;
+            self.add_structure(&mut game, r, &anchors)?;
+            self.add_stairs(&mut game, r.id, index, &anchors)?;
+        }
+        self.add_entities(&mut game, seed, index, &members)?;
+        let records = group
+            .members
+            .iter()
+            .map(|id| {
+                let declaration = self.unbuilt_region(index, *id)?;
+                let record = game
+                    .clone()
+                    .into_region_record(RegionId(*id))
+                    .map_err(|e| fail(format!("Group {identity}: {e:?}")))?;
+                Ok((declaration, record))
+            })
+            .collect::<Result<Vec<_>, Failure>>()?;
+        Ok(PreparedGroup { records, files })
+    }
+
     /// Restore only stored metadata. Storage attaches the bounded index and lazy
     /// region sources separately before validating or exposing the scenario.
     pub(crate) fn from_saved_metadata(
@@ -1133,6 +1382,8 @@ fn corridor(
             hall.actors.clear();
             hall.items.clear();
             hall.generate = Some(crate::generator::Generate {
+                group: None,
+                boundary_anchors: Vec::new(),
                 stair_anchors: vec![],
                 generator: crate::generator::ROOMS.into(),
                 version: crate::generator::ROOMS_VERSION,
@@ -1399,6 +1650,7 @@ impl Package {
     }
     pub fn check(&self) -> Result<(), Failure> {
         self.check_identity()?;
+        self.check_generation_groups()?;
         require(
             (1..=MAX_REGIONS).contains(&self.index.regions.len()),
             format!("Expected 1..{MAX_REGIONS} authored regions"),
@@ -1888,12 +2140,22 @@ impl Package {
             World::new(vec![], vec![]).map_err(|e| fail(format!("{e:?}")))?,
             seed,
         );
-        let defs = self
-            .index
-            .regions
-            .iter()
-            .map(|entry| index.region(self, entry.id))
-            .collect::<Result<Vec<_>, _>>()?;
+        // Full authoring validation materializes each floor once. Drain this
+        // temporary batch into definitions; it is never a terrain baseline.
+        let mut generated = BTreeMap::new();
+        let mut defs = Vec::new();
+        for entry in &self.index.regions {
+            if let Some(owner) = index.group_owners.get(&entry.id) {
+                if !generated.contains_key(&entry.id) {
+                    generated.extend(self.group_definitions(&index.groups[owner], seed)?);
+                }
+                defs.push(Arc::new(
+                    generated.remove(&entry.id).expect("validated group member"),
+                ));
+            } else {
+                defs.push(index.region(self, entry.id)?);
+            }
+        }
         for r in &defs {
             self.check_region(r)?;
         }
@@ -1908,7 +2170,7 @@ impl Package {
         }
         for (name, position) in &anchors {
             require(
-                game.authored_cell_valid(*position),
+                self.boundary_anchor(name) || game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
@@ -1923,6 +2185,10 @@ impl Package {
         anchor: &str,
         anchors: &BTreeMap<String, Location>,
     ) -> Result<Location, Failure> {
+        require(
+            !self.boundary_anchor(anchor),
+            "Character starts cannot use structural boundary anchors",
+        )?;
         anchors.get(anchor).copied().ok_or_else(|| {
             Origin::Character(id).reference(
                 fail(format!("Missing character anchor {anchor:?}")),
@@ -2076,6 +2342,23 @@ impl Package {
             ceilings.1 = ceilings.1.max(end(generated_base.1)?);
         }
         Ok(PackageIndex {
+            group_owners: self
+                .manifest
+                .generation_groups
+                .values()
+                .flat_map(|group| {
+                    group
+                        .members
+                        .iter()
+                        .map(|region| (*region, group.members[0]))
+                })
+                .collect(),
+            groups: self
+                .manifest
+                .generation_groups
+                .iter()
+                .map(|(id, group)| (group.members[0], id.clone()))
+                .collect(),
             definitions,
             anchors,
             stairs,
@@ -2117,6 +2400,10 @@ impl Package {
             }
         }
         if let Some(o) = &self.manifest.objective {
+            require(
+                !self.boundary_anchor(&o.anchor),
+                "Objectives cannot use structural boundary anchors",
+            )?;
             let at = index
                 .anchors
                 .get(&o.anchor)
@@ -2152,7 +2439,7 @@ impl Package {
             .index
             .region(region)
             .ok_or_else(|| fail(format!("Unknown region {region}")))?;
-        let generated = if r.generated {
+        let generated = if r.generated && !index.group_owners.contains_key(&region) {
             Some(index.region(self, region)?)
         } else {
             None
@@ -2228,6 +2515,7 @@ impl Package {
                     .get(&region)
                     .into_iter()
                     .flatten()
+                    .filter(|s| !index.group_owners.contains_key(&s.destination))
                     .map(|s| s.destination),
             );
         for destination in destinations {
@@ -2244,11 +2532,31 @@ impl Package {
             seed,
         );
         self.add_geometry(&mut game, &shell)?;
+        // Deferred stair destinations need only their structural declarations.
+        for destination in index
+            .stairs
+            .get(&region)
+            .into_iter()
+            .flatten()
+            .map(|exit| exit.destination)
+            .filter(|id| index.group_owners.contains_key(id))
+            .collect::<BTreeSet<_>>()
+        {
+            if shell.iter().all(|r| r.id != destination) {
+                let declaration = self.unbuilt_region(index, destination)?;
+                game.add_unbuilt_region(
+                    declaration.region,
+                    declaration.chamber,
+                    declaration.identities,
+                )
+                .map_err(|e| fail(format!("Stair destination: {e:?}")))?;
+            }
+        }
         self.add_structure(&mut game, &r, &anchors)?;
         self.add_stairs(&mut game, region, index, &anchors)?;
         for (name, position) in anchors.iter().filter(|(_, at)| at.region.0 == region) {
             require(
-                game.authored_cell_valid(*position),
+                self.boundary_anchor(name) || game.authored_cell_valid(*position),
                 format!("Anchor {name}: outside traversable geometry"),
             )?;
         }
@@ -2263,6 +2571,11 @@ impl Package {
     /// generator runs to learn its identities.
     pub(crate) fn declaring_reads_file(&self, region: u64) -> bool {
         self.index.region(region).is_some_and(|r| r.generated)
+            && !self
+                .manifest
+                .generation_groups
+                .values()
+                .any(|g| g.members.contains(&region))
     }
 
     fn add_stairs(
@@ -2272,6 +2585,46 @@ impl Package {
         index: &PackageIndex,
         anchors: &BTreeMap<String, Location>,
     ) -> Result<(), Failure> {
+        let deferred = |exit: &StairExit| {
+            index.group_owners.contains_key(&region)
+                || index.group_owners.contains_key(&exit.destination)
+        };
+        let mut names: BTreeSet<_> = self
+            .index
+            .region(region)
+            .filter(|_| index.group_owners.contains_key(&region))
+            .into_iter()
+            .flat_map(|r| r.stair_anchors.iter().cloned())
+            .collect();
+        for exit in index
+            .stairs
+            .get(&region)
+            .into_iter()
+            .flatten()
+            .filter(|exit| deferred(exit))
+        {
+            let (_, name) = exit
+                .from
+                .split_once('/')
+                .ok_or_else(|| fail("Invalid named stair source"))?;
+            names.insert(name.to_owned());
+        }
+        if !names.is_empty() {
+            let coordinates = names
+                .into_iter()
+                .map(|name| {
+                    let position = anchors
+                        .get(&format!("{region}/{name}"))
+                        .ok_or_else(|| {
+                            fail(format!("Region {region}: unresolved stair anchor {name}"))
+                        })?
+                        .position;
+                    Ok((name, position))
+                })
+                .collect::<Result<BTreeMap<_, _>, Failure>>()?;
+            game.register_named_anchors(RegionId(region), coordinates)
+                .map_err(|e| fail(format!("Region {region} stair anchors: {e:?}")))?;
+        }
         for exit in index.stairs.get(&region).into_iter().flatten() {
             let endpoint = |name: &str| {
                 anchors.get(name).copied().ok_or_else(|| {
@@ -2281,15 +2634,30 @@ impl Package {
                     ))
                 })
             };
-            game.connect(
-                Passage {
-                    from: endpoint(&exit.from)?,
-                    direction: exit.direction,
-                    to: endpoint(&exit.to)?,
-                },
-                0,
-            )
-            .map_err(|e| fail(format!("Stair pair {}: {e:?}", exit.id)))?;
+            let result = if deferred(exit) {
+                let (_, name) = exit
+                    .to
+                    .split_once('/')
+                    .ok_or_else(|| fail("Invalid named stair destination"))?;
+                game.connect_named_stair(
+                    endpoint(&exit.from)?,
+                    exit.direction,
+                    tor_world::NamedAnchor {
+                        region: RegionId(exit.destination),
+                        name: name.into(),
+                    },
+                )
+            } else {
+                game.connect(
+                    Passage {
+                        from: endpoint(&exit.from)?,
+                        direction: exit.direction,
+                        to: endpoint(&exit.to)?,
+                    },
+                    0,
+                )
+            };
+            result.map_err(|e| fail(format!("Stair pair {}: {e:?}", exit.id)))?;
         }
         Ok(())
     }
@@ -2382,6 +2750,7 @@ impl Package {
                 "Stairs require an up/down direction",
             )?;
             let connect = match p.kind.as_deref() {
+                Some("boundary") => Game::connect_boundary_area,
                 Some("portal") => Game::connect_portal_area,
                 None | Some("stairs") => Game::connect_area,
                 _ => return Err(fail("Invalid connection kind")),
@@ -2631,9 +3000,9 @@ impl Package {
         game.authored_links_clear()
             && self.anchors().is_ok_and(|anchors| {
                 anchors
-                    .values()
-                    .filter(|p| loaded(p))
-                    .all(|p| game.authored_cell_valid(*p))
+                    .iter()
+                    .filter(|(name, p)| !self.boundary_anchor(name) && loaded(p))
+                    .all(|(_, p)| game.authored_cell_valid(*p))
             })
     }
 }
@@ -2641,6 +3010,8 @@ impl Package {
 /// Whole-package facts for building regions (see [`Package::index`]).
 #[derive(Clone, Debug)]
 pub(crate) struct PackageIndex {
+    pub(crate) group_owners: BTreeMap<u64, u64>,
+    pub(crate) groups: BTreeMap<u64, String>,
     definitions: Arc<PreparedDefinitions>,
     anchors: BTreeMap<String, Location>,
     stairs: BTreeMap<u64, Vec<StairExit>>,
@@ -2658,6 +3029,12 @@ pub(crate) struct PackageIndex {
     appearances: BTreeMap<String, String>,
     /// Region definitions handed out, for scaling contracts.
     lookups: std::cell::Cell<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedGroup {
+    pub(crate) records: Vec<(tor_simulation::UnbuiltRegion, tor_simulation::RegionRecord)>,
+    pub(crate) files: BTreeSet<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -2688,6 +3065,13 @@ impl PackageIndex {
         let Some(generate) = &def.generate else {
             return Ok(def);
         };
+        if let Some(group) = &generate.group {
+            return package
+                .group_definitions(group, self.seed)?
+                .remove(&id)
+                .map(Arc::new)
+                .ok_or_else(|| fail("Region missing from generated group"));
+        }
         let first = |base: u64| {
             (id - 1)
                 .checked_mul(crate::generator::IDENTITY_STRIDE)

@@ -10,6 +10,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegionSlice {
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "crate::checkpoint_map"
+    )]
+    named_stairs: BTreeMap<(Location, Direction), NamedAnchor>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    named_anchors: BTreeMap<String, Position>,
     region: Region,
     chamber: Option<Extent>,
     gravity: Option<[i32; 3]>,
@@ -19,6 +27,8 @@ pub struct RegionSlice {
     #[serde(with = "crate::checkpoint_map")]
     passages: BTreeMap<(Location, Direction), (Passage, u8)>,
     physical_vertical: BTreeSet<(Location, Direction)>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    solid_boundaries: BTreeSet<(Location, Direction)>,
     #[serde(with = "crate::checkpoint_map")]
     cell_gravity: BTreeMap<Location, [i32; 3]>,
     #[serde(with = "crate::checkpoint_map")]
@@ -37,7 +47,11 @@ impl RegionSlice {
     /// Identities of the doors in this region.
     /// Regions this region's links lead to, in id order.
     pub fn linked_regions(&self) -> BTreeSet<RegionId> {
-        self.passages.values().map(|(p, _)| p.to.region).collect()
+        self.passages
+            .values()
+            .map(|(p, _)| p.to.region)
+            .chain(self.named_stairs.values().map(|to| to.region))
+            .collect()
     }
     pub fn door_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.doors.values().map(|door| door.id)
@@ -48,6 +62,15 @@ impl RegionSlice {
         let inside = |at: &Location| at.region == id && self.region.bounds.contains(at.position);
         let (x, y, z) = self.region.bounds.dimensions();
         x > 0
+            && self.named_anchors.iter().all(|(name, position)| {
+                valid_anchor_name(name) && self.region.bounds.contains(*position)
+            })
+            && self.named_stairs.iter().all(|((from, direction), to)| {
+                inside(from)
+                    && matches!(direction, Direction::Up | Direction::Down)
+                    && valid_anchor_name(&to.name)
+                    && !self.passages.contains_key(&(*from, *direction))
+            })
             && y > 0
             && z > 0
             && self.gravity.is_none_or(valid_gravity)
@@ -67,6 +90,9 @@ impl RegionSlice {
                 .physical_vertical
                 .iter()
                 .all(|key| self.passages.contains_key(key))
+            && self.solid_boundaries.iter().all(|key| {
+                !matches!(key.1, Direction::Up | Direction::Down) && self.passages.contains_key(key)
+            })
             && self
                 .cell_gravity
                 .iter()
@@ -208,7 +234,23 @@ impl World {
     /// projection also follows these links, so they cover every region a
     /// step from `region` can reach.
     pub fn linked_regions(&self, region: RegionId) -> BTreeSet<RegionId> {
-        self.exits(region).map(|p| p.to.region).collect()
+        self.exits(region)
+            .map(|p| p.to.region)
+            .chain(
+                self.named_stairs
+                    .range((Location::first(region), Direction::North)..)
+                    .take_while(|((at, _), _)| at.region == region)
+                    .map(|(_, to)| to.region),
+            )
+            .collect()
+    }
+
+    /// Publish a prepared record's structural anchors before any member attaches.
+    pub fn publish_region_anchors(&mut self, slice: &RegionSlice) -> Result<(), WorldError> {
+        if !slice.valid() || self.known_region(slice.id()) != Some(slice.region()) {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.register_named_anchors(slice.id(), slice.named_anchors.clone())
     }
 
     /// Remove a loaded region's content, keeping its metadata so references
@@ -232,6 +274,9 @@ impl World {
             passages,
             rotations,
             physical_vertical,
+            solid_boundaries,
+            named_stairs,
+            named_anchors,
             region_gravity,
             cell_gravity,
             terrain,
@@ -243,6 +288,8 @@ impl World {
         let links = take_region(passages, id);
         let mut turns = take_region(rotations, id);
         let slice = RegionSlice {
+            named_stairs: take_region(named_stairs, id),
+            named_anchors: named_anchors.get(&id).cloned().unwrap_or_default(),
             chamber: chambers.get(&id).copied(),
             gravity: region_gravity.get(&id).copied(),
             doors: take_region(doors, id),
@@ -254,6 +301,7 @@ impl World {
                 })
                 .collect(),
             physical_vertical: take_set(physical_vertical, id),
+            solid_boundaries: take_set(solid_boundaries, id),
             cell_gravity: take_region(cell_gravity, id),
             terrain: take_region(terrain, id),
             place_hints: take_region(place_hints, id),
@@ -285,18 +333,25 @@ impl World {
         {
             return Err(WorldError::InvalidEndpoint);
         }
+        self.publish_region_anchors(&slice)?;
         let RegionSlice {
+            named_stairs,
+            named_anchors: _,
             region,
             chamber,
             gravity,
             doors,
             passages,
             physical_vertical,
+            solid_boundaries,
             cell_gravity,
             terrain,
             place_hints,
         } = slice;
         self.absent.remove(&id);
+        if !named_stairs.is_empty() {
+            self.named_stairs.extend(named_stairs);
+        }
         self.regions.insert(id, region);
         if let Some(chamber) = chamber {
             self.chambers.insert(id, chamber);
@@ -315,6 +370,9 @@ impl World {
         }
         if !physical_vertical.is_empty() {
             self.physical_vertical.extend(physical_vertical);
+        }
+        if !solid_boundaries.is_empty() {
+            self.solid_boundaries.extend(solid_boundaries);
         }
         if !cell_gravity.is_empty() {
             self.cell_gravity.extend(cell_gravity);

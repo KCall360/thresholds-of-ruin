@@ -36,16 +36,21 @@ impl World {
         // Abstract stair landings occupy separate panels, outside physical slices.
         for (direction, sign) in [(Direction::Up, 1), (Direction::Down, -1)] {
             if self.is_stair(origin, direction) {
-                let passage = self.passage(origin, direction).expect("stair");
+                let Some(to) = self
+                    .link_destination(origin, direction)
+                    .filter(|at| self.contains(*at))
+                else {
+                    continue;
+                };
                 cells.push(SightCell {
-                    location: passage.to,
+                    location: to,
                     rotation: compose_rotation(frame, self.crossing_rotation(origin, direction)),
                     offset: Position {
                         x: 0,
                         y: 0,
                         z: sign * (radius + 1),
                     },
-                    wall: self.is_wall(passage.to),
+                    wall: self.is_wall(to),
                 });
             }
         }

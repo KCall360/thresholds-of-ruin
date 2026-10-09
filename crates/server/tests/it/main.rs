@@ -8,6 +8,7 @@ mod descriptions;
 mod doors;
 mod dungeon;
 mod generated_regions;
+mod generation_groups;
 mod geometry;
 mod history;
 mod invariants;

@@ -9,6 +9,21 @@ from process_harness import ProcessTestCase, ROOT, SUFFIX, TOKEN
 
 
 class PerformanceProcesses(ProcessTestCase):
+    def test_rogue_benchmark_preserves_floor_work_and_residency_bounds(self):
+        from performance_report import validate_rogue
+        build = ['cargo', 'build', '-p', 'tor-server', '--example', 'rogue_bench', '--locked']
+        if os.environ.get('TOR_TEST_PROFILE', 'debug') == 'release':
+            build.append('--release')
+        with (self.directory/'rogue-build.log').open('w', encoding='utf-8') as log:
+            subprocess.run(build, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=600)
+        with (self.directory/'rogue.jsonl').open('w', encoding='utf-8') as log, (self.directory/'rogue-stderr.log').open('w', encoding='utf-8') as errors:
+            subprocess.run([self.bin/'examples'/('rogue_bench'+SUFFIX), '1'],
+                           cwd=ROOT, stdout=log, stderr=errors, check=True, timeout=180)
+        rows = [json.loads(line) for line in (self.directory/'rogue.jsonl').read_text(encoding='utf-8').splitlines()]
+        validate_rogue(rows)
+        with self.assertRaises(AssertionError):
+            validate_rogue(rows[:-1])
+
     def test_multiphase_attack_timing_reaches_authoritative_outcome_and_fresh_context(self):
         self.server(scenario="dungeon-loop", seed=None)
         client = JsonProcess(self.bin / ("tor-client-headless" + SUFFIX),

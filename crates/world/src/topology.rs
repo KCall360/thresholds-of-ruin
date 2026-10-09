@@ -22,6 +22,14 @@ pub struct Location {
     pub position: Position,
 }
 
+/// A logical stair destination whose coordinates are published with its region.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedAnchor {
+    pub region: RegionId,
+    pub name: String,
+}
+
 /// Directions in the current region's coordinate system; z increases upward.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -182,6 +190,15 @@ pub enum WorldError {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct World {
+    #[serde(
+        default,
+        skip_serializing_if = "no_named_stairs",
+        with = "crate::checkpoint_map::shared"
+    )]
+    named_stairs: Shared<BTreeMap<(Location, Direction), NamedAnchor>>,
+    /// Immutable structural coordinates retained when terrain is detached.
+    #[serde(default, skip_serializing_if = "no_named_anchors")]
+    named_anchors: Shared<BTreeMap<RegionId, BTreeMap<String, Position>>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     doors: Shared<BTreeMap<Location, Door>>,
     regions: Shared<BTreeMap<RegionId, Region>>,
@@ -190,6 +207,8 @@ pub struct World {
     #[serde(with = "crate::checkpoint_map::shared")]
     rotations: Shared<BTreeMap<(Location, Direction), u8>>,
     physical_vertical: Shared<BTreeSet<(Location, Direction)>>,
+    #[serde(default, skip_serializing_if = "no_solid_boundaries")]
+    solid_boundaries: Shared<BTreeSet<(Location, Direction)>>,
     region_gravity: Shared<BTreeMap<RegionId, [i32; 3]>>,
     #[serde(with = "crate::checkpoint_map::shared")]
     cell_gravity: Shared<BTreeMap<Location, [i32; 3]>>,
@@ -226,6 +245,22 @@ pub const MAX_DOOR_HEIGHT: u8 = 8;
 fn no_absent_regions(absent: &Shared<BTreeMap<RegionId, Region>>) -> bool {
     absent.is_empty()
 }
+fn no_solid_boundaries(value: &Shared<BTreeSet<(Location, Direction)>>) -> bool {
+    value.is_empty()
+}
+fn no_named_stairs(value: &Shared<BTreeMap<(Location, Direction), NamedAnchor>>) -> bool {
+    value.is_empty()
+}
+fn no_named_anchors(value: &Shared<BTreeMap<RegionId, BTreeMap<String, Position>>>) -> bool {
+    value.is_empty()
+}
+fn valid_anchor_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 80
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
 
 fn raised(location: Location, cells: i32) -> Option<Location> {
     Some(Location {
@@ -238,6 +273,51 @@ fn raised(location: Location, cells: i32) -> Option<Location> {
 }
 
 impl World {
+    /// Publish immutable coordinates, independently of region residency.
+    pub fn register_named_anchors(
+        &mut self,
+        region: RegionId,
+        anchors: BTreeMap<String, Position>,
+    ) -> Result<(), WorldError> {
+        if anchors.iter().any(|(name, position)| {
+            !valid_anchor_name(name)
+                || !self.knows(Location {
+                    region,
+                    position: *position,
+                })
+        }) || self
+            .named_anchors
+            .get(&region)
+            .is_some_and(|existing| existing != &anchors)
+        {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        if !anchors.is_empty() {
+            self.named_anchors.insert(region, anchors);
+            self.sight.region_changed(region);
+        }
+        Ok(())
+    }
+    /// Connect a visible logical stair without inspecting its destination's terrain.
+    pub fn connect_named_stair(
+        &mut self,
+        from: Location,
+        direction: Direction,
+        to: NamedAnchor,
+    ) -> Result<(), WorldError> {
+        if !matches!(direction, Direction::Up | Direction::Down)
+            || !self.walkable(from)
+            || !self.knows_region(to.region)
+            || !valid_anchor_name(&to.name)
+            || self.passages.contains_key(&(from, direction))
+            || self.named_stairs.contains_key(&(from, direction))
+        {
+            return Err(WorldError::InvalidEndpoint);
+        }
+        self.named_stairs.insert((from, direction), to);
+        self.sight.region_changed(from.region);
+        Ok(())
+    }
     /// Invalidates derived geometry mappings when any topology or region changes.
     /// Tokens only select cache reuse; they never affect world behavior.
     pub fn geometry_snapshot(&self) -> crate::GeometrySnapshot {
@@ -246,9 +326,12 @@ impl World {
     /// Authored portal endpoints must remain clear of solid terrain. Closed
     /// doors are ordinary gameplay state and do not invalidate a package.
     pub fn authored_links_clear(&self) -> bool {
-        self.passages
-            .values()
-            .all(|p| !self.is_wall(p.from) && !self.is_wall(p.to))
+        self.passages.iter().all(|(key, p)| {
+            self.solid_boundaries.contains(key) || (!self.is_wall(p.from) && !self.is_wall(p.to))
+        }) && self
+            .named_stairs
+            .keys()
+            .all(|(from, _)| !self.is_wall(*from))
     }
     /// Structural validation for backend checkpoint restoration.
     pub fn checkpoint_valid(&self, next_door_id: u64) -> bool {
@@ -269,6 +352,12 @@ impl World {
         }) {
             return false;
         }
+        if self.solid_boundaries.iter().any(|(at, direction)| {
+            matches!(direction, Direction::Up | Direction::Down)
+                || !self.passages.contains_key(&(*at, *direction))
+        }) {
+            return false;
+        }
         if !self.absent.iter().all(|(id, region)| {
             *id == region.id && !self.regions.contains_key(id) && {
                 let (x, y, z) = region.bounds.dimensions();
@@ -277,7 +366,21 @@ impl World {
         }) {
             return false;
         }
-        self.regions.iter().all(|(id, region)| {
+        self.named_anchors.iter().all(|(region, anchors)| {
+            anchors.iter().all(|(name, position)| {
+                valid_anchor_name(name)
+                    && self.knows(Location {
+                        region: *region,
+                        position: *position,
+                    })
+            })
+        }) && self.named_stairs.iter().all(|((from, direction), to)| {
+            self.contains(*from)
+                && matches!(direction, Direction::Up | Direction::Down)
+                && self.knows_region(to.region)
+                && valid_anchor_name(&to.name)
+                && !self.passages.contains_key(&(*from, *direction))
+        }) && self.regions.iter().all(|(id, region)| {
             *id == region.id && {
                 let (x, y, z) = region.bounds.dimensions();
                 x > 0 && y > 0 && z > 0
@@ -418,6 +521,12 @@ impl World {
     }
     /// The perceived adjacent cell, including a closed barrier at the destination.
     pub fn adjacent(&self, from: Location, direction: Direction) -> Option<Location> {
+        if self.named_stairs.contains_key(&(from, direction)) {
+            return self
+                .walkable(from)
+                .then(|| self.link_destination(from, direction))
+                .flatten();
+        }
         if direction.components().is_some() {
             return self
                 .diagonal_reach(from, direction, |_| true)
@@ -433,6 +542,9 @@ impl World {
             passages: Shared::new(BTreeMap::new()),
             rotations: Shared::new(BTreeMap::new()),
             physical_vertical: Shared::default(),
+            solid_boundaries: Shared::default(),
+            named_stairs: Shared::default(),
+            named_anchors: Shared::default(),
             region_gravity: Shared::default(),
             cell_gravity: Shared::default(),
             terrain: Shared::new(BTreeMap::new()),
@@ -504,13 +616,28 @@ impl World {
     /// Clockwise quarter turns about z transform sight after crossing. Connections
     /// are directed: callers must explicitly construct and validate reverse links.
     pub fn connect(&mut self, passage: Passage, quarter_turns: u8) -> Result<(), WorldError> {
+        self.connect_checked(passage, quarter_turns, false)
+    }
+
+    fn connect_checked(
+        &mut self,
+        passage: Passage,
+        quarter_turns: u8,
+        solid_boundary: bool,
+    ) -> Result<(), WorldError> {
         if passage.direction.components().is_some() {
             return Err(WorldError::InvalidEndpoint);
         }
         if quarter_turns >= 24 {
             return Err(WorldError::InvalidRotation);
         }
-        if !self.walkable(passage.from) || !self.walkable(passage.to) {
+        if !(if solid_boundary {
+            self.within_aperture_bounds(passage.from)
+                && self.within_aperture_bounds(passage.to)
+                && !matches!(passage.direction, Direction::Up | Direction::Down)
+        } else {
+            self.walkable(passage.from) && self.walkable(passage.to)
+        }) {
             return Err(WorldError::InvalidEndpoint);
         }
         if !matches!(passage.direction, Direction::Up | Direction::Down)
@@ -527,10 +654,13 @@ impl World {
             return Err(WorldError::NotBoundaryExit);
         }
         let key = (passage.from, passage.direction);
-        if self.passages.contains_key(&key) {
+        if self.passages.contains_key(&key) || self.named_stairs.contains_key(&key) {
             return Err(WorldError::DuplicateExit);
         }
         self.passages.insert(key, passage);
+        if solid_boundary {
+            self.solid_boundaries.insert(key);
+        }
         self.rotations.insert(key, quarter_turns);
         self.sight.topology_changed();
         Ok(())
@@ -546,6 +676,30 @@ impl World {
         turns: u8,
         width: u16,
         height: u16,
+    ) -> Result<(), WorldError> {
+        self.connect_area_checked(anchor, turns, width, height, false)
+    }
+
+    /// Glue horizontal region faces without changing solid terrain. Excavation
+    /// can subsequently open any part of the join. Ordinary transport links
+    /// continue to require traversable endpoints.
+    pub fn connect_boundary_area(
+        &mut self,
+        anchor: Passage,
+        turns: u8,
+        width: u16,
+        height: u16,
+    ) -> Result<(), WorldError> {
+        self.connect_area_checked(anchor, turns, width, height, true)
+    }
+
+    fn connect_area_checked(
+        &mut self,
+        anchor: Passage,
+        turns: u8,
+        width: u16,
+        height: u16,
+        solid_boundary: bool,
     ) -> Result<(), WorldError> {
         if width == 0 || height == 0 || u32::from(width) * u32::from(height) > 1024 {
             return Err(WorldError::InvalidEndpoint);
@@ -588,13 +742,14 @@ impl World {
                             ..location
                         })
                     };
-                candidate.connect(
+                candidate.connect_checked(
                     Passage {
                         from: offset(anchor.from, x, y, z)?,
                         direction: anchor.direction,
                         to: offset(anchor.to, rx, ry, rz)?,
                     },
                     turns,
+                    solid_boundary,
                 )?;
             }
         }
@@ -652,8 +807,34 @@ impl World {
     }
     pub fn is_stair(&self, from: Location, direction: Direction) -> bool {
         matches!(direction, Direction::Up | Direction::Down)
-            && self.passage(from, direction).is_some()
+            && (self.passage(from, direction).is_some()
+                || self.named_stairs.contains_key(&(from, direction)))
             && !self.physical_vertical.contains(&(from, direction))
+    }
+
+    /// Known owner of a stair landing, even before its coordinates exist.
+    pub fn stair_region(&self, from: Location, direction: Direction) -> Option<RegionId> {
+        if !self.is_stair(from, direction) {
+            return None;
+        }
+        self.named_stairs
+            .get(&(from, direction))
+            .map(|anchor| anchor.region)
+            .or_else(|| {
+                self.passage(from, direction)
+                    .map(|passage| passage.to.region)
+            })
+    }
+
+    pub fn link_destination(&self, from: Location, direction: Direction) -> Option<Location> {
+        if let Some(passage) = self.passage(from, direction) {
+            return Some(passage.to);
+        }
+        let anchor = self.named_stairs.get(&(from, direction))?;
+        Some(Location {
+            region: anchor.region,
+            position: *self.named_anchors.get(&anchor.region)?.get(&anchor.name)?,
+        })
     }
 
     pub fn crossing_rotation(&self, from: Location, direction: Direction) -> u8 {
@@ -878,6 +1059,16 @@ impl World {
         if let Some(passage) = self.passage(from, direction) {
             return Some((passage.to, self.crossing_rotation(from, direction)));
         }
+        if let Some(anchor) = self.named_stairs.get(&(from, direction)) {
+            let position = *self.named_anchors.get(&anchor.region)?.get(&anchor.name)?;
+            return Some((
+                Location {
+                    region: anchor.region,
+                    position,
+                },
+                0,
+            ));
+        }
         let to = Location {
             position: direction.offset(from.position)?,
             ..from
@@ -922,6 +1113,101 @@ impl World {
 #[cfg(test)]
 mod sharing_tests {
     use super::*;
+    #[test]
+    fn named_stair_resolves_after_destination_generation_and_survives_detach() {
+        let region = |id| Region {
+            id: RegionId(id),
+            name: format!("floor-{id}"),
+            bounds: Extent::new(3, 3, 2).unwrap(),
+        };
+        let from = Location {
+            region: RegionId(1),
+            position: Position { x: 1, y: 1, z: 0 },
+        };
+        let to = Location {
+            region: RegionId(2),
+            position: Position { x: 2, y: 1, z: 0 },
+        };
+        let mut world = World::new(vec![region(1)], vec![]).unwrap();
+        world.add_unbuilt_region(region(2), false).unwrap();
+        world
+            .connect_named_stair(
+                from,
+                Direction::Down,
+                NamedAnchor {
+                    region: RegionId(2),
+                    name: "up".into(),
+                },
+            )
+            .unwrap();
+        assert!(world.is_stair(from, Direction::Down));
+        assert_eq!(
+            world.linked_regions(RegionId(1)),
+            BTreeSet::from([RegionId(2)])
+        );
+        assert_eq!(world.movement_neighbor(from, Direction::Down), None);
+        let slice = world.detach_region(RegionId(1)).unwrap();
+        let mut generated = World::new(vec![region(2)], vec![]).unwrap();
+        generated
+            .register_named_anchors(RegionId(2), BTreeMap::from([("up".into(), to.position)]))
+            .unwrap();
+        let target = generated.detach_region(RegionId(2)).unwrap();
+        world.publish_region_anchors(&target).unwrap();
+        world.attach_region(slice).unwrap();
+        assert_eq!(
+            world.movement_neighbor(from, Direction::Down),
+            Some((to, 0))
+        );
+        assert!(!world.contains(to));
+        world.attach_region(target).unwrap();
+        assert!(world.checkpoint_valid(1));
+        world.detach_region(RegionId(2)).unwrap();
+        assert_eq!(
+            world.movement_neighbor(from, Direction::Down),
+            Some((to, 0))
+        );
+    }
+    #[test]
+    fn solid_boundary_join_preserves_terrain_until_excavated() {
+        let regions = (1..=2)
+            .map(|id| Region {
+                id: RegionId(id),
+                name: format!("slot-{id}"),
+                bounds: Extent::new(3, 3, 2).unwrap(),
+            })
+            .collect();
+        let mut world = World::new(regions, vec![]).unwrap();
+        let from = Location {
+            region: RegionId(1),
+            position: Position { x: 2, y: 0, z: 0 },
+        };
+        let to = Location {
+            region: RegionId(2),
+            position: Position { x: 0, y: 0, z: 0 },
+        };
+        world.set_wall(from, true).unwrap();
+        world.set_wall(to, true).unwrap();
+        world
+            .connect_boundary_area(
+                Passage {
+                    from,
+                    direction: Direction::East,
+                    to,
+                },
+                0,
+                3,
+                2,
+            )
+            .unwrap();
+        assert!(!world.walkable(from));
+        assert!(!world.walkable(to));
+        assert!(world.authored_links_clear());
+        assert_eq!(world.physics_neighbor(from, Direction::East), None);
+        world.set_wall(from, false).unwrap();
+        world.set_wall(to, false).unwrap();
+        assert!(world.walkable(from) && world.walkable(to));
+        assert_eq!(world.physics_neighbor(from, Direction::East), Some((to, 0)));
+    }
     #[test]
     fn door_edits_share_large_geometry_and_keep_the_previous_boundary_unchanged() {
         let regions = (1..=256)

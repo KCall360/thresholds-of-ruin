@@ -32,6 +32,12 @@ const CLEARING: i32 = 2;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Generate {
+    /// Coordinated recipe group. Required only by the `group` generator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Structural boundary references may remain in solid terrain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_anchors: Vec<String>,
     pub generator: String,
     pub version: u32,
     /// Explicit generation variation; omitted and zero mean the same thing.
@@ -165,6 +171,48 @@ impl Rng {
 /// Check a recipe's shape, before any generation.
 pub(crate) fn check(def: &RegionDef, generate: &Generate) -> Result<(), Failure> {
     let id = def.id;
+    if generate.generator == "group" && generate.version == 1 {
+        let boundaries: BTreeSet<_> = generate.boundary_anchors.iter().collect();
+        if generate.group.as_ref().is_none_or(|name| name.is_empty())
+            || boundaries.len() != generate.boundary_anchors.len()
+            || boundaries
+                .iter()
+                .any(|name| !def.anchors.contains_key(*name))
+            || generate.actors.is_some()
+            || generate.items.is_some()
+            || generate.rooms != [1, 1]
+            || generate.salt != 0
+            || !def.walls.is_empty()
+            || !def.openings.is_empty()
+            || !def.doors.is_empty()
+            || !def.items.is_empty()
+            || !def.actors.is_empty()
+            || !def.places.is_empty()
+            || !def.gravity_overrides.is_empty()
+        {
+            return Err(fail(format!(
+                "Region {id}: invalid group generator structure"
+            )));
+        }
+        let names: BTreeSet<_> = generate.stair_anchors.iter().collect();
+        if names.len() != generate.stair_anchors.len()
+            || names.iter().any(|name| {
+                name.is_empty()
+                    || name.len() > 80
+                    || name.contains('/')
+                    || def.anchors.contains_key(*name)
+                    || name.chars().any(char::is_control)
+            })
+        {
+            return Err(fail(format!("Region {id}: invalid group stair anchors")));
+        }
+        return Ok(());
+    }
+    if generate.group.is_some() || !generate.boundary_anchors.is_empty() {
+        return Err(fail(format!(
+            "Region {id}: group fields require the group generator"
+        )));
+    }
     if generate.generator != ROOMS || generate.version != ROOMS_VERSION {
         return Err(fail(format!(
             "Region {id}: unknown generator {} version {}",
@@ -410,9 +458,19 @@ pub(crate) fn entries_connected(region: &RegionDef) -> bool {
         .map(|[x, y, _]| (*x, *y))
         .collect();
     let [width, depth, _] = region.size;
-    let entries: Vec<Cell> = region.anchors.values().map(|[x, y, _]| (*x, *y)).collect();
+    let entries: Vec<Cell> = region
+        .anchors
+        .iter()
+        .filter(|(name, _)| {
+            !region
+                .generate
+                .as_ref()
+                .is_some_and(|g| g.boundary_anchors.contains(name))
+        })
+        .map(|(_, [x, y, _])| (*x, *y))
+        .collect();
     let Some(&start) = entries.first() else {
-        return false;
+        return region.generate.as_ref().is_some_and(|g| g.group.is_some());
     };
     let mut seen = BTreeSet::from([start]);
     let mut queue = VecDeque::from([start]);

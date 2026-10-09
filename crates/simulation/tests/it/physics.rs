@@ -225,20 +225,39 @@ fn every_actor_falls_and_lands_not_only_the_one_acting() {
 
 #[test]
 fn gravity_does_not_use_stair_links() {
-    let (mut game, id) = game();
-    game.connect(
-        tor_world::Passage {
-            from: at(2, 10),
-            direction: tor_world::Direction::Down,
-            to: at(6, 3),
-        },
-        0,
-    )
-    .unwrap();
-    game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
-    game.act(id, Action::Wait).unwrap();
-    assert_eq!(game.observe(id).unwrap().location.position.x, 2);
-    assert_eq!(game.observe(id).unwrap().location.position.z, 9);
+    for named in [false, true] {
+        let (mut game, id) = game();
+        if named {
+            game.register_named_anchors(
+                RegionId(1),
+                std::collections::BTreeMap::from([("landing".into(), at(6, 3).position)]),
+            )
+            .unwrap();
+            game.connect_named_stair(
+                at(2, 10),
+                tor_world::Direction::Down,
+                tor_world::NamedAnchor {
+                    region: RegionId(1),
+                    name: "landing".into(),
+                },
+            )
+            .unwrap();
+        } else {
+            game.connect(
+                tor_world::Passage {
+                    from: at(2, 10),
+                    direction: tor_world::Direction::Down,
+                    to: at(6, 3),
+                },
+                0,
+            )
+            .unwrap();
+        }
+        game.set_gravity(RegionId(1), [0, 0, -1]).unwrap();
+        game.act(id, Action::Wait).unwrap();
+        assert_eq!(game.observe(id).unwrap().location.position.x, 2);
+        assert_eq!(game.observe(id).unwrap().location.position.z, 9);
+    }
 }
 
 #[test]

@@ -1,0 +1,33 @@
+id = 51
+name = "Depth 6, slot 6"
+size = [26, 7, 2]
+chamber = true
+anchors = { west = [0, 0, 0], east = [25, 0, 0], north = [0, 0, 0], south = [0, 6, 0] }
+[[portals]]
+kind = "boundary"
+at = [0, 0, 0]
+direction = "west"
+to = "50/east"
+width = 7
+height = 2
+[[portals]]
+kind = "boundary"
+at = [0, 0, 0]
+direction = "north"
+to = "48/south"
+width = 26
+height = 2
+[[portals]]
+kind = "boundary"
+at = [0, 6, 0]
+direction = "south"
+to = "54/north"
+width = 26
+height = 2
+[generate]
+generator = "group"
+version = 1
+group = "floor-6"
+rooms = [1, 1]
+boundary_anchors = ["west", "east", "north", "south"]
+stair_anchors = []

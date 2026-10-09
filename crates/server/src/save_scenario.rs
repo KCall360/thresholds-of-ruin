@@ -206,6 +206,10 @@ struct Streaming {
 #[serde(remote = "source::Manifest", deny_unknown_fields)]
 struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
+    generation_recipes: BTreeMap<String, crate::generation_recipe::Recipe>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
+    generation_groups: BTreeMap<String, crate::generation_recipe::GenerationGroup>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", with = "mapped")]
     stair_pairs: BTreeMap<String, source::StairPair>,
     factions: BTreeMap<String, BTreeSet<String>>,
     #[serde(with = "mapped")]
@@ -236,6 +240,50 @@ struct Manifest {
 struct StairPair {
     upper: String,
     lower: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::generation_recipe::GenerationGroup",
+    deny_unknown_fields
+)]
+struct GenerationGroup {
+    depth: u32,
+    recipe: String,
+    members: [u64; 9],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generation_recipe::Recipe", deny_unknown_fields)]
+struct Recipe {
+    version: u32,
+    #[serde(with = "mapped")]
+    stages: Vec<crate::generation_recipe::Stage>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "crate::generation_recipe::Stage", deny_unknown_fields)]
+struct Stage {
+    id: String,
+    version: u32,
+    #[serde(with = "mapped")]
+    operation: crate::generation_recipe::Operation,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    remote = "crate::generation_recipe::Operation",
+    tag = "kind",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum Operation {
+    StoneFill,
+    GridPartition,
+    Rooms { width: [u32; 2], height: [u32; 2] },
+    ConnectedGraph { extra: [u32; 2] },
+    Corridors,
+    Stairs,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -461,6 +509,8 @@ struct RegionIndex {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "source::IndexedRegion", deny_unknown_fields)]
 struct IndexedRegion {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    boundary_anchors: Vec<String>,
     id: u64,
     file: String,
     hash: String,
@@ -513,6 +563,10 @@ macro_rules! remote {
     )+};
 }
 remote!(
+    GenerationGroup => crate::generation_recipe::GenerationGroup,
+    Recipe => crate::generation_recipe::Recipe,
+    Stage => crate::generation_recipe::Stage,
+    Operation => crate::generation_recipe::Operation,
     Scenario => crate::Scenario,
     ActorSetup => crate::ActorSetup,
     Position => crate::journal::Position,
