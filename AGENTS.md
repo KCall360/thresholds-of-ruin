@@ -125,6 +125,11 @@ floor generation before the shared creature/item/survival features are complete.
 Planning approval does not by itself authorize starting a new implementation
 milestone. Runtime scripting and its language remain undecided.
 
+The ASCII client follows NetHack's layout: messages on top that stay until the
+next command, one full-width map that merges every height, two status lines,
+and on-demand screens (no side panels). It's client-only; what needs server or
+protocol support is listed in [the ASCII client guide](docs/ascii-client.md#needs-server-or-protocol-support).
+
 Preserve the original dirty interactions checkout; it contains unpublished work
 that is not the published main baseline. Keep future work isolated where needed.
 Do not weaken native tests or infer a waiver from historical checkpoint notes.

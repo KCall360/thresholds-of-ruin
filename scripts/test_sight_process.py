@@ -49,19 +49,24 @@ class SightProcesses(ProcessTestCase):
         window = self.launch("tor-client-ascii", ["--connect", self.address, "--automation"])
         native = self.ascii_frame(window, lambda f: f["state"] is not None and not f["busy"])
         self.assertEqual(native["state"], initial["state"])
-        tiles = {tuple(t["position"][axis] for axis in ("x", "y", "z")): t
-                 for t in native["map_tiles"]}
-        for z in (-1, 2):
-            self.assertEqual(tiles[(0, 0, z)]["glyph"], "#")
-            self.assertFalse(tiles[(0, 0, z)]["remembered"])
-        # Height browsing changes presentation, never simulation state.
-        higher = self.key(window, "map_higher")
-        self.assertEqual(higher["state"], initial["state"])
-        tiles = {tuple(t["position"][axis] for axis in ("x", "y", "z")): t
-                 for t in higher["map_tiles"]}
-        self.assertEqual(tiles[(-3, -1, 1)]["glyph"], "&")
-        lower = self.key(window, "map_lower")
-        self.assertEqual(lower["state"], initial["state"])
+        # Every height collapses into one map: the waist-high wall, the
+        # creature hovering at head height and the two-cell door each show
+        # in their column, and the player's own head isn't a creature.
+        tiles = {(t["position"]["x"], t["position"]["y"]): t for t in native["map_tiles"]}
+        self.assertEqual(len(tiles), len(native["map_tiles"]))
+        self.assertEqual(tiles[(0, 0)]["glyph"], "@")
+        self.assertEqual([t["glyph"] for t in native["map_tiles"]].count("@"), 1)
+        self.assertEqual(tiles[(-2, 0)]["kind"], "low_wall")
+        self.assertEqual(tiles[(-3, -1)]["kind"], "creature")
+        self.assertEqual(tiles[(1, 0)]["glyph"], "+")
+        # Look at the hovering creature: free, and it names it.
+        self.key(window, "look")
+        for direction in ("left", "left", "left", "up"):
+            self.key(window, direction)
+        looked = self.key(window, "look")
+        self.assertEqual(looked["state"], initial["state"])
+        self.assertIsNone(looked["screen"]["look_cursor"])
+        self.assertRegex(looked["messages"]["turn"].split("  ")[-1], r"^[a-z&] - ")
         self.key(window, "open_door")
         opened = self.key(window, "right")
         seen = opened["state"]["observation"]

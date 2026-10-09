@@ -1,6 +1,14 @@
 //! Fixed logical canvas, scaled by the native window without changing game state.
-use crate::{history_lines, history_text, App};
+//!
+//! Layout, as in NetHack: message and prompt lines across the top, the map
+//! across the full width, two status lines at the bottom. Everything else
+//! (inventory, creature details, help, logs) opens on demand over the map.
+use crate::map::{self, Kind};
+use crate::{history_lines, App};
 use font8x8::{UnicodeFonts, BASIC_FONTS};
+use tor_protocol::{AccessRole, Observation};
+
+pub use crate::map::{MapTile, MEMORY_COLOR};
 
 pub const WIDTH: usize = 1200;
 pub const HEIGHT: usize = 800;
@@ -11,20 +19,13 @@ const TEXT: u32 = 0xd9e3e9;
 const MUTED: u32 = 0x869ba9;
 const ACCENT: u32 = 0x67d8bd;
 const GOLD: u32 = 0xedc579;
-pub const MEMORY_COLOR: u32 = 0x626262;
+const DANGER: u32 = 0xef958c;
 
-/// The same tiles drive native painting and opt-in presentation diagnostics.
-#[derive(serde::Serialize)]
-pub struct MapTile {
-    pub position: tor_protocol::Position,
-    pub glyph: char,
-    pub remembered: bool,
-    pub color: u32,
-    pub center: (usize, usize),
-    step: usize,
-}
+/// The key hint under the status lines.
+const HINT: &str = "? help  hjklyubn move (shift: run)  < > stairs  _ travel  ; look  i inventory  g pick up  a attack  ^P messages";
 
-fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::Observation {
+/// Current cells plus remembered ones that fall inside the drawn map.
+fn display_observation(state: &tor_client_common::ClientState) -> Observation {
     let mut view = state.state().observation.clone();
     let visible: std::collections::BTreeSet<_> = view
         .visible_cells
@@ -33,12 +34,7 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
         .collect();
     for cell in state.map_memory() {
         let p = cell.position;
-        // Keep a readable local viewport. Distant chart cells remain in memory.
-        if !(-8..=8).contains(&p.z)
-            || !(-24..=24).contains(&p.x)
-            || !(-12..=12).contains(&p.y)
-            || visible.contains(&(p.x, p.y, p.z))
-        {
+        if !map::in_view(&view, p) || visible.contains(&(p.x, p.y, p.z)) {
             continue;
         }
         view.visible_cells.push(cell.cell_view());
@@ -47,59 +43,8 @@ fn display_observation(state: &tor_client_common::ClientState) -> tor_protocol::
     view
 }
 
-/// Index each disclosed cell/occupant once instead of scanning every vector for
-/// every viewport tile. First occurrence and glyph precedence match glyph_at_level.
-fn indexed_glyphs(
-    view: &tor_protocol::Observation,
-) -> std::collections::BTreeMap<(i32, i32, i32), char> {
-    use std::collections::{BTreeMap, BTreeSet};
-    let key = |p: tor_protocol::Position| (p.x, p.y, p.z);
-    let actors: BTreeSet<_> = view
-        .visible_actors
-        .iter()
-        .map(|a| key(a.position))
-        .collect();
-    let mut items = BTreeMap::new();
-    for item in &view.ground_items {
-        items
-            .entry(key(item.position))
-            .or_insert(crate::item_glyph(item.item.class));
-    }
-    let mut glyphs = BTreeMap::new();
-    for cell in &view.visible_cells {
-        let p = key(cell.position);
-        let glyph = if cell.wall {
-            '#'
-        } else if cell.position == view.position {
-            '@'
-        } else if actors.contains(&p) {
-            '&'
-        } else if let Some(glyph) = items.get(&p) {
-            *glyph
-        } else if let Some(door) = &cell.door {
-            if door.open {
-                '/'
-            } else {
-                '+'
-            }
-        } else if cell.stairs_up {
-            '<'
-        } else if cell.stairs_down {
-            '>'
-        } else {
-            '.'
-        };
-        glyphs.entry(p).or_insert(glyph);
-    }
-    glyphs
-}
-
+/// The map as drawn: one tile per column, current and remembered.
 pub fn map_tiles(state: &tor_client_common::ClientState) -> Vec<MapTile> {
-    map_tiles_at_level(state, 0)
-}
-
-pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) -> Vec<MapTile> {
-    let display = display_observation(state);
     let current: std::collections::BTreeSet<_> = state
         .state()
         .observation
@@ -107,69 +52,38 @@ pub fn map_tiles_at_level(state: &tor_client_common::ClientState, level: i32) ->
         .iter()
         .map(|c| (c.position.x, c.position.y, c.position.z))
         .collect();
-    let glyphs = indexed_glyphs(&display);
-    let item_cells: std::collections::BTreeSet<_> =
-        display.ground_items.iter().map(|i| i.position).collect();
-    let mut tiles = Vec::new();
-    for panel in map_panels(&display, level) {
-        for row in 0..panel.rows {
-            for col in 0..panel.cols {
-                let position = tor_protocol::Position {
-                    x: panel.x0 + col as i32,
-                    y: panel.y0 + row as i32,
-                    z: panel.z,
-                };
-                let glyph = glyphs
-                    .get(&(position.x, position.y, position.z))
-                    .copied()
-                    .unwrap_or(' ');
-                if glyph == ' ' {
-                    continue;
-                }
-                let remembered = !current.contains(&(position.x, position.y, position.z));
-                let color = if remembered {
-                    MEMORY_COLOR
-                } else {
-                    match glyph {
-                        '@' => ACCENT,
-                        '&' => 0xef958c,
-                        _ if item_cells.contains(&position) => GOLD,
-                        '<' | '>' => 0x8cbafa,
-                        _ => 0x7890a2,
-                    }
-                };
-                tiles.push(MapTile {
-                    position,
-                    glyph,
-                    remembered,
-                    color,
-                    center: (
-                        panel.left + col * panel.step + panel.step / 2,
-                        panel.top + row * panel.step + panel.step / 2,
-                    ),
-                    step: panel.step,
-                });
-            }
-        }
-    }
-    tiles
+    map::tiles(&display_observation(state), &|cell| {
+        current.contains(&(cell.position.x, cell.position.y, cell.position.z))
+    })
 }
 
+/// The known cell under a pixel, current or remembered.
 pub fn known_cell_at(
     state: &tor_client_common::ClientState,
     x: usize,
     y: usize,
 ) -> Option<tor_protocol::Position> {
-    known_cell_at_level(state, x, y, 0)
-}
-pub fn known_cell_at_level(
-    state: &tor_client_common::ClientState,
-    x: usize,
-    y: usize,
-    level: i32,
-) -> Option<tor_protocol::Position> {
-    let position = cell_at_level(&display_observation(state), x, y, level)?;
+    let position = map::cell_at(&display_observation(state), x, y)?;
     state.map_cell(position).map(|c| c.position)
+}
+
+/// The known cell a column selects, current or remembered.
+pub fn known_column(
+    state: &tor_client_common::ClientState,
+    x: i32,
+    y: i32,
+) -> Option<tor_protocol::Position> {
+    let position = map::target(&display_observation(state), x, y)?;
+    state.map_cell(position).map(|c| c.position)
+}
+
+/// Hit testing shares the exact layout used to draw cells.
+pub fn cell_at(o: &Observation, x: usize, y: usize) -> Option<tor_protocol::Position> {
+    map::cell_at(o, x, y)
+}
+
+pub fn cell_center(o: &Observation, position: tor_protocol::Position) -> Option<(usize, usize)> {
+    map::cell_center(o, position)
 }
 
 pub struct Canvas {
@@ -190,6 +104,12 @@ impl Canvas {
                 self.pixels[py * WIDTH + px] = color;
             }
         }
+    }
+    fn outline(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
+        self.rect(x, y, w, 2, color);
+        self.rect(x, y + h - 2, w, 2, color);
+        self.rect(x, y, 2, h, color);
+        self.rect(x + w - 2, y, 2, h, color);
     }
     fn text(&mut self, x: usize, y: usize, text: &str, color: u32, scale: usize, limit: usize) {
         let clipped = text.chars().count() > limit;
@@ -219,247 +139,150 @@ impl Canvas {
         self.rect(x, y, w, h, BORDER);
         self.rect(x + 1, y + 1, w - 2, h - 2, PANEL);
     }
+    /// A titled screen over the main view.
+    fn screen(&mut self, title: &str, keys: &str) {
+        self.panel(48, 76, 1104, 644);
+        self.text(72, 96, title, ACCENT, 2, 65);
+        self.text(72, 124, keys, MUTED, 1, 128);
+    }
+
     pub fn draw(&mut self, app: &App) {
         self.pixels.fill(BG);
-        self.text(28, 24, "THRESHOLDS OF RUIN", TEXT, 2, 35);
-        self.text(28, 54, &enclosure_label(app), MUTED, 1, 110);
-        if app.state.as_ref().is_some_and(|s| s.state().wizard_game) {
-            self.text(560, 30, "WIZARD GAME", GOLD, 2, 20);
-        }
-        let control = if !app.connected {
-            "DISCONNECTED"
-        } else if app.role == tor_protocol::AccessRole::Spectator {
-            "SPECTATOR"
-        } else if app.state.as_ref().is_some_and(|s| s.has_control()) {
-            "IN CONTROL"
-        } else {
-            "OBSERVING"
-        };
-        self.text(
-            936,
-            30,
-            control,
-            if app.connected { ACCENT } else { GOLD },
-            2,
-            16,
-        );
-        self.panel(24, 88, 744, 408);
-        self.panel(784, 88, 392, 408);
-        self.panel(24, 512, 1152, 208);
-        self.text(44, 532, "RECENT HISTORY", MUTED, 1, 70);
+        self.draw_messages(app);
         if let Some(state) = &app.state {
-            let o = &state.state().observation;
-            if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective) {
-                let objective = tor_client_common::narration::objective(objective);
-                self.text(28, 72, objective, MUTED, 1, 120);
-            }
-            self.text(44, 110, "YOUR SURROUNDINGS", TEXT, 2, 40);
-            let status = o.combat.as_ref().map_or_else(
-                || format!("TICK {}", o.tick),
-                tor_client_common::narration::combat_status,
-            );
-            self.text(44, 140, &status, MUTED, 1, 110);
-            for panel in map_panels(&display_observation(state), app.map_level) {
-                if panel.label {
-                    self.text(
-                        panel.left,
-                        panel.top - 14,
-                        &format!("Z {:+}", panel.z),
-                        MUTED,
-                        1,
-                        18,
-                    );
-                }
-            }
-            for tile in map_tiles_at_level(state, app.map_level) {
-                let selected = app.travel_cursor == Some(tile.position);
-                let x = tile.center.0 - tile.step / 2;
-                let y = tile.center.1 - tile.step / 2;
-                self.rect(
-                    x,
-                    y,
-                    tile.step - 1,
-                    tile.step - 1,
-                    if selected {
-                        GOLD
-                    } else if tile.remembered {
-                        0x171b20
-                    } else if tile.glyph == '@' {
-                        0x203f41
-                    } else {
-                        0x192733
-                    },
-                );
-                let scale = (tile.step / 12).clamp(1, 3);
-                let pad = (tile.step - 8 * scale) / 2;
-                self.text(
-                    x + pad,
-                    y + pad,
-                    &tile.glyph.to_string(),
-                    if selected { BG } else { tile.color },
-                    scale,
-                    1,
-                );
-            }
-            self.text(44, 154, "GREY: LAST SEEN", MEMORY_COLOR, 1, 30);
-            if let Some(travel) = state.travel() {
-                self.text(
-                    220,
-                    140,
-                    &format!(
-                        "TRAVEL: {} / {} STEPS{}",
-                        travel_label(travel.phase),
-                        travel.completed_steps,
-                        if travel.phase == tor_protocol::TravelPhase::Active {
-                            " / ESC CANCEL"
-                        } else {
-                            ""
-                        }
-                    ),
-                    GOLD,
-                    1,
-                    64,
-                );
-            }
-            self.text(
-                44,
-                468,
-                "@ YOU  ! ITEM  & ACTOR  # WALL  . FLOOR  <> STAIRS  + CLOSED / OPEN DOOR",
-                MUTED,
-                1,
-                84,
-            );
-            self.text(804, 110, "INVENTORY", ACCENT, 2, 22);
-            if o.inventory.is_empty() {
-                self.text(804, 148, "Nothing carried yet.", MUTED, 2, 22);
-            }
-            for (i, item) in o
-                .inventory
-                .iter()
-                .take(if o.combat.is_some() { 3 } else { 5 })
-                .enumerate()
-            {
-                self.text(
-                    804,
-                    146 + i * 22,
-                    &format!(
-                        "{} {} x {}",
-                        crate::item_glyph(item.class),
-                        item.quantity,
-                        item.name
-                    ),
-                    TEXT,
-                    2,
-                    22,
-                );
-            }
-            let inventory_limit = if o.combat.is_some() { 3 } else { 5 };
-            if o.inventory.len() > inventory_limit {
-                self.text(
-                    804,
-                    if o.combat.is_some() { 205 } else { 257 },
-                    &format!("... {} more", o.inventory.len() - inventory_limit),
-                    MUTED,
-                    1,
-                    40,
-                );
-            }
-            self.text(804, 280, "IN SIGHT", ACCENT, 2, 22);
-            if let Some(combat) = &o.combat {
-                for (index, actor) in combat.actors.iter().take(3).enumerate() {
-                    if let Some(view) = o.visible_actors.iter().find(|a| a.id == actor.actor) {
-                        self.text(
-                            804,
-                            220 + index * 16,
-                            &format!(
-                                "{}: {}",
-                                view.name,
-                                tor_client_common::narration::injury(actor.injury)
-                            ),
-                            TEXT,
-                            1,
-                            44,
-                        );
-                    }
-                }
-            }
-            if o.ground_items.is_empty() {
-                self.text(804, 316, "No items in sight.", MUTED, 2, 22);
-            }
-            for (i, item) in o.ground_items.iter().take(4).enumerate() {
-                self.text(
-                    804,
-                    316 + i * 36,
-                    &format!(
-                        "{} {} x {}",
-                        crate::item_glyph(item.item.class),
-                        item.item.quantity,
-                        item.item.name
-                    ),
-                    TEXT,
-                    2,
-                    22,
-                );
-                self.text(
-                    804,
-                    337 + i * 36,
-                    &format!(
-                        "OFFSET ({}, {}, {}){}",
-                        item.position.x,
-                        item.position.y,
-                        item.position.z,
-                        if item.reachable && app.role != tor_protocol::AccessRole::Spectator {
-                            "  [G] PICK UP"
-                        } else {
-                            ""
-                        }
-                    ),
-                    MUTED,
-                    1,
-                    44,
-                );
-            }
-            let entries = state.history();
-            let prose = state.narration().join(" ");
-            for (i, line) in crate::wrap(&prose, 142).iter().take(2).enumerate() {
-                self.text(28, 696 + i * 12, line, TEXT, 1, 142);
-            }
-            for (i, entry) in entries
-                .iter()
-                .rev()
-                .take(6)
-                .collect::<Vec<_>>()
-                .iter()
-                .rev()
-                .enumerate()
-            {
-                self.text(
-                    44,
-                    556 + i * 24,
-                    &format!("{:>5}  {}", entry.tick, history_text(entry)),
-                    TEXT,
-                    2,
-                    68,
-                );
-            }
+            self.draw_map(app, state);
         } else {
-            self.text(44, 190, "Connecting...", MUTED, 2, 40);
+            self.text(40, 100, "Connecting...", MUTED, 2, 40);
         }
-        self.text(
-            28,
-            738,
-            &app.status,
-            if app.busy { GOLD } else { TEXT },
-            1,
-            142,
-        );
-        let intention_hint = app.intention_hint();
-        let help = if app.role == tor_protocol::AccessRole::Spectator {
-            "READ-ONLY   F6/F7 height   F2 history   F5 places   UP/DOWN scroll history   PAGE UP older history   ESC close/quit"
+        self.draw_status(app);
+        self.draw_screens(app);
+    }
+
+    /// Messages, then any prompt or refusal on the next row, as NetHack
+    /// shows prompts on its message line.
+    fn draw_messages(&mut self, app: &App) {
+        let paging = app.role != AccessRole::Spectator;
+        let rows = app.messages.shown(paging);
+        for (i, row) in rows.iter().enumerate() {
+            self.text(24, 6 + i * 20, row, TEXT, 2, crate::messages::WIDTH);
+        }
+        // A bare acknowledgement says nothing the player needs.
+        if !app.busy && !app.status.is_empty() && app.status != "Done." && !app.messages.more() {
+            self.text(
+                24,
+                6 + rows.len().min(crate::messages::ROWS) * 20,
+                &app.status,
+                GOLD,
+                2,
+                crate::messages::WIDTH,
+            );
+        }
+    }
+
+    fn draw_map(&mut self, app: &App, state: &tor_client_common::ClientState) {
+        let o = &state.state().observation;
+        let cursor = app.travel_cursor.or(app.look_cursor);
+        let target = app
+            .attack_targets
+            .get(app.selected)
+            .map(|actor| (actor.position.x, actor.position.y));
+        for tile in map_tiles(state) {
+            let column = (tile.position.x, tile.position.y);
+            let selected = cursor.is_some_and(|c| (c.x, c.y) == column);
+            let x = tile.center.0 - tile.step / 2;
+            let y = tile.center.1 - tile.step / 2;
+            self.rect(
+                x,
+                y,
+                tile.step - 1,
+                tile.step - 1,
+                if selected {
+                    GOLD
+                } else if tile.remembered {
+                    0x151a20
+                } else if tile.kind == Kind::Player {
+                    0x203f41
+                } else {
+                    0x182430
+                },
+            );
+            self.text(
+                x + 1,
+                y + 1,
+                &tile.glyph.to_string(),
+                if selected { BG } else { tile.color },
+                2,
+                1,
+            );
+            if target == Some(column) && tile.kind == Kind::Creature {
+                self.outline(x, y, tile.step, tile.step, DANGER);
+            }
+        }
+        // A cursor over an unknown column is still shown.
+        if let Some(cursor) = cursor {
+            let dx = cursor.x - o.position.x + map::COLS / 2;
+            let dy = cursor.y - o.position.y + map::ROWS / 2;
+            if (0..map::COLS).contains(&dx) && (0..map::ROWS).contains(&dy) {
+                self.outline(
+                    map::LEFT + dx as usize * map::STEP,
+                    map::TOP + dy as usize * map::STEP,
+                    map::STEP,
+                    map::STEP,
+                    GOLD,
+                );
+            }
+        }
+    }
+
+    /// Two status lines, as in NetHack, and a one-line key hint.
+    fn draw_status(&mut self, app: &App) {
+        if let Some(state) = &app.state {
+            let [first, second] = crate::status_lines(app, state);
+            self.text(24, 700, &first, TEXT, 2, 72);
+            self.text(24, 724, &second, TEXT, 2, 72);
+        }
+        let hint = if app.role == AccessRole::Spectator {
+            "READ-ONLY   ? help   ^P messages   F2 history   F5 places   Esc quit".into()
         } else {
-            intention_hint.as_deref().unwrap_or("F6/F7 z HJKL/YUBN move </> stairs _/CLICK travel G/D items W/T gear Q drink O/C doors A attack SPACE wait F3/R control F4 note F5 places F2 history ESC quit")
+            app.intention_hint().unwrap_or_else(|| HINT.into())
         };
-        self.text(28, 768, help, MUTED, 1, 142);
+        self.text(24, 760, &hint, MUTED, 1, 146);
+        self.text(
+            24,
+            778,
+            &crate::control_label(app),
+            if app.busy { GOLD } else { ACCENT },
+            1,
+            60,
+        );
+    }
+
+    fn draw_screens(&mut self, app: &App) {
+        if let Some(state) = &app.state {
+            let combat = state.state().observation.combat.as_ref();
+            if let Some(combat) = combat.filter(|c| c.terminal && !app.end_dismissed) {
+                self.panel(220, 250, 760, 200);
+                self.text(
+                    252,
+                    276,
+                    if combat.dead { "YOU DIED" } else { "VICTORY" },
+                    if combat.dead { DANGER } else { GOLD },
+                    3,
+                    20,
+                );
+                for (i, line) in crate::end_summary(state).iter().enumerate() {
+                    self.text(252, 320 + i * 22, line, TEXT, 2, 44);
+                }
+                self.text(
+                    252,
+                    424,
+                    "Enter closes this   ^P messages   F2 history   Esc quits",
+                    MUTED,
+                    1,
+                    80,
+                );
+            }
+        }
         if let Some(draft) = &app.note {
             self.panel(60, 180, 1080, 424);
             self.text(
@@ -498,21 +321,25 @@ impl Canvas {
                 2,
                 50,
             );
-            self.text(188, 250, "Arrows or HJKL/YUBN", TEXT, 2, 50);
-            self.text(188, 292, "ESC cancels without taking a turn", MUTED, 1, 80);
+            self.text(188, 250, "hjklyubn or arrow keys", TEXT, 2, 50);
+            self.text(188, 292, "Esc cancels without taking a turn", MUTED, 1, 80);
         }
         if !app.pickup.is_empty() {
-            self.panel(160, 176, 880, 428);
-            self.text(188, 204, "CHOOSE AN ITEM", ACCENT, 2, 50);
+            self.panel(160, 150, 880, 480);
+            let title = match app.item_operation {
+                Some(operation) => format!("WHAT DO YOU WANT TO {}?", operation.verb()),
+                None if app.dropping => "WHAT DO YOU WANT TO DROP?".into(),
+                None => "WHAT DO YOU WANT TO PICK UP?".into(),
+            };
+            self.text(188, 176, &title.to_uppercase(), ACCENT, 2, 50);
             self.text(
                 188,
-                239,
-                &if let Some(operation) = app.item_operation {
-                    format!("UP/DOWN select  ENTER {}  ESC cancel", operation.verb())
+                208,
+                &if app.item_operation.is_some() {
+                    "letter or UP/DOWN + ENTER chooses   ESC cancels".to_owned()
                 } else {
                     format!(
-                        "UP/DOWN select  ENTER {}  Count: {}  ESC cancel",
-                        if app.dropping { "drop" } else { "take" },
+                        "letter or UP/DOWN + ENTER chooses   digits set a count (now: {})   ESC cancels",
                         if app.quantity.is_empty() {
                             "all"
                         } else {
@@ -522,17 +349,18 @@ impl Canvas {
                 },
                 MUTED,
                 1,
-                80,
+                100,
             );
-            let start = app.selected.saturating_sub(8);
-            for (i, item) in app.pickup.iter().enumerate().skip(start).take(9) {
+            let start = app.selected.saturating_sub(10);
+            for (i, item) in app.pickup.iter().enumerate().skip(start).take(11) {
                 self.text(
                     188,
-                    272 + (i - start) * 32,
+                    240 + (i - start) * 32,
                     &format!(
-                        "{} {}",
+                        "{} {} - {}",
                         if i == app.selected { ">" } else { " " },
-                        format_args!("{} x {}", item.quantity, item.name)
+                        app.choice_letter(i),
+                        crate::item_phrase(&item.name, item.quantity)
                     ),
                     if i == app.selected { GOLD } else { TEXT },
                     2,
@@ -540,16 +368,55 @@ impl Canvas {
                 );
             }
         }
+        if app.inventory_open {
+            self.screen("INVENTORY", "ESC or i closes");
+            if let Some(state) = &app.state {
+                let o = &state.state().observation;
+                let entries = crate::inventory_entries(app, o);
+                if entries.is_empty() {
+                    self.text(72, 156, "You are not carrying anything.", TEXT, 2, 60);
+                }
+                for (i, entry) in entries.iter().take(26).enumerate() {
+                    self.text(
+                        72,
+                        156 + i * 22,
+                        &entry.long(),
+                        if entry.equipped.is_some() {
+                            ACCENT
+                        } else {
+                            TEXT
+                        },
+                        2,
+                        64,
+                    );
+                }
+            }
+        }
+        if let Some(scroll) = app.message_log {
+            self.screen(
+                "MESSAGES",
+                "UP/DOWN scroll   PGUP/PGDN page   ESC closes   (newest at the bottom)",
+            );
+            let rows = app.messages.history_rows(crate::messages::WIDTH);
+            let end = rows.len().saturating_sub(scroll);
+            let start = end.saturating_sub(crate::MESSAGE_LOG_ROWS);
+            if rows.is_empty() {
+                self.text(72, 156, "No messages yet.", MUTED, 2, 60);
+            }
+            for (i, row) in rows[start..end].iter().enumerate() {
+                self.text(72, 152 + i * 22, row, TEXT, 2, crate::messages::WIDTH);
+            }
+        }
+        if app.help_open {
+            self.screen("HELP", "ESC or ? closes");
+            for (i, line) in crate::HELP.iter().enumerate() {
+                self.text(72, 150 + i * 19, line, TEXT, 2, 66);
+            }
+        }
         if app.places_open {
-            self.panel(48, 88, 1104, 632);
-            self.text(72, 112, "REMEMBERED PLACES", ACCENT, 2, 65);
-            self.text(
-                72,
-                144,
+            self.screen(
+                "REMEMBERED PLACES",
                 "UP/DOWN select   ENTER rename   ESC close. Names are personal mnemonics.",
-                MUTED,
-                1,
-                120,
             );
             if let Some(state) = &app.state {
                 let observation = &state.state().observation;
@@ -561,7 +428,7 @@ impl Canvas {
                         .any(|c| c.key == place.key && !c.wall);
                     self.text(
                         72,
-                        178 + (i - start) * 26,
+                        156 + (i - start) * 26,
                         &format!(
                             "{} {} ({})",
                             if i == app.place_selected { ">" } else { " " },
@@ -574,7 +441,7 @@ impl Canvas {
                     );
                 }
                 if observation.places.is_empty() {
-                    self.text(72, 178, "No places discovered yet.", TEXT, 2, 66);
+                    self.text(72, 156, "No places discovered yet.", TEXT, 2, 66);
                 }
             }
             if let Some(name) = &app.place_name {
@@ -592,176 +459,23 @@ impl Canvas {
             }
         }
         if let Some(page) = &app.history_page {
-            self.panel(48, 88, 1104, 632);
-            self.text(72, 112, "HISTORY", ACCENT, 2, 65);
-            self.text(
-                72,
-                144,
+            self.screen(
+                "HISTORY",
                 "UP/DOWN scroll  PGUP older page  PGDN live view  ESC close",
-                MUTED,
-                1,
-                120,
             );
             for (i, line) in history_lines(&page.entries)
                 .iter()
                 .skip(app.history_scroll)
-                .take(20)
+                .take(crate::HISTORY_ROWS)
                 .enumerate()
             {
-                self.text(72, 178 + i * 26, line, TEXT, 2, 66);
+                self.text(72, 152 + i * 24, line, TEXT, 2, 66);
             }
             if page.entries.is_empty() {
-                self.text(72, 180, "No history entries yet.", MUTED, 2, 60);
+                self.text(72, 156, "No history entries yet.", MUTED, 2, 60);
             }
         }
     }
-}
-
-/// Floor and ceiling of the player's own cell, derived from seen solid cells.
-fn enclosure_label(app: &App) -> String {
-    use tor_client_common::surfaces;
-    let Some(state) = &app.state else {
-        return "ASCII / EXPEDITION".into();
-    };
-    let cells = &state.state().observation.visible_cells;
-    let feet = tor_protocol::Position { x: 0, y: 0, z: 0 };
-    let floor = surfaces::floor_below(cells, feet);
-    let ceiling = surfaces::ceiling_above(cells, feet);
-    if floor.is_none() && ceiling.is_none() {
-        return "ASCII / EXPEDITION".into();
-    }
-    format!(
-        "FLOOR: {} / CEILING: {}",
-        floor.map_or("not visible", surfaces::material),
-        ceiling.map_or_else(
-            || "not visible".into(),
-            |(cell, distance)| format!(
-                "{} ({} ft above feet)",
-                surfaces::material(cell),
-                u64::from(distance) * 5
-            )
-        )
-    )
-}
-
-struct MapPanel {
-    z: i32,
-    x0: i32,
-    y0: i32,
-    rows: usize,
-    cols: usize,
-    step: usize,
-    left: usize,
-    top: usize,
-    label: bool,
-}
-fn map_panels(o: &tor_protocol::Observation, focus: i32) -> Vec<MapPanel> {
-    let mut levels: Vec<_> = o.visible_cells.iter().map(|c| c.position.z).collect();
-    levels.sort_unstable();
-    levels.dedup();
-    levels.sort_by_key(|z| ((i64::from(*z) - i64::from(focus)).abs(), *z));
-    levels.truncate(5);
-    let panels = levels.len().max(1);
-    levels
-        .into_iter()
-        .enumerate()
-        .map(|(index, z)| {
-            let (panel_x, panel_y, panel_w, panel_h): (usize, usize, usize, usize) = if index == 0 {
-                (44, 166, 704, if panels == 1 { 292 } else { 236 })
-            } else {
-                let width = 704 / (panels - 1);
-                (44 + (index - 1) * width, 402, width, 56)
-            };
-            let cells: Vec<_> = o
-                .visible_cells
-                .iter()
-                .filter(|c| c.position.z == z)
-                .collect();
-            let mut x0 = cells.iter().map(|c| c.position.x).min().unwrap_or(0);
-            let x1 = cells.iter().map(|c| c.position.x).max().unwrap_or(0);
-            let mut y0 = cells.iter().map(|c| c.position.y).min().unwrap_or(0);
-            let y1 = cells.iter().map(|c| c.position.y).max().unwrap_or(0);
-            let cols = (i64::from(x1) - i64::from(x0) + 1).min((panel_w / 8) as i64) as usize;
-            let rows = (i64::from(y1) - i64::from(y0) + 1)
-                .min((panel_h.saturating_sub(16) / 8) as i64) as usize;
-            // Crop large remembered charts around the observer, never overflow panels.
-            x0 = (-(cols as i64) / 2).clamp(i64::from(x0), i64::from(x1) - cols as i64 + 1) as i32;
-            y0 = (-(rows as i64) / 2).clamp(i64::from(y0), i64::from(y1) - rows as i64 + 1) as i32;
-            let step = (panel_w / cols)
-                .min(panel_h.saturating_sub(16) / rows)
-                .clamp(8, 52);
-            MapPanel {
-                z,
-                x0,
-                y0,
-                rows,
-                cols,
-                step,
-                left: panel_x + (panel_w - cols * step) / 2,
-                top: panel_y + 16,
-                label: panels > 1,
-            }
-        })
-        .collect()
-}
-
-/// Hit testing shares the exact layout used to draw cells, including stair panels.
-pub fn cell_at(
-    o: &tor_protocol::Observation,
-    x: usize,
-    y: usize,
-) -> Option<tor_protocol::Position> {
-    cell_at_level(o, x, y, 0)
-}
-fn cell_at_level(
-    o: &tor_protocol::Observation,
-    x: usize,
-    y: usize,
-    level: i32,
-) -> Option<tor_protocol::Position> {
-    for panel in map_panels(o, level) {
-        if x >= panel.left
-            && y >= panel.top
-            && x < panel.left + panel.cols * panel.step
-            && y < panel.top + panel.rows * panel.step
-        {
-            let position = tor_protocol::Position {
-                x: panel.x0 + ((x - panel.left) / panel.step) as i32,
-                y: panel.y0 + ((y - panel.top) / panel.step) as i32,
-                z: panel.z,
-            };
-            return o
-                .visible_cells
-                .iter()
-                .find(|c| c.position == position)
-                .map(|c| c.position);
-        }
-    }
-    None
-}
-
-pub fn cell_center(
-    o: &tor_protocol::Observation,
-    position: tor_protocol::Position,
-) -> Option<(usize, usize)> {
-    if !o.visible_cells.iter().any(|c| c.position == position) {
-        return None;
-    }
-    map_panels(o, 0)
-        .into_iter()
-        .find(|p| {
-            p.z == position.z
-                && i64::from(position.x) >= i64::from(p.x0)
-                && i64::from(position.x) < i64::from(p.x0) + p.cols as i64
-                && i64::from(position.y) >= i64::from(p.y0)
-                && i64::from(position.y) < i64::from(p.y0) + p.rows as i64
-        })
-        .map(|p| {
-            (
-                p.left + (position.x - p.x0) as usize * p.step + p.step / 2,
-                p.top + (position.y - p.y0) as usize * p.step + p.step / 2,
-            )
-        })
 }
 
 /// Convert native mouse pixels through the window's aspect-ratio letterboxing.
@@ -774,43 +488,4 @@ pub fn logical_mouse(x: f32, y: f32, width: usize, height: usize) -> Option<(usi
     let y = (y - (height as f32 - HEIGHT as f32 * scale) / 2.0) / scale;
     (x >= 0.0 && y >= 0.0 && x < WIDTH as f32 && y < HEIGHT as f32)
         .then_some((x as usize, y as usize))
-}
-
-fn travel_label(phase: tor_protocol::TravelPhase) -> &'static str {
-    use tor_protocol::TravelPhase::*;
-    match phase {
-        Active => "MOVING",
-        Arrived => "ARRIVED",
-        Blocked => "PATH BLOCKED",
-        Hazard => "POTENTIAL HAZARD IN SIGHT",
-        DecisionRequired => "THROWN OFF COURSE",
-        ControlLost => "CONTROL RELEASED",
-        WorldChanged => "WORLD CHANGED",
-        Failed => "COULD NOT SAVE OR MOVE",
-    }
-}
-
-#[cfg(test)]
-mod index_tests {
-    #[test]
-    fn index_matches_vector_oracle_including_overlaps_and_precedence() {
-        let view: tor_protocol::Observation = serde_json::from_value(serde_json::json!({
-            "actor":"1","self_target":tor_protocol::ActorTarget::from_digest([1; 32]),"tick":"0","position":{"x":0,"y":0,"z":0},"ready":true,
-            "places":[],"visible_cells":(0..128).map(|i|serde_json::json!({
-                "key":i.to_string(),"position":{"x":i%16,"y":0,"z":i/32},
-                "wall":i%7==0,"stairs_up":i%3==0,"stairs_down":i%5==0,"place_hint":false
-            })).collect::<Vec<_>>(),
-            "ground_items":[{"item":{"quantity":"1","class":"misc","appearance":"item","identified":true,"id":tor_protocol::ItemTarget::from_digest([1; 32]),"name":"item"},"position":{"x":3,"y":0,"z":0},"reachable":true}],
-            "visible_actors":[{"id":tor_protocol::ActorTarget::from_digest([2; 32]),"position":{"x":3,"y":0,"z":0}}],"inventory":[]
-        })).unwrap();
-        let index = super::indexed_glyphs(&view);
-        for z in -1..5 {
-            for x in -1..18 {
-                assert_eq!(
-                    index.get(&(x, 0, z)).copied().unwrap_or(' '),
-                    crate::glyph_at_level(&view, x, 0, z)
-                );
-            }
-        }
-    }
 }

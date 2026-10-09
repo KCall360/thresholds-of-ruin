@@ -14,6 +14,8 @@ pub enum Event {
     Snapshot(Box<Snapshot>),
     Update(Box<StreamUpdate>),
     Status(String),
+    /// The server refused a request, in the player's words.
+    Refused(String),
     Ready,
     History(HistoryPage),
     Fatal(String),
@@ -177,19 +179,18 @@ fn present(message: ServerMessage, tx: &SyncSender<Event>) -> Result<(), Error> 
         ServerMessage::Ack {
             receipt: tor_protocol::RequestReceipt::Admitted { phase, .. },
             ..
-        } => publish(tx, Event::Status(format!("Action: {phase:?}."))),
+        } => publish(
+            tx,
+            Event::Status(tor_client_ascii::phase_status(phase).into()),
+        ),
         ServerMessage::Ack {
             receipt: tor_protocol::RequestReceipt::Immediate { .. },
             ..
-        } => publish(
+        } => publish(tx, Event::Status("Done.".into())),
+        ServerMessage::Error { code, message, .. } => publish(
             tx,
-            Event::Status(
-                "Ready. Background saving is enabled; closing normally saves pending play.".into(),
-            ),
+            Event::Refused(tor_client_ascii::plain_error(code, &message)),
         ),
-        ServerMessage::Error { code, message, .. } => {
-            publish(tx, Event::Status(format!("{code:?}: {message}")))
-        }
         ServerMessage::History { page, .. } => {
             publish(tx, Event::History(page))?;
             publish(tx, Event::Status("History loaded.".into()))
@@ -622,7 +623,7 @@ mod tests {
             let statuses: Vec<_> = received
                 .try_iter()
                 .filter_map(|event| match event {
-                    Event::Status(status) => Some(status),
+                    Event::Status(status) | Event::Refused(status) => Some(status),
                     _ => None,
                 })
                 .collect();
@@ -634,9 +635,9 @@ mod tests {
             );
             assert!(
                 statuses.iter().any(|status| if rejected {
-                    status.contains("StorageFailure: Save rejected")
+                    status == "The game couldn't be saved: Save rejected"
                 } else {
-                    status.starts_with("Ready.")
+                    status == "Done."
                 }),
                 "original reply missing: {statuses:?}"
             );

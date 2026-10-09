@@ -7,8 +7,6 @@ use tor_protocol::*;
 #[serde(rename_all = "snake_case")]
 pub enum Key {
     Attack,
-    MapHigher,
-    MapLower,
     Places,
     Travel,
     Up,
@@ -45,6 +43,23 @@ pub enum Key {
     Slower,
     /// Show journey steps more quickly.
     Faster,
+    /// Open the log of earlier messages.
+    MessageLog,
+    /// Show everything carried.
+    Inventory,
+    /// Describe a map cell without taking a turn.
+    Look,
+    /// Show commands and map symbols.
+    Help,
+    /// Keep moving in a direction until something interesting happens.
+    RunUp,
+    RunDown,
+    RunLeft,
+    RunRight,
+    RunNorthEast,
+    RunSouthEast,
+    RunSouthWest,
+    RunNorthWest,
 }
 
 /// The native keyboard and opt-in process-test driver share this input boundary.
@@ -83,7 +98,19 @@ pub struct App {
     pub bump_attacks: BumpAttacks,
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
-    pub map_level: i32,
+    /// The look cursor, while choosing a cell to describe.
+    pub look_cursor: Option<Position>,
+    pub inventory_open: bool,
+    pub help_open: bool,
+    /// The end-of-run screen was closed.
+    pub end_dismissed: bool,
+    /// The direction being run in, between steps.
+    pub running: Option<Direction>,
+    /// Inventory letters, kept for as long as an item is carried.
+    pub letters: std::collections::BTreeMap<ItemTarget, char>,
+    /// The last request sent was a one-cell move, so a refusal means the
+    /// way is blocked.
+    last_move: bool,
     pub places_open: bool,
     pub place_selected: usize,
     pub place_name: Option<String>,
@@ -102,6 +129,10 @@ pub struct App {
     pub selected: usize,
     pub history_page: Option<HistoryPage>,
     pub history_scroll: usize,
+    /// What happened since the player last acted, and earlier turns.
+    pub messages: crate::messages::Messages,
+    /// Rows scrolled back from the newest in the message log, when it's open.
+    pub message_log: Option<usize>,
 }
 
 impl Default for App {
@@ -116,7 +147,13 @@ impl App {
             bump_attacks: BumpAttacks::Hostile,
             pace_ms: DEFAULT_PACE_MS,
             attack_targets: Vec::new(),
-            map_level: 0,
+            look_cursor: None,
+            inventory_open: false,
+            help_open: false,
+            end_dismissed: false,
+            running: None,
+            letters: Default::default(),
+            last_move: false,
             places_open: false,
             place_selected: 0,
             place_name: None,
@@ -135,6 +172,8 @@ impl App {
             selected: 0,
             history_page: None,
             history_scroll: 0,
+            messages: Default::default(),
+            message_log: None,
         }
     }
 
@@ -153,16 +192,40 @@ impl App {
             UpdateBody::Intention { status } => Some(status.phase),
             _ => None,
         };
+        let observed = matches!(
+            update.body,
+            UpdateBody::Observation { .. } | UpdateBody::ObservationDelta { .. }
+        );
+        let travel = match &update.body {
+            UpdateBody::Travel { status, .. } => Some(status.phase),
+            _ => None,
+        };
         let state = self
             .state
             .as_mut()
             .ok_or(tor_client_common::StreamError::InconsistentState)?;
         let old = Some((state.branch().clone(), state.state().revision));
         state.apply(update)?;
+        if observed {
+            let lines = state.narration_lines();
+            // A spectator never sends commands; the followed actor's next
+            // action starts its turn instead.
+            if self.role == AccessRole::Spectator
+                && lines
+                    .iter()
+                    .any(|line| matches!(line.topic, tor_client_common::narration::Topic::Own(_)))
+            {
+                self.messages.begin_turn();
+            }
+            self.messages.absorb(lines, &state.state().observation);
+        }
+        if let Some(reason) = travel.and_then(travel_stop) {
+            self.messages.push(reason);
+        }
         self.state_changed(old);
         if self.role == AccessRole::Player {
             if let Some(phase) = phase {
-                self.status = format!("Action: {phase:?}.");
+                self.status = phase_status(phase).into();
             }
         }
         Ok(())
@@ -201,7 +264,12 @@ impl App {
             self.place_name = None;
             self.history_page = None;
             self.history_scroll = 0;
-            self.map_level = 0;
+            self.look_cursor = None;
+            self.running = None;
+            self.end_dismissed = false;
+            self.messages.begin_turn();
+            self.messages.reset_sightings();
+            self.message_log = None;
             self.status = "Timeline changed; pending selections cleared.".into();
         }
         if old.is_some_and(|(_, revision)| revision != state.state().revision) {
@@ -223,11 +291,119 @@ impl App {
             self.door_direction = None;
             self.travel_cursor = None;
         }
+        let carried: std::collections::BTreeSet<_> = state
+            .state()
+            .observation
+            .inventory
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        self.letters.retain(|item, _| carried.contains(item));
+        for item in &state.state().observation.inventory {
+            if !self.letters.contains_key(&item.id) {
+                let used: std::collections::BTreeSet<_> = self.letters.values().copied().collect();
+                if let Some(letter) = ('a'..='z')
+                    .chain('A'..='Z')
+                    .find(|letter| !used.contains(letter))
+                {
+                    self.letters.insert(item.id, letter);
+                }
+            }
+        }
         self.connected = true;
     }
 
     pub fn ready(&mut self) {
         self.busy = false;
+    }
+
+    /// The server refused a request: stop any run and say why, in terms of
+    /// what the player tried.
+    pub fn refused(&mut self, status: String) {
+        self.running = None;
+        self.status = if self.last_move && status == "You can't do that now." {
+            "You can't go that way.".into()
+        } else {
+            status
+        };
+    }
+
+    /// Whether the column one step in a direction is open floor or stairs.
+    fn open_ahead(&self, direction: Direction) -> bool {
+        let Some(state) = &self.state else {
+            return false;
+        };
+        let o = &state.state().observation;
+        let (dx, dy) = match direction {
+            Direction::North => (0, -1),
+            Direction::South => (0, 1),
+            Direction::East => (1, 0),
+            Direction::West => (-1, 0),
+            Direction::NorthEast => (1, -1),
+            Direction::SouthEast => (1, 1),
+            Direction::SouthWest => (-1, 1),
+            Direction::NorthWest => (-1, -1),
+            Direction::Up | Direction::Down => return false,
+        };
+        crate::render::map_tiles(state).into_iter().any(|t| {
+            (t.position.x, t.position.y) == (o.position.x + dx, o.position.y + dy)
+                && matches!(
+                    t.kind,
+                    crate::map::Kind::Floor
+                        | crate::map::Kind::StairsUp
+                        | crate::map::Kind::StairsDown
+                        | crate::map::Kind::Item
+                )
+        })
+    }
+
+    /// A menu row's letter: an item's inventory letter when choosing from
+    /// what's carried, otherwise a, b, c... down the list.
+    pub fn choice_letter(&self, index: usize) -> char {
+        let carried = self.dropping || self.item_operation.is_some();
+        self.pickup
+            .get(index)
+            .and_then(|item| {
+                carried
+                    .then(|| self.letters.get(&item.id).copied())
+                    .flatten()
+            })
+            .unwrap_or_else(|| ('a'..='z').chain('A'..='Z').nth(index).unwrap_or('?'))
+    }
+
+    /// Whether another creature is in sight, which stops a run.
+    pub fn creature_in_view(&self) -> bool {
+        self.state.as_ref().is_some_and(|state| {
+            let o = &state.state().observation;
+            o.visible_actors.iter().any(|a| a.id != o.self_target)
+        })
+    }
+
+    /// Take the next step of a run, or end it when something interesting
+    /// happened: a message, a creature in sight, or the way ahead not open.
+    pub fn continue_run(&mut self) -> Effect {
+        let Some(direction) = self.running else {
+            return Effect::None;
+        };
+        let Some(state) = &self.state else {
+            self.running = None;
+            return Effect::None;
+        };
+        if ended(state) {
+            self.running = None;
+            return Effect::None;
+        }
+        if self.busy || !state.can_admit_intention() {
+            return Effect::None;
+        }
+        if !self.messages.text().is_empty()
+            || self.creature_in_view()
+            || !self.open_ahead(direction)
+        {
+            self.running = None;
+            return Effect::None;
+        }
+        self.act(Action::Move { direction })
     }
 
     pub fn intention_hint(&self) -> Option<String> {
@@ -299,6 +475,63 @@ impl App {
             self.status = "Skipping ahead.".into();
             return Effect::Skip;
         }
+        if self.running.take().is_some() && !matches!(input, Input::Click { .. }) {
+            self.status = "You stop running.".into();
+            return Effect::None;
+        }
+        if self.inventory_open || self.help_open {
+            if let Input::Key { .. } = input {
+                self.inventory_open = false;
+                self.help_open = false;
+            }
+            return Effect::None;
+        }
+        if let Input::Key { key: Key::Enter } = input {
+            if !self.end_dismissed
+                && self.state.as_ref().is_some_and(|s| {
+                    s.state()
+                        .observation
+                        .combat
+                        .as_ref()
+                        .is_some_and(|c| c.terminal)
+                })
+            {
+                self.end_dismissed = true;
+                return Effect::None;
+            }
+        }
+        if let Some(scroll) = self.message_log {
+            if let Input::Key { key } = input {
+                let rows = self.messages.history_rows(crate::messages::WIDTH).len();
+                let most = rows.saturating_sub(MESSAGE_LOG_ROWS);
+                self.message_log = match key {
+                    Key::Up => Some((scroll + 1).min(most)),
+                    Key::Down => Some(scroll.saturating_sub(1)),
+                    Key::OlderHistory => Some((scroll + MESSAGE_LOG_ROWS).min(most)),
+                    Key::RecentHistory => Some(scroll.saturating_sub(MESSAGE_LOG_ROWS)),
+                    Key::Escape | Key::MessageLog | Key::Enter => None,
+                    _ => Some(scroll),
+                };
+            }
+            return Effect::None;
+        }
+        if let Input::Key {
+            key: Key::MessageLog,
+        } = input
+        {
+            self.message_log = Some(0);
+            return Effect::None;
+        }
+        // Unread messages come first: a key shows the next rows and does
+        // nothing else, so no message scrolls away unseen. Esc skips to the end.
+        if self.role != AccessRole::Spectator && self.messages.more() {
+            match input {
+                Input::Key { key: Key::Escape } => self.messages.skip(),
+                Input::Key { .. } => self.messages.page(),
+                _ => {}
+            }
+            return Effect::None;
+        }
         if !self.attack_targets.is_empty() {
             match input {
                 Input::Key { key: Key::Escape } => {
@@ -324,6 +557,16 @@ impl App {
         }
         if !self.pickup.is_empty() {
             if let Input::Text { text } = &input {
+                if let Some(letter) = text.chars().find(char::is_ascii_alphabetic) {
+                    if let Some(index) =
+                        (0..self.pickup.len()).find(|&i| self.choice_letter(i) == letter)
+                    {
+                        self.selected = index;
+                        return self.input(Input::Key { key: Key::Enter });
+                    }
+                    self.status = format!("No item is lettered {letter}.");
+                    return Effect::None;
+                }
                 if self.item_operation.is_some() {
                     return Effect::None;
                 }
@@ -345,8 +588,8 @@ impl App {
                 self.places_open = false;
                 return Effect::None;
             }
-            if self.travel_cursor.take().is_some() {
-                self.status = "Travel selection cancelled.".into();
+            if self.travel_cursor.take().is_some() || self.look_cursor.take().is_some() {
+                self.status = "Never mind.".into();
                 return Effect::None;
             }
             if self.note.take().is_some()
@@ -471,7 +714,7 @@ impl App {
             if let Some(position) = self
                 .state
                 .as_ref()
-                .and_then(|s| crate::render::known_cell_at_level(s, x, y, self.map_level))
+                .and_then(|s| crate::render::known_cell_at(s, x, y))
             {
                 return self.travel_to(position);
             }
@@ -487,8 +730,11 @@ impl App {
                     return Effect::None;
                 }
                 Key::Down => {
-                    self.history_scroll = (self.history_scroll + 1)
-                        .min(history_lines(&page.entries).len().saturating_sub(20));
+                    self.history_scroll = (self.history_scroll + 1).min(
+                        history_lines(&page.entries)
+                            .len()
+                            .saturating_sub(HISTORY_ROWS),
+                    );
                     return Effect::None;
                 }
                 Key::OlderHistory | Key::RecentHistory | Key::History => {}
@@ -502,8 +748,10 @@ impl App {
                     | Key::History
                     | Key::OlderHistory
                     | Key::RecentHistory
-                    | Key::MapHigher
-                    | Key::MapLower
+                    | Key::Look
+                    | Key::Inventory
+                    | Key::Help
+                    | Key::MessageLog
             )
         {
             self.status = "Spectator access is read-only.".into();
@@ -633,47 +881,139 @@ impl App {
                     cursor.y += -1;
                 }
 
-                Key::Ascend => cursor.z += 1,
-                Key::Descend => cursor.z -= 1,
-                Key::Enter => return self.travel_to(cursor),
+                Key::Ascend | Key::Descend => {
+                    let up = key == Key::Ascend;
+                    let wanted = if up {
+                        crate::map::Kind::StairsUp
+                    } else {
+                        crate::map::Kind::StairsDown
+                    };
+                    let found = self.state.as_ref().and_then(|s| {
+                        crate::render::map_tiles(s)
+                            .into_iter()
+                            .filter(|t| t.kind == wanted)
+                            .min_by_key(|t| {
+                                (t.position.x - cursor.x).abs() + (t.position.y - cursor.y).abs()
+                            })
+                            .map(|t| t.position)
+                    });
+                    match found {
+                        Some(stairs) => cursor = stairs,
+                        None => {
+                            self.status = format!(
+                                "You don't know of any stairs {} on this map.",
+                                if up { "up" } else { "down" }
+                            );
+                        }
+                    }
+                }
+                Key::Enter | Key::Wait | Key::Travel => {
+                    let target = self
+                        .state
+                        .as_ref()
+                        .and_then(|s| crate::render::known_column(s, cursor.x, cursor.y));
+                    return match target {
+                        Some(target) => self.travel_to(target),
+                        None => {
+                            self.status = "You don't know that spot. Pick a known floor.".into();
+                            Effect::None
+                        }
+                    };
+                }
                 _ => return Effect::None,
             }
-            cursor.x = cursor.x.clamp(-16, 16);
-            cursor.y = cursor.y.clamp(-16, 16);
-            cursor.z = cursor.z.clamp(-16, 16);
+            if let Some(state) = &self.state {
+                cursor = crate::map::clamp(&state.state().observation, cursor);
+            }
             self.travel_cursor = Some(cursor);
             return Effect::None;
         }
-        match key {
-            Key::MapHigher | Key::MapLower => {
-                if let Some(state) = &self.state {
-                    let levels: std::collections::BTreeSet<_> = state
-                        .state()
-                        .observation
-                        .visible_cells
-                        .iter()
-                        .map(|c| c.position.z)
-                        .collect();
-                    let next = if matches!(key, Key::MapHigher) {
-                        levels
-                            .range((
-                                std::ops::Bound::Excluded(self.map_level),
-                                std::ops::Bound::Unbounded,
-                            ))
-                            .next()
-                            .copied()
-                    } else {
-                        levels.range(..self.map_level).next_back().copied()
-                    };
-                    if let Some(level) = next {
-                        self.map_level = level;
+        if let Some(mut cursor) = self.look_cursor {
+            match key {
+                Key::Up => cursor.y -= 1,
+                Key::Down => cursor.y += 1,
+                Key::Left => cursor.x -= 1,
+                Key::Right => cursor.x += 1,
+                Key::NorthEast => {
+                    cursor.x += 1;
+                    cursor.y -= 1;
+                }
+                Key::SouthEast => {
+                    cursor.x += 1;
+                    cursor.y += 1;
+                }
+                Key::SouthWest => {
+                    cursor.x -= 1;
+                    cursor.y += 1;
+                }
+                Key::NorthWest => {
+                    cursor.x -= 1;
+                    cursor.y -= 1;
+                }
+                Key::Enter | Key::Look | Key::Wait => {
+                    self.look_cursor = None;
+                    self.status.clear();
+                    if let Some(state) = &self.state {
+                        let text = crate::describe(state, cursor.x, cursor.y);
+                        self.messages.push(text);
                     }
-                    self.status = format!(
-                        "Viewing height {:+}. F6/F7 browse disclosed heights.",
-                        self.map_level
-                    );
+                    return Effect::None;
+                }
+                _ => return Effect::None,
+            }
+            if let Some(state) = &self.state {
+                cursor = crate::map::clamp(&state.state().observation, cursor);
+            }
+            self.look_cursor = Some(cursor);
+            return Effect::None;
+        }
+        match key {
+            Key::Look => {
+                if let Some(state) = &self.state {
+                    self.look_cursor = Some(state.state().observation.position);
+                    self.status = "Look at what? hjklyubn moves, . or ; picks, Esc cancels.".into();
                 }
                 Effect::None
+            }
+            Key::Inventory => {
+                self.inventory_open = true;
+                Effect::None
+            }
+            Key::Help => {
+                self.help_open = true;
+                Effect::None
+            }
+            Key::RunUp
+            | Key::RunDown
+            | Key::RunLeft
+            | Key::RunRight
+            | Key::RunNorthEast
+            | Key::RunSouthEast
+            | Key::RunSouthWest
+            | Key::RunNorthWest => {
+                let direction = match key {
+                    Key::RunUp => Direction::North,
+                    Key::RunDown => Direction::South,
+                    Key::RunLeft => Direction::West,
+                    Key::RunRight => Direction::East,
+                    Key::RunNorthEast => Direction::NorthEast,
+                    Key::RunSouthEast => Direction::SouthEast,
+                    Key::RunSouthWest => Direction::SouthWest,
+                    _ => Direction::NorthWest,
+                };
+                if self.creature_in_view() {
+                    self.status = "You can't run with a creature in view.".into();
+                    return Effect::None;
+                }
+                if !self.open_ahead(direction) {
+                    self.status = "You can't run that way.".into();
+                    return Effect::None;
+                }
+                let effect = self.act(Action::Move { direction });
+                if matches!(effect, Effect::Request(_)) {
+                    self.running = Some(direction);
+                }
+                effect
             }
             Key::Travel => {
                 if self
@@ -688,7 +1028,7 @@ impl App {
                 if let Some(state) = self.state.as_ref().filter(|s| s.has_control()) {
                     self.travel_cursor = Some(state.state().observation.position);
                     self.status =
-                        "Travel: HJKL/YUBN select, </> height, Enter confirms, Esc cancels.".into();
+                        "Travel where? hjklyubn moves, < > stairs, . goes, Esc cancels.".into();
                 } else {
                     self.status = "Acquire control before travelling.".into();
                 }
@@ -786,7 +1126,7 @@ impl App {
                     self.place_name = None;
                     self.status = "You are observing. Press F3 to request control.".into();
                 } else if !state.can_admit_intention() {
-                    self.status = "The server is not accepting another action.".into();
+                    self.status = "You can't act right now.".into();
                 } else if state
                     .travel()
                     .is_some_and(|t| t.phase == TravelPhase::Active)
@@ -832,22 +1172,18 @@ impl App {
                         .into();
                         Effect::None
                     }
-                    [item] if item.quantity == 1 => self.act(if self.dropping {
-                        Action::Drop {
-                            item: item.id,
-                            quantity: None,
-                        }
-                    } else {
-                        Action::Take {
-                            item: item.id,
-                            quantity: None,
-                        }
+                    // A lone object is picked up at once; dropping always asks.
+                    [item] if item.quantity == 1 && !self.dropping => self.act(Action::Take {
+                        item: item.id,
+                        quantity: None,
                     }),
                     _ => {
                         self.pickup = items;
                         self.selected = 0;
-                        self.status =
-                            "Up/Down select; type quantity (blank = all); Enter confirms.".into();
+                        self.status = format!(
+                            "What do you want to {}? Type its letter; digits first set a count.",
+                            if self.dropping { "drop" } else { "pick up" }
+                        );
                         Effect::None
                     }
                 }
@@ -870,22 +1206,24 @@ impl App {
                 self.quantity.clear();
                 match items.as_slice() {
                     [] => {
-                        self.status = format!("You have no item to {}.", operation.verb());
+                        self.status = if view.interactions.is_none() && !view.inventory.is_empty() {
+                            format!(
+                                "Nothing you carry can be used to {} here.",
+                                operation.verb()
+                            )
+                        } else {
+                            format!("You don't have anything to {}.", operation.verb())
+                        };
                         Effect::None
                     }
-                    [item] => match item_action(view, item.id, operation) {
-                        Ok(action) => self.act(action),
-                        Err(reason) => {
-                            self.status = reason;
-                            Effect::None
-                        }
-                    },
                     _ => {
                         self.pickup = items;
                         self.item_operation = Some(operation);
                         self.selected = 0;
-                        self.status =
-                            format!("Up/Down select; Enter {}; Esc cancels.", operation.verb());
+                        self.status = format!(
+                            "What do you want to {}? Type its letter; Esc cancels.",
+                            operation.verb()
+                        );
                         Effect::None
                     }
                 }
@@ -980,9 +1318,15 @@ impl App {
                     .as_ref()
                     .is_some_and(|c| !c.terminal)
             {
+                self.messages.begin_turn();
                 return self.request(Request::Continue);
             }
-            self.status = "The server is not accepting another action.".into();
+            self.status = if ended(state) {
+                "This run has ended."
+            } else {
+                "You can't act right now."
+            }
+            .into();
             return Effect::None;
         }
         if let Action::Move { direction } = action {
@@ -1015,29 +1359,98 @@ impl App {
                 action = Action::Attack { target: target.id };
             }
         }
-        self.command(Command::Act {
-            expected_revision: state.state().revision,
-            action,
-        })
+        let expected_revision = state.state().revision;
+        let effect = self.command(Command::Act {
+            expected_revision,
+            action: action.clone(),
+        });
+        self.last_move = matches!(action, Action::Move { .. });
+        effect
     }
 
     fn command(&mut self, command: Command) -> Effect {
         let Some(state) = &self.state else {
             return Effect::None;
         };
-        if matches!(command, Command::Act { .. } | Command::Travel { .. })
-            && !state.can_admit_intention()
-        {
-            self.status = "The server is not accepting another action.".into();
-            return Effect::None;
+        if matches!(command, Command::Act { .. } | Command::Travel { .. }) {
+            if !state.can_admit_intention() {
+                self.status = if ended(state) {
+                    "This run has ended."
+                } else {
+                    "You can't act right now."
+                }
+                .into();
+                return Effect::None;
+            }
+            self.messages.begin_turn();
         }
-        self.request(state.command_request(command))
+        let request = state.command_request(command);
+        self.request(request)
     }
 
     fn request(&mut self, request: Request) -> Effect {
         self.busy = true;
         self.status = "Waiting for server...".into();
         Effect::Request(request)
+    }
+}
+
+/// Rows the history screen shows at once.
+pub const HISTORY_ROWS: usize = 22;
+
+/// Rows the message log screen shows at once.
+pub const MESSAGE_LOG_ROWS: usize = 24;
+
+/// A request's progress in plain words; a finished action needs none.
+pub fn phase_status(phase: IntentionPhase) -> &'static str {
+    match phase {
+        IntentionPhase::Queued => "Action queued.",
+        IntentionPhase::Suspended => "Action suspended. F8 resumes, F9 cancels.",
+        IntentionPhase::Paused => "Attack paused.",
+        IntentionPhase::Started => "Action under way.",
+        IntentionPhase::Resolved => "",
+        IntentionPhase::Failed => "That didn't work.",
+        IntentionPhase::Cancelled => "Action cancelled.",
+    }
+}
+
+/// A server refusal in the player's words; unknown reasons keep the server's text.
+pub fn plain_error(code: ErrorCode, message: &str) -> String {
+    match (code, message) {
+        (ErrorCode::InvalidAction, "Intention is unavailable") => "You can't do that now.".into(),
+        (ErrorCode::InvalidAction, "Travel destination or known route is unavailable") => {
+            "You don't know a way there.".into()
+        }
+        (ErrorCode::ActorBusy, _) => "You're still on your way.".into(),
+        (ErrorCode::ControlTaken, _) => {
+            "Another player has control; you can watch until they release it.".into()
+        }
+        (ErrorCode::NotController, _) => "You don't have control. Press F3 to request it.".into(),
+        (ErrorCode::StaleRevision | ErrorCode::StaleContext | ErrorCode::WrongBranch, _) => {
+            "The game moved on before that arrived; look again and retry.".into()
+        }
+        (ErrorCode::StorageFailure, _) => format!("The game couldn't be saved: {message}"),
+        _ => {
+            let mut text = message.trim().to_owned();
+            if !text.ends_with(['.', '!', '?']) {
+                text.push('.');
+            }
+            text
+        }
+    }
+}
+
+/// "a dawn seal", "an ember", "3 x arrow".
+pub fn item_phrase(name: &str, quantity: u64) -> String {
+    if quantity == 1 {
+        let article = if name.to_lowercase().starts_with(['a', 'e', 'i', 'o', 'u']) {
+            "an"
+        } else {
+            "a"
+        };
+        format!("{article} {name}")
+    } else {
+        format!("{quantity} x {name}")
     }
 }
 
@@ -1049,42 +1462,13 @@ pub enum BumpAttacks {
     Off,
 }
 
-/// Render only cells disclosed in the observer's scene.
+/// The glyph the map draws for a column of the observer's scene, or a space
+/// when nothing there is disclosed.
 pub fn glyph_at(o: &Observation, x: i32, y: i32) -> char {
-    glyph_at_level(o, x, y, 0)
-}
-
-pub fn glyph_at_level(o: &Observation, x: i32, y: i32, z: i32) -> char {
-    let position = Position { x, y, z };
-    let Some(cell) = o
-        .visible_cells
-        .iter()
-        .find(|cell| cell.position == position)
-    else {
-        return ' ';
-    };
-    if cell.wall {
-        return '#';
-    }
-    if position == o.position {
-        return '@';
-    }
-    if o.visible_actors.iter().any(|a| a.position == position) {
-        return '&';
-    }
-    if let Some(item) = o.ground_items.iter().find(|i| i.position == position) {
-        return item_glyph(item.item.class);
-    }
-    if let Some(door) = &cell.door {
-        return if door.open { '/' } else { '+' };
-    }
-    if cell.stairs_up {
-        return '<';
-    }
-    if cell.stairs_down {
-        return '>';
-    }
-    '.'
+    crate::map::tiles(o, &|_| true)
+        .into_iter()
+        .find(|t| (t.position.x, t.position.y) == (x, y))
+        .map_or(' ', |t| t.glyph)
 }
 
 pub fn history_text(entry: &HistoryEntry) -> String {
@@ -1093,12 +1477,26 @@ pub fn history_text(entry: &HistoryEntry) -> String {
         HistoryContent::Travel { .. } => "Travel requested.".into(),
         HistoryContent::Wizard { summary, .. } => summary.clone(),
         HistoryContent::Action { event, .. } => match event {
-            Event::Moved { direction } => format!("Moved {direction:?}."),
-            Event::Taken { item, quantity, .. } => {
-                format!("Picked up {quantity} from item #{item}.")
+            Event::Moved { direction } => format!("Moved {}.", direction_name(*direction)),
+            Event::Taken { quantity, .. } => {
+                format!(
+                    "Picked up {}.",
+                    if *quantity == 1 {
+                        "an item".to_owned()
+                    } else {
+                        format!("{quantity} items")
+                    }
+                )
             }
-            Event::Dropped { item, quantity, .. } => {
-                format!("Dropped {quantity} from item #{item}.")
+            Event::Dropped { quantity, .. } => {
+                format!(
+                    "Dropped {}.",
+                    if *quantity == 1 {
+                        "an item".to_owned()
+                    } else {
+                        format!("{quantity} items")
+                    }
+                )
             }
             Event::DoorChanged { open, .. } => {
                 format!("{} door.", if *open { "Opened" } else { "Closed" })
@@ -1113,8 +1511,13 @@ pub fn history_text(entry: &HistoryEntry) -> String {
                 _ => "Began preparation.".into(),
             },
         },
-        HistoryContent::Annotation { text, category, .. } => {
-            format!("{:?} {:?}: {text}", entry.audience, category)
+        HistoryContent::Annotation { text, .. } => {
+            let audience = if entry.audience == Audience::Private {
+                "Private note"
+            } else {
+                "Note"
+            };
+            format!("{audience}: {text}")
         }
     }
 }
@@ -1130,19 +1533,28 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
         .collect()
 }
 
+/// History entries for the history screen, newest last, one per turn time.
 pub fn history_lines(entries: &[HistoryEntry]) -> Vec<String> {
     entries
         .iter()
-        .flat_map(|e| {
-            let mut lines = vec![
-                format!("tick {}  {}", e.tick, e.id.0),
-                format!("{:?} / {:?}", e.author, e.audience),
-            ];
-            lines.extend(wrap(&history_text(e), 66));
-            lines.push(String::new());
-            lines
-        })
+        .flat_map(|e| crate::messages::word_wrap(&format!("T:{}  {}", e.tick, history_text(e)), 66))
         .collect()
+}
+
+/// A direction as a word.
+pub fn direction_name(direction: Direction) -> &'static str {
+    match direction {
+        Direction::North => "north",
+        Direction::East => "east",
+        Direction::South => "south",
+        Direction::West => "west",
+        Direction::NorthEast => "northeast",
+        Direction::SouthEast => "southeast",
+        Direction::SouthWest => "southwest",
+        Direction::NorthWest => "northwest",
+        Direction::Up => "up",
+        Direction::Down => "down",
+    }
 }
 
 pub fn item_glyph(class: ItemClass) -> char {
@@ -1160,4 +1572,332 @@ pub fn item_glyph(class: ItemClass) -> char {
         ItemClass::Coin => '$',
         ItemClass::Gem => '*',
     }
+}
+
+/// Why a journey stopped short, as a message; arriving needs none.
+pub fn travel_stop(phase: TravelPhase) -> Option<&'static str> {
+    Some(match phase {
+        TravelPhase::Active | TravelPhase::Arrived => return None,
+        TravelPhase::Blocked => "Your way is blocked.",
+        TravelPhase::Hazard => "You stop. There may be danger in sight.",
+        TravelPhase::DecisionRequired => "You are thrown off course.",
+        TravelPhase::ControlLost => "You stop travelling; control was released.",
+        TravelPhase::WorldChanged => "You stop. Something changed along the way.",
+        TravelPhase::Failed => "You couldn't travel there.",
+    })
+}
+
+/// One carried item as the inventory shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InventoryEntry {
+    pub letter: char,
+    pub glyph: char,
+    pub name: String,
+    pub quantity: u64,
+    /// The slot it's worn or held in, when equipped.
+    pub equipped: Option<String>,
+    /// Known equipment numbers, when the server discloses them.
+    pub stats: Option<String>,
+}
+
+impl InventoryEntry {
+    pub fn short(&self) -> String {
+        format!(
+            "{} - {}",
+            self.letter,
+            item_phrase(&self.name, self.quantity)
+        )
+    }
+    pub fn long(&self) -> String {
+        let mut text = format!(
+            "{} - {} {}",
+            self.letter,
+            self.glyph,
+            item_phrase(&self.name, self.quantity)
+        );
+        if let Some(slot) = &self.equipped {
+            text.push_str(&format!(" ({})", slot));
+        }
+        if let Some(stats) = &self.stats {
+            text.push_str(&format!("  [{stats}]"));
+        }
+        text
+    }
+}
+
+fn slot_phrase(slot: EquipmentSlot) -> &'static str {
+    match slot {
+        EquipmentSlot::Weapon => "weapon in hand",
+        EquipmentSlot::Ring => "on a finger",
+        EquipmentSlot::Amulet => "around the neck",
+        _ => "being worn",
+    }
+}
+
+/// Everything carried, lettered and in disclosed order.
+pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
+    o.inventory
+        .iter()
+        .map(|item| {
+            let affordance = o
+                .interactions
+                .as_ref()
+                .and_then(|i| i.inventory.iter().find(|a| a.item == item.id));
+            let equipped = affordance.and_then(|a| a.equipped_slot).map(|index| {
+                o.interactions
+                    .as_ref()
+                    .and_then(|i| i.slots.get(index as usize))
+                    .map_or_else(|| "in use".into(), |slot| slot_phrase(*slot).to_owned())
+            });
+            let stats = affordance
+                .and_then(|a| a.known_equipment.as_ref())
+                .map(|known| {
+                    let mut parts = Vec::new();
+                    if let Some(attack) = &known.attack {
+                        parts.push(format!("attack {:+}", attack.bonus));
+                    }
+                    if known.defense != 0 {
+                        parts.push(format!("defense {:+}", known.defense));
+                    }
+                    parts.join(", ")
+                })
+                .filter(|text| !text.is_empty());
+            InventoryEntry {
+                letter: app.letters.get(&item.id).copied().unwrap_or('?'),
+                glyph: item_glyph(item.class),
+                name: item.name.clone(),
+                quantity: item.quantity,
+                equipped,
+                stats,
+            }
+        })
+        .collect()
+}
+
+/// What the look command says about a column.
+pub fn describe(state: &ClientState, x: i32, y: i32) -> String {
+    let o = &state.state().observation;
+    if (x, y) == (o.position.x, o.position.y) {
+        return "That's you.".into();
+    }
+    if let Some(actor) = o
+        .visible_actors
+        .iter()
+        .find(|a| a.id != o.self_target && (a.position.x, a.position.y) == (x, y))
+    {
+        let name = if actor.name.trim().is_empty() {
+            "figure"
+        } else {
+            actor.name.as_str()
+        };
+        let mut text = format!(
+            "{} - {}",
+            crate::map::creature_glyph(name),
+            item_phrase(name, 1)
+        );
+        if let Some(combat) = o
+            .combat
+            .as_ref()
+            .and_then(|c| c.actors.iter().find(|c| c.actor == actor.id))
+        {
+            text.push_str(&format!(
+                " ({}, {})",
+                if combat.hostile {
+                    "hostile"
+                } else {
+                    "peaceful"
+                },
+                tor_client_common::narration::injury(combat.injury)
+            ));
+        }
+        if !actor.description.trim().is_empty() {
+            text.push_str(&format!(". {}", actor.description.trim()));
+        }
+        return text + ".";
+    }
+    let tiles = crate::render::map_tiles(state);
+    let Some(tile) = tiles
+        .iter()
+        .find(|t| (t.position.x, t.position.y) == (x, y))
+    else {
+        return "You don't know what's there.".into();
+    };
+    let what = match tile.kind {
+        crate::map::Kind::Item => {
+            let items: Vec<_> = o
+                .ground_items
+                .iter()
+                .chain(state.map_memory().flat_map(|c| c.ground_items.iter()))
+                .filter(|i| (i.position.x, i.position.y) == (x, y))
+                .collect();
+            match items.first() {
+                Some(item) => item_phrase(&item.item.name, item.item.quantity),
+                None => "an object".into(),
+            }
+        }
+        crate::map::Kind::Wall => "a wall".into(),
+        crate::map::Kind::LowWall => "a low wall".into(),
+        crate::map::Kind::Drop => "a drop".into(),
+        crate::map::Kind::Door => {
+            if tile.glyph == '/' {
+                "an open door".into()
+            } else {
+                "a closed door".into()
+            }
+        }
+        crate::map::Kind::StairsUp => "a staircase up".into(),
+        crate::map::Kind::StairsDown => "a staircase down".into(),
+        crate::map::Kind::Floor => "the floor".into(),
+        crate::map::Kind::Player => "you".into(),
+        crate::map::Kind::Creature => "a creature".into(),
+    };
+    format!(
+        "{} - {}{}.",
+        tile.glyph,
+        what,
+        if tile.remembered { " (remembered)" } else { "" }
+    )
+}
+
+/// The known place whose anchor in sight is nearest the player.
+fn place_name(o: &Observation) -> Option<&str> {
+    o.places
+        .iter()
+        .filter_map(|place| {
+            o.visible_cells
+                .iter()
+                .filter(|c| c.key == place.key)
+                .map(|c| {
+                    let d = c.position;
+                    (d.x - o.position.x).pow(2) + (d.y - o.position.y).pow(2)
+                })
+                .min()
+                .map(|distance| (distance, place.name.as_str()))
+        })
+        .min()
+        .map(|(_, name)| name)
+}
+
+/// NetHack's two status lines: where you are and what you're after, then
+/// hit points, time and conditions.
+pub fn status_lines(app: &App, state: &ClientState) -> [String; 2] {
+    let o = &state.state().observation;
+    let me = o
+        .visible_actors
+        .iter()
+        .find(|a| a.id == o.self_target && !a.name.trim().is_empty())
+        .map(|a| a.name.as_str());
+    let mut first = place_name(o).or(me).unwrap_or_default().to_owned();
+    if let Some(objective) = o.combat.as_ref().and_then(|c| c.objective) {
+        if !first.is_empty() {
+            first.push_str("   ");
+        }
+        first.push_str(tor_client_common::narration::objective(objective));
+    }
+    let mut second = Vec::new();
+    if let Some(combat) = &o.combat {
+        second.push(format!("HP:{}({})", combat.hp, combat.max_hp));
+    }
+    second.push(format!("T:{}", o.tick));
+    if let Some(combat) = &o.combat {
+        if combat.dead {
+            second.push("Dead".into());
+        } else if combat.victory {
+            second.push("Victorious".into());
+        } else if combat.preparation_remaining.is_some() {
+            second.push(
+                if combat.preparation_active {
+                    "Attacking"
+                } else {
+                    "Attack paused"
+                }
+                .into(),
+            );
+        } else if combat.recovery_remaining > 0 {
+            second.push("Recovering".into());
+        }
+    }
+    if state
+        .travel()
+        .is_some_and(|t| t.phase == TravelPhase::Active)
+    {
+        second.push("Travelling".into());
+    }
+    if app.running.is_some() {
+        second.push("Running".into());
+    }
+    if state.state().wizard_game {
+        second.push("Wizard".into());
+    }
+    [first, second.join("  ")]
+}
+
+/// Who controls the character, and whether a request is out.
+pub fn control_label(app: &App) -> String {
+    let control = if !app.connected {
+        "DISCONNECTED - relaunch to reconnect"
+    } else if app.role == AccessRole::Spectator {
+        "SPECTATOR"
+    } else if app.state.as_ref().is_some_and(|s| s.has_control()) {
+        "IN CONTROL"
+    } else {
+        "OBSERVING - F3 to take control"
+    };
+    if app.busy && app.connected {
+        format!("{control}   waiting for the server...")
+    } else {
+        control.into()
+    }
+}
+
+/// The end-of-run screen's lines.
+pub fn end_summary(state: &ClientState) -> Vec<String> {
+    let o = &state.state().observation;
+    let mut lines = Vec::new();
+    if let Some(combat) = &o.combat {
+        lines.push(format!("Hit points {} of {}", combat.hp, combat.max_hp));
+    }
+    lines.push(format!("Time {}   Places known {}", o.tick, o.places.len()));
+    let carried: Vec<_> = o
+        .inventory
+        .iter()
+        .map(|item| item_phrase(&item.name, item.quantity))
+        .collect();
+    lines.push(if carried.is_empty() {
+        "Carrying nothing".into()
+    } else {
+        format!("Carrying {}", carried.join(", "))
+    });
+    lines
+}
+
+/// The help screen.
+pub const HELP: &[&str] = &[
+    "MOVING                         MAP",
+    "y k u   move; Shift runs        @ you      a-z creatures",
+    "h @ l   (arrows also move)      # wall     # low wall (tan)",
+    " b j n                          . floor    ^ drop or pit",
+    "< >     go up / down stairs     < > stairs + / doors",
+    "_       travel (< > jump)       ) [ ! % ( = \" ? / $ * items",
+    "click   travel to a cell        grey: remembered, not in sight",
+    "",
+    "ACTING                         SEEING",
+    "a       attack a target         ;      look at a cell",
+    ". space wait                    i      inventory",
+    "g , d   pick up / drop          ^P     earlier messages",
+    "w t q   wear+wield/remove/drink F2     game history",
+    "o c     open / close a door     F5     remembered places",
+    "                                F4     write a note",
+    "F3 R    take / release control  [ ]    slower / faster journeys",
+    "F8 F9   resume / cancel action  Esc    cancel, close, or quit",
+];
+
+/// Whether the run is over: won or lost with no further play.
+fn ended(state: &ClientState) -> bool {
+    state
+        .state()
+        .observation
+        .combat
+        .as_ref()
+        .is_some_and(|c| c.terminal)
 }
