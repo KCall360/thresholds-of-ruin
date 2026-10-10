@@ -163,7 +163,7 @@ control.
 
 ## Development and graphical validation
 
-The frontend uses [minifb](https://docs.rs/minifb/0.28.0/minifb/) for its native
+The frontend uses [minifb](https://docs.rs/minifb/0.29.0/minifb/) for its native
 pixel-buffer window and [font8x8](https://docs.rs/font8x8/0.3.1/font8x8/) for bitmap
 glyphs. Simulation and protocol crates have no rendering dependencies. A background
 worker consumes WebSocket updates independently of window input, through bounded

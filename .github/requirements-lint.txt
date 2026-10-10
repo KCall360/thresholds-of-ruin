@@ -1,4 +1,4 @@
 # Pinned tools for the repository-tooling lint job in .github/workflows/ci.yml.
 # Dependabot proposes updates.
 actionlint-py==1.7.12.25
-ruff==0.16.9
+ruff==0.16.10
