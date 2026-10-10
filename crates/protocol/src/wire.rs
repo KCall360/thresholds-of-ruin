@@ -211,6 +211,10 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    UseAbility {
+        ability: Ability,
+        target: ActorTarget,
+    },
     Attack {
         target: ActorTarget,
     },
@@ -242,6 +246,22 @@ pub enum Action {
         quantity: Option<u64>,
     },
     Wait,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ability {
+    PowerStrike,
+    MagicBolt,
+    Fear,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbilityOutcome {
+    Applied,
+    Unaffected,
+    Miss,
 }
 
 /// Offset in the backend-resolved observer frame, never a world coordinate.
@@ -371,18 +391,8 @@ pub enum DamageType {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AttackView {
-    pub bonus: i32,
-    #[serde(with = "crate::integers::unsigned")]
-    pub wind_up: u64,
-    #[serde(with = "crate::integers::unsigned")]
-    pub recovery: u64,
-    pub damage: std::collections::BTreeMap<DamageType, u32>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EquipmentView {
-    pub attack: Option<AttackView>,
+    pub attack: Option<crate::AttackView>,
     pub defense: i32,
     pub reductions: std::collections::BTreeMap<DamageType, u32>,
 }
@@ -415,6 +425,9 @@ pub struct InteractionView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CombatView {
+    /// Exact information about the attached actor, never another actor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_stats: Option<crate::OwnStats>,
     pub hp: u32,
     pub max_hp: u32,
     #[serde(default, with = "crate::integers::optional_unsigned")]
@@ -475,6 +488,12 @@ pub enum AttackOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CombatEventView {
+    Ability {
+        caster: Option<ActorTarget>,
+        target: Option<ActorTarget>,
+        ability: Ability,
+        outcome: AbilityOutcome,
+    },
     Attack {
         attacker: Option<ActorTarget>,
         target: Option<ActorTarget>,
@@ -629,6 +648,10 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    AbilityStarted {
+        ability: Ability,
+        target: ActorTarget,
+    },
     PreparationPaused,
     ItemStarted {
         action: Action,
@@ -931,6 +954,16 @@ pub enum ServerMessage {
         request_id: String,
         receipt: RequestReceipt,
     },
+    CombatDiagnostics {
+        context: ReplyContext,
+        request_id: String,
+        report: Box<crate::CombatDiagnosticsView>,
+    },
+    CreatureInspection {
+        context: ReplyContext,
+        request_id: String,
+        report: Box<crate::CreatureInspectionView>,
+    },
     History {
         context: ReplyContext,
         request_id: String,
@@ -961,6 +994,8 @@ impl ServerMessage {
         match self {
             Self::Ack { context, .. }
             | Self::History { context, .. }
+            | Self::CreatureInspection { context, .. }
+            | Self::CombatDiagnostics { context, .. }
             | Self::Palette { context, .. }
             | Self::Error {
                 scope: ErrorScope::Attached { context },

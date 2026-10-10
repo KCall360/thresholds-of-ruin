@@ -263,6 +263,7 @@ fn protocol_22_says_whose_move_it_is_where_the_exit_is_and_where_names_came_from
     assert!(serde_json::from_str::<PlaceView>(r#"{"key":"k","name":"n"}"#).is_err());
 
     let combat = |exit: Option<&str>| CombatView {
+        own_stats: None,
         hp: 1,
         max_hp: 1,
         preparation_remaining: None,

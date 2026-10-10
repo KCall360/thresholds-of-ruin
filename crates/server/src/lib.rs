@@ -2,6 +2,8 @@
 
 mod actions;
 mod adapt;
+pub mod creature_authoring;
+mod creature_view;
 mod developer;
 mod diagnostics;
 mod engine;
@@ -30,3 +32,5 @@ pub use engine::{
 pub use runner::{Simulation, SimulationHandle};
 pub use session::{Account, Service};
 pub use transport::serve;
+
+pub use engine::arena_evaluation;

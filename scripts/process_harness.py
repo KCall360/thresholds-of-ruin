@@ -73,6 +73,52 @@ def binaries():
     return _binaries
 
 
+def creature_package(test, name, *, hostile=False, abilities=("power_strike", "magic_bolt", "fear")):
+    package = test.directory / name
+    shutil.copytree(ROOT / "scenarios/two-room", package)
+    manifest = package / "scenario.toml"
+    source = manifest.read_text(encoding="utf-8")
+    build = ('creature = { species = "human", name = "trainee", faction = "neutral", '
+             'binding = "intellect", hit_dice = [{ source = "warrior", '
+             'training = ["heavy_weaponry"] }, { source = "mage", '
+             'training = ["spellcasting", "intimidation"] }] }, ')
+    source = source.replace('characters = [{ ', 'characters = [{ ' + build)
+    if hostile:
+        source = source.replace('"turn_ticks" = 100', '"turn_ticks" = 10')
+        source += '\nfactions = { neutral = [], foe = ["neutral"] }\n'
+    grants = ", ".join([
+        *('{ type = "ability", ability = "' + ability + '" }' for ability in abilities),
+        '{ type = "magical" }', '{ type = "health", amount = 200 }',
+    ])
+    source += ('\nai_profiles = { practice = { memory_ticks = 100, flee_percent = 0 } }\n'
+               '[creatures.species.human]\nkind = "humanoid"\n'
+               'attributes = { strength = 2, speed = 1, intellect = 2, '
+               'willpower = 2, awareness = 1, presence = 1 }\n'
+               'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\n'
+               'grants = [' + grants + ']\n')
+    manifest.write_text(source, encoding="utf-8", newline="\n")
+    region = package / "regions/1.toml"
+    source = region.read_text(encoding="utf-8")
+    source = "\n".join(line for line in source.splitlines() if not line.startswith("items =")) + "\n"
+    target_x = 4 if hostile and abilities == ("magic_bolt",) else 2
+    faction = "foe" if hostile else "neutral"
+    source += ('\n[[actors]]\nid = 2\nat = [' + str(target_x) + ', 1, 0]\ncontroller = "ai"\nai = "practice"\n'
+               'creature = { species = "human", name = "practice target", '
+               'faction = "' + faction + '", binding = "intellect", '
+               'hit_dice = [{ source = "racial" }] }\n')
+    region.write_text(source, encoding="utf-8", newline="\n")
+    result = subprocess.run([test.bin / ("tor-scenario" + test.suffix), "validate", package],
+                            capture_output=True, text=True, encoding="utf-8", timeout=15)
+    test.assertEqual(result.returncode, 0, result.stderr)
+    return package
+
+
+def resource(frame, name):
+    stats = frame["state"]["observation"]["combat"]["own_stats"]
+    return next(pool for pool in stats["resources"] if pool["resource"] == name)
+
+
+
 def package_path(name):
     """A scenario package by name: shipped packages first, then test packages."""
     path = Path(name)
@@ -391,8 +437,9 @@ class ProcessTestCase(unittest.TestCase):
         return self.ascii_frame(process, ascii_input_completion(
             key, wait_for_simulation=wait_for_simulation))
 
-    def native_keys(self, client):
-        """Send genuine OS key events to the client's only visible window."""
+    def _native_window(self, client):
+        """Find the native game window; fail unless it is unique."""
+        self.assertIsNone(client.child.poll(), "native client exited before window lookup")
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
@@ -401,9 +448,7 @@ class ProcessTestCase(unittest.TestCase):
             user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
             user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
             user32.IsWindowVisible.argtypes = [wintypes.HWND]
-            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
             handles = []
-
             @callback_type
             def find(hwnd, _):
                 pid = wintypes.DWORD()
@@ -413,19 +458,45 @@ class ProcessTestCase(unittest.TestCase):
                 return True
             user32.EnumWindows(find, 0)
             self.assertEqual(len(handles), 1)
+            return handles[0]
+        # minifb 0.28 does not publish _NET_WM_PID. Native process tests run
+        # serially; exact title plus uniqueness preserves the existing X11 gate.
+        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible",
+            "--name", r"^Thresholds of Ruin \| ASCII$"], text=True, timeout=10).split()
+        self.assertEqual(len(windows), 1)
+        return windows[0]
 
+    def native_text(self, client, text):
+        """Send text through native window events, bypassing the JSON input driver."""
+        handle = self._native_window(client)
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            encoded = text.encode("utf-16-le")
+            for offset in range(0, len(encoded), 2):
+                unit = int.from_bytes(encoded[offset:offset + 2], "little")
+                self.assertTrue(user32.PostMessageW(handle, 0x102, unit, 1))
+        else:
+            subprocess.run(["xdotool", "type", "--window", handle, "--clearmodifiers", "--", text], check=True, timeout=10)
+
+    def native_keys(self, client):
+        """Send genuine OS key events to the client's only visible window."""
+        handle = self._native_window(client)
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
             def key(name, down):
                 vk = {"o": 0x4F, "c": 0x43, "Right": 0x27, "Up": 0x26, "Escape": 0x1B, "y": 0x59, "u": 0x55, "b": 0x42,
-                      "n": 0x4E, "F4": 0x73, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
+                      "n": 0x4E, "F4": 0x73, "F7": 0x76, "F8": 0x77, "F9": 0x78, "Shift_L": 0x10, "comma": 0xBC, "period": 0xBE, "g": 0x47,
                       "w": 0x57, "t": 0x54, "q": 0x51, "Return": 0x0D, "Down": 0x28}[name]
                 scan = user32.MapVirtualKeyW(vk, 0)
-                self.assertTrue(user32.PostMessageW(handles[0], 0x100 if down else 0x101, vk,
+                self.assertTrue(user32.PostMessageW(handle, 0x100 if down else 0x101, vk,
                     1 | (scan << 16) | (0x01000000 if name in ("Up", "Down", "Right") else 0) | (0 if down else 0xC0000000)))
             return key
-        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", r"^Thresholds of Ruin \| ASCII$"],
-                                          text=True, timeout=10).split()
-        self.assertEqual(len(windows), 1)
-
         def key(name, down):
-            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], name], check=True, timeout=10)
+            subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, name], check=True, timeout=10)
         return key

@@ -106,6 +106,7 @@ async fn run() -> Result<(), Error> {
                             Ok(Input::Look) => println!("{}", describe(connection.state.state())),
                             Ok(Input::Places) => println!("{}", tor_client_text::places(connection.state.state())),
                             Ok(Input::Inventory) => println!("{}", inventory(connection.state.state())),
+                            Ok(Input::Stats) => println!("{}", tor_client_text::stats(connection.state.state())),
                             Ok(Input::Help) => println!("{HELP}"),
                             Ok(Input::Pace(None)) => println!("Journey steps are shown {} ms apart.", connection.pace().as_millis()),
                             Ok(Input::Pace(Some(ms))) => {
@@ -227,6 +228,16 @@ fn present(connection: &Connection, message: &ServerMessage) -> Result<(), Error
             }
             if let Some(before) = &page.older_before {
                 println!("Older entries: history {}", safe(&before.0));
+            }
+        }
+        ServerMessage::CombatDiagnostics { report, .. } => {
+            for line in tor_client_common::combat_diagnostics::lines(report)? {
+                println!("{line}");
+            }
+        }
+        ServerMessage::CreatureInspection { report, .. } => {
+            for line in tor_client_common::inspection::lines(report)? {
+                println!("{line}");
             }
         }
         ServerMessage::Palette { .. } | ServerMessage::Waiting { .. } => {}

@@ -5,7 +5,7 @@ ruleset = "interactions-v26"
 default_character = 1
 factions = { delvers = ["ruin"], ruin = ["delvers"] }
 ai_profiles = { tactical = { memory_ticks = 1000, flee_percent = 25 } }
-characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, combat = { name = "delver", max_hp = 100, faction = "delvers", attack = { bonus = 1000, wind_up = 1, recovery = 99, damage = { vital = 15 } } } }]
+characters = [{ id = 1, anchor = "1/start", turn_ticks = 100, creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
 
 [archetypes.healing]
 class = "potion"
@@ -49,3 +49,19 @@ confounding = true
 [appearance_pools.potions]
 appearances = ["red potion"]
 confounding = true
+
+# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Fixed attacks and source grants control health, hit probability and timing.
+
+[creatures.species.ruin_guard]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+anatomy = { slots = ["body_armor", "ring", "ring", "head_armor"] }
+melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 80, recovery = 20, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 1 } }] } }
+grants = [{ type = "health", amount = 22 }]
+
+[creatures.species.delver]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 1000, wind_up = 1, recovery = 99, damage = { primary = { category = "vital" }, components = [{ category = "vital", amount = { type = "fixed", value = 15 } }] } }
+grants = [{ type = "health", amount = 92 }]

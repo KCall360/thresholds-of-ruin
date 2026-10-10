@@ -7,6 +7,6 @@
     "scenario.toml": "2bb5642214f36760276669be6361d80dfff21b2391a27c4fbbd3967b01e1d972"
   },
   "regions": 1,
-  "model_hash": "4545b9c5050980453ecc751606a7535bad2bb85fb3728cb4539bd7597975d752",
+  "model_hash": "1c1b3c9d93928526315983861dbfbb18ce620787e99c28fba8cdc7e70cf4b3c9",
   "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
 }

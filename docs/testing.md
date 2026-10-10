@@ -303,6 +303,28 @@ process tests in `scripts/test_*_process.py`, where every tier finds them
 automatically. A process test for a new client binary also needs an entry in
 `verify.py`'s `CLIENT_BINARIES`, and `scripts/test_verify.py` must cover it.
 
+Repository Python tests include the arena search sampler. Prepare an isolated
+Python environment with the [hash-pinned dependencies](../.github/requirements-arena-search.txt)
+before running a verification tier. Use that environment's interpreter for the
+verifier and direct Python test commands. CI prepares the same environment.
+
+Choose a gitignored workspace directory for `SEARCH_ENV`, then create it with
+`python -m venv SEARCH_ENV`. On Windows PowerShell:
+
+```powershell
+SEARCH_ENV/Scripts/python.exe -m pip install --require-hashes -r .github/requirements-arena-search.txt
+SEARCH_ENV/Scripts/python.exe scripts/verify.py full
+```
+
+On Linux:
+
+```sh
+SEARCH_ENV/bin/python -m pip install --require-hashes -r .github/requirements-arena-search.txt
+SEARCH_ENV/bin/python scripts/verify.py full
+```
+
+With this environment activated, the ordinary tier commands are:
+
 ```sh
 python scripts/verify.py quick
 python scripts/verify.py            # push tier

@@ -4,9 +4,53 @@ import subprocess
 import unittest
 
 from process_harness import ProcessTestCase, ROOT, WIZARD_TOKEN
+from process_harness import creature_package
 
 
 class AiInteractionProcesses(ProcessTestCase):
+    def test_creature_ai_chooses_a_weapon_using_owned_training(self):
+        package = creature_package(self, "weapon-training", abilities=("power_strike",))
+        manifest = package / "scenario.toml"
+        source = manifest.read_text(encoding="utf-8")
+        weapons = []
+        for name, skill, bonus in [("light_blade", "light_weaponry", 1),
+                                   ("heavy_blade", "heavy_weaponry", 0)]:
+            weapons.append(name + ' = { class = "weapon", name = "' + name + '", '
+                           'equipment = { slot = "weapon", attack = { skill = "' + skill + '", '
+                           'bonus = ' + str(bonus) + ', wind_up = 60, recovery = 40, damage = { '
+                           'primary = { category = "impact", sides = 6 }, components = [{ '
+                           'category = "impact", amount = { type = "rolled", count = 2, '
+                           'sides = 6, bonus = 0 } }] } } } }')
+        source = source.replace('archetypes = { ', 'archetypes = { ' + ', '.join(weapons) + ', ', 1)
+        manifest.write_text(source, encoding="utf-8", newline="\n")
+        region = package / "regions/1.toml"
+        source = region.read_text(encoding="utf-8").replace(
+            'hit_dice = [{ source = "racial" }]',
+            'hit_dice = [{ source = "warrior", training = ["heavy_weaponry"] }]')
+        source = ('items = [{ id = 100, at = [2,1,0], archetype = "light_blade", carried_by = 2 }, '
+                  '{ id = 101, at = [2,1,0], archetype = "heavy_blade", carried_by = 2 }]\n' + source)
+        region.write_text(source, encoding="utf-8", newline="\n")
+        validated = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=15)
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.server(scenario=package, wizard=True)
+        player, _ = self.client()
+        observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
+        chosen = None
+        for _ in range(12):
+            self.act(player, {"type": "wait"})
+            view = self.request(observer, {"type": "snapshot"})["state"]["observation"]
+            names = {item["id"]: item["name"] for item in view["inventory"]}
+            equipped = [item for item in view["interactions"]["inventory"]
+                        if item["equipped_slot"] is not None]
+            if equipped:
+                self.assertEqual(len(equipped), 1)
+                chosen = equipped[0]
+                self.assertEqual(names[chosen["item"]], "heavy_blade")
+                break
+        self.assertIsNotNone(chosen, "AI must equip the actual upgrade")
+        self.assertEqual(chosen["known_equipment"]["attack"]["skill"], "heavy_weaponry")
+
     def test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack(self):
         package = self.save.parent / "ground-healing"
         shutil.copytree(ROOT / "scenarios/tests/ai-interactions", package)

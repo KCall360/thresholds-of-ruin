@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 import json
+import os
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -300,6 +301,58 @@ class LocalMouseGate(unittest.TestCase):
         self.assertIn("local only",result.stderr)
         self.assertNotIn("packages:",result.stdout)
 
+
+
+class CiPythonEnvironment(unittest.TestCase):
+    def test_workflow_keeps_virtual_environment_interpreter_on_path(self):
+        workflow = (verify.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        prefix = '"$task_python" -c "'
+        commands = [line.strip()[len(prefix):-1] for line in workflow.splitlines()
+                    if line.strip().startswith(prefix) and line.strip().endswith('"')]
+        commands = [command for command in commands if "GITHUB_PATH" in command]
+        self.assertEqual(len(commands), 1, "Exercise the workflow's actual PATH publication command")
+        local = verify.ROOT / ".local"
+        local.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="ci-python-path-", dir=local) as directory:
+            root = Path(directory)
+            base = root / "base"
+            base.mkdir()
+            virtual = root / "virtual"
+            virtual.mkdir()
+            if os.name == "nt":
+                # A directory junction models interpreter alias resolution
+                # without requiring Windows symbolic-link privileges.
+                link = virtual / "Scripts"
+                result = subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(link), str(base)],
+                                        capture_output=True, text=True, timeout=10,
+                                        creationflags=subprocess.CREATE_NO_WINDOW)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                (base / "python.exe").touch()
+                invocation = link / "python.exe"
+            else:
+                link = virtual / "bin"
+                link.mkdir()
+                target = base / "python"
+                target.touch()
+                invocation = link / "python"
+                invocation.symlink_to(target)
+            try:
+                expected = invocation.parent.absolute()
+                self.assertNotEqual(invocation.resolve().parent, expected)
+                output = root / "github-path.txt"
+                result = subprocess.run(
+                    [sys.executable, "-c", "import sys; sys.executable = sys.argv[1]; exec(sys.argv[2])",
+                     str(invocation), commands[0]],
+                    env={**os.environ, "GITHUB_PATH": str(output)},
+                    capture_output=True, text=True, encoding="utf-8", timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(encoding="utf-8").splitlines(), [str(expected)])
+            finally:
+                if os.name == "nt":
+                    link.rmdir()
+                else:
+                    invocation.unlink()
 
 if __name__ == "__main__":
     unittest.main()

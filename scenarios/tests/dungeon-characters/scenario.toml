@@ -7,6 +7,21 @@ factions = { delvers = [] }
 ai_profiles = { tactical = { memory_ticks = 1000, flee_percent = 25 } }
 objective = { anchor = "1/companion", item = 100, disclosed = false, continue_play = true }
 characters = [
- { id = 1, anchor = "1/companion", unselected = "ai", ai = "tactical", combat = { name = "companion", faction = "delvers" } },
- { id = 7, anchor = "1/start", combat = { name = "delver", faction = "delvers" } }
+ { id = 1, anchor = "1/companion", unselected = "ai", ai = "tactical", creature = { species = "companion", name = "companion", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] } },
+ { id = 7, anchor = "1/start", creature = { species = "delver", name = "delver", faction = "delvers", binding = "intellect", hit_dice = [{ source = "racial" }] } }
 ]
+
+# Synthetic one-HD fixture subjects leave training and talent slots unspent.
+# Fixed attacks and source grants control health, hit probability and timing.
+
+[creatures.species.companion]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }
+grants = [{ type = "health", amount = 22 }]
+
+[creatures.species.delver]
+kind = "humanoid"
+attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
+melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }
+grants = [{ type = "health", amount = 22 }]

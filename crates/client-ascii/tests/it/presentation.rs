@@ -3,6 +3,227 @@ use tor_client_ascii::{glyph_at, App, Effect, Input, Key};
 use tor_client_common::ClientState;
 use tor_protocol::*;
 
+fn creature_snapshot() -> Snapshot {
+    let mut snapshot = state().snapshot();
+    Arc::make_mut(&mut snapshot.state).observation.combat = Some(serde_json::from_value(serde_json::json!({
+        "hp": 7, "max_hp": 12, "preparation_remaining": null, "preparation_active": false,
+        "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
+        "victory": false, "dead": false, "terminal": false,
+        "own_stats": {
+            "kind": "humanoid", "subtypes": [], "hit_dice": ["warrior"],
+            "attributes": {"strength": 2, "speed": 1, "intellect": 3, "willpower": 2, "awareness": 1, "presence": 0},
+            "skills": (["athletics", "heavy_weaponry", "agility", "light_weaponry", "stealth", "thievery", "crafting", "deduction", "lore", "medicine", "discipline", "intimidation", "insight", "perception", "survival", "deception", "leadership", "persuasion", "spellcasting"].into_iter().map(|skill| serde_json::json!({"skill": skill, "rank": 0})).collect::<Vec<_>>()),
+            "defenses": {"physical": 13, "cognitive": 15, "spiritual": 11},
+            "binding": "intellect", "resources": (["stamina", "focus", "mana"].into_iter().map(|resource| serde_json::json!({"resource": resource, "balance": 2, "maximum": 3, "available": 1, "reserved": 1})).collect::<Vec<_>>()),
+            "active_talents": [], "dormant_talents": [], "abilities": ["basic_melee", "magic_bolt"]
+        }
+    })).unwrap());
+    snapshot
+}
+
+#[test]
+fn stats_screen_is_readonly_scrollable_and_available_to_spectators() {
+    let snapshot = creature_snapshot();
+    let mut app = App::default();
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    app.role = AccessRole::Spectator;
+    app.ready();
+    let before = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
+    assert!(app.stats_open);
+    let rows = app.stats_rows().into_owned();
+    assert!(rows
+        .iter()
+        .any(|row| row.contains("Mana: 2/3 (1 available, 1 reserved)")));
+    assert!(rows.len() > tor_client_ascii::STATS_ROWS);
+    for _ in 0..100 {
+        assert_eq!(app.input(Input::Key { key: Key::Down }), Effect::None);
+    }
+    assert_eq!(app.stats_scroll, rows.len() - tor_client_ascii::STATS_ROWS);
+    assert_eq!(app.input(Input::Key { key: Key::Attack }), Effect::None);
+    assert!(app.stats_open);
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert_eq!(app.input(Input::Key { key: Key::Stats }), Effect::None);
+    assert!(!app.stats_open);
+}
+
+#[test]
+fn ability_menu_selects_a_granted_technique_then_an_opaque_target_without_paying() {
+    for (index, ability) in [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear]
+        .into_iter()
+        .enumerate()
+    {
+        let mut snapshot = creature_snapshot();
+        let observation = &mut Arc::make_mut(&mut snapshot.state).observation;
+        let stats = observation
+            .combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap();
+        stats.abilities = vec![
+            Technique::BasicMelee,
+            Technique::PowerStrike,
+            Technique::MagicBolt,
+            Technique::Fear,
+        ];
+        for pool in &mut stats.resources {
+            pool.balance = 0;
+            pool.available = 0;
+            pool.reserved = 0;
+        }
+        let target = super::actor_target(42);
+        let actor = ActorView {
+            asset: None,
+            id: target,
+            name: "goblin".into(),
+            description: String::new(),
+            position: Position { x: 2, y: 1, z: 0 },
+        };
+        observation.visible_actors = vec![
+            actor.clone(),
+            ActorView {
+                position: Position { x: 3, y: 1, z: 0 },
+                ..actor
+            },
+        ];
+        let mut app = App::default();
+        app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+        app.role = AccessRole::Player;
+        app.ready();
+        app.messages.skip();
+        let before = app.state.as_ref().unwrap().snapshot();
+        assert_eq!(
+            app.input(Input::Key {
+                key: Key::Abilities
+            }),
+            Effect::None
+        );
+        assert_eq!(app.ability_choices.len(), 3);
+        for _ in 0..index {
+            app.input(Input::Key { key: Key::Down });
+        }
+        assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+        assert_eq!(app.selected_ability, Some(ability));
+        assert_eq!(
+            app.attack_targets.len(),
+            1,
+            "portal occurrences must not duplicate targets"
+        );
+        assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+        assert!(
+            matches!(app.input(Input::Key { key: Key::Enter }), Effect::Request(Request::Command {
+            command: Command::Act { expected_revision: 3, action: Action::UseAbility { ability: selected, target: selected_target } }, ..
+        }) if selected == ability && selected_target == target)
+        );
+        assert_eq!(
+            app.state.as_ref().unwrap().snapshot(),
+            before,
+            "admission sends a request without spending locally"
+        );
+    }
+}
+
+#[test]
+fn ability_selection_cancels_cleanly_and_clears_when_grants_or_control_change() {
+    let mut snapshot = creature_snapshot();
+    Arc::make_mut(&mut snapshot.state)
+        .observation
+        .visible_actors
+        .push(ActorView {
+            asset: None,
+            id: super::actor_target(42),
+            name: "goblin".into(),
+            description: String::new(),
+            position: Position { x: 2, y: 1, z: 0 },
+        });
+    let mut app = App::default();
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    app.role = AccessRole::Player;
+    app.ready();
+    app.messages.skip();
+    assert_eq!(
+        app.input(Input::Key {
+            key: Key::Abilities
+        }),
+        Effect::None
+    );
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert!(app.ability_choices.is_empty());
+    app.input(Input::Key {
+        key: Key::Abilities,
+    });
+    app.input(Input::Key { key: Key::Enter });
+    assert_eq!(app.selected_ability, Some(Ability::MagicBolt));
+    app.input(Input::Key { key: Key::Escape });
+    assert!(app.selected_ability.is_none());
+    assert!(app.attack_targets.is_empty());
+    app.input(Input::Key {
+        key: Key::Abilities,
+    });
+    let view = Arc::make_mut(&mut snapshot.state);
+    view.revision += 1;
+    view.observation
+        .combat
+        .as_mut()
+        .unwrap()
+        .own_stats
+        .as_mut()
+        .unwrap()
+        .abilities = vec![Technique::BasicMelee];
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    assert!(app.ability_choices.is_empty());
+    assert!(app.selected_ability.is_none());
+    assert_eq!(app.input(Input::Key { key: Key::Enter }), Effect::None);
+    app.role = AccessRole::Spectator;
+    assert_eq!(
+        app.input(Input::Key {
+            key: Key::Abilities
+        }),
+        Effect::None
+    );
+    assert!(app.status.contains("read-only"));
+    assert!(app.ability_choices.is_empty());
+    app.role = AccessRole::Player;
+    snapshot.has_control = false;
+    snapshot.readiness.admission = false;
+    app.set_state(ClientState::from_snapshot(snapshot).unwrap());
+    assert_eq!(
+        app.input(Input::Key {
+            key: Key::Abilities
+        }),
+        Effect::None
+    );
+    assert!(app.status.contains("observing"));
+}
+
+#[test]
+fn ability_preparation_history_names_the_technique() {
+    let target = ActorTarget::from_digest([2; 32]);
+    for (ability, text) in [
+        (Ability::PowerStrike, "Prepared power strike."),
+        (Ability::MagicBolt, "Prepared magic bolt."),
+        (Ability::Fear, "Prepared fear."),
+    ] {
+        let entry = HistoryEntry {
+            id: EntryId("ability".into()),
+            branch: BranchId("test".into()),
+            actor: ActorId(1),
+            tick: 0,
+            author: Author::User {
+                user: "test".into(),
+            },
+            audience: Audience::Actor,
+            content: HistoryContent::Action {
+                action: Action::UseAbility { ability, target },
+                event: Event::AbilityStarted { ability, target },
+            },
+        };
+        assert_eq!(tor_client_ascii::history_text(&entry), text);
+    }
+}
+
 fn carried_rings() -> Snapshot {
     let mut snapshot = state().snapshot();
     let view = &mut Arc::make_mut(&mut snapshot.state).observation;
@@ -1215,6 +1436,7 @@ fn configurable_bump_attacks_use_disclosed_hostility_only() {
             position: Position { x: 1, y: 0, z: 0 },
         });
         view.observation.combat = Some(CombatView {
+            own_stats: None,
             hp: 30,
             max_hp: 30,
             preparation_remaining: None,
@@ -1283,4 +1505,149 @@ fn fixture_context() -> tor_protocol::StreamContext {
         stream: tor_protocol::StreamId("fixture-attachment".into()),
         epoch: 0,
     }
+}
+
+#[test]
+fn privileged_inspection_is_authorized_scrollable_and_cleared_on_snapshot() {
+    let snapshot = creature_snapshot();
+    let combat = snapshot.state.observation.combat.as_ref().unwrap();
+    let stats = combat.own_stats.clone().unwrap();
+    let report = CreatureInspectionView {
+        actor: ActorId(2),
+        tick: 0,
+        name: "blue sentinel".into(),
+        faction: "blue".into(),
+        species: InspectionSpecies {
+            id: "human".into(),
+            kind: CreatureType::Humanoid,
+            subtypes: vec![],
+            attributes: stats.attributes,
+            melee: serde_json::from_value(serde_json::json!({"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}})).unwrap(),
+        },
+        initial_attributes: stats.attributes,
+        templates: vec![],
+        max_hp: 12,
+        hp: 7,
+        injury: 5,
+        dead: false,
+        stats,
+        hit_dice: vec![InspectionHitDie {
+            ordinal: 1,
+            source: HitDieSource::Warrior,
+            health_seed: u64::MAX,
+            health_die: 8,
+            base_health: 7,
+            training: vec![],
+            attribute: None,
+            talent: None,
+        }],
+        grants: vec![],
+        fear: vec![],
+    };
+    let mut app = App::new();
+    app.set_state(ClientState::from_snapshot(snapshot.clone()).unwrap());
+    for role in [AccessRole::Player, AccessRole::Spectator] {
+        app.role = role;
+        assert!(app.show_inspection(&report).is_err());
+        assert!(!app.stats_open);
+        assert!(!app.has_inspection());
+    }
+    app.role = AccessRole::Wizard;
+    let before = app.state.as_ref().unwrap().snapshot();
+    let mut invalid = report.clone();
+    invalid.hp += 1;
+    app.show_inspection(&report).unwrap();
+    let displayed = app.stats_rows().to_vec();
+    assert!(app.show_inspection(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), displayed);
+    assert!(app.stats_open);
+    assert!(app.stats_rows().join("\n").contains("blue sentinel"));
+    for _ in 0..100 {
+        app.input(Input::Key { key: Key::Down });
+    }
+    assert_eq!(
+        app.stats_scroll,
+        app.stats_rows().len() - tor_client_ascii::STATS_ROWS
+    );
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    let mut reset = snapshot;
+    reset.context.epoch += 1;
+    app.replace_snapshot(reset).unwrap();
+    assert!(!app.stats_open);
+    assert!(!app.has_inspection());
+}
+
+#[test]
+fn wizard_console_is_private_and_submits_the_current_input_context() {
+    let mut app = App::new();
+    app.set_state(state());
+    app.ready();
+    for role in [AccessRole::Player, AccessRole::Spectator] {
+        app.role = role;
+        assert_eq!(app.input(Input::Key { key: Key::Wizard }), Effect::None);
+        assert!(app.wizard_command.is_none());
+    }
+    app.role = AccessRole::Wizard;
+    let before = app.state.as_ref().unwrap().snapshot();
+    assert_eq!(app.input(Input::Key { key: Key::Wizard }), Effect::None);
+    assert_eq!(
+        app.input(Input::Text {
+            text: "creature inspect 2".into()
+        }),
+        Effect::None
+    );
+    let Effect::Request(Request::Command {
+        context,
+        branch,
+        command,
+    }) = app.input(Input::Key { key: Key::Enter })
+    else {
+        panic!("query request");
+    };
+    assert_eq!(context, before.reply_context().input);
+    assert_eq!(branch, before.branch);
+    assert_eq!(
+        command,
+        Command::Wizard {
+            expected_revision: before.state.revision,
+            operation: "creature inspect 2".into()
+        }
+    );
+    assert_eq!(app.state.as_ref().unwrap().snapshot(), before);
+    assert!(app.wizard_command.is_none());
+    app.ready();
+    app.input(Input::Key { key: Key::Wizard });
+    assert_eq!(app.input(Input::Key { key: Key::Escape }), Effect::None);
+    assert!(app.wizard_command.is_none());
+}
+
+#[test]
+fn combat_diagnostics_presentation_is_private_and_atomic() {
+    let report = tor_protocol::CombatDiagnosticsView {
+        enabled: true,
+        tick: 0,
+        captured: 0,
+        dropped: 0,
+        retained: 0,
+        through: 0,
+        records: vec![],
+    };
+    let mut app = App::new();
+    for role in [
+        tor_protocol::AccessRole::Player,
+        tor_protocol::AccessRole::Spectator,
+    ] {
+        app.role = role;
+        assert!(app.show_combat_diagnostics(&report).is_err());
+        assert!(!app.stats_open);
+    }
+    app.role = tor_protocol::AccessRole::Wizard;
+    app.show_combat_diagnostics(&report).unwrap();
+    let rows = app.stats_rows().to_vec();
+    assert!(rows.join(" ").contains("Combat diagnostics"));
+    assert!(app.stats_open);
+    let mut invalid = report.clone();
+    invalid.retained = 1;
+    assert!(app.show_combat_diagnostics(&invalid).is_err());
+    assert_eq!(app.stats_rows().as_ref(), rows);
 }

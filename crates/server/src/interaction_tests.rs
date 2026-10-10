@@ -5,8 +5,18 @@ fn fixture() -> Engine {
     let mut manifest: author::Manifest =
         toml::from_str(include_str!("../../../scenarios/tests/items/scenario.toml")).unwrap();
     manifest.characters.truncate(1);
-    manifest.characters[0].combat = Some(author::CombatSpec::default());
-    manifest.characters[0].anatomy = Some(author::AnatomySpec {
+    let definitions: author::Manifest = toml::from_str(include_str!(
+        "../../../scenarios/tests/interactions/scenario.toml"
+    ))
+    .unwrap();
+    manifest.creatures = definitions.creatures;
+    manifest.characters[0].creature = definitions.characters[0].creature.clone();
+    manifest
+        .creatures
+        .species
+        .get_mut("figure")
+        .unwrap()
+        .anatomy = Some(author::AnatomySpec {
         slots: vec![author::EquipmentSlot::BodyArmor],
     });
     manifest.archetypes.insert(

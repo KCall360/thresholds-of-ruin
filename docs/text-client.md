@@ -34,6 +34,20 @@ careful step. Each command's turn ends before the next is read, so piped command
 run in order. Read [adventure commands and behavior](text-adventure.md) before
 scripting this mode.
 
+`stats` inspects your disclosed creature build without submitting an action or
+advancing time. It shows attributes, skills, defenses, HD composition, Mana
+binding, resources (including reserved amounts), active/dormant talents and
+granted abilities. The command also works in `--script` mode and for spectators.
+Detailed stats require a creature-backed actor; diagnostic actors without that
+model report their available Health or the absence of creature stats.
+
+Use `power strike <creature>`, `magic bolt <creature>` or `fear <creature>` to
+invoke a granted technique from your current position. `powerstrike` and `bolt`
+are shorter aliases. Both Text modes use disclosed targets and the same ordinary
+action admission/preparation path. The server checks physical reach, grants and
+funding at execution; queueing pays no cost, and an empty pool does not prevent
+choosing a technique. Move into range before invoking an ability.
+
 ## Development scripting interface
 
 Pass `--script` to preserve the original line-oriented diagnostic interface.

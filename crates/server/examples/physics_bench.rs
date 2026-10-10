@@ -34,9 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 region.anchors.insert("start".into(), [2, 2, z]);
                 for id in 2..=actors {
                     region.actors.push(scenario_package::Actor {
+                        creature: None,
                         anatomy: None,
                         known_identities: vec![],
-                        combat: None,
                         id,
                         at: [2 + 3 * (id as i32 - 1), 2, z],
                         archetype: None,

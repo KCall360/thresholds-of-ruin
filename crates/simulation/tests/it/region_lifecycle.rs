@@ -7,7 +7,7 @@ use std::{
 use tor_simulation::{
     ai::AiProfile,
     checkpoint::SharedState,
-    combat::{CombatSpec, Objective},
+    combat::{DamageType, Objective},
     Action, ActorId, BodySpec, Game, ItemId, MemoryRecords, ReferencePoint, ReferenceTarget,
     RegionState, RegionTransition, TransitionError,
 };
@@ -36,14 +36,10 @@ fn ticks(n: u64) -> NonZeroU64 {
 }
 
 fn fighter(game: &mut Game, id: ActorId, faction: &str) {
-    let mut spec = CombatSpec {
-        faction: faction.into(),
-        ..Default::default()
-    };
-    spec.attack.bonus = 100;
-    spec.attack.wind_up = 30;
-    spec.attack.recovery = 40;
-    game.configure_combat(id, spec).unwrap();
+    let mut species = super::creature_fixture::species();
+    species.melee = super::creature_fixture::melee(100, 30, DamageType::Impact, 4);
+    super::creature_fixture::configure(game, id, faction, species);
+    assert!(game.creature(id).is_some());
 }
 
 /// A four-region corridor with the character in region 1.

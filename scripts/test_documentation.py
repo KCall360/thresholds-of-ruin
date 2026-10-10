@@ -69,6 +69,11 @@ def code_constant(relative: str, pattern: str) -> str:
     return match.group(1)
 
 
+def current_artifact_formats() -> set[str]:
+    return {code_constant(path, r'FORMAT = "([^\"]+)"') for path in (
+        "scripts/arena_search_sampling.py", "scripts/arena_search_parameters.py", "scripts/arena_search.py")}
+
+
 def current_versions() -> dict[str, str]:
     return {
         "protocol": code_constant("crates/protocol/src/wire.rs", r"PROTOCOL_VERSION: u32 = (\d+);"),
@@ -152,6 +157,7 @@ class DocumentationTests(unittest.TestCase):
 
     def test_documents_do_not_mention_other_versions(self):
         versions = current_versions()
+        artifact_formats = current_artifact_formats()
         checks = [
             ("protocol", re.compile(r"\b[Pp]rotocol(?: version)?\s+\**(\d+)"), versions["protocol"]),
             ("protocol", re.compile(r'"protocol":\s*(\d+)'), versions["protocol"]),
@@ -168,12 +174,33 @@ class DocumentationTests(unittest.TestCase):
                     if value != current:
                         failures.append(f"{name}: {label} {value} (current is {current})")
             for token in ruleset.findall(text):
-                if token not in WORKLOAD_IDENTIFIERS and token != versions["ruleset"]:
+                if token not in WORKLOAD_IDENTIFIERS and token not in artifact_formats and token != versions["ruleset"]:
                     failures.append(
                         f"{name}: {token} is not the current ruleset {versions['ruleset']} "
                         "(add benchmark workload names to WORKLOAD_IDENTIFIERS)"
                     )
         self.assertEqual([], failures, "Outdated version references:\n" + "\n".join(failures))
+
+    def test_artifact_version_changes_do_not_exempt_stale_formats_or_rulesets(self):
+        versions = current_versions()
+        with TemporaryDirectory(dir=ROOT / ".local") as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "scripts/arena_search_sampling.py").write_text(
+                'FORMAT = "tor-arena-search-sampling-v1"', encoding="utf-8")
+            (root / "scripts/arena_search_parameters.py").write_text(
+                'FORMAT = "tor-arena-search-parameters-v2"', encoding="utf-8")
+            (root / "scripts/arena_search.py").write_text(
+                'FORMAT = "tor-arena-search-v1"', encoding="utf-8")
+            guide = root / "guide.md"
+            with patch.dict(globals(), ROOT=root, current_versions=lambda: versions,
+                            current_guides=lambda: [guide]):
+                guide.write_text("tor-arena-search-parameters-v2", encoding="utf-8")
+                self.test_documents_do_not_mention_other_versions()
+                for stale in ("tor-arena-search-parameters-v1", "interactions-v0"):
+                    guide.write_text(stale, encoding="utf-8")
+                    with self.subTest(stale=stale), self.assertRaises(AssertionError):
+                        self.test_documents_do_not_mention_other_versions()
 
     def test_guides_do_not_cite_local_only_evidence(self):
         failures = []

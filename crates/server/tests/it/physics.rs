@@ -208,9 +208,9 @@ fn unsettled_physics_refreshes_navigation_only_when_its_inputs_change() {
     let package = template.package.as_ref().unwrap();
     let mut regions = package.region_defs().unwrap();
     regions[0].actors.push(scenario_package::Actor {
+        creature: None,
         anatomy: None,
         known_identities: vec![],
-        combat: None,
         id: 2,
         at: [5, 2, 6],
         archetype: None,

@@ -1,12 +1,12 @@
 {
   "validator": "tor-scenario-11",
   "ruleset": "interactions-v26",
-  "content_hash": "c2f4414650dcd943e6d5d979f40f0e3528bf1524f479683eb32eb09f4e37f0f9",
+  "content_hash": "7f2081ab56ab6d314a504902979b1b671b689da568fd9d41ace0c788e5d2eff6",
   "files": {
-    "index.json": "2a095ca35621b5cd50f5b6945de1068c989abd329f7b2b70a2f71c3158d6da16",
-    "scenario.toml": "73a2f608a756ab8be822cac5b4ab99f98c5332fe73b3da120a00fe69cf459bea"
+    "index.json": "9ea3d0a0ea95cfe8f6e0a35619edd913787a197e8e24b0629aac07fadb0b4cbb",
+    "scenario.toml": "d7ad90222da210c6ecddcc34e418c9181cd642d8fb786df704c68759d1bab917"
   },
   "regions": 1,
-  "model_hash": "b3bda2dcb7fefba24f45e986735148927d5b6ad7cca683725c2c865be13ee1d9",
+  "model_hash": "e5dc339f42eefef3ebfe32eca803f14a22f26d328399b4f786408201eeb8dea4",
   "coverage": "all authored regions; generated regions deterministic with connected entries; all character starts; deterministic construction twice at seeds 0, 1, 42; no winnability proof"
 }

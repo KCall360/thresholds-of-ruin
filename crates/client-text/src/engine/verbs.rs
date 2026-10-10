@@ -40,6 +40,10 @@ pub enum Goal {
     Attack {
         target: ActorTarget,
     },
+    UseAbility {
+        ability: Ability,
+        target: ActorTarget,
+    },
     Approach {
         target: Key,
     },
@@ -102,7 +106,7 @@ pub struct Choice {
     pub then: Interpretation,
 }
 
-pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
+pub const HELP: &str = "Try look, examine <thing>, take <thing>, drop <thing>, wear or wield <item>, remove <item>, drink <potion>, open or close <door>, attack <creature>, power strike <creature>, magic bolt <creature>, fear <creature>, a direction (north, ne, up...), go to <thing or place>, go to exit, go to start, wait, inventory, stats, status, places, name room <name>, again and quit. A direction keeps walking until there's something to see. brief, verbose and superbrief choose how places are described when you arrive. You can chain commands: take the token, then go east. Answer a question with a name or its number. Type help session for more.";
 pub const SESSION_HELP: &str = "control, release, sync, save, history, note <text>, bookmark <text>, pace [milliseconds].\nstep <direction> makes one careful step. Developer commands require wizard authority.";
 
 /// What the game can't do yet, as the refusal says it.
@@ -333,6 +337,9 @@ fn needs_object(verb: Verb) -> bool {
             | Verb::Unlock
             | Verb::Lock
             | Verb::Attack
+            | Verb::PowerStrike
+            | Verb::MagicBolt
+            | Verb::Fear
             | Verb::Wear
             | Verb::Wield
             | Verb::Remove
@@ -371,6 +378,7 @@ fn intransitive(verb: Verb, scene: &Scene) -> Interpretation {
     match verb {
         Verb::Look => Interpretation::Look,
         Verb::Inventory => say(inventory(scene)),
+        Verb::Stats => say(crate::stats(scene.state)),
         Verb::Wait => goal(Goal::Wait),
         Verb::Quit => Interpretation::Quit,
         Verb::Diagnose => say(condition(scene.state)),
@@ -549,6 +557,40 @@ fn transitive(
                         r.name.trim_end_matches(" corpse")
                     )),
                     _ => say(format!("Attacking {} would achieve nothing.", r.the())),
+                },
+            )
+        }
+        (Verb::PowerStrike | Verb::MagicBolt | Verb::Fear, indirect) => {
+            let ability = match verb {
+                Verb::PowerStrike => Ability::PowerStrike,
+                Verb::MagicBolt => Ability::MagicBolt,
+                _ => Ability::Fear,
+            };
+            if indirect.is_some() {
+                return say(format!("Use {} <creature>.", verb.as_str()));
+            }
+            if !tor_client_common::abilities::choices(&scene.state.observation).contains(&ability) {
+                return say(format!(
+                    "You don't have {}.",
+                    narration::ability_name(ability)
+                ));
+            }
+            bind(
+                direct,
+                scene,
+                referents,
+                Domain::Figures,
+                &|r| match r.key {
+                    Key::Actor(target) => match tor_client_common::abilities::action(
+                        &scene.state.observation,
+                        ability,
+                        target,
+                    ) {
+                        Ok(_) => goal(Goal::UseAbility { ability, target }),
+                        Err(reason) => say(reason),
+                    },
+                    Key::Me => say("Choose another creature."),
+                    _ => say("Choose a living creature."),
                 },
             )
         }

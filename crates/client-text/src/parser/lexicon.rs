@@ -8,6 +8,7 @@ pub enum Verb {
     Examine,
     Read,
     Inventory,
+    Stats,
     Take,
     Drop,
     Put,
@@ -16,6 +17,9 @@ pub enum Verb {
     Unlock,
     Lock,
     Attack,
+    PowerStrike,
+    MagicBolt,
+    Fear,
     Go,
     Climb,
     Enter,
@@ -81,6 +85,7 @@ impl Verb {
             Verb::Examine => "examine",
             Verb::Read => "read",
             Verb::Inventory => "inventory",
+            Verb::Stats => "stats",
             Verb::Take => "take",
             Verb::Drop => "drop",
             Verb::Put => "put",
@@ -89,6 +94,9 @@ impl Verb {
             Verb::Unlock => "unlock",
             Verb::Lock => "lock",
             Verb::Attack => "attack",
+            Verb::PowerStrike => "powerstrike",
+            Verb::MagicBolt => "bolt",
+            Verb::Fear => "fear",
             Verb::Go => "go",
             Verb::Climb => "climb",
             Verb::Enter => "enter",
@@ -192,10 +200,14 @@ pub enum Pronoun {
 
 pub fn parse_verb(word: &str) -> Option<Verb> {
     match word {
+        "powerstrike" => Some(Verb::PowerStrike),
+        "bolt" => Some(Verb::MagicBolt),
+        "fear" => Some(Verb::Fear),
         "look" | "l" => Some(Verb::Look),
         "examine" | "x" | "inspect" | "study" | "check" | "describe" => Some(Verb::Examine),
         "read" | "peruse" | "skim" => Some(Verb::Read),
         "inventory" | "i" | "inv" => Some(Verb::Inventory),
+        "stats" => Some(Verb::Stats),
         "take" | "get" | "grab" | "carry" | "acquire" | "collect" | "hold" | "lift" => {
             Some(Verb::Take)
         }

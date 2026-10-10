@@ -401,6 +401,10 @@ impl Engine {
                 record.say(verbs::HELP);
                 return Ok(Flow::Continue);
             }
+            Input::Stats => {
+                record.say(crate::stats(link.client().state()));
+                return Ok(Flow::Continue);
+            }
             Input::Quit => return Ok(Flow::Quit),
             Input::Pace(None) => {
                 record.say(format!(

@@ -86,6 +86,19 @@ jobs:
       - name: Verify Windows graphical test desktop
         if: runner.os == 'Windows'
         run: python -c "import ctypes; assert ctypes.windll.user32.GetDesktopWindow(), 'A native Windows desktop is required'"
+      - name: Install hash-pinned arena search test environment
+        shell: bash
+        run: |
+          python -m venv .local/arena-search-python
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            task_bin=".local/arena-search-python/Scripts"
+            task_python="$task_bin/python.exe"
+          else
+            task_bin=".local/arena-search-python/bin"
+            task_python="$task_bin/python"
+          fi
+          "$task_python" -m pip install --disable-pip-version-check --require-hashes -r .github/requirements-arena-search.txt
+          "$task_python" -c "import os, sys; from pathlib import Path; Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(Path(sys.executable).absolute().parent) + '\n')"
       - name: Verify complete profile partition
         run: python scripts/verify.py full --ci-profile ${{ matrix.profile }}
       - name: Preserve verification logs

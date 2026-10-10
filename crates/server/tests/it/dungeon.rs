@@ -4,6 +4,71 @@ use tor_server::journal::{Action, Direction};
 use tor_server::{scenario_package, Engine};
 
 #[test]
+fn default_dungeon_actors_use_owned_creature_builds() {
+    let scenario = support::load("first-dungeon", 42);
+    let manifest = &scenario.package.as_ref().unwrap().manifest;
+
+    let catalog = manifest.creatures.compile().unwrap();
+    let player = manifest.characters[0].creature.as_ref().unwrap();
+    for (source, id, hd) in [
+        (player, 1, 4),
+        (
+            manifest.archetypes["scout"].creature.as_ref().unwrap(),
+            3,
+            1,
+        ),
+        (
+            manifest.archetypes["guardian"].creature.as_ref().unwrap(),
+            4,
+            2,
+        ),
+        (manifest.archetypes["wisp"].creature.as_ref().unwrap(), 5, 1),
+    ] {
+        let recipe = catalog.prepare(source).unwrap();
+        let build = recipe
+            .instantiate(tor_server::creature_authoring::actor_health_seed(42, id))
+            .unwrap();
+        assert_eq!(build.ledger().total_hd(), hd);
+        assert!(build
+            .species()
+            .melee
+            .damage()
+            .components()
+            .iter()
+            .all(|component| matches!(
+                component.amount(),
+                tor_simulation::damage::DamageAmount::Rolled(_)
+            )));
+    }
+    let mut engine = Engine::memory(scenario).unwrap();
+    let state = engine.state(ActorId(1)).unwrap();
+    let stats = state
+        .observation
+        .combat
+        .as_ref()
+        .unwrap()
+        .own_stats
+        .as_ref()
+        .expect("ordinary default player receives personal stats");
+    assert!(stats
+        .abilities
+        .contains(&tor_protocol::Technique::PowerStrike));
+    engine.enable_wizard().unwrap();
+    let report = engine.inspect_creature(ActorId(1)).unwrap();
+    assert_eq!(report.hit_dice.len(), 4);
+    assert_eq!(
+        report
+            .stats
+            .skills
+            .iter()
+            .find(|rank| rank.skill == tor_protocol::Skill::HeavyWeaponry)
+            .unwrap()
+            .rank,
+        4
+    );
+}
+
+#[test]
 fn authored_dungeon_completes_retrieval_and_escape() {
     let mut engine = Engine::memory(support::load("first-dungeon", 42)).unwrap();
     for _ in 0..160 {

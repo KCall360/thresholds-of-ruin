@@ -3,11 +3,27 @@
 //! [`Game`] and [`ActionOutcome`] are backend-only types. Network adapters must
 //! disclose observations and filter events; they must not serialize raw game state.
 
+pub mod abilities;
 mod actions;
+mod actor_creatures;
 mod actor_store;
+pub mod arena;
+mod creature_melee;
+mod creature_time;
+pub use actor_creatures::{CreatureIdentity, CreatureInspection};
 pub mod ai;
 mod ai_items;
+pub mod attacks;
+pub mod attributes;
+mod bounded;
 pub mod combat;
+pub mod costs;
+pub mod creatures;
+pub mod damage;
+pub mod dice;
+pub mod fear;
+pub mod grants;
+pub mod health;
 mod intention;
 pub use intention::{
     IntentionControl, IntentionControlState, IntentionExecution, IntentionId, IntentionInput,
@@ -29,6 +45,10 @@ mod fixture;
 mod navigation_map;
 mod observation;
 mod places;
+pub mod progression;
+pub mod resolution_diagnostics;
+pub mod resources;
+pub mod talents;
 pub use places::{NameOrigin, PlaceName};
 mod streaming;
 pub use streaming::{
@@ -66,14 +86,36 @@ pub struct ItemId(pub u64);
     deny_unknown_fields
 )]
 pub enum Action {
-    Equip { item: ItemId, slot: EquipmentSlotId },
-    Unequip { item: ItemId },
-    Drink { item: ItemId },
-    Attack { target: ActorId },
-    SetDoor { door: u64, open: bool },
+    Equip {
+        item: ItemId,
+        slot: EquipmentSlotId,
+    },
+    Unequip {
+        item: ItemId,
+    },
+    Drink {
+        item: ItemId,
+    },
+    Attack {
+        target: ActorId,
+    },
+    UseAbility {
+        ability: grants::Ability,
+        target: ActorId,
+    },
+    SetDoor {
+        door: u64,
+        open: bool,
+    },
     Move(Direction),
-    Take { item: ItemId, quantity: Option<u64> },
-    Drop { item: ItemId, quantity: Option<u64> },
+    Take {
+        item: ItemId,
+        quantity: Option<u64>,
+    },
+    Drop {
+        item: ItemId,
+        quantity: Option<u64>,
+    },
     Wait,
 }
 
@@ -97,6 +139,10 @@ pub enum GameError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
+    AbilityStarted {
+        ability: grants::Ability,
+        target: ActorId,
+    },
     ItemStarted {
         work: Work,
     },
@@ -179,11 +225,16 @@ struct Item {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     combat: combat::CombatWorld,
+    /// Optional backend observations; deliberately excluded from checkpoints.
+    combat_diagnostics: Option<Shared<resolution_diagnostics::CombatDiagnostics>>,
     physics: physics::Physics,
     navigation: BTreeMap<ActorId, Shared<travel::Navigation>>,
     world: Shared<World>,
     seed: u64,
     tick: u64,
+    /// Timers are settled at public boundaries; physics can integrate between
+    /// them without editing every creature on every tick. Never persisted.
+    creature_time_at: u64,
     actors: actor_store::ActorStore,
     items: item_store::ItemStore,
     next_actor_id: u64,
@@ -305,11 +356,13 @@ impl Game {
     pub fn new(world: World, seed: u64) -> Self {
         Self {
             combat: combat::CombatWorld::new(seed),
+            combat_diagnostics: None,
             physics: physics::Physics::default(),
             navigation: BTreeMap::new(),
             world: Shared::new(world),
             seed,
             tick: 0,
+            creature_time_at: 0,
             actors: actor_store::ActorStore::default(),
             items: item_store::ItemStore::default(),
             next_actor_id: 1,
@@ -459,7 +512,7 @@ impl Game {
         actor.location = location;
         actor.orientation = 0;
         actor.motion = MotionState::default();
-        if actor.pending.take().is_some() {
+        if actor.cancel_preparation().is_some() {
             actor.ready_at = clock;
         }
         actor.visited.insert(location.region);
@@ -600,6 +653,15 @@ impl Game {
     /// Stable ordering: earliest ready time, then actor identity. Frozen
     /// actors never act.
     pub fn next_actor(&self) -> Option<ActorId> {
+        if !self.arena_execution_enabled() {
+            return None;
+        }
+        self.next_scheduled_actor()
+    }
+
+    /// Read-only scheduler identity, including while an arena is paused.
+    /// This grants no permission to execute work.
+    pub fn next_scheduled_actor(&self) -> Option<ActorId> {
         if self.combat.outcome.terminal {
             return None;
         }
@@ -665,3 +727,10 @@ mod sharing_tests {
         assert_eq!(projected, scene);
     }
 }
+
+#[cfg(test)]
+extern crate self as tor_simulation;
+
+#[cfg(test)]
+#[path = "../test_support/creatures.rs"]
+mod test_creatures;

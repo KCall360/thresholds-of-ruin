@@ -406,9 +406,9 @@ pub(crate) fn materialize(
         )?;
         for (n, &(x, y)) in floor.iter().step_by(2).take(count as usize).enumerate() {
             out.actors.push(Actor {
+                creature: None,
                 anatomy: None,
                 known_identities: vec![],
-                combat: None,
                 body: None,
                 velocity: None,
                 id: first_actor + n as u64,

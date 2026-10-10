@@ -22,7 +22,7 @@ const GOLD: u32 = 0xedc579;
 const DANGER: u32 = 0xef958c;
 
 /// The key hint under the status lines.
-const HINT: &str = "? help  hjklyubn move (shift: run)  < > stairs  _ travel  ; look  i inventory  g pick up  a attack  ^P messages";
+const HINT: &str = "? help  hjklyubn move/run  < > stairs  _ travel  ; look  i inventory  @ stats  z abilities  g pick up  a attack  ^P messages";
 
 /// Current cells plus remembered ones that fall inside the drawn map.
 fn display_observation(state: &tor_client_common::ClientState) -> Observation {
@@ -283,6 +283,24 @@ impl Canvas {
                 );
             }
         }
+        if let Some(draft) = &app.wizard_command {
+            self.panel(60, 180, 1080, 424);
+            self.text(84, 206, "WIZARD COMMAND", ACCENT, 2, 60);
+            self.text(84, 240, "ENTER send   ESC cancel", MUTED, 1, 80);
+            self.text(
+                84,
+                260,
+                "creature inspect <actor>   arena pause|resume|step",
+                MUTED,
+                1,
+                80,
+            );
+            let lines = crate::wrap(draft, 64);
+            let start = lines.len().saturating_sub(10);
+            for (i, line) in lines.iter().skip(start).enumerate() {
+                self.text(84, 290 + i * 26, line, TEXT, 2, 64);
+            }
+        }
         if let Some(draft) = &app.note {
             self.panel(60, 180, 1080, 424);
             self.text(
@@ -411,6 +429,43 @@ impl Canvas {
             self.screen("HELP", "ESC or ? closes");
             for (i, line) in crate::HELP.iter().enumerate() {
                 self.text(72, 150 + i * 19, line, TEXT, 2, 66);
+            }
+        }
+        if app.stats_open {
+            self.screen(
+                if app.has_inspection() {
+                    "CREATURE INSPECTION"
+                } else {
+                    "CREATURE STATS"
+                },
+                "UP/DOWN scroll   PGUP/PGDN page   ESC or @ closes",
+            );
+            let rows = app.stats_rows();
+            let start = app
+                .stats_scroll
+                .min(rows.len().saturating_sub(crate::STATS_ROWS));
+            for (i, row) in rows.iter().skip(start).take(crate::STATS_ROWS).enumerate() {
+                self.text(72, 152 + i * 22, row, TEXT, 2, crate::STATS_WIDTH);
+            }
+        }
+        if !app.ability_choices.is_empty() {
+            self.screen(
+                "ABILITIES",
+                "UP/DOWN selects   ENTER chooses a target   ESC cancels",
+            );
+            for (i, ability) in app.ability_choices.iter().enumerate() {
+                self.text(
+                    72,
+                    156 + i * 26,
+                    &format!(
+                        "{} {}",
+                        if i == app.selected { ">" } else { " " },
+                        tor_client_common::narration::ability_name(*ability)
+                    ),
+                    if i == app.selected { GOLD } else { TEXT },
+                    2,
+                    65,
+                );
             }
         }
         if app.places_open {
