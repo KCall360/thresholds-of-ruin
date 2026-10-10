@@ -102,8 +102,9 @@ class TravelProcesses(ProcessTestCase):
         watched = self.terminal(spectator)
         self.assertEqual(watched["state"], arrived["state"])
         self.assertEqual(watched["travel"], arrived["travel"])
-        # Eight cells centered in the map: click the first cell (world corridor x=0).
-        ascii_client.child.stdin.write(json.dumps({"type": "click", "x": 214, "y": 208}) + "\n")
+        # Click the corridor's first cell (world x=0), five cells west.
+        start = next(t for t in arrived["map_tiles"] if t["position"] == {"x": -5, "y": 0, "z": 0})
+        ascii_client.child.stdin.write(json.dumps({"type": "click", "x": start["center"][0], "y": start["center"][1]}) + "\n")
         ascii_client.child.stdin.flush()
         returned = self.ascii_frame(ascii_client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived")
         self.assertEqual(returned["state"]["observation"]["tick"], '1000')
@@ -156,6 +157,7 @@ class TravelProcesses(ProcessTestCase):
         capture = Path(os.environ.get("TOR_TRAVEL_CAPTURE", str(self.save.parent / "travel.ppm")))
         client = self.launch("tor-client-ascii", ["--connect", self.address, "--report-frames", "--capture", capture])
         self.ascii_frame(client, lambda f: f["state"] is not None and not f["busy"])
+        click = {"x": 0, "y": 0}  # set from the presented map once the target is known
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
@@ -205,7 +207,7 @@ class TravelProcesses(ProcessTestCase):
                 rect = wintypes.RECT()
                 user32.GetClientRect(handles[0], ctypes.byref(rect))
                 scale = min(rect.right / 1200, rect.bottom / 800)
-                point = wintypes.POINT(int((rect.right - 1200 * scale) / 2 + 214 * scale), int((rect.bottom - 800 * scale) / 2 + 208 * scale))
+                point = wintypes.POINT(int((rect.right - 1200 * scale) / 2 + click["x"] * scale), int((rect.bottom - 800 * scale) / 2 + click["y"] * scale))
                 user32.ClientToScreen(handles[0], ctypes.byref(point))
                 self.assertTrue(user32.SetCursorPos(point.x, point.y))
                 actual = wintypes.POINT()
@@ -232,7 +234,7 @@ class TravelProcesses(ProcessTestCase):
             def key(key, down):
                 subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", windows[0], key], check=True, timeout=10)
             def mouse(down):
-                subprocess.run(["xdotool", "mousemove", "--window", windows[0], "214", "208", "mousedown" if down else "mouseup", "1"], check=True, timeout=10)
+                subprocess.run(["xdotool", "mousemove", "--window", windows[0], str(click["x"]), str(click["y"]), "mousedown" if down else "mouseup", "1"], check=True, timeout=10)
         underscore()
         selected = self.ascii_frame(client, lambda f: f.get("travel_cursor") is not None)
         self.assertEqual(selected["state"]["observation"]["tick"], '0')
@@ -244,6 +246,9 @@ class TravelProcesses(ProcessTestCase):
         arrived = self.ascii_frame(client, lambda f: f.get("travel") and f["travel"]["phase"] == "arrived")
         key("Return", False)
         self.assertEqual(arrived["state"]["observation"]["tick"],'100')
+        # Click where the map draws the cell travelled from, one step west.
+        start = next(t for t in arrived["map_tiles"] if t["position"] == {"x": -1, "y": 0, "z": 0})
+        click.update(x=start["center"][0], y=start["center"][1])
         mouse(True)
         returned = self.ascii_frame(client, lambda f: f.get("travel") and f["travel"]["id"] != arrived["travel"]["id"] and f["travel"]["phase"] == "arrived")
         mouse(False)

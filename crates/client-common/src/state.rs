@@ -49,6 +49,7 @@ pub struct ClientState {
     memory: BTreeMap<String, RememberedCell>,
     map_memory: crate::map_memory::MapMemory,
     narration: Vec<String>,
+    narration_lines: Vec<crate::narration::Line>,
 }
 
 impl ClientState {
@@ -85,6 +86,7 @@ impl ClientState {
             memory: BTreeMap::new(),
             map_memory: Default::default(),
             narration: Vec::new(),
+            narration_lines: Vec::new(),
         };
         client.remember_view();
         Ok(client)
@@ -267,6 +269,10 @@ impl ClientState {
     /// Latest observation's prose, derived only from disclosed facts. Not history.
     pub fn narration(&self) -> &[String] {
         &self.narration
+    }
+    /// [`Self::narration`], with what each line reports.
+    pub fn narration_lines(&self) -> &[crate::narration::Line] {
+        &self.narration_lines
     }
     pub fn history(&self) -> &[HistoryEntry] {
         &self.snapshot.history.entries
@@ -463,11 +469,16 @@ impl ClientState {
                     }
                     self.remember(*entry, update.cursor.tick)?;
                 }
-                self.narration = crate::narration::observation(
+                self.narration_lines = crate::narration::observation_lines(
                     &self.snapshot.state.observation,
                     &state.observation,
                     own_action.as_ref(),
                 );
+                self.narration = self
+                    .narration_lines
+                    .iter()
+                    .map(|line| line.text.clone())
+                    .collect();
                 self.observation_base = ObservationBase {
                     cursor: update.cursor,
                     revision: state.revision,

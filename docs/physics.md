@@ -143,7 +143,7 @@ Only changed observer states are applied/drawn, matching live stream delivery;
 client sample counts can therefore be lower than command counts in multi-actor
 cases. Results are under [performance](#performance).
 
-ASCII F6/F7 browse disclosed height slices without advancing time; spectators can use them too. Mouse selection follows the displayed slice.
+The ASCII client draws every height in one map; see [the map](ascii-client.md#the-map). The falling character is drawn once, as `@`.
 
 ## Performance
 

@@ -125,7 +125,7 @@ fn hidden_terrain_and_items_are_grey_actors_disappear_and_clicks_use_known_cells
 }
 
 #[test]
-fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
+fn remembered_heights_and_large_maps_collapse_into_the_single_map() {
     let mut first = snapshot(false);
     let template = first.state.observation.visible_cells[0].clone();
     let existing: std::collections::BTreeSet<_> = first
@@ -153,10 +153,18 @@ fn remembered_elevations_and_large_maps_fit_inside_the_map_panel() {
     let mut state = ClientState::from_snapshot(first).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
     let tiles = render::map_tiles(&state);
-    assert!(tiles.iter().any(|t| t.remembered && t.position.z != 0));
+    // Every height collapses into one map: one tile per column, all of them
+    // inside the map area.
+    let columns: std::collections::BTreeSet<_> =
+        tiles.iter().map(|t| (t.position.x, t.position.y)).collect();
+    assert_eq!(columns.len(), tiles.len());
+    assert!(tiles.iter().any(|t| t.remembered));
+    let (left, top) = (tor_client_ascii::map::LEFT, tor_client_ascii::map::TOP);
+    let right = left + tor_client_ascii::map::COLS as usize * tor_client_ascii::map::STEP;
+    let bottom = top + tor_client_ascii::map::ROWS as usize * tor_client_ascii::map::STEP;
     assert!(tiles
         .iter()
-        .all(|t| (44..748).contains(&t.center.0) && (166..458).contains(&t.center.1)));
+        .all(|t| (left..right).contains(&t.center.0) && (top..bottom).contains(&t.center.1)));
     let mut app = App::new();
     app.set_state(state);
     render::Canvas::default().draw(&app);
@@ -205,25 +213,27 @@ fn remembered_travel_rejects_known_obstacles_unknown_slices_and_spectators() {
 }
 
 #[test]
-fn remembered_mouse_travel_uses_the_displayed_height_slice() {
+fn a_column_known_only_at_head_height_is_drawn_but_not_travelled_to() {
     let mut initial = snapshot(false);
     Arc::make_mut(&mut initial.state).observation.visible_cells[1]
         .position
         .z = 1;
     let mut state = ClientState::from_snapshot(initial).unwrap();
     state.replace_snapshot(snapshot(true)).unwrap();
-    let tile = render::map_tiles_at_level(&state, 1)
+    let tile = render::map_tiles(&state)
         .into_iter()
         .find(|t| t.position.x == 1)
         .unwrap();
     assert!(tile.remembered);
     let mut app = App::new();
     app.role = AccessRole::Player;
-    app.map_level = 1;
     app.set_state(state);
     app.ready();
-    assert!(
-        matches!(app.input(Input::Click {x:tile.center.0,y:tile.center.1}),
-        Effect::Request(Request::Command {command:Command::Travel {destination,..},..}) if destination=="1")
+    assert_eq!(
+        app.input(Input::Click {
+            x: tile.center.0,
+            y: tile.center.1
+        }),
+        Effect::None
     );
 }

@@ -32,9 +32,12 @@ Narration is transient presentation, not durable history. Snapshots, including
 those after rewind and relaunch, reset the comparison baseline without replaying
 old notices. Invalid updates leave both state and prose unchanged.
 
-**ASCII** shows the latest observation's prose above the status bar (up to two
-lines); F2 still opens durable history. Automation frames include the same prose
-in a `narration` array, which is empty immediately after a snapshot.
+**ASCII** composes the prose into NetHack-style messages that stay at the top
+of the window until the player's next command, leaving out what the map and
+status lines already show and merging related lines; see
+[messages](ascii-client.md#messages). Ctrl-P opens earlier turns and F2 the
+durable history. Automation frames still include each observation's prose in a
+`narration` array, which is empty immediately after a snapshot.
 
 **Text** tells everything between two prompts as one passage: the intention,
 what happened on the way, how it ended, and what else came into or left sight.

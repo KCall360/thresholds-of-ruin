@@ -34,10 +34,11 @@ without reconstructing past views from history or the save. Remembered item
 positions may be stale if another actor moved them out of sight.
 
 The spatial cache retains at most 4096 occurrences, preferring nearby cells.
-Rendering includes remembered offsets within 24 cells horizontally in x, 12 in y,
-and eight in z. The window shows up to five nearest elevation panels and crops
-large charts to keep glyphs readable inside the map panel. Cells outside the
-viewport can remain cached; unseen cells are never filled in.
+Rendering includes remembered offsets inside the map window (31 cells either
+side in x, 16 in y) and from two cells below the feet to three above, merged
+into one map as described in [the ASCII client](ascii-client.md#the-map).
+Cells are a fixed size; the map is never rescaled to fit. Cells outside the
+window can remain cached; unseen cells are never filled in.
 
 ## Known limitations
 
@@ -49,8 +50,8 @@ viewport can remain cached; unseen cells are never filled in.
   distant cells sooner. The rendered window alone spans about 20,800 positions,
   so the bound, not the window, limits what can be shown. This hasn't been
   measured. If it matters in play, options include raising the bound or not
-  caching empty headroom, though the elevation panels currently draw headroom
-  as floor, so dropping it would change what they show.
+  caching empty headroom, though the single map uses headroom to tell low
+  walls from full walls, so dropping it would change what it shows.
 - **A conflicting view discards the whole chart.** A single disagreeing anchor,
   such as a cell seen through a rotated portal, resets the chart as described
   above. 3D sight shows more cells through portals, including vertical ones, so
@@ -61,7 +62,8 @@ viewport can remain cached; unseen cells are never filled in.
 Shared-client tests cover translation across successive updates, item refresh,
 actor exclusion, elevation, snapshots, rewind, ambiguous views, overflow, bounded
 storage, and atomic rejection of invalid updates. ASCII tests check glyphs, grey
-pixels, remembered elevation panels, clipping, and mouse targets.
+pixels, remembered heights merged into the single map, clipping, and mouse
+targets.
 
 `scenarios/tests/ascii-memory-*` and `scripts/test_ascii_memory_process.py`
 exercise real server/headless/text/native ASCII processes: normal door occlusion,

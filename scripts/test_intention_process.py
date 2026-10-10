@@ -410,7 +410,7 @@ class IntentionNativeProcesses(ProcessTestCase):
         completed = self.key(window, "wait")
         self.assertEqual(completed["intentions"], [])
         self.assertIsNone(completed["action_hint"])
-        self.assertEqual(completed["status"], "Action: Resolved.")
+        self.assertEqual(completed["status"], "")
         self.assertGreater(int(completed["state"]["observation"]["tick"]),
                            int(initial["state"]["observation"]["tick"]))
 

@@ -3,6 +3,7 @@
 
 mod map_memory;
 mod presentation;
+mod turns_and_map;
 
 // Synthetic disclosed references for client-model fixtures, not server derivation.
 fn fixture_digest(index: u64) -> [u8; 32] {

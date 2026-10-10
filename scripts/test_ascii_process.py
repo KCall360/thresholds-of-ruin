@@ -84,7 +84,7 @@ class AsciiProcesses(ProcessTestCase):
         text.command("note Return through the entry.")
         self.ascii_frame(ascii_client, lambda f: "Return through the entry." in str(f["history"]))
         denied = self.key(ascii_client, "control")
-        self.assertIn("ControlTaken", denied["status"])
+        self.assertEqual(denied["status"], "Another player has control; you can watch until they release it.")
         text.command("release")
         self.assertTrue(self.key(ascii_client, "control")["has_control"])
         for _ in range(5):
@@ -126,7 +126,7 @@ class AsciiProcesses(ProcessTestCase):
         self.assertIn("A graphical note", str(noted["history"]))
         self.assertEqual(noted["state"]["revision"], '1')
         invalid = self.key(client, "ascend")
-        self.assertIn("InvalidAction", invalid["status"])
+        self.assertEqual(invalid["status"], "You can't go that way.")
         self.assertEqual(invalid["state"], noted["state"])
         self.game.stop()
         self.ascii_frame(client, lambda f: not f["connected"])

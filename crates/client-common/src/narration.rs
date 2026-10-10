@@ -11,10 +11,53 @@ fn label(name: &str, fallback: &str) -> String {
     }
 }
 
+/// What a narrated line reports, so a frontend can choose which lines to show
+/// and merge related ones. The text stays the same whichever it picks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Topic {
+    /// The observer's own action, as its history event records it.
+    Own(Event),
+    /// Another actor came into sight.
+    Noticed(ActorTarget),
+    /// Another actor left sight.
+    LostSight(ActorTarget),
+    /// A door changed state without the observer acting on it.
+    Door,
+    /// Involuntary motion or a collision.
+    Motion,
+    /// The observer finished timed item work.
+    Finished,
+    /// A disclosed combat event.
+    Combat(CombatEventView),
+    /// Hit points with preparation, recovery, victory or death.
+    Status,
+    /// Readiness changed: the observer can act again, or must wait.
+    Pacing,
+}
+
+/// One narrated sentence and what it reports.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub topic: Topic,
+    pub text: String,
+}
+
+impl Line {
+    fn new(topic: Topic, text: impl Into<String>) -> Self {
+        Self {
+            topic,
+            text: text.into(),
+        }
+    }
+}
+
 /// Sight transitions describe knowledge, never movement, death, or hidden causes.
 /// Duplicate portal views count once; self sightings never count as discoveries.
 pub fn changes(before: &Observation, after: &Observation) -> Vec<String> {
     describe_changes(before, after, None)
+        .into_iter()
+        .map(|line| line.text)
+        .collect()
 }
 
 /// Narrate the observer's completed item work from disclosed inventories only.
@@ -57,27 +100,45 @@ pub fn observation(
     after: &Observation,
     event: Option<&Event>,
 ) -> Vec<String> {
+    observation_lines(before, after, event)
+        .into_iter()
+        .map(|line| line.text)
+        .collect()
+}
+
+/// [`observation`], with what each line reports.
+pub fn observation_lines(
+    before: &Observation,
+    after: &Observation,
+    event: Option<&Event>,
+) -> Vec<Line> {
     let door = match event {
         Some(Event::DoorChanged { door, .. }) => Some(*door),
         _ => None,
     };
     let mut lines = describe_changes(before, after, door);
     if let Some(event) = event {
-        lines.insert(0, action(event, after));
+        lines.insert(
+            0,
+            Line::new(Topic::Own(event.clone()), action(event, after)),
+        );
     }
-    lines.extend(completed_items(before, after));
+    lines.extend(
+        completed_items(before, after)
+            .into_iter()
+            .map(|text| Line::new(Topic::Finished, text)),
+    );
     if let Some(combat) = &after.combat {
         if before.tick != after.tick || before.combat != after.combat {
             lines.extend(
-                combat
-                    .events
-                    .iter()
-                    .map(|event| combat_event(event, before, after)),
+                combat.events.iter().map(|event| {
+                    Line::new(Topic::Combat(*event), combat_event(event, before, after))
+                }),
             );
             if before.combat.as_ref().is_none_or(|c| {
                 c.hp != combat.hp || c.victory != combat.victory || c.dead != combat.dead
             }) {
-                lines.push(combat_status(combat));
+                lines.push(Line::new(Topic::Status, combat_status(combat)));
             }
         }
     }
@@ -176,7 +237,7 @@ fn describe_changes(
     before: &Observation,
     after: &Observation,
     acted_door: Option<DoorTarget>,
-) -> Vec<String> {
+) -> Vec<Line> {
     let actors = |view: &Observation| -> BTreeMap<ActorTarget, String> {
         view.visible_actors
             .iter()
@@ -190,10 +251,10 @@ fn describe_changes(
     if after.tick != before.tick {
         if let Some(motion) = &after.motion {
             if motion.displaced {
-                lines.push("You move involuntarily.".into());
+                lines.push(Line::new(Topic::Motion, "You move involuntarily."));
             }
             if motion.impacted {
-                lines.push("You collide with an obstruction.".into());
+                lines.push(Line::new(Topic::Motion, "You collide with an obstruction."));
             }
         }
     }
@@ -204,12 +265,18 @@ fn describe_changes(
             } else {
                 "a"
             };
-            lines.push(format!("You notice {article} {name}."));
+            lines.push(Line::new(
+                Topic::Noticed(*id),
+                format!("You notice {article} {name}."),
+            ));
         }
     }
     for (id, name) in &old {
         if !new.contains_key(id) {
-            lines.push(format!("You can no longer see the {name}."));
+            lines.push(Line::new(
+                Topic::LostSight(*id),
+                format!("You can no longer see the {name}."),
+            ));
         }
     }
     let doors = |view: &Observation| -> BTreeMap<DoorTarget, (bool, String)> {
@@ -222,21 +289,24 @@ fn describe_changes(
     let old = doors(before);
     for (id, (open, name)) in doors(after) {
         if Some(id) != acted_door && old.get(&id).is_some_and(|(was_open, _)| *was_open != open) {
-            lines.push(format!(
-                "The {name} is now {}.",
-                if open { "open" } else { "closed" }
+            lines.push(Line::new(
+                Topic::Door,
+                format!(
+                    "The {name} is now {}.",
+                    if open { "open" } else { "closed" }
+                ),
             ));
         }
     }
     if before.ready != after.ready && after.combat.as_ref().is_none_or(|c| !c.terminal) {
-        lines.push(
+        lines.push(Line::new(
+            Topic::Pacing,
             if after.ready {
                 "You can act again."
             } else {
                 "You must wait."
-            }
-            .into(),
-        );
+            },
+        ));
     }
     lines
 }
@@ -553,5 +623,64 @@ mod tests {
             assert!(!text.contains("must wait"));
             assert!(text.contains(if dead { "You died" } else { "Victory" }));
         }
+    }
+
+    #[test]
+    fn every_line_says_what_it_reports_and_matches_the_plain_text() {
+        let scout = tor_protocol::ActorTarget::from_digest([2; 32]);
+        let me = tor_protocol::ActorTarget::from_digest([1; 32]);
+        let mut before = observation();
+        before.ready = false;
+        before.visible_actors.push(ActorView {
+            asset: None,
+            id: scout,
+            name: "ruin scout".into(),
+            description: String::new(),
+            position: Position { x: 1, y: 0, z: 0 },
+        });
+        let mut after = observation();
+        let hit = CombatEventView::Attack {
+            attacker: Some(me),
+            target: Some(scout),
+            outcome: AttackOutcome::Hit,
+        };
+        after.combat = Some(CombatView {
+            hp: 28,
+            max_hp: 30,
+            preparation_remaining: None,
+            preparation_active: false,
+            recovery_remaining: 0,
+            actors: vec![],
+            events: vec![hit, CombatEventView::Died { actor: scout }],
+            objective: None,
+            exit: None,
+            victory: false,
+            dead: false,
+            terminal: false,
+        });
+        let event = Event::Moved {
+            direction: Direction::East,
+        };
+        let lines = observation_lines(&before, &after, Some(&event));
+        let topics: Vec<_> = lines.iter().map(|line| line.topic.clone()).collect();
+        assert_eq!(
+            topics,
+            [
+                Topic::Own(event.clone()),
+                Topic::LostSight(scout),
+                Topic::Pacing,
+                Topic::Combat(hit),
+                Topic::Combat(CombatEventView::Died { actor: scout }),
+                Topic::Status,
+            ]
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.text.clone())
+                .collect::<Vec<_>>(),
+            super::observation(&before, &after, Some(&event))
+        );
+        assert_eq!(lines[3].text, "You struck the ruin scout.");
     }
 }

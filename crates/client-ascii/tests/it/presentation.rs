@@ -245,7 +245,7 @@ fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_
         app.set_state(ClientState::from_snapshot(initial.clone()).unwrap());
         let banner = "Spectator access is read-only.";
         app.status = if role == AccessRole::Player {
-            "Action: Queued.".into()
+            "Action queued.".into()
         } else {
             banner.into()
         };
@@ -282,7 +282,7 @@ fn validated_lifecycle_updates_refresh_action_status_without_changing_spectator_
         assert_eq!(
             app.status,
             if role == AccessRole::Player {
-                "Action: Resolved."
+                ""
             } else {
                 banner
             }
@@ -454,7 +454,7 @@ fn queued_intention_prevents_another_gameplay_request_even_when_observation_is_r
     app.set_state(ClientState::from_snapshot(snapshot).unwrap());
     app.ready();
     assert_eq!(app.input(Input::Key { key: Key::Right }), Effect::None);
-    assert!(app.status.contains("not accepting"));
+    assert_eq!(app.status, "You can't act right now.");
 }
 
 #[test]
@@ -983,14 +983,22 @@ fn spectator_can_browse_but_cannot_create_any_mutation_or_note_draft() {
 }
 
 #[test]
-fn resized_clicks_and_stair_panels_use_the_rendered_cell_layout() {
+fn resized_clicks_use_the_rendered_cell_layout_and_ignore_far_heights() {
     use tor_client_ascii::render::{cell_at, cell_center, logical_mouse};
     let mut view = state().state().observation.clone();
+    // A stair's far landing shares the column but is drawn nowhere.
     let mut landing = view.visible_cells[0].clone();
     landing.key = "landing".into();
-    landing.position.z = 1;
+    landing.position = Position { x: 2, y: 1, z: -17 };
     view.visible_cells.push(landing.clone());
-    for position in [view.position, landing.position] {
+    let mut snapshot = state().snapshot();
+    Arc::make_mut(&mut snapshot.state).observation = view.clone();
+    assert!(
+        !tor_client_ascii::render::map_tiles(&ClientState::from_snapshot(snapshot).unwrap())
+            .iter()
+            .any(|t| t.position.z == -17)
+    );
+    for position in [view.position, Position { x: 3, y: 1, z: 0 }] {
         let (x, y) = cell_center(&view, position).unwrap();
         assert_eq!(cell_at(&view, x, y), Some(position));
         // 1600x800 has 200 pixels of letterboxing on either side.
@@ -1003,6 +1011,8 @@ fn resized_clicks_and_stair_panels_use_the_rendered_cell_layout() {
             Some((x, y))
         );
     }
+    let (x, y) = cell_center(&view, Position { x: 2, y: 1, z: 0 }).unwrap();
+    assert_eq!(cell_at(&view, x, y), Some(Position { x: 2, y: 1, z: 0 }));
     assert_eq!(logical_mouse(10.0, 100.0, 1600, 800), None);
 }
 

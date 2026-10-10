@@ -735,8 +735,8 @@ and displacement/impact sensations from the latest action boundary. Static
 single-cell diagnostic views may omit it. Gravity fields, hidden collision targets,
 and backend frames are never serialized. Visible actor cells can repeat an actor
 ID at different observer-relative positions; undisclosed body cells remain hidden.
-Both clients narrate involuntary motion and impact, and ASCII F6/F7 browse disclosed
-height slices. See [physics](physics.md) for numerical and persistence rules.
+Both clients narrate involuntary motion and impact, and the ASCII client draws
+every disclosed height in one map. See [physics](physics.md) for numerical and persistence rules.
 
 ## Dungeon combat
 

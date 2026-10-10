@@ -25,10 +25,14 @@ class AsciiInteractionProcesses(ProcessTestCase):
             return frame["state"]["observation"]
 
         mail = next(item["id"] for item in view(initial)["inventory"] if item["name"] == "mail")
-        equipped = press("w", "equip")
+        # w always asks, as in NetHack, even with one candidate.
+        asking = press("w", "equip")
+        self.assertEqual(view(asking), view(initial), "opening a selection costs no turn")
+        equipped = press("Return", "enter")
         self.assertEqual(next(item for item in view(equipped)["interactions"]["inventory"] if item["item"] == mail)["equipped_slot"], 1)
         self.assertEqual(int(view(equipped)["tick"]), 300)
         self.assertIn("You finish equipping the mail.", equipped["narration"])
+        self.assertEqual(equipped["messages"]["turn"], "You finish equipping the mail.")
         selected = press("t", "unequip")
         self.assertEqual(view(selected), view(equipped), "opening a selection costs no turn")
         press("Down", "down")  # starting order: sword, mail, ring

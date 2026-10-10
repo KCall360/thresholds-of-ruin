@@ -33,10 +33,10 @@ class PhysicsProcesses(ProcessTestCase):
         initial = self.ascii_frame(player, lambda f: f['state'] is not None and not f['busy'])
         view = initial['state']['observation']
         self.assertTrue(any(a['id'] == view['self_target'] and a['position']['z'] == 1 for a in view['visible_actors']))
-        browsed=self.key(player,'map_lower')
-        self.assertEqual(browsed['state']['observation']['tick'],'0')
-        self.assertIn('Viewing height -1',browsed['status'])
-        self.key(player,'map_higher')
+        # The single map draws the body once, as @, never its head as a creature.
+        here=[t for t in initial['map_tiles'] if (t['position']['x'],t['position']['y'])==(0,0)]
+        self.assertEqual([t['glyph'] for t in here],['@'])
+        self.assertFalse(any(t['kind']=='creature' for t in here))
         falling = self.key(player, 'wait')['state']['observation']
         self.assertTrue(falling['motion']['displaced'])
         self.assertLess(int(falling['motion']['velocity'][2]), 0)
