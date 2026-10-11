@@ -17,7 +17,7 @@ fn fixture(hidden: u64) -> (Game, tor_simulation::ActorId) {
         region: RegionId(region),
         position: Position { x: 1, y: 1, z: 0 },
     };
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(at(1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -169,7 +169,7 @@ fn portal_transfer_and_checkpoint_restore_rebuild_local_indexes() {
     .unwrap();
     let mut shared = tor_simulation::checkpoint::SharedState::default();
     let snapshot = game.checkpoint(&mut shared);
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(restored.observe(actor), game.observe(actor));
     for candidate in [&mut restored, &mut game] {
         candidate

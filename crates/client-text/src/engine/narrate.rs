@@ -142,7 +142,6 @@ fn told(beat: &Beat) -> bool {
             | Beat::Dropped { .. }
             | Beat::SetDoor { .. }
             | Beat::Waited
-            | Beat::AttackBegan
             | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
@@ -453,24 +452,6 @@ fn episode(teller: &mut Teller, e: &Episode) {
                 Goal::Step { direction } => {
                     teller.say(format!("you step {}", direction_name(*direction)))
                 }
-                Goal::Attack { target } => {
-                    // When the other side acts first, say what was attempted.
-                    let first = after.iter().find(|b| told(b));
-                    if !matches!(
-                        first,
-                        Some(Beat::Blow {
-                            attacker: Who::Me,
-                            ..
-                        })
-                    ) {
-                        let figure = Figure {
-                            id: *target,
-                            name: object.trim_start_matches("the ").to_owned(),
-                        };
-                        let who = teller.the(&figure);
-                        teller.say(format!("you ready an attack on {who}"));
-                    }
-                }
                 Goal::Wait if !after.iter().any(told) => teller.say("time passes"),
                 Goal::Wait => teller.say("you wait"),
                 _ => {}
@@ -533,7 +514,7 @@ fn episode(teller: &mut Teller, e: &Episode) {
                         let struck = travel.iter().any(|b| {
                             matches!(
                                 b,
-                                Beat::Blow {
+                                Beat::AbilityResolved {
                                     target: Who::Me,
                                     ..
                                 }
@@ -670,7 +651,6 @@ fn own_actions(teller: &mut Teller, beats: &[Beat]) {
             )),
             Beat::Waited => teller.say("time passes"),
             Beat::ItemBegan(text) => teller.say(text.trim_end_matches('.')),
-            Beat::AttackBegan => teller.say("you ready an attack"),
             _ => {}
         }
     }
@@ -687,9 +667,12 @@ fn done_beats(teller: &mut Teller, e: &Episode, after: &[Beat]) {
         }
     }
     if matches!(e.goal, Goal::Attack { .. })
-        && !after
-            .iter()
-            .any(|b| matches!(b, Beat::Blow { .. } | Beat::Interrupted))
+        && !after.iter().any(|b| {
+            matches!(
+                b,
+                Beat::AbilityResolved { .. } | Beat::AbilityBegan(_) | Beat::Interrupted
+            )
+        })
     {
         teller.say(format!("you attack {}", e.object));
     }
@@ -700,53 +683,31 @@ fn done_beats(teller: &mut Teller, e: &Episode, after: &[Beat]) {
 fn tell(teller: &mut Teller, beats: &[Beat]) {
     let mut i = 0;
     while i < beats.len() {
-        let next = beats.get(i + 1);
         match &beats[i] {
-            Beat::ItemFinished(text) | Beat::AbilityBegan(text) | Beat::AbilityEffect(text) => {
+            Beat::ItemFinished(text) | Beat::AbilityBegan(text) => {
                 teller.say(text.trim_end_matches('.'))
             }
-            Beat::Blow {
+            Beat::AbilityResolved {
+                ability,
                 attacker,
                 target,
                 outcome,
             } => {
-                let killed = matches!(
-                    (target, next),
-                    (Who::Figure(t), Some(Beat::Died(Who::Figure(d)))) if t.id == d.id
-                ) && *outcome == AttackOutcome::Hit;
-                let spoiled = *target == Who::Me
-                    && matches!(next, Some(Beat::Interrupted))
-                    && *outcome == AttackOutcome::Hit;
                 let a = teller.who(attacker);
                 let t = teller.who(target);
-                let (verb, at) = if *attacker == Who::Me {
-                    ("strike", "swing at")
-                } else {
-                    ("strikes", "swings at")
-                };
-                let (misses, harm) = if *attacker == Who::Me {
-                    ("but miss", "but the blow does no harm")
-                } else if *target == Who::Me {
-                    ("and misses", "but the blow does you no harm")
-                } else {
-                    ("and misses", "but the blow does no harm")
-                };
-                let mut text = match outcome {
-                    AttackOutcome::Hit => format!("{a} {verb} {t}"),
-                    AttackOutcome::Miss => format!("{a} {at} {t} {misses}"),
-                    AttackOutcome::NoInjury => format!("{a} {verb} {t}, {harm}"),
-                };
-                if killed {
-                    if let Who::Figure(f) = target {
-                        teller.dead.insert(f.id);
+                let verb = if *attacker == Who::Me { "use" } else { "uses" };
+                let suffix = match outcome {
+                    AbilityOutcome::Applied => "",
+                    AbilityOutcome::Unaffected => ", but it has no effect",
+                    AbilityOutcome::Miss => {
+                        if *attacker == Who::Me {
+                            ", but miss"
+                        } else {
+                            ", but misses"
+                        }
                     }
-                    text.push_str(", and it falls dead");
-                    i += 1;
-                } else if spoiled {
-                    text.push_str(", spoiling your attack");
-                    i += 1;
-                }
-                teller.say(text);
+                };
+                teller.say(format!("{a} {verb} {} on {t}{suffix}", ability.name));
             }
             Beat::Interrupted => teller.say("your attack is interrupted"),
             Beat::Died(Who::Me) => teller.say("you die. This run has ended"),
@@ -798,7 +759,6 @@ fn tell(teller: &mut Teller, beats: &[Beat]) {
             | Beat::Dropped { .. }
             | Beat::SetDoor { .. }
             | Beat::Waited
-            | Beat::AttackBegan
             | Beat::ItemBegan(_)
             | Beat::Journey { .. }
             | Beat::Hp { .. }
@@ -911,10 +871,11 @@ mod tests {
             )]),
             "Time passes."
         );
-        let blow = Beat::Blow {
+        let blow = Beat::AbilityResolved {
+            ability: tor_client_common::test_support::content("basic_melee"),
             attacker: Who::Figure(scout()),
             target: Who::Me,
-            outcome: AttackOutcome::Miss,
+            outcome: AbilityOutcome::Miss,
         };
         assert_eq!(
             told(vec![episode(
@@ -924,17 +885,18 @@ mod tests {
                 vec![Beat::Waited, blow],
                 End::Done
             )]),
-            "You wait. The ruin scout swings at you and misses."
+            "You wait. The ruin scout uses Basic Melee on you, but misses."
         );
     }
 
     #[test]
     fn blows_by_unseen_attackers_name_no_one() {
         let beats = vec![
-            Beat::Blow {
+            Beat::AbilityResolved {
+                ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Unseen,
                 target: Who::Me,
-                outcome: AttackOutcome::NoInjury,
+                outcome: AbilityOutcome::Unaffected,
             },
             Beat::Hp {
                 from: 50,
@@ -944,7 +906,7 @@ mod tests {
         ];
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
-            "Something strikes you, but the blow does you no harm."
+            "Something uses Basic Melee on you, but it has no effect."
         );
     }
 
@@ -959,19 +921,21 @@ mod tests {
                 figure: scout(),
                 whereabouts: "to the east".into(),
             },
-            Beat::Blow {
+            Beat::AbilityResolved {
+                ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(scout()),
                 target: Who::Me,
-                outcome: AttackOutcome::Hit,
+                outcome: AbilityOutcome::Applied,
             },
             Beat::Appeared {
                 figure: guardian.clone(),
                 whereabouts: "to the north".into(),
             },
-            Beat::Blow {
+            Beat::AbilityResolved {
+                ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(guardian),
                 target: Who::Me,
-                outcome: AttackOutcome::Miss,
+                outcome: AbilityOutcome::Miss,
             },
             Beat::Hp {
                 from: 50,
@@ -981,7 +945,7 @@ mod tests {
         ];
         assert_eq!(
             told(vec![Entry::Beats(beats)]),
-            "You notice a ruin scout to the east. It strikes you. You notice a stone guardian to the north. The stone guardian swings at you and misses.\nHP 47/50"
+            "You notice a ruin scout to the east. It uses Basic Melee on you. You notice a stone guardian to the north. The stone guardian uses Basic Melee on you, but misses.\nHP 47/50"
         );
     }
 
@@ -1020,10 +984,11 @@ mod tests {
         // journey was being struck.
         let journey = vec![
             Beat::Stepped(Direction::East),
-            Beat::Blow {
+            Beat::AbilityResolved {
+                ability: tor_client_common::test_support::content("basic_melee"),
                 attacker: Who::Figure(scout()),
                 target: Who::Me,
-                outcome: AttackOutcome::Hit,
+                outcome: AbilityOutcome::Applied,
             },
             Beat::Journey {
                 phase: TravelPhase::Hazard,
@@ -1040,7 +1005,7 @@ mod tests {
                 journey,
                 End::Stopped(TravelPhase::Hazard)
             )]),
-            "You set off east. The ruin scout strikes you. You stop short."
+            "You set off east. The ruin scout uses Basic Melee on you. You stop short."
         );
     }
 

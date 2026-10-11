@@ -3,6 +3,9 @@ use crate::journal::{CreatureAdvancement, Position, RegionView, WizardItem, Wiza
 use tor_protocol::{ActorId, EntryId};
 
 fn catalog_value<T: serde::de::DeserializeOwned>(name: &str, usage: &str) -> Result<T, String> {
+    if !tor_simulation::content_ids::valid_id(name) {
+        return Err(usage.into());
+    }
     serde_json::from_value(serde_json::Value::String(name.into())).map_err(|_| usage.into())
 }
 
@@ -11,7 +14,7 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
         return serde_json::from_str(text).map_err(|_| "Invalid developer command".into());
     }
     let words: Vec<_> = text.split_whitespace().collect();
-    let usage = "Wizard commands: wizard creature add-hd <actor> <racial|warrior|mage>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
+    let usage = "Wizard commands: wizard creature add-hd <actor> <racial|class-id>; wizard creature train <actor> <hit-die> <skill>; wizard creature attribute <actor> <hit-die> <attribute>; wizard creature talent <actor> <hit-die> <talent>; wizard creature template <actor> <template> <on|off>; wizard creature remove-hd <actor>; wizard arena pause|resume|step [actions]; wizard identify <actor> <item>; wizard chamber <id> <width> <depth> <height> <name>; wizard door <region> <x> <y> <z> <open|closed>; wizard item <token|tablet> <region> <x> <y> <z>; wizard actor <turn-ticks> <region> <x> <y> <z>; wizard teleport <actor> <region> <x> <y> <z>; wizard rewind <initial|entry-id>; wizard room <id> <width> <depth> <height> <name>; wizard connect <from-region> <x> <y> <z> <direction> <to-region> <x> <y> <z> <quarter-turns>; wizard place <region> <x> <y> <z> <on|off>; wizard wall <region> <x> <y> <z> <open|closed>";
     let owner = |text: &str| -> Result<u16, String> {
         text.parse::<u16>()
             .ok()
@@ -37,14 +40,18 @@ pub fn parse_wizard(text: &str) -> Result<WizardOperation, String> {
             actor: ActorId(actor.parse().map_err(|_| usage)?),
             advancement: CreatureAdvancement::Train {
                 owner: owner(ordinal)?,
-                skill: catalog_value(skill, usage)?,
+                skill: crate::creature_authoring::skill(skill)
+                    .map(|_| (*skill).to_owned())
+                    .map_err(|_| usage)?,
             },
         },
         ["creature", "attribute", actor, ordinal, attribute] => WizardOperation::AdvanceCreature {
             actor: ActorId(actor.parse().map_err(|_| usage)?),
             advancement: CreatureAdvancement::IncreaseAttribute {
                 owner: owner(ordinal)?,
-                attribute: catalog_value(attribute, usage)?,
+                attribute: crate::creature_authoring::attribute(attribute)
+                    .map(|_| (*attribute).to_owned())
+                    .map_err(|_| usage)?,
             },
         },
         ["creature", "talent", actor, ordinal, talent] => WizardOperation::AdvanceCreature {
@@ -304,10 +311,13 @@ mod advancement_tests {
     use super::*;
     #[test]
     fn advancement_uses_explicit_one_based_owners_and_named_catalog_values() {
+        // Content IDs parse independently of the loaded catalog; resolution checks existence.
         for text in [
             "creature add-hd 1 racial",
             "creature add-hd 1 warrior",
             "creature add-hd 1 mage",
+            "creature add-hd 1 bard",
+            "creature talent 1 4 unknown",
             "creature train 1 4 athletics",
             "creature attribute 1 4 strength",
             "creature talent 1 4 hardiness",
@@ -319,7 +329,7 @@ mod advancement_tests {
             assert_eq!(operation, restored);
         }
         for text in [
-            "creature add-hd 1 bard",
+            "creature add-hd 1 bad!",
             "creature add-hd -1 warrior",
             "creature add-hd 1 warrior extra",
             "creature train 1 0 athletics",
@@ -327,7 +337,7 @@ mod advancement_tests {
             "creature train 1 -1 athletics",
             "creature train 1 4 unknown",
             "creature attribute 1 4 unknown",
-            "creature talent 1 4 unknown",
+            "creature talent 1 4 bad!",
             "creature train 1 athletics",
             "creature attribute 1 strength",
             "creature talent 1 hardiness",

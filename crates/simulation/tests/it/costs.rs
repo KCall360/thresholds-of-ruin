@@ -66,11 +66,14 @@ fn invalid_duplicate_and_unfunded_restored_holds_reject() {
 }
 
 fn ledger(stamina: u32) -> CostLedger {
-    CostLedger::new(Resources::new(ResourceMaxima {
-        stamina,
-        focus: 3,
-        mana: 3,
-    }))
+    CostLedger::new(Resources::new(
+        ResourceMaxima {
+            stamina,
+            focus: 3,
+            mana: 3,
+        },
+        &super::creature_fixture::ruleset(),
+    ))
 }
 fn cost() -> ResourceCost {
     ResourceCost {
@@ -266,4 +269,31 @@ fn malformed_costs_ids_and_reservation_counts_are_bounded() {
     let available = ledger.available(Resource::Stamina);
     ledger.advance_active(100);
     assert_eq!(ledger.available(Resource::Stamina), available + 1);
+}
+
+#[test]
+fn runtime_and_restore_share_the_named_hold_limit() {
+    let limit = tor_simulation::limits::COST_HOLDS;
+    let mut state = ledger((limit + 1) as u32);
+    let held = ResourceCost {
+        resource: Resource::Stamina,
+        start: 0,
+        resolution: 1,
+    };
+    for id in 1..=limit {
+        state.start(IntentionId(id as u64), held).unwrap();
+    }
+    let before = state.clone();
+    assert_eq!(
+        state.start(IntentionId((limit + 1) as u64), held),
+        Err(CostError::Limit)
+    );
+    assert_eq!(state, before);
+    let reservations = (1..=limit)
+        .map(|id| (IntentionId(id as u64), held))
+        .collect();
+    assert_eq!(
+        CostLedger::from_recorded(state.resources().clone(), reservations).unwrap(),
+        state
+    );
 }

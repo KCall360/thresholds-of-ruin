@@ -1,22 +1,10 @@
 //! Anatomy, ordinary equipment actions and reusable immediate effect definitions.
-use crate::combat::{AttackSpec, CombatEvent, CombatSpec, DamageType, Preparation};
+use crate::combat::Preparation;
 use crate::{Action, ActorId, Game, GameError, ItemClass, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EquipmentSlot {
-    Weapon,
-    BodyArmor,
-    Shield,
-    HeadArmor,
-    HandsArmor,
-    FeetArmor,
-    Cloak,
-    Ring,
-    Amulet,
-}
+pub use crate::content_ids::EquipmentSlot;
 
 /// Stable index into this actor's anatomy; two rings occupy different sockets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -29,24 +17,17 @@ pub struct AnatomySpec {
     pub slots: Vec<EquipmentSlot>,
 }
 impl AnatomySpec {
-    pub fn humanoid() -> Self {
+    pub fn from_rules(rules: &crate::rules::Ruleset) -> Self {
         Self {
-            slots: vec![
-                EquipmentSlot::Weapon,
-                EquipmentSlot::Shield,
-                EquipmentSlot::BodyArmor,
-                EquipmentSlot::HeadArmor,
-                EquipmentSlot::HandsArmor,
-                EquipmentSlot::FeetArmor,
-                EquipmentSlot::Cloak,
-                EquipmentSlot::Ring,
-                EquipmentSlot::Ring,
-                EquipmentSlot::Amulet,
-            ],
+            slots: rules.constants().default_anatomy.clone(),
         }
     }
-    pub fn valid(&self) -> bool {
-        self.slots.len() <= 64
+    pub fn valid(&self, rules: &crate::rules::Ruleset) -> bool {
+        self.slots.len() <= crate::limits::EQUIPMENT_SOCKETS
+            && self
+                .slots
+                .iter()
+                .all(|id| rules.equipment_slot(id).is_some())
     }
 }
 
@@ -55,56 +36,61 @@ impl AnatomySpec {
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
     pub attack: Option<crate::attacks::MeleeAttack>,
-    pub defense: i32,
-    pub reductions: BTreeMap<DamageType, u32>,
+    pub modifiers: Vec<crate::rules::Modifier>,
 }
 impl EquipmentSpec {
-    pub fn valid(&self, class: ItemClass) -> bool {
-        let compatible = match self.slot {
-            EquipmentSlot::Weapon => class == ItemClass::Weapon,
-            EquipmentSlot::Ring => class == ItemClass::Ring,
-            EquipmentSlot::Amulet => class == ItemClass::Amulet,
-            _ => class == ItemClass::Armor,
-        };
-        compatible
-            && (-1000..=1000).contains(&self.defense)
-            && self.reductions.values().all(|value| *value <= 1_000_000)
-            && match self.slot {
-                EquipmentSlot::Weapon => {
-                    self.defense == 0 && self.reductions.is_empty() && self.attack.is_some()
-                }
-                _ => self.attack.is_none(),
+    pub fn valid_shape(&self) -> bool {
+        crate::rules::validate_modifier_shapes(&self.modifiers).is_ok()
+    }
+    pub fn validate_rules(
+        &self,
+        class: ItemClass,
+        rules: &crate::rules::Ruleset,
+    ) -> Result<(), crate::rules::RulesetError> {
+        let slot = rules.equipment_slot(&self.slot).ok_or_else(|| {
+            crate::rules::RulesetError::UnknownReference {
+                category: "equipment_slot",
+                id: self.slot.to_string(),
             }
+        })?;
+        if !slot.compatible_classes.contains(&class)
+            || slot.requires_attack != self.attack.is_some()
+        {
+            return Err(crate::rules::RulesetError::Bound {
+                field: "equipment_capability".into(),
+            });
+        }
+        rules.validate_modifiers(&self.modifiers)?;
+        if let Some(attack) = &self.attack {
+            rules.validate_damage(attack.damage())?;
+        }
+        Ok(())
     }
 }
 
-/// Shared primitives usable by items and later ability/trap sources.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum EffectSpec {
-    Heal {
-        amount: u32,
-    },
-    Damage {
-        components: BTreeMap<DamageType, u32>,
-    },
-}
-impl EffectSpec {
-    pub fn valid(&self) -> bool {
-        match self {
-            Self::Heal { amount } => (1..=1_000_000).contains(amount),
-            Self::Damage { components } => {
-                !components.is_empty()
-                    && components.values().all(|value| *value <= 1_000_000)
-                    && components.values().any(|value| *value > 0)
-            }
-        }
-    }
-}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
-    pub effects: Vec<EffectSpec>,
+    pub effects: Vec<crate::rules::Effect>,
+}
+
+/// Data disclosed for a validated equipment-slot content reference.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EquipmentSlotView {
+    pub id: EquipmentSlot,
+    pub name: String,
+    pub equipped_phrase: String,
+    pub requires_attack: bool,
+}
+impl From<&crate::rules::EquipmentSlotDef> for EquipmentSlotView {
+    fn from(value: &crate::rules::EquipmentSlotDef) -> Self {
+        Self {
+            id: value.id.clone(),
+            name: value.name.clone(),
+            equipped_phrase: value.equipped_phrase.clone(),
+            requires_attack: value.requires_attack,
+        }
+    }
 }
 
 /// Controlled actor's anatomy and carried-item affordances. Equipment statistics
@@ -112,7 +98,7 @@ pub struct ConsumableSpec {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractionView {
     pub completed: Vec<Work>,
-    pub slots: Vec<EquipmentSlot>,
+    pub slots: Vec<EquipmentSlotView>,
     pub preparation: Option<PreparationView>,
     pub inventory: Vec<ItemInteractionView>,
 }
@@ -125,7 +111,7 @@ pub struct PreparationView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemInteractionView {
     pub item: ItemId,
-    pub slot: Option<EquipmentSlot>,
+    pub slot: Option<EquipmentSlotView>,
     pub equipped_slot: Option<EquipmentSlotId>,
     pub known_equipment: Option<EquipmentSpec>,
     pub drinkable: bool,
@@ -133,19 +119,16 @@ pub struct ItemInteractionView {
 impl ConsumableSpec {
     pub fn valid(&self) -> bool {
         !self.effects.is_empty()
-            && self.effects.len() <= 16
-            && self.effects.iter().all(EffectSpec::valid)
+            && self.effects.len() <= crate::limits::CONSUMABLE_EFFECTS
+            && self.effects.iter().all(crate::rules::Effect::valid_shape)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Work {
     UseAbility {
-        ability: crate::grants::Ability,
-        target: ActorId,
-    },
-    Attack {
+        id: crate::content_ids::AbilityId,
         target: ActorId,
     },
     Equip {
@@ -160,44 +143,46 @@ pub enum Work {
     },
 }
 impl Work {
-    pub fn action(self) -> Action {
+    pub fn action(&self) -> Action {
         match self {
-            Self::UseAbility { ability, target } => Action::UseAbility { ability, target },
-            Self::Attack { target } => Action::Attack { target },
-            Self::Equip { item, slot } => Action::Equip { item, slot },
-            Self::Unequip { item } => Action::Unequip { item },
-            Self::Drink { item } => Action::Drink { item },
+            Self::UseAbility { id, target } => Action::UseAbility {
+                id: id.clone(),
+                target: *target,
+            },
+            Self::Equip { item, slot } => Action::Equip {
+                item: *item,
+                slot: *slot,
+            },
+            Self::Unequip { item } => Action::Unequip { item: *item },
+            Self::Drink { item } => Action::Drink { item: *item },
         }
     }
-    pub fn target(self) -> Option<ActorId> {
-        if let Self::Attack { target } | Self::UseAbility { target, .. } = self {
-            Some(target)
-        } else {
-            None
-        }
-    }
-    pub fn item(self) -> Option<ItemId> {
+    pub fn target(&self) -> Option<ActorId> {
         match self {
-            Self::Attack { .. } | Self::UseAbility { .. } => None,
-            Self::Equip { item, .. } | Self::Unequip { item } | Self::Drink { item } => Some(item),
+            Self::UseAbility { target, .. } => Some(*target),
+            Self::Equip { .. } | Self::Unequip { .. } | Self::Drink { .. } => None,
         }
     }
-    pub fn name(self) -> &'static str {
+    pub fn item(&self) -> Option<ItemId> {
+        match self {
+            Self::UseAbility { .. } => None,
+            Self::Equip { item, .. } | Self::Unequip { item } | Self::Drink { item } => Some(*item),
+        }
+    }
+    pub fn name(&self) -> &'static str {
         match self {
             Self::UseAbility { .. } => "use ability",
-            Self::Attack { .. } => "attack",
             Self::Equip { .. } => "equip",
             Self::Unequip { .. } => "remove",
             Self::Drink { .. } => "drink",
         }
     }
-    pub(crate) fn structural_valid(self, actor: ActorId) -> bool {
+    pub(crate) fn structural_valid(&self, _actor: ActorId) -> bool {
         match self {
-            Self::UseAbility { ability, target } => {
-                ability != crate::grants::Ability::BasicMelee && target.0 > 0 && target != actor
+            Self::UseAbility { target, .. } => target.0 > 0,
+            Self::Equip { item, slot } => {
+                item.0 > 0 && usize::from(slot.0) < crate::limits::EQUIPMENT_SOCKETS
             }
-            Self::Attack { target } => target.0 > 0 && target != actor,
-            Self::Equip { item, slot } => item.0 > 0 && slot.0 < 64,
             Self::Unequip { item } | Self::Drink { item } => item.0 > 0,
         }
     }
@@ -210,7 +195,7 @@ impl Game {
         anatomy: AnatomySpec,
     ) -> Result<(), GameError> {
         let mut actor = self.actors.get_mut(&actor).ok_or(GameError::UnknownActor)?;
-        if !anatomy.valid()
+        if !anatomy.valid(&self.content.rules)
             || !actor.equipment.is_empty()
             || actor.pending.is_some()
             || actor
@@ -219,7 +204,9 @@ impl Game {
                 .map(|combat| combat.creature())
                 .is_some_and(|creature| creature.derived().anatomy != anatomy)
         {
-            return Err(GameError::InvalidLocation);
+            return Err(GameError::Build(
+                crate::creatures::BuildError::InvalidDefinition,
+            ));
         }
         actor.anatomy = tor_world::Shared::new(anatomy);
         Ok(())
@@ -236,93 +223,102 @@ impl Game {
         item: ItemId,
         slot: EquipmentSlotId,
     ) -> Result<(), GameError> {
-        self.work_duration(actor, Work::Equip { item, slot })?;
-        self.actors
-            .get_mut(&actor)
-            .unwrap()
+        self.item_work_duration(actor, Work::Equip { item, slot })?;
+        let mut equipment = self
+            .actors
+            .get(&actor)
+            .ok_or(GameError::UnknownActor)?
             .equipment
-            .insert(slot, item);
-        Ok(())
+            .clone();
+        equipment.insert(slot, item);
+        self.set_actor_equipment(actor, equipment)
     }
-    pub fn effective_combat(&self, actor: ActorId) -> Option<std::borrow::Cow<'_, CombatSpec>> {
-        let a = self.actors.get(&actor)?;
-        let base = &*a.combat.as_ref()?.spec;
-        if a.equipment.is_empty() {
-            return Some(std::borrow::Cow::Borrowed(base));
-        }
-        let mut combat = base.clone();
-        let mut weapon = false;
-        for item in a.equipment.values() {
-            let equipment = self.items.get(item)?.spec.equipment.as_ref()?;
-            if let Some(attack) = &equipment.attack {
-                combat.attack = AttackSpec {
-                    bonus: attack.bonus(),
-                    wind_up: attack.wind_up(),
-                    recovery: attack.recovery(),
-                    // Compatibility cache supplies phases; the authoritative
-                    // selected definition supplies checks and damage.
-                    damage: BTreeMap::new(),
-                };
-                weapon = true;
-                {
-                    let creature = a.combat.as_ref()?.creature();
-                    combat.attack.bonus +=
-                        i32::from(
-                            creature
-                                .derived()
-                                .attributes
-                                .get(attack.skill().attribute(creature.build().binding())),
-                        ) + i32::from(creature.derived().skills.get(attack.skill()));
-                }
-            }
-            combat.defense = combat.defense.saturating_add(equipment.defense);
-            for (kind, value) in &equipment.reductions {
-                let total = combat.reductions.entry(*kind).or_default();
-                *total = total.saturating_add(*value);
+
+    fn equipment_candidate(
+        &self,
+        actor: ActorId,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Result<crate::lifecycle::ActorOutcome, GameError> {
+        let mut outcome = self.settled_actor_outcome(actor)?;
+        if let Some(combat) = outcome.state.combat.as_mut() {
+            let sources = equipment
+                .iter()
+                .map(|(socket, id)| {
+                    let item = self.items.get(id).ok_or(GameError::ItemUnavailable)?;
+                    let equipment = item
+                        .spec
+                        .equipment
+                        .as_ref()
+                        .ok_or(GameError::ItemUnavailable)?;
+                    Ok(crate::creatures::EquipmentSource {
+                        item: *id,
+                        socket: *socket,
+                        modifiers: equipment.modifiers.clone(),
+                        attack: equipment.attack.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, GameError>>()?;
+            let change = combat.set_equipment(sources).map_err(GameError::Creature)?;
+            if change.died {
+                self.next_item_id
+                    .checked_add(1)
+                    .ok_or(GameError::IdentityExhausted)?;
             }
         }
-        if weapon {
-            let creature = a.combat.as_ref()?.creature();
-            combat.attack.wind_up = creature
-                .derived()
-                .attributes
-                .physical_duration(combat.attack.wind_up);
-            combat.attack.recovery = creature
-                .derived()
-                .attributes
-                .physical_duration(combat.attack.recovery);
-        }
-        Some(std::borrow::Cow::Owned(combat))
+        outcome.state.equipment = equipment;
+        Ok(outcome)
     }
-    pub(crate) fn work_duration(&self, actor: ActorId, work: Work) -> Result<u64, GameError> {
+
+    fn set_actor_equipment(
+        &mut self,
+        actor: ActorId,
+        equipment: BTreeMap<EquipmentSlotId, ItemId>,
+    ) -> Result<(), GameError> {
+        let outcome = self.equipment_candidate(actor, equipment)?;
+        self.apply_outcome(outcome)
+    }
+    /// Recheck only live item references and socket eligibility. Captured effects,
+    /// costs and timing remain owned by the original plan.
+    pub(crate) fn item_work_available(&self, actor: ActorId, work: &Work) -> bool {
+        let Some(a) = self.actors.get(&actor).filter(|actor| actor.alive()) else {
+            return false;
+        };
+        let Some(item) = work.item() else {
+            return false;
+        };
+        let Some(i) = self
+            .items
+            .get(&item)
+            .filter(|item| item.location == ItemLocation::Carried(actor))
+        else {
+            return false;
+        };
+        match work {
+            Work::Equip { slot, .. } => i.spec.equipment.as_ref().is_some_and(|equipment| {
+                a.anatomy.slots.get(usize::from(slot.0)) == Some(&equipment.slot)
+                    && !a.equipment.contains_key(slot)
+                    && !a.equipment.values().any(|id| *id == item)
+            }),
+            Work::Unequip { .. } => {
+                i.spec.equipment.is_some() && a.equipment.values().any(|id| *id == item)
+            }
+            Work::Drink { .. } => i.spec.consumable.is_some() && a.combat.is_some(),
+            Work::UseAbility { .. } => false,
+        }
+    }
+    fn item_work_duration(&self, actor: ActorId, work: Work) -> Result<u64, GameError> {
         let a = self
             .actors
             .get(&actor)
-            .filter(|a| a.alive())
+            .filter(|actor| actor.alive())
             .ok_or(GameError::UnknownActor)?;
-        if let Work::UseAbility { ability, target } = work {
-            if ability == crate::grants::Ability::BasicMelee
-                || !self.ability_target_available(actor, ability, target)
-                || (ability == crate::grants::Ability::Fear && self.creature(target).is_none())
-            {
-                return Err(GameError::InvalidLocation);
-            }
-            return Ok(self.ability_plan(actor, ability)?.preparation);
-        }
-        if let Work::Attack { target } = work {
-            self.creature_melee_damage(actor)?;
-            return if self.attack_available(actor, target) {
-                Ok(self.effective_combat(actor).unwrap().attack.wind_up)
-            } else {
-                Err(GameError::InvalidLocation)
-            };
-        }
-        let item = work.item().unwrap();
+        let item = work.item().ok_or(GameError::ItemUnavailable)?;
         let i = self
             .items
             .get(&item)
             .filter(|i| i.location == ItemLocation::Carried(actor))
             .ok_or(GameError::ItemUnavailable)?;
+        let timing = &self.content.rules.constants().item_timing;
         let turns = match work {
             Work::Equip { slot, .. } => {
                 let equipment = i
@@ -333,78 +329,98 @@ impl Game {
                 if a.anatomy.slots.get(usize::from(slot.0)) != Some(&equipment.slot)
                     || a.equipment.contains_key(&slot)
                     || a.equipment.values().any(|id| *id == item)
-                    || (equipment.slot == EquipmentSlot::Weapon
-                        && a.equipment.values().any(|id| {
-                            self.items[id]
-                                .spec
-                                .equipment
-                                .as_ref()
-                                .is_some_and(|e| e.slot == EquipmentSlot::Weapon)
-                        }))
                 {
                     return Err(GameError::ItemUnavailable);
                 }
-                if equipment.slot == EquipmentSlot::BodyArmor {
-                    3
-                } else {
-                    1
-                }
+                let mut candidate = a.equipment.clone();
+                candidate.insert(slot, item);
+                self.equipment_candidate(actor, candidate)?;
+                self.content
+                    .rules
+                    .equipment_slot(&equipment.slot)
+                    .ok_or(GameError::ItemUnavailable)?
+                    .equip_turns
             }
             Work::Unequip { .. } => {
                 if !a.equipment.values().any(|id| *id == item) {
                     return Err(GameError::ItemUnavailable);
                 }
-                if i.spec
-                    .equipment
-                    .as_ref()
+                let mut candidate = a.equipment.clone();
+                candidate.retain(|_, equipped| *equipped != item);
+                self.equipment_candidate(actor, candidate)?;
+                self.content
+                    .rules
+                    .equipment_slot(
+                        &i.spec
+                            .equipment
+                            .as_ref()
+                            .ok_or(GameError::ItemUnavailable)?
+                            .slot,
+                    )
                     .ok_or(GameError::ItemUnavailable)?
-                    .slot
-                    == EquipmentSlot::BodyArmor
-                {
-                    3
-                } else {
-                    1
-                }
+                    .unequip_turns
             }
             Work::Drink { .. } => {
                 if i.spec.consumable.is_none() || a.combat.is_none() {
                     return Err(GameError::ItemUnavailable);
                 }
-                1
+                timing.consume_turns
             }
-            Work::Attack { .. } | Work::UseAbility { .. } => unreachable!(),
+            Work::UseAbility { .. } => return Err(GameError::ItemUnavailable),
         };
         a.turn_ticks
             .get()
             .checked_mul(turns)
-            .ok_or(GameError::TimeExhausted)
+            .filter(|duration| *duration <= crate::limits::NUMERIC as u64)
+            .ok_or(GameError::Schedule(crate::ScheduleError::TimeExhausted))
     }
-    /// Timing for already validated work; resume retains the first start's phases.
-    pub(crate) fn work_timing(&self, actor: ActorId, work: Work) -> (u64, u64) {
-        self.actors[&actor]
-            .pending
-            .as_ref()
-            .filter(|p| p.work == work)
-            .map_or_else(
-                || {
-                    if let Work::UseAbility { ability, .. } = work {
-                        let plan = self
-                            .ability_plan(actor, ability)
-                            .expect("validated ability");
-                        (plan.preparation, plan.recovery)
-                    } else if work.target().is_some() {
-                        let combat = self.effective_combat(actor).expect("validated combat work");
-                        (combat.attack.wind_up, combat.attack.recovery)
-                    } else {
-                        (
-                            self.work_duration(actor, work)
-                                .expect("validated item work"),
-                            0,
-                        )
-                    }
-                },
-                |p| (p.duration, p.recovery),
-            )
+    pub(crate) fn plan_work(
+        &self,
+        actor: ActorId,
+        work: Work,
+    ) -> Result<crate::abilities::Plan, GameError> {
+        if let Some(preparation) = self.preparation(actor).filter(|p| p.plan.work() == work) {
+            if self.plan_still_available(&preparation.plan) {
+                return Ok(preparation.plan.clone());
+            }
+            return Err(GameError::Rule(crate::abilities::RuleError::OutOfReach));
+        }
+        if let Work::UseAbility { id, target } = &work {
+            return self.ability_plan(actor, id, *target);
+        }
+        let preparation = self.item_work_duration(actor, work.clone())?;
+        let plan = match work {
+            Work::Equip { item, slot } => crate::abilities::Plan::Equip {
+                actor,
+                item,
+                slot,
+                preparation,
+            },
+            Work::Unequip { item } => crate::abilities::Plan::Unequip {
+                actor,
+                item,
+                preparation,
+            },
+            Work::Drink { item } => {
+                let effects = &self
+                    .items
+                    .get(&item)
+                    .and_then(|item| item.spec.consumable.as_ref())
+                    .ok_or(GameError::ItemUnavailable)?
+                    .effects;
+                crate::abilities::Plan::Drink {
+                    actor,
+                    item,
+                    preparation,
+                    effects: self.effect_plan(actor, effects)?,
+                }
+            }
+            Work::UseAbility { id, target } => return self.ability_plan(actor, &id, target),
+        };
+        if !plan.valid(&self.content.rules) {
+            return Err(GameError::Rule(crate::abilities::RuleError::InvalidPlan));
+        }
+        Ok(plan)
     }
     pub(crate) fn visible_hostiles(&self, actor: ActorId) -> BTreeSet<ActorId> {
         let Ok(scene) = self.scene(actor) else {
@@ -425,85 +441,94 @@ impl Game {
     }
     pub(crate) fn start_work(
         &mut self,
-        actor: ActorId,
-        work: Work,
+        plan: crate::abilities::Plan,
         intention: Option<crate::IntentionId>,
-    ) {
-        let (duration, recovery) = self.work_timing(actor, work);
-        let charge = self.actors[&actor]
-            .pending
-            .as_ref()
-            .filter(|p| p.work == work)
-            .map_or_else(
-                || match work {
-                    Work::UseAbility { ability, .. } => crate::abilities::ability_cost(ability),
-                    _ => None,
-                },
-                |p| p.charge,
-            );
-        let threats = if work.item().is_some() {
+    ) -> Result<(), GameError> {
+        let actor = plan.actor();
+        self.settle_actor_time(actor)?;
+        let threats = if plan.work().item().is_some() {
             self.visible_hostiles(actor)
         } else {
             BTreeSet::new()
         };
-        let mut a = self.actors.get_mut(&actor).unwrap();
-        if a.pending.as_ref().is_some_and(|p| p.work != work) {
-            a.cancel_preparation();
-        }
-        let (remaining, origin_intention) = a
+        let mut outcome = self.actor_outcome(actor)?;
+        let candidate = &mut outcome.state;
+        if candidate
             .pending
             .as_ref()
-            .filter(|p| p.work == work)
-            .map_or((duration, intention), |p| {
-                (p.remaining, p.origin_intention())
-            });
-        if let Some(charge) = charge {
-            a.combat
-                .as_mut()
-                .unwrap()
-                .start_preparation_cost(origin_intention.expect("paid admission"), charge);
+            .is_some_and(|p| p.plan.work() != plan.work())
+        {
+            candidate.cancel_preparation();
         }
-        a.pending = Some(Preparation {
+        let (remaining, hold, origin) = candidate
+            .pending
+            .as_ref()
+            .filter(|p| p.plan.work() == plan.work())
+            .map_or((plan.preparation(), intention, intention), |p| {
+                (p.remaining, p.hold, p.origin)
+            });
+        if let Some(cost) = plan.cost() {
+            let owner = hold.ok_or(GameError::Schedule(crate::ScheduleError::InvalidIntention))?;
+            candidate
+                .combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?
+                .start_preparation_cost(owner, cost)?;
+        }
+        candidate.pending = Some(Preparation {
             intention,
-            origin_intention,
-            work,
+            origin,
+            hold: if plan.cost().is_some() { hold } else { None },
+            plan,
             threats,
-            duration,
-            recovery,
-            charge,
             remaining,
             started: self.tick,
             active: true,
         });
+        self.apply_outcome(outcome)
     }
     pub fn apply_effects(
         &mut self,
         actor: ActorId,
-        effects: &[EffectSpec],
+        effects: &[crate::rules::Effect],
     ) -> Result<bool, GameError> {
-        if self.health(actor).is_none_or(|(hp, _)| hp == 0) {
-            return Err(GameError::UnknownActor);
+        let mut candidate = self.clone();
+        let observed = candidate.apply_effects_in_transaction(actor, effects)?;
+        *self = candidate;
+        Ok(observed)
+    }
+    fn apply_effects_in_transaction(
+        &mut self,
+        actor: ActorId,
+        effects: &[crate::rules::Effect],
+    ) -> Result<bool, GameError> {
+        if effects.is_empty() {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
         }
-        if effects.is_empty() || effects.len() > 16 || !effects.iter().all(EffectSpec::valid) {
-            return Err(GameError::InvalidLocation);
-        }
-        self.next_item_id
-            .checked_add(self.actors.len() as u64)
-            .ok_or(GameError::IdentityExhausted)?;
-        let mut observed = false;
-        for effect in effects {
-            if !self.alive(actor) {
-                break;
-            }
-            observed |= match effect {
-                EffectSpec::Heal { amount } => {
-                    let mut a = self.actors.get_mut(&actor).unwrap();
-                    let c = a.combat.as_mut().unwrap();
-                    c.heal(*amount) > 0
-                }
-                EffectSpec::Damage { components } => self.apply_damage(actor, components) > 0,
-            };
-        }
+        self.content
+            .rules
+            .validate_effects(effects)
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::InvalidDefinition))?;
+        self.settle_actor_time(actor)?;
+        let plan = self.effect_plan(actor, effects)?;
+        let creature = self.creature(actor).ok_or(GameError::UnknownActor)?;
+        let snapshot = crate::abilities::Snapshot::capture(&creature);
+        let mut rng = self.rules_rng;
+        let outcome = crate::abilities::resolve(
+            crate::abilities::ResolutionPlan::Effects {
+                actor,
+                target: actor,
+                effects: &plan,
+            },
+            &snapshot,
+            &mut rng,
+            &mut (),
+        );
+        let observed = outcome.result == crate::abilities::OutcomeStatus::Applied;
+        self.apply_outcome(outcome)?;
+        self.rules_rng = rng;
         Ok(observed)
     }
     pub(crate) fn finish_item_work(
@@ -511,57 +536,58 @@ impl Game {
         actor: ActorId,
         work: Work,
         intention: Option<crate::IntentionId>,
-    ) {
-        let item = work.item().unwrap();
-        let event_index = self.combat.events.len();
-        match work {
+        observed: bool,
+    ) -> Result<(), GameError> {
+        use crate::lifecycle::{ItemChange, ItemOutcome};
+        let item = work.item().ok_or(GameError::ItemUnavailable)?;
+        let change = match work {
             Work::Equip { slot, .. } => {
-                self.actors
-                    .get_mut(&actor)
-                    .unwrap()
+                let mut equipment = self
+                    .actors
+                    .get(&actor)
+                    .ok_or(GameError::UnknownActor)?
                     .equipment
-                    .insert(slot, item);
+                    .clone();
+                equipment.insert(slot, item);
+                ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
             }
             Work::Unequip { .. } => {
-                self.actors
-                    .get_mut(&actor)
-                    .unwrap()
+                let mut equipment = self
+                    .actors
+                    .get(&actor)
+                    .ok_or(GameError::UnknownActor)?
                     .equipment
-                    .retain(|_, id| *id != item);
+                    .clone();
+                equipment.retain(|_, equipped| *equipped != item);
+                ItemChange::Equipment(self.equipment_candidate(actor, equipment)?)
             }
             Work::Drink { .. } => {
-                let spec = self.items[&item].spec.clone();
-                if self.items[&item].quantity == 1 {
-                    self.items.remove(&item);
-                } else {
-                    self.items.edit(item, |i| i.quantity -= 1).unwrap();
-                }
-                if self
-                    .apply_effects(actor, &spec.consumable.as_ref().unwrap().effects)
-                    .expect("validated effect")
-                {
-                    self.actors
-                        .get_mut(&actor)
-                        .unwrap()
+                let consumed = self.items.get(&item).ok_or(GameError::ItemUnavailable)?;
+                let mut outcome = self.actor_outcome(actor)?;
+                if observed {
+                    outcome
+                        .state
                         .knowledge
-                        .insert(spec.identity.clone());
+                        .insert(consumed.spec.identity.clone());
+                }
+                ItemChange::Consume {
+                    actor: outcome,
+                    item,
                 }
             }
-            Work::Attack { .. } | Work::UseAbility { .. } => unreachable!(),
-        }
-        self.combat.events.insert(
-            event_index,
-            CombatEvent::ItemCompleted {
-                actor,
-                work,
-                intention,
-            },
-        );
+            Work::UseAbility { .. } => return Err(GameError::ItemUnavailable),
+        };
+        self.apply_outcome(ItemOutcome {
+            actor,
+            work,
+            intention,
+            change,
+        })
     }
     pub(crate) fn work_state_valid(&self, actor: ActorId) -> bool {
         let a = &self.actors[&actor];
         let equipped: BTreeSet<_> = a.equipment.values().collect();
-        a.anatomy.valid()
+        a.anatomy.valid(&self.content.rules)
             && equipped.len() == a.equipment.len()
             && a.equipment.iter().all(|(slot, item)| {
                 self.items.get(item).is_some_and(|i| {
@@ -571,54 +597,36 @@ impl Game {
                         })
                 })
             })
-            && a.equipment
-                .values()
-                .filter(|id| {
-                    self.items[id]
-                        .spec
-                        .equipment
-                        .as_ref()
-                        .is_some_and(|e| e.slot == EquipmentSlot::Weapon)
-                })
-                .count()
-                <= 1
             && a.pending.as_ref().is_none_or(|p| {
                 a.alive()
-                    && p.work.structural_valid(actor)
+                    && p.plan.valid(&self.content.rules)
+                    && p.plan.actor() == actor
+                    && match p.plan.work() {
+                        Work::Drink { item } => self
+                            .items
+                            .get(&item)
+                            .and_then(|item| item.spec.consumable.as_ref())
+                            .is_some_and(|consumable| {
+                                crate::abilities::item_effects_match_definition(
+                                    &consumable.effects,
+                                    p.plan.on_success(),
+                                )
+                            }),
+                        _ => true,
+                    }
+                    && (p.plan.work().item().is_none()
+                        || self.item_work_available(actor, &p.plan.work()))
                     && p.started <= self.tick
-                    && p.duration > 0
-                    && p.remaining <= p.duration
-                    && p.started.checked_add(p.remaining).is_some()
+                    && p.remaining <= p.plan.preparation()
                     && p.started
                         .checked_add(p.remaining)
-                        .and_then(|tick| tick.checked_add(p.recovery))
+                        .and_then(|tick| tick.checked_add(p.plan.recovery()))
                         .is_some()
                     && (!p.active || p.started + p.remaining >= self.actor_clock(actor))
                     && p.threats
                         .iter()
                         .all(|id| self.actors.contains_key(id) || self.detached_actor(*id))
-                    && match p.work {
-                        Work::UseAbility { ability, target } => {
-                            self.actors.contains_key(&target)
-                                && self.creature(actor).is_some_and(|creature| {
-                                    creature.derived().abilities.contains(&ability)
-                                })
-                                && p.duration <= 1_000_000
-                                && (1..=1_000_000).contains(&p.recovery)
-                                && p.charge == crate::abilities::ability_cost(ability)
-                                && p.origin_intention().is_some()
-                        }
-                        Work::Attack { target } => {
-                            self.actors.contains_key(&target)
-                                && self.effective_combat(actor).is_some()
-                                && p.duration <= 1_000_000
-                                && (1..=1_000_000).contains(&p.recovery)
-                                && p.charge.is_none()
-                        }
-                        _ => self.work_duration(actor, p.work).is_ok_and(|duration| {
-                            p.duration == duration && p.recovery == 0 && p.charge.is_none()
-                        }),
-                    }
+                    && (p.plan.cost().is_none() || p.hold.is_some())
             })
     }
 }

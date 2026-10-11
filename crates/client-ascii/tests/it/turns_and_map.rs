@@ -90,10 +90,11 @@ fn update(app: &mut App, sequence: u64, change: impl FnOnce(&mut Observation)) {
 fn routine_lines_are_left_out_and_kills_read_as_one_sentence() {
     let me = super::actor_target(1);
     let scout = super::actor_target(2);
-    let hit = CombatEventView::Attack {
-        attacker: Some(me),
+    let hit = CombatEventView::Ability {
+        ability: tor_client_common::test_support::content("basic_melee"),
+        caster: Some(me),
         target: Some(scout),
-        outcome: AttackOutcome::Hit,
+        outcome: AbilityOutcome::Applied,
     };
     let mut messages = Messages::default();
     let mut view = view();
@@ -120,7 +121,10 @@ fn routine_lines_are_left_out_and_kills_read_as_one_sentence() {
         ],
         &view,
     );
-    assert_eq!(messages.text(), "You kill the ruin scout!");
+    assert_eq!(
+        messages.text(),
+        "You struck the ruin scout.  The ruin scout died."
+    );
 }
 
 #[test]
@@ -133,14 +137,18 @@ fn item_work_reads_as_one_action_and_repeats_are_counted() {
         &[line(Topic::Finished, "You finish drinking the red potion.")],
         &view,
     );
-    let miss = CombatEventView::Attack {
-        attacker: Some(super::actor_target(2)),
+    let miss = CombatEventView::Ability {
+        ability: tor_client_common::test_support::content("basic_melee"),
+        caster: Some(super::actor_target(2)),
         target: Some(super::actor_target(1)),
-        outcome: AttackOutcome::Miss,
+        outcome: AbilityOutcome::Miss,
     };
     for _ in 0..3 {
         messages.absorb(
-            &[line(Topic::Combat(miss), "The ruin scout missed you.")],
+            &[line(
+                Topic::Combat(miss.clone()),
+                "The ruin scout missed you.",
+            )],
             &view,
         );
     }
@@ -217,15 +225,19 @@ fn a_creature_is_announced_again_only_after_a_long_absence() {
 fn messages_stay_until_the_next_command_and_then_move_to_the_log() {
     let mut app = app();
     update(&mut app, 1, |o| {
-        o.combat.as_mut().unwrap().events = vec![CombatEventView::Attack {
-            attacker: Some(super::actor_target(2)),
+        o.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
+            ability: tor_client_common::test_support::content("basic_melee"),
+            caster: Some(super::actor_target(2)),
             target: Some(super::actor_target(1)),
-            outcome: AttackOutcome::Hit,
+            outcome: AbilityOutcome::Applied,
         }]
     });
     // Later updates with nothing to say don't clear what was said.
     update(&mut app, 2, |o| o.combat.as_mut().unwrap().events.clear());
-    assert_eq!(app.messages.text(), "The ruin scout struck you.");
+    assert_eq!(
+        app.messages.text(),
+        "The ruin scout used Basic Melee on you."
+    );
     assert!(matches!(
         app.input(Input::Key { key: Key::Up }),
         Effect::Request(_)
@@ -233,7 +245,7 @@ fn messages_stay_until_the_next_command_and_then_move_to_the_log() {
     assert_eq!(app.messages.text(), "");
     assert_eq!(
         app.messages.log().collect::<Vec<_>>(),
-        ["The ruin scout struck you."]
+        ["The ruin scout used Basic Melee on you."]
     );
     app.ready();
     assert_eq!(

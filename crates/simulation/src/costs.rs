@@ -18,7 +18,7 @@ impl ResourceCost {
     fn total(self) -> Option<u32> {
         self.start
             .checked_add(self.resolution)
-            .filter(|value| *value <= 1_000_000)
+            .filter(|value| i64::from(*value) <= crate::limits::NUMERIC)
     }
 }
 
@@ -50,7 +50,7 @@ impl CostLedger {
         resources: Resources,
         reservations: Vec<(IntentionId, ResourceCost)>,
     ) -> Result<Self, CostError> {
-        if reservations.len() > 64 {
+        if reservations.len() > crate::limits::COST_HOLDS {
             return Err(CostError::Limit);
         }
         let mut ledger = Self::new(resources);
@@ -120,7 +120,7 @@ impl CostLedger {
                 Err(CostError::Conflict)
             };
         }
-        if self.held.len() >= 64 {
+        if self.held.len() >= crate::limits::COST_HOLDS {
             return Err(CostError::Limit);
         }
         if self.available(cost.resource) < total {
@@ -199,6 +199,12 @@ impl CostLedger {
         canceled
     }
 
+    pub fn restore_resource(&mut self, resource: Resource, amount: u32) -> u32 {
+        self.resources.restore(resource, amount)
+    }
+    pub fn set_recovery_rules(&mut self, rules: &crate::rules::Ruleset) {
+        self.resources.set_recovery_rules(rules);
+    }
     pub fn advance_active(&mut self, ticks: u64) {
         self.resources.advance_active(ticks);
     }

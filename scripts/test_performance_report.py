@@ -36,6 +36,32 @@ class PhaseDWorkTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate_work(profile, {"type":"move"}, 8)
 
+    def test_movement_can_disclose_fresh_views_from_cached_scene_projections(self):
+        profile = dict(actors_observed=16, perception_calls=16, scene_calls=0,
+                       candidate_captures=1, rollback_snapshots=1)
+        validate_work(profile, {"type":"move"}, 8)
+
+    def test_observation_and_projection_counts_keep_separate_integer_work_bounds(self):
+        profile = dict(actors_observed=16, perception_calls=16, scene_calls=0,
+                       candidate_captures=1, rollback_snapshots=1)
+        for field in ('scene_calls', 'perception_calls'):
+            for value in (True, False, -1, 0.0, 1.5, 17):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(AssertionError):
+                        validate_work({**profile, field: value}, {"type":"move"}, 8)
+        # Door validation can request one extra observation and projection.
+        validate_work({**profile, 'perception_calls': 17, 'scene_calls': 17},
+                      {"type":"set_door"}, 8)
+
+    def test_cached_projections_still_require_fresh_disclosure_for_each_actor(self):
+        profile = dict(actors_observed=16, perception_calls=8, scene_calls=0,
+                       candidate_captures=1, rollback_snapshots=1)
+        validate_work(profile, {"type":"move"}, 8)
+        for calls in (0, 7):
+            with self.subTest(perception_calls=calls):
+                with self.assertRaises(AssertionError):
+                    validate_work({**profile, 'perception_calls': calls}, {"type":"move"}, 8)
+
 
 class DiscoveryValidationTests(unittest.TestCase):
     def rows(self):

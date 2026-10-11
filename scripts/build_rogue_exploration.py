@@ -5,9 +5,10 @@ from pathlib import Path
 def build(root: Path) -> None:
     regions = root / "regions"
     regions.mkdir(parents=True, exist_ok=True)
+    (root / "rules.toml").write_text('import = "interactions-v27"\n', encoding="utf-8", newline="\n")
     manifest = [
         'format = 2', 'id = "rogue-exploration"', 'version = "1.0"',
-        'ruleset = "interactions-v26"', 'default_character = 1',
+        'ruleset = "rules.toml"', 'default_character = 1',
         '[[characters]]', 'id = 1',
         'anchor = "1/start"', 'turn_ticks = 100',
         '[generation_recipes.exploration]', 'version = 2',

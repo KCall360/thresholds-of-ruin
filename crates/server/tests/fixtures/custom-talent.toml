@@ -1,0 +1,5 @@
+id = "fixture_vitality"
+name = "Fixture Vitality"
+prerequisites = []
+requirement = { kind = "total_hd", minimum = 1 }
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 7 } }]

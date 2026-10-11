@@ -1,17 +1,66 @@
 //! Backend-only deterministic checkpoint state. Equal world and navigation
 //! regions, actor tables and intentions are encoded once across rewind boundaries.
 //! This module does not perform storage or I/O.
+use crate::actor_record::ActorRecord;
+use crate::creatures::Content;
 use crate::streaming::Lifecycle;
 use crate::{travel::Navigation, Actor, ActorId, Game, Item, ItemId, ItemLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use tor_world::Location;
 use tor_world::{Shared, World};
+
+/// A malformed checkpoint is rejected before any restored game is published.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PersistError {
+    MissingShared {
+        table: &'static str,
+        index: usize,
+    },
+    Navigation,
+    /// Includes missing catalog references and invalid mutable creature state.
+    CreatureRecord {
+        actor: ActorId,
+        error: crate::creatures::CreatureStateError,
+    },
+    Equipment {
+        actor: ActorId,
+        item: ItemId,
+    },
+    ActorClock {
+        actor: ActorId,
+    },
+    ActorState {
+        actor: ActorId,
+    },
+    ItemDefinition {
+        item: ItemId,
+        error: crate::rules::RulesetError,
+    },
+    ItemState {
+        item: ItemId,
+    },
+    Intentions,
+    Lifecycle,
+    Physics,
+    RunState,
+    Schedule,
+    World,
+}
+impl std::fmt::Display for PersistError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invalid checkpoint: {self:?}")
+    }
+}
+impl std::error::Error for PersistError {}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
     combat: crate::combat::CombatWorld,
+    rules_rng: u64,
+    events: Vec<crate::combat::CombatEvent>,
     physics: crate::physics::Physics,
     world: usize,
     navigation: BTreeMap<ActorId, usize>,
@@ -37,7 +86,7 @@ pub struct SharedState {
     #[serde(with = "navigation_regions")]
     navigation: Vec<Navigation>,
     items: Vec<BTreeMap<ItemId, Item>>,
-    actors: Vec<BTreeMap<ActorId, Actor>>,
+    actors: Vec<BTreeMap<ActorId, ActorRecord>>,
     intentions: crate::intention::checkpoint::Pool,
     /// Identical lifecycle states (with their identity directories) across
     /// rewind boundaries are encoded once.
@@ -56,23 +105,24 @@ impl SharedState {
 /// references; restored games retain only the definitions they actually use.
 pub struct RestoreContext<'a> {
     shared: &'a SharedState,
+    content: Arc<Content>,
     worlds: BTreeMap<usize, Shared<World>>,
     navigation: BTreeMap<usize, Shared<Navigation>>,
     /// Validation is reusable only for these immutable decoded pool entries.
     validated_navigation: BTreeSet<(usize, usize)>,
     items: BTreeMap<usize, crate::item_store::ItemStore>,
-    actors: BTreeMap<usize, crate::actor_store::ActorStore>,
+    actors: BTreeMap<(usize, usize), crate::actor_store::ActorStore>,
     intentions: crate::intention::checkpoint::Restore,
     bodies: BTreeSet<Shared<crate::BodySpec>>,
     item_definitions: BTreeSet<Shared<crate::ItemSpec>>,
-    combat_definitions: BTreeSet<Shared<crate::combat::CombatSpec>>,
     anatomies: BTreeSet<Shared<crate::AnatomySpec>>,
 }
 
 impl<'a> RestoreContext<'a> {
-    pub fn new(shared: &'a SharedState) -> Self {
+    pub fn new(shared: &'a SharedState, content: Arc<Content>) -> Self {
         Self {
             shared,
+            content,
             worlds: BTreeMap::new(),
             navigation: BTreeMap::new(),
             validated_navigation: BTreeSet::new(),
@@ -81,12 +131,11 @@ impl<'a> RestoreContext<'a> {
             intentions: crate::intention::checkpoint::Restore::default(),
             bodies: BTreeSet::new(),
             item_definitions: BTreeSet::new(),
-            combat_definitions: BTreeSet::new(),
             anatomies: BTreeSet::new(),
         }
     }
 
-    pub fn restore(&mut self, snapshot: Snapshot) -> Option<Game> {
+    pub fn restore(&mut self, snapshot: Snapshot) -> Result<Game, PersistError> {
         Game::restore_with_context(snapshot, self)
     }
 
@@ -119,37 +168,72 @@ impl<'a> RestoreContext<'a> {
         Some(navigation)
     }
 
-    fn items(&mut self, index: usize) -> Option<crate::item_store::ItemStore> {
+    fn items(&mut self, index: usize) -> Result<crate::item_store::ItemStore, PersistError> {
         if let Some(items) = self.items.get(&index) {
-            return Some(items.clone());
+            return Ok(items.clone());
         }
-        let mut entries = self.shared.items.get(index)?.clone();
-        for item in entries.values_mut() {
+        let mut entries = self
+            .shared
+            .items
+            .get(index)
+            .ok_or(PersistError::MissingShared {
+                table: "items",
+                index,
+            })?
+            .clone();
+        for (id, item) in &mut entries {
+            item.spec
+                .validate_rules(self.content.rules())
+                .map_err(|error| PersistError::ItemDefinition { item: *id, error })?;
             share_definition(&mut self.item_definitions, &mut item.spec);
         }
         let items = crate::item_store::ItemStore::from_entries(entries);
         self.items.insert(index, items.clone());
-        Some(items)
+        Ok(items)
     }
 
-    fn actors(&mut self, index: usize) -> Option<crate::actor_store::ActorStore> {
-        if let Some(actors) = self.actors.get(&index) {
-            return Some(actors.clone());
+    fn actors(
+        &mut self,
+        index: usize,
+        item_index: usize,
+    ) -> Result<crate::actor_store::ActorStore, PersistError> {
+        if let Some(actors) = self.actors.get(&(index, item_index)) {
+            return Ok(actors.clone());
         }
-        let mut entries = self.shared.actors.get(index)?.clone();
+        let records = self
+            .shared
+            .actors
+            .get(index)
+            .ok_or(PersistError::MissingShared {
+                table: "actors",
+                index,
+            })?;
+        let items = self
+            .shared
+            .items
+            .get(item_index)
+            .ok_or(PersistError::MissingShared {
+                table: "items",
+                index: item_index,
+            })?;
+        let mut entries = records
+            .iter()
+            .map(|(id, record)| {
+                record
+                    .restore(*id, self.content.clone(), items)
+                    .map(|actor| (*id, actor))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         self.share_actor_definitions(&mut entries);
         let actors = crate::actor_store::ActorStore::from_entries(entries);
-        self.actors.insert(index, actors.clone());
-        Some(actors)
+        self.actors.insert((index, item_index), actors.clone());
+        Ok(actors)
     }
 
     fn share_actor_definitions(&mut self, actors: &mut BTreeMap<ActorId, Actor>) {
         for actor in actors.values_mut() {
             share_definition(&mut self.anatomies, &mut actor.anatomy);
             share_definition(&mut self.bodies, &mut actor.body);
-            if let Some(combat) = &mut actor.combat {
-                share_definition(&mut self.combat_definitions, &mut combat.spec);
-            }
         }
     }
 }
@@ -166,10 +250,6 @@ fn share_definition<T: Ord>(pool: &mut BTreeSet<Shared<T>>, definition: &mut Sha
 
 impl Game {
     pub fn checkpoint(&self, shared: &mut SharedState) -> Snapshot {
-        assert_eq!(
-            self.creature_time_at, self.tick,
-            "unsettled creature checkpoint"
-        );
         let worlds = &mut shared.worlds;
         let world = worlds
             .iter()
@@ -178,8 +258,15 @@ impl Game {
                 worlds.push((*self.world).clone());
                 worlds.len() - 1
             });
+        let actor_records: BTreeMap<_, _> = self
+            .actors
+            .iter()
+            .map(|(id, actor)| (*id, ActorRecord::capture(actor)))
+            .collect();
         Snapshot {
             combat: self.combat.clone(),
+            rules_rng: self.rules_rng,
+            events: self.event_log.clone(),
             physics: self.physics.clone(),
             world,
             navigation: self
@@ -202,9 +289,9 @@ impl Game {
             actors: shared
                 .actors
                 .iter()
-                .position(|actors| actors == self.actors.raw_entries())
+                .position(|actors| actors == &actor_records)
                 .unwrap_or_else(|| {
-                    shared.actors.push(self.actors.raw_entries().clone());
+                    shared.actors.push(actor_records);
                     shared.actors.len() - 1
                 }),
             items: shared
@@ -232,77 +319,122 @@ impl Game {
         }
     }
 
-    pub fn restore_checkpoint(snapshot: Snapshot, shared: &SharedState) -> Option<Self> {
-        RestoreContext::new(shared).restore(snapshot)
+    pub fn restore_checkpoint(
+        snapshot: Snapshot,
+        shared: &SharedState,
+        content: Arc<Content>,
+    ) -> Result<Self, PersistError> {
+        RestoreContext::new(shared, content).restore(snapshot)
     }
 
-    fn restore_with_context(snapshot: Snapshot, context: &mut RestoreContext<'_>) -> Option<Self> {
-        let game = Self {
+    fn restore_with_context(
+        snapshot: Snapshot,
+        context: &mut RestoreContext<'_>,
+    ) -> Result<Self, PersistError> {
+        let items = context.items(snapshot.items)?;
+        let mut game = Self {
+            content: context.content.clone(),
             combat: snapshot.combat,
+            rules_rng: snapshot.rules_rng,
+            event_log: snapshot.events,
             combat_diagnostics: None,
             physics: snapshot.physics,
-            world: context.world(snapshot.world)?,
+            world: context
+                .world(snapshot.world)
+                .ok_or(PersistError::MissingShared {
+                    table: "worlds",
+                    index: snapshot.world,
+                })?,
             navigation: snapshot
                 .navigation
                 .into_iter()
                 .map(|(actor, index)| Some((actor, context.navigation(index, snapshot.world)?)))
-                .collect::<Option<_>>()?,
+                .collect::<Option<_>>()
+                .ok_or(PersistError::Navigation)?,
             seed: snapshot.seed,
             tick: snapshot.tick,
-            creature_time_at: snapshot.tick,
-            actors: context.actors(snapshot.actors)?,
-            items: context.items(snapshot.items)?,
+            actors: context.actors(snapshot.actors, snapshot.items)?,
+            items,
             next_actor_id: snapshot.next_actor_id,
             next_item_id: snapshot.next_item_id,
             next_door_id: snapshot.next_door_id,
             intentions: context
                 .intentions
-                .restore(snapshot.intentions, &context.shared.intentions)?,
+                .restore(snapshot.intentions, &context.shared.intentions)
+                .ok_or(PersistError::Intentions)?,
             lifecycle: match snapshot.lifecycle {
                 None => Lifecycle::default(),
                 // An empty state is always omitted, so encodings stay unique.
-                Some(index) => {
-                    Some(context.shared.lifecycles.get(index)?.clone()).filter(|l| !l.is_empty())?
-                }
+                Some(index) => context
+                    .shared
+                    .lifecycles
+                    .get(index)
+                    .filter(|l| !l.is_empty())
+                    .cloned()
+                    .ok_or(PersistError::Lifecycle)?,
             },
         };
-        let mut occupied = BTreeSet::new();
-        if !game.intentions_valid()
-            || !game.lifecycle_state_valid()
-            || !game.physics_valid()
-            || !game.combat_valid()
-            || (game.actors.is_empty() && !game.has_detached_actors())
+        if !game.intentions_valid() {
+            return Err(PersistError::Intentions);
+        }
+        if !game.lifecycle_state_valid() {
+            return Err(PersistError::Lifecycle);
+        }
+        game.rebuild_timer_activity();
+        if !game.physics_valid() {
+            return Err(PersistError::Physics);
+        }
+        if !game.combat_valid() {
+            return Err(PersistError::RunState);
+        }
+        if (game.actors.is_empty() && !game.has_detached_actors())
             || game.next_actor_id == 0
             || game.next_item_id == 0
             || game.next_door_id == 0
             || game
                 .next_actor()
                 .is_some_and(|id| game.actors[&id].ready_at != game.tick)
-            || game.actors.iter().any(|(id, actor)| {
-                !game.actor_state_valid(*id, actor) || !game.body_has_room(actor, &mut occupied)
-            })
-            || game
-                .items
-                .iter()
-                .any(|(id, item)| !game.item_state_valid(*id, item))
-            || game
-                .navigation
-                .keys()
-                .any(|id| !game.actors.contains_key(id))
-            || !game.world.checkpoint_valid(game.next_door_id)
         {
-            return None;
+            return Err(PersistError::Schedule);
         }
-        Some(game)
+        let mut occupied = BTreeSet::new();
+        for (id, actor) in game.actors.iter() {
+            if actor.active_since > game.actor_clock(*id) {
+                return Err(PersistError::ActorClock { actor: *id });
+            }
+            if !game.actor_state_valid(*id, actor) || !game.body_has_room(actor, &mut occupied) {
+                return Err(PersistError::ActorState { actor: *id });
+            }
+        }
+        for (id, item) in game.items.iter() {
+            if !game.item_state_valid(*id, item) {
+                return Err(PersistError::ItemState { item: *id });
+            }
+        }
+        if game
+            .navigation
+            .keys()
+            .any(|id| !game.actors.contains_key(id))
+        {
+            return Err(PersistError::Navigation);
+        }
+        if !game.world.checkpoint_valid(game.next_door_id) {
+            return Err(PersistError::World);
+        }
+        Ok(game)
     }
 
     /// Checks restoring gives a loaded actor, apart from its body's room;
     /// attaching a stored region gives its actors the same.
     pub(crate) fn actor_state_valid(&self, id: ActorId, actor: &Actor) -> bool {
         id.0 != 0
+            && actor.active_since <= self.actor_clock(id)
             && actor.pending.as_ref().is_none_or(|p| {
-                !matches!(p.work, crate::Work::UseAbility { .. })
-                    || actor.combat.as_ref().map(|c| c.creature()).is_some()
+                p.plan.actor() == id
+                    && p.plan.valid(&self.content.rules)
+                    && p.plan.target().0 < self.next_actor_id
+                    && (p.plan.as_ability().is_none()
+                        || actor.combat.as_ref().map(|c| c.creature()).is_some())
             })
             && actor.combat.as_ref().is_none_or(|c| c.valid())
             && actor
@@ -311,52 +443,38 @@ impl Game {
                 .map(|combat| combat.creature())
                 .is_none_or(|creature| {
                     creature.derived().anatomy == *actor.anatomy
-                        && match actor
-                            .pending
-                            .as_ref()
-                            .and_then(|p| p.charge.map(|charge| (p, charge)))
-                        {
-                            Some((preparation, charge)) => {
-                                preparation.origin_intention().is_some_and(|owner| {
-                                    self.intention_issued(owner)
-                                        && preparation.intention.is_some_and(|latest| {
-                                            self.intention_issued(latest) && owner <= latest
-                                        })
-                                        && (match preparation.work {
-                                            crate::Work::UseAbility { ability, target } => {
-                                                target != id
-                                                    && target.0 > 0
-                                                    && target.0 < self.next_actor_id
-                                                    && creature
-                                                        .derived()
-                                                        .abilities
-                                                        .contains(&ability)
-                                                    && crate::abilities::ability_cost(ability)
-                                                        == Some(charge)
-                                                    && preparation.duration > 0
-                                                    && preparation.duration <= 1_000_000
-                                                    && (1..=1_000_000)
-                                                        .contains(&preparation.recovery)
-                                                    && (ability
-                                                        == crate::grants::Ability::PowerStrike
-                                                        || (preparation.duration == 100
-                                                            && preparation.recovery == 100))
-                                            }
-                                            _ => false,
-                                        })
-                                        && creature.costs().reservations().len() == 1
-                                        && creature.costs().reservation(owner) == Some(charge)
-                                })
+                        && match actor.pending.as_ref() {
+                            Some(preparation) => {
+                                let plan = &preparation.plan;
+                                let linked = plan.actor() == id
+                                    && plan.valid(creature.build().ruleset())
+                                    && plan.target().0 > 0
+                                    && plan.target().0 < self.next_actor_id;
+                                let owned = preparation
+                                    .intention
+                                    .is_none_or(|latest| self.intention_issued(latest));
+                                let funded = match plan.cost() {
+                                    Some(charge) => preparation.hold.is_some_and(|owner| {
+                                        self.intention_issued(owner)
+                                            && preparation.origin == Some(owner)
+                                            && preparation
+                                                .intention
+                                                .is_some_and(|latest| owner <= latest)
+                                            && creature.costs().reservations().len() == 1
+                                            && creature.costs().reservation(owner) == Some(charge)
+                                    }),
+                                    None => {
+                                        creature.costs().reservations().is_empty()
+                                            && preparation.hold.is_none()
+                                    }
+                                };
+                                linked && owned && funded
                             }
-                            None => {
-                                creature.costs().reservations().is_empty()
-                                    && actor.pending.as_ref().is_none_or(|p| {
-                                        !matches!(p.work, crate::Work::UseAbility { .. })
-                                    })
-                            }
+                            None => creature.costs().reservations().is_empty(),
                         }
-                        && creature.fear().sources().keys().all(|source| {
-                            self.actors.contains_key(source) || self.detached_actor(*source)
+                        && creature.conditions().instances().all(|entry| {
+                            self.actors.contains_key(&entry.source)
+                                || self.detached_actor(entry.source)
                         })
                 })
             && id.0 < self.next_actor_id
@@ -395,6 +513,7 @@ impl Game {
             && item.quantity != 0
             && (item.spec.stackable || item.quantity == 1)
             && item.spec.valid()
+            && item.spec.validate_rules(self.content.rules()).is_ok()
             && item.motion.valid()
             && item.motion.acceleration_remainder == [0; 3]
             && item.orientation < 24
@@ -423,6 +542,28 @@ mod tests {
     use tor_world::{Location, Position, RegionId};
 
     #[test]
+    fn restored_actor_clocks_cannot_come_from_the_future() {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+        game.spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+        let mut shared = SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        let mut value = serde_json::to_value(&shared).unwrap();
+        value["actors"][snapshot.actors]["1"]["active_since"] = serde_json::json!(game.tick() + 1);
+        let forged: SharedState = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            Game::restore_checkpoint(snapshot, &forged, game.content().clone()),
+            Err(PersistError::ActorClock { actor: ActorId(1) })
+        );
+    }
+
+    #[test]
     fn shared_navigation_validation_cannot_cross_world_bounds_or_actor_membership() {
         let world = |width| {
             let mut world = World::new(vec![], vec![]).unwrap();
@@ -435,7 +576,7 @@ mod tests {
                 .unwrap();
             world
         };
-        let mut game = Game::new(world(8), 42);
+        let mut game = Game::new(world(8), 42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {
@@ -455,10 +596,10 @@ mod tests {
         let mut other_actor = game.checkpoint(&mut shared);
         let index = other_actor.navigation.remove(&actor).unwrap();
         other_actor.navigation.insert(ActorId(999), index);
-        let mut context = RestoreContext::new(&shared);
-        assert!(context.restore(valid).is_some());
-        assert!(context.restore(other_world).is_none());
-        assert!(context.restore(other_actor).is_none());
+        let mut context = RestoreContext::new(&shared, game.content().clone());
+        assert!(context.restore(valid).is_ok());
+        assert!(context.restore(other_world).is_err());
+        assert!(context.restore(other_actor).is_err());
     }
 
     #[test]
@@ -471,7 +612,7 @@ mod tests {
                 bounds: tor_world::Extent::new(66, 3, 1).unwrap(),
             })
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         for x in 1..=64 {
             game.spawn_actor(
                 Location {
@@ -504,7 +645,7 @@ mod tests {
         );
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
-        let mut context = RestoreContext::new(&shared);
+        let mut context = RestoreContext::new(&shared, game.content().clone());
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|snapshot| context.restore(snapshot).unwrap())
@@ -531,7 +672,7 @@ mod tests {
                     bounds: tor_world::Extent::new(count as i32 + 2, 3, 1).unwrap(),
                 })
                 .unwrap();
-            let mut queued = Game::new(world, 42);
+            let mut queued = Game::new(world, 42, crate::test_creatures::content());
             for x in 1..=count as i32 {
                 let actor = queued
                     .spawn_actor(
@@ -572,7 +713,7 @@ mod tests {
             assert!(bytes.len() < 16 * 1024 * 1024);
             let (snapshots, shared): (Vec<Snapshot>, SharedState) =
                 serde_json::from_slice(&bytes).unwrap();
-            let mut context = RestoreContext::new(&shared);
+            let mut context = RestoreContext::new(&shared, queued.content().clone());
             let mut restored: Vec<_> = snapshots
                 .into_iter()
                 .map(|s| context.restore(s).unwrap())
@@ -604,7 +745,7 @@ mod tests {
                     bounds: tor_world::Extent::new(count * 3 + 3, 3, 1).unwrap(),
                 })
                 .unwrap();
-            let mut game = Game::new(world, 42);
+            let mut game = Game::new(world, 42, crate::test_creatures::content());
             for x in 0..count {
                 let id = game
                     .spawn_actor(
@@ -636,7 +777,8 @@ mod tests {
             let bytes = serde_json::to_vec(&(snapshot, shared)).unwrap();
             let (snapshot, shared): (Snapshot, SharedState) =
                 serde_json::from_slice(&bytes).unwrap();
-            let restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+            let restored =
+                Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
             assert_eq!(restored, game);
             let first = &restored.actors[&ActorId(1)].body;
             let second = &restored.actors[&ActorId(2)].body;
@@ -658,8 +800,141 @@ mod tests {
     }
 
     #[test]
-    fn decoded_item_and_combat_definitions_share_across_distinct_boundaries() {
-        let mut game = Game::two_room_in_stone(42);
+    fn ground_item_references_are_checked_at_runtime_checkpoint_and_detached_restore() {
+        use crate::content_ids::{AbilityId, ConditionId, DescriptorId};
+        use crate::rules::{Effect, Modifier, ModifierOp, RulesetError, Scope};
+        let mut modifier = crate::ItemSpec::ordinary("armor".into());
+        modifier.class = crate::ItemClass::Armor;
+        modifier.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::new("body_armor").unwrap(),
+            attack: None,
+            modifiers: vec![Modifier {
+                scope: Scope::Always,
+                op: ModifierOp::GrantAbility {
+                    ability: AbilityId::new("missing_ability").unwrap(),
+                },
+            }],
+        });
+        let mut effect = crate::ItemSpec::ordinary("potion".into());
+        effect.class = crate::ItemClass::Potion;
+        effect.consumable = Some(crate::ConsumableSpec {
+            effects: vec![Effect::ApplyCondition {
+                condition: ConditionId::new("missing_condition").unwrap(),
+                duration: 100,
+            }],
+        });
+        let mut attack = crate::ItemSpec::ordinary("weapon".into());
+        attack.class = crate::ItemClass::Weapon;
+        attack.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::new("weapon").unwrap(),
+            modifiers: vec![],
+            attack: Some(
+                crate::attacks::MeleeAttack::fixed(
+                    crate::attributes::Skill::HeavyWeaponry,
+                    0,
+                    100,
+                    40,
+                    crate::combat::DamageType::Impact,
+                    Some(DescriptorId::new("missing_descriptor").unwrap()),
+                    2,
+                )
+                .unwrap(),
+            ),
+        });
+        let mut slot = crate::ItemSpec::ordinary("unknown slot armor".into());
+        slot.class = crate::ItemClass::Armor;
+        slot.equipment = Some(crate::EquipmentSpec {
+            slot: crate::EquipmentSlot::new("missing_slot").unwrap(),
+            attack: None,
+            modifiers: vec![],
+        });
+        for (spec, category, missing) in [
+            (modifier, "ability", "missing_ability"),
+            (effect, "condition", "missing_condition"),
+            (attack, "descriptor", "missing_descriptor"),
+            (slot, "equipment_slot", "missing_slot"),
+        ] {
+            let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+            let at = Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            };
+            game.spawn_actor(at, NonZeroU64::new(100).unwrap()).unwrap();
+            let before = game.clone();
+            assert_eq!(
+                game.place_item_stack(100, at, None, 1, spec.clone()),
+                Err(crate::GameError::Rule(
+                    crate::abilities::RuleError::InvalidDefinition
+                ))
+            );
+            assert_eq!(game, before, "invalid item insertion is atomic");
+            let item = game
+                .place_item_stack(100, at, None, 1, crate::ItemSpec::ordinary("valid".into()))
+                .unwrap();
+            let content = game.content().clone();
+            let mut shared = SharedState::default();
+            let snapshot = game.checkpoint(&mut shared);
+            shared.items[snapshot.items].get_mut(&item).unwrap().spec = Shared::new(spec.clone());
+            let shared = serde_json::from_slice(&serde_json::to_vec(&shared).unwrap()).unwrap();
+            let expected = PersistError::ItemDefinition {
+                item,
+                error: RulesetError::UnknownReference {
+                    category,
+                    id: missing.into(),
+                },
+            };
+            assert_eq!(
+                Game::restore_checkpoint(snapshot, &shared, content.clone()),
+                Err(expected.clone())
+            );
+            let record = game.into_region_record(RegionId(1)).unwrap();
+            let mut value =
+                serde_json::to_value(crate::streaming::RegionRecordData::capture(&record)).unwrap();
+            value["items"][item.0.to_string()]["spec"] = serde_json::to_value(spec).unwrap();
+            let saved: crate::streaming::RegionRecordData = serde_json::from_value(value).unwrap();
+            assert_eq!(saved.restore(content), Err(expected));
+        }
+    }
+
+    #[test]
+    fn restoring_unknown_catalog_references_preserves_the_typed_cause() {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
+        let actor = game
+            .spawn_actor(
+                Location {
+                    region: RegionId(1),
+                    position: Position { x: 1, y: 1, z: 0 },
+                },
+                NonZeroU64::new(100).unwrap(),
+            )
+            .unwrap();
+        crate::test_creatures::configure(
+            &mut game,
+            actor,
+            "neutral",
+            crate::test_creatures::species(),
+        );
+        let empty = Content::new(
+            game.content().rules.clone(),
+            crate::creatures::ScenarioCatalog::default(),
+        )
+        .unwrap();
+        let mut shared = SharedState::default();
+        let snapshot = game.checkpoint(&mut shared);
+        assert_eq!(
+            Game::restore_checkpoint(snapshot, &shared, empty),
+            Err(PersistError::CreatureRecord {
+                actor,
+                error: crate::creatures::CreatureStateError::Build(
+                    crate::creatures::BuildError::UnknownSpecies
+                ),
+            })
+        );
+    }
+
+    #[test]
+    fn decoded_catalog_and_item_definitions_share_across_distinct_boundaries() {
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let at = Location {
             region: RegionId(1),
             position: Position { x: 1, y: 1, z: 0 },
@@ -681,18 +956,12 @@ mod tests {
         let mut shared = SharedState::default();
         let before = game.checkpoint(&mut shared);
         game.items.edit(item, |entry| entry.quantity = 1).unwrap();
-        game.actors
-            .get_mut(&actor)
-            .unwrap()
-            .combat
-            .as_mut()
-            .unwrap()
-            .damage(1);
+        crate::test_creatures::injure(&mut game, actor, 1).unwrap();
         let after = game.checkpoint(&mut shared);
         let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
-        let mut context = RestoreContext::new(&shared);
+        let mut context = RestoreContext::new(&shared, game.content().clone());
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|s| context.restore(s).unwrap())
@@ -704,12 +973,10 @@ mod tests {
         assert!(restored[0].items[&item]
             .spec
             .shares_storage(&restored[1].items[&item].spec));
-        assert!(restored[0].actors[&actor]
-            .combat
-            .as_ref()
-            .unwrap()
-            .spec
-            .shares_storage(&restored[1].actors[&actor].combat.as_ref().unwrap().spec));
+        assert!(Arc::ptr_eq(
+            restored[0].creature(actor).unwrap().build().content(),
+            restored[1].creature(actor).unwrap().build().content()
+        ));
         drop(context);
         let mut encoded_shared = SharedState::default();
         let encoded: Vec<_> = restored
@@ -724,31 +991,15 @@ mod tests {
             .items
             .edit(item, |entry| entry.spec.name = "changed".into())
             .unwrap();
-        let mut build = restored[0].creature(actor).unwrap().build().clone();
-        let mut template = crate::creatures::Template::new("armored", 0);
-        template
-            .grants
-            .push(crate::grants::Grant::PhysicalDefense(10));
-        build.set_templates(vec![template]).unwrap();
-        restored[0].rebuild_creature(actor, build).unwrap();
-        assert_eq!(restored[0].effective_combat(actor).unwrap().defense, 20);
-        assert_eq!(restored[0].creature(actor).unwrap().health().injury(), 0);
+        crate::test_creatures::injure(&mut restored[0], actor, 2).unwrap();
+        assert_eq!(restored[0].creature(actor).unwrap().health().injury(), 2);
         assert_eq!(restored[1].creature(actor).unwrap().health().injury(), 1);
         assert_eq!(restored[1].items[&item].spec.name, "token");
-        assert_eq!(
-            restored[1].actors[&actor]
-                .combat
-                .as_ref()
-                .unwrap()
-                .spec
-                .defense,
-            10
-        );
     }
 
     #[test]
     fn common_restore_context_shares_decoded_pools_and_preserves_copy_on_write() {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let at = Location {
             region: RegionId(1),
             position: Position { x: 1, y: 1, z: 0 },
@@ -764,7 +1015,7 @@ mod tests {
         let bytes = serde_json::to_vec(&(vec![before, after], shared)).unwrap();
         let (snapshots, shared): (Vec<Snapshot>, SharedState) =
             serde_json::from_slice(&bytes).unwrap();
-        let mut context = RestoreContext::new(&shared);
+        let mut context = RestoreContext::new(&shared, game.content().clone());
         let mut restored: Vec<_> = snapshots
             .into_iter()
             .map(|s| context.restore(s).unwrap())
@@ -839,7 +1090,7 @@ mod tests {
             Shared::new(mass),
         ]);
         assert_eq!(pool.len(), 4);
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {
@@ -857,14 +1108,14 @@ mod tests {
             .body
             .eye = [1, 0, 0];
         let valid = game.checkpoint(&mut shared);
-        let mut context = RestoreContext::new(&shared);
-        assert!(context.restore(broken).is_none());
-        assert_eq!(context.restore(valid), Some(game));
+        let mut context = RestoreContext::new(&shared, game.content().clone());
+        assert!(context.restore(broken).is_err());
+        assert_eq!(context.restore(valid), Ok(game));
     }
 
     #[test]
     fn snapshots_preserve_complete_game_and_reject_invalid_shared_references() {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {
@@ -878,21 +1129,24 @@ mod tests {
         let mut shared = SharedState::default();
         let before = game.checkpoint(&mut shared);
         assert_eq!(
-            Game::restore_checkpoint(before, &shared),
-            Some(game.clone())
+            Game::restore_checkpoint(before, &shared, game.content().clone()),
+            Ok(game.clone())
         );
         game.act(actor, crate::Action::Wait).unwrap();
         let after = game.checkpoint(&mut shared);
-        assert_eq!(Game::restore_checkpoint(after, &shared), Some(game.clone()));
+        assert_eq!(
+            Game::restore_checkpoint(after, &shared, game.content().clone()),
+            Ok(game.clone())
+        );
         let mut broken = game.checkpoint(&mut shared);
         broken.navigation.insert(actor, usize::MAX);
-        assert!(Game::restore_checkpoint(broken, &shared).is_none());
+        assert!(Game::restore_checkpoint(broken, &shared, game.content().clone()).is_err());
         let mut broken = game.checkpoint(&mut shared);
         broken.world = usize::MAX;
-        assert!(Game::restore_checkpoint(broken, &shared).is_none());
+        assert!(Game::restore_checkpoint(broken, &shared, game.content().clone()).is_err());
         let mut broken = game.checkpoint(&mut shared);
         broken.actors = usize::MAX;
-        assert!(Game::restore_checkpoint(broken, &shared).is_none());
+        assert!(Game::restore_checkpoint(broken, &shared, game.content().clone()).is_err());
     }
 }
 

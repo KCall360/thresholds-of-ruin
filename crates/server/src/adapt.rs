@@ -24,36 +24,6 @@ pub fn position(location: w::Location) -> crate::journal::Position {
 
 use crate::actions as a;
 
-pub fn requested_ability(ability: p::Ability) -> a::Ability {
-    match ability {
-        p::Ability::PowerStrike => a::Ability::PowerStrike,
-        p::Ability::MagicBolt => a::Ability::MagicBolt,
-        p::Ability::Fear => a::Ability::Fear,
-    }
-}
-pub fn wire_ability(ability: a::Ability) -> p::Ability {
-    match ability {
-        a::Ability::PowerStrike => p::Ability::PowerStrike,
-        a::Ability::MagicBolt => p::Ability::MagicBolt,
-        a::Ability::Fear => p::Ability::Fear,
-    }
-}
-pub fn simulation_ability(ability: a::Ability) -> s::grants::Ability {
-    match ability {
-        a::Ability::PowerStrike => s::grants::Ability::PowerStrike,
-        a::Ability::MagicBolt => s::grants::Ability::MagicBolt,
-        a::Ability::Fear => s::grants::Ability::Fear,
-    }
-}
-pub fn recorded_ability(ability: s::grants::Ability) -> Option<a::Ability> {
-    Some(match ability {
-        s::grants::Ability::PowerStrike => a::Ability::PowerStrike,
-        s::grants::Ability::MagicBolt => a::Ability::MagicBolt,
-        s::grants::Ability::Fear => a::Ability::Fear,
-        s::grants::Ability::BasicMelee => return None,
-    })
-}
-
 pub fn requested_direction(direction: p::Direction) -> a::Direction {
     match direction {
         p::Direction::North => a::Direction::North,
@@ -105,11 +75,10 @@ pub fn direction(direction: p::Direction) -> w::Direction {
 
 pub fn action(action: &a::Action) -> s::Action {
     match action {
-        a::Action::UseAbility { ability, target } => s::Action::UseAbility {
-            ability: simulation_ability(*ability),
+        a::Action::UseAbility { id, target } => s::Action::UseAbility {
+            id: id.clone(),
             target: *target,
         },
-        a::Action::Attack { target } => s::Action::Attack { target: *target },
         a::Action::SetDoor { door, open } => s::Action::SetDoor {
             door: *door,
             open: *open,
@@ -139,11 +108,10 @@ pub fn action(action: &a::Action) -> s::Action {
 
 pub fn work(action: &a::Action) -> Option<s::Work> {
     Some(match action {
-        a::Action::UseAbility { ability, target } => s::Work::UseAbility {
-            ability: simulation_ability(*ability),
+        a::Action::UseAbility { id, target } => s::Work::UseAbility {
+            id: id.clone(),
             target: *target,
         },
-        a::Action::Attack { target } => s::Work::Attack { target: *target },
         a::Action::Equip { item, slot } => s::Work::Equip {
             item: s::ItemId(*item),
             slot: s::EquipmentSlotId(*slot),
@@ -186,11 +154,7 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
                 | w::Direction::SouthDown => return None,
             },
         },
-        s::Action::Attack { target } => a::Action::Attack { target },
-        s::Action::UseAbility { ability, target } => a::Action::UseAbility {
-            ability: recorded_ability(ability)?,
-            target,
-        },
+        s::Action::UseAbility { id, target } => a::Action::UseAbility { id, target },
         s::Action::SetDoor { door, open } => a::Action::SetDoor { door, open },
         s::Action::Take { item, quantity } => a::Action::Take {
             item: item.0,
@@ -212,15 +176,13 @@ pub fn recorded_action(action: s::Action) -> Option<a::Action> {
 
 pub fn event(kind: s::OutcomeKind) -> crate::journal::Event {
     match kind {
-        s::OutcomeKind::AbilityStarted { ability, target } => {
+        s::OutcomeKind::AbilityStarted { id, name, target } => {
             crate::journal::Event::AbilityStarted {
-                ability: recorded_ability(ability).expect("paid ability start"),
+                id,
+                name,
                 target: p::ActorId(target.0),
             }
         }
-        s::OutcomeKind::AttackStarted { target } => crate::journal::Event::AttackStarted {
-            target: p::ActorId(target.0),
-        },
         s::OutcomeKind::DoorChanged { door, open } => {
             crate::journal::Event::DoorChanged { door, open }
         }
@@ -269,6 +231,11 @@ pub fn observation(
         y: position.y,
         z: position.z,
     };
+    let rules = view
+        .combat
+        .as_ref()
+        .and_then(|combat| combat.own_stats.as_ref())
+        .map(|stats| stats.rules.clone());
     let mut visible_cells = Vec::new();
     let mut ground_items = Vec::new();
     let mut visible_actors = Vec::new();
@@ -384,17 +351,17 @@ pub fn observation(
                     item: targets.item(item.item),
                     slot: item.slot.map(equipment_slot),
                     equipped_slot: item.equipped_slot.map(|slot| slot.0),
-                    known_equipment: item.known_equipment.map(|equipment| p::EquipmentView {
-                        attack: equipment
-                            .attack
-                            .as_ref()
-                            .map(crate::creature_view::attack_view),
-                        defense: equipment.defense,
-                        reductions: equipment
-                            .reductions
-                            .into_iter()
-                            .map(|(kind, amount)| (damage_type(kind), amount))
-                            .collect(),
+                    known_equipment: item.known_equipment.and_then(|equipment| {
+                        rules.as_deref().map(|rules| p::EquipmentView {
+                            attack: equipment.attack.as_ref().map(|attack| {
+                                crate::creature_view::attack_view(attack, Some(rules))
+                            }),
+                            modifiers: equipment
+                                .modifiers
+                                .iter()
+                                .map(|value| crate::creature_view::modifier(value, rules))
+                                .collect(),
+                        })
                     }),
                     drinkable: item.drinkable,
                 })
@@ -462,29 +429,14 @@ pub fn observation(
     }
 }
 
-fn equipment_slot(slot: s::EquipmentSlot) -> p::EquipmentSlot {
-    match slot {
-        s::EquipmentSlot::Weapon => p::EquipmentSlot::Weapon,
-        s::EquipmentSlot::BodyArmor => p::EquipmentSlot::BodyArmor,
-        s::EquipmentSlot::Shield => p::EquipmentSlot::Shield,
-        s::EquipmentSlot::HeadArmor => p::EquipmentSlot::HeadArmor,
-        s::EquipmentSlot::HandsArmor => p::EquipmentSlot::HandsArmor,
-        s::EquipmentSlot::FeetArmor => p::EquipmentSlot::FeetArmor,
-        s::EquipmentSlot::Cloak => p::EquipmentSlot::Cloak,
-        s::EquipmentSlot::Ring => p::EquipmentSlot::Ring,
-        s::EquipmentSlot::Amulet => p::EquipmentSlot::Amulet,
+fn equipment_slot(slot: s::EquipmentSlotView) -> p::EquipmentSlot {
+    p::EquipmentSlot {
+        id: slot.id.to_string(),
+        name: slot.name,
+        equipped_phrase: slot.equipped_phrase,
+        requires_attack: slot.requires_attack,
     }
 }
-fn damage_type(kind: s::combat::DamageType) -> p::DamageType {
-    match kind {
-        s::combat::DamageType::Energy => p::DamageType::Energy,
-        s::combat::DamageType::Impact => p::DamageType::Impact,
-        s::combat::DamageType::Keen => p::DamageType::Keen,
-        s::combat::DamageType::Spirit => p::DamageType::Spirit,
-        s::combat::DamageType::Vital => p::DamageType::Vital,
-    }
-}
-
 fn injury_view(injury: s::combat::Injury) -> p::Injury {
     match injury {
         s::combat::Injury::Healthy => p::Injury::Healthy,
@@ -498,36 +450,23 @@ fn combat_event_view(
     event: s::combat::DisclosedCombatEvent,
     targets: &crate::wire_adapter::TargetScope,
 ) -> p::CombatEventView {
-    use s::combat::{AttackOutcome as O, DisclosedCombatEvent as E};
+    use s::combat::DisclosedCombatEvent as E;
     let id = |actor: s::ActorId| targets.actor(actor);
     match event {
         E::Ability {
             caster,
             target,
-            ability,
+            id: ability_id,
+            name,
             outcome,
         } => p::CombatEventView::Ability {
             caster: caster.map(id),
             target: target.map(id),
-            ability: wire_ability(recorded_ability(ability).expect("disclosed paid ability")),
-            outcome: match outcome {
-                s::combat::AbilityOutcome::Applied => p::AbilityOutcome::Applied,
-                s::combat::AbilityOutcome::Unaffected => p::AbilityOutcome::Unaffected,
-                s::combat::AbilityOutcome::Miss => p::AbilityOutcome::Miss,
+            ability: p::ContentRef {
+                id: ability_id.to_string(),
+                name,
             },
-        },
-        E::Attack {
-            attacker,
-            target,
-            outcome,
-        } => p::CombatEventView::Attack {
-            attacker: attacker.map(id),
-            target: target.map(id),
-            outcome: match outcome {
-                O::Miss => p::AttackOutcome::Miss,
-                O::NoInjury => p::AttackOutcome::NoInjury,
-                O::Hit => p::AttackOutcome::Hit,
-            },
+            outcome: crate::creature_view::outcome_status(outcome),
         },
         E::Interrupted { actor } => p::CombatEventView::Interrupted { actor: id(actor) },
         E::Died { actor } => p::CombatEventView::Died { actor: id(actor) },
@@ -577,58 +516,32 @@ fn item_class(class: s::ItemClass) -> p::ItemClass {
 #[cfg(test)]
 mod ability_journal_tests {
     #[test]
-    fn paid_ability_actions_reconstruct_their_prepared_work_for_checkpoint_auditing() {
-        for (ability, expected) in [
-            (
-                crate::actions::Ability::PowerStrike,
-                tor_simulation::grants::Ability::PowerStrike,
-            ),
-            (
-                crate::actions::Ability::MagicBolt,
-                tor_simulation::grants::Ability::MagicBolt,
-            ),
-            (
-                crate::actions::Ability::Fear,
-                tor_simulation::grants::Ability::Fear,
-            ),
-        ] {
-            let action = crate::actions::Action::UseAbility {
-                ability,
-                target: tor_simulation::ActorId(9),
-            };
-            assert_eq!(
-                super::work(&action),
-                Some(tor_simulation::Work::UseAbility {
-                    ability: expected,
-                    target: tor_simulation::ActorId(9),
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn ability_start_preserves_its_technique_and_target_in_the_private_journal() {
-        for ability in [
-            tor_simulation::grants::Ability::PowerStrike,
-            tor_simulation::grants::Ability::MagicBolt,
-            tor_simulation::grants::Ability::Fear,
-        ] {
-            let event = super::event(tor_simulation::OutcomeKind::AbilityStarted {
-                ability,
-                target: tor_simulation::ActorId(9),
-            });
-            assert_eq!(
-                event,
-                crate::journal::Event::AbilityStarted {
-                    ability: super::recorded_ability(ability).unwrap(),
-                    target: tor_protocol::ActorId(9),
-                }
-            );
-            let encoded = serde_json::to_vec(&event).unwrap();
-            assert_eq!(
-                serde_json::from_slice::<crate::journal::Event>(&encoded).unwrap(),
-                event
-            );
-        }
+    fn arbitrary_content_ids_preserve_action_and_preparation_identity() {
+        let id = tor_simulation::content_ids::AbilityId::new("fixture_ability").unwrap();
+        let action = crate::actions::Action::UseAbility {
+            id: id.clone(),
+            target: tor_simulation::ActorId(2),
+        };
+        assert_eq!(
+            super::work(&action),
+            Some(tor_simulation::Work::UseAbility {
+                id: id.clone(),
+                target: tor_simulation::ActorId(2)
+            })
+        );
+        assert_eq!(super::recorded_action(super::action(&action)), Some(action));
+        let event = super::event(tor_simulation::OutcomeKind::AbilityStarted {
+            id: id.clone(),
+            name: "Fixture Ability".into(),
+            target: tor_simulation::ActorId(2),
+        });
+        assert_eq!(
+            event,
+            crate::journal::Event::AbilityStarted {
+                id,
+                name: "Fixture Ability".into(),
+                target: tor_protocol::ActorId(2)
+            }
+        );
     }
 }

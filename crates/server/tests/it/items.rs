@@ -172,6 +172,7 @@ fn package_validation_rejects_bad_counts_properties_and_objective_stacks() {
     let regions = std::fs::read_to_string(root.join("regions/1.toml")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("regions")).unwrap();
+    std::fs::copy(root.join("rules.toml"), dir.path().join("rules.toml")).unwrap();
     for (m, r) in [
         (manifest.clone(), regions.replacen("quantity = 10", "quantity = 0", 1)),
         (manifest.replacen("stackable = true", "stackable = false", 1), regions.clone()),

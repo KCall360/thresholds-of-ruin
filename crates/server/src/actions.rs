@@ -4,10 +4,7 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     UseAbility {
-        ability: Ability,
-        target: tor_simulation::ActorId,
-    },
-    Attack {
+        id: tor_simulation::content_ids::AbilityId,
         target: tor_simulation::ActorId,
     },
     Equip {
@@ -43,7 +40,6 @@ impl Action {
         matches!(
             self,
             Self::UseAbility { .. }
-                | Self::Attack { .. }
                 | Self::Equip { .. }
                 | Self::Unequip { .. }
                 | Self::Drink { .. }
@@ -51,15 +47,6 @@ impl Action {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ability {
-    PowerStrike,
-    MagicBolt,
-    Fear,
-}
-
-/// Directions supported by backend requests and recorded action facts.
-/// Native geometry has additional directions; projecting those remains fallible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     North,
@@ -86,19 +73,21 @@ mod tests {
     fn ability_target_resolution_rejects_foreign_and_undisclosed_tokens_equally() {
         let engine = crate::Engine::memory(crate::Scenario::two_room(42)).unwrap();
         let observer = wire::ActorId(1);
-        for ability in [
-            wire::Ability::PowerStrike,
-            wire::Ability::MagicBolt,
-            wire::Ability::Fear,
-        ] {
+        for ability in ["basic_melee", "fixture_ability", "fear"] {
             let target = engine.target_scope(observer).actor(sim::ActorId(1));
             let decoded = engine
-                .decode_action(observer, &wire::Action::UseAbility { ability, target })
+                .decode_action(
+                    observer,
+                    &wire::Action::UseAbility {
+                        id: ability.into(),
+                        target,
+                    },
+                )
                 .unwrap();
             assert_eq!(
                 decoded,
                 Action::UseAbility {
-                    ability: adapt::requested_ability(ability),
+                    id: sim::content_ids::AbilityId::new(ability).unwrap(),
                     target: sim::ActorId(1)
                 }
             );
@@ -108,7 +97,7 @@ mod tests {
                 .decode_action(
                     observer,
                     &wire::Action::UseAbility {
-                        ability,
+                        id: ability.into(),
                         target: hidden,
                     },
                 )
@@ -117,7 +106,7 @@ mod tests {
                 .decode_action(
                     observer,
                     &wire::Action::UseAbility {
-                        ability,
+                        id: ability.into(),
                         target: foreign,
                     },
                 )
@@ -238,10 +227,12 @@ mod tests {
                 },
             ),
             (
-                Action::Attack {
+                Action::UseAbility {
+                    id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: sim::ActorId(u64::MAX),
                 },
-                sim::Action::Attack {
+                sim::Action::UseAbility {
+                    id: sim::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: sim::ActorId(u64::MAX),
                 },
             ),
@@ -289,14 +280,15 @@ mod tests {
                 },
             ));
         }
-        for ability in [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear] {
+        for ability in ["power_strike", "magic_bolt", "fear", "fixture_ability"] {
+            let id = sim::content_ids::AbilityId::new(ability).unwrap();
             cases.push((
                 Action::UseAbility {
-                    ability,
+                    id: id.clone(),
                     target: sim::ActorId(u64::MAX),
                 },
                 sim::Action::UseAbility {
-                    ability: adapt::simulation_ability(ability),
+                    id,
                     target: sim::ActorId(u64::MAX),
                 },
             ));

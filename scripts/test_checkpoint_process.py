@@ -67,7 +67,7 @@ class CheckpointProcesses(ProcessTestCase):
             payload = db.execute("SELECT payload FROM checkpoint").fetchone()[0]
             raw = decode_checkpoint_payload(payload)
             checkpoint = json.loads(raw)
-            self.assertEqual(checkpoint["version"], 25)
+            self.assertEqual(checkpoint["version"], 26)
             self.assertEqual(checkpoint["sequence"], 16)
             self.assertLess(len(payload), len(raw))
             self.assertEqual(db.execute("SELECT count(*) FROM history").fetchone()[0], 16)

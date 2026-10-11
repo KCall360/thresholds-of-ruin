@@ -145,6 +145,45 @@ class PhysicsReports(unittest.TestCase):
                 physics_performance_report.summarize(broken)
 
 
+class SceneProjectionCounts(unittest.TestCase):
+    def workloads(self):
+        return [(combat_performance_report, CombatReports().rows()),
+                (item_performance_report, ItemReports().rows()),
+                (physics_performance_report, PhysicsReports().rows())]
+
+    def test_cached_projections_preserve_zero_counts_and_measured_disclosure(self):
+        for validator, rows in self.workloads():
+            with self.subTest(workload=validator.__name__):
+                for row in rows:
+                    row['scenes'] = 0
+                summary = validator.summarize(rows)
+                self.assertTrue(all(row['scenes'] == dict(min=0, max=0) for row in summary))
+                self.assertTrue(all(row['disclosed_bytes']['min'] > 0 for row in summary))
+
+    def test_scene_counts_reject_booleans_negative_and_noninteger_values(self):
+        for validator, rows in self.workloads():
+            for value in (True, False, -1, 0.0, 1.5, '0', None, float('inf')):
+                with self.subTest(workload=validator.__name__, value=value):
+                    broken = copy.deepcopy(rows)
+                    broken[0]['scenes'] = value
+                    with self.assertRaises(InvalidWorkload):
+                        validator.summarize(broken)
+
+    def test_cached_projections_still_require_actual_disclosure(self):
+        for validator, rows in self.workloads():
+            fields = ['disclosed_bytes']
+            if validator is item_performance_report:
+                fields.append('observations')
+            for field in fields:
+                with self.subTest(workload=validator.__name__, field=field):
+                    broken = copy.deepcopy(rows)
+                    for row in broken:
+                        row['scenes'] = 0
+                    broken[0][field] = 0
+                    with self.assertRaisesRegex(InvalidWorkload, f'{field} must be a positive count'):
+                        validator.summarize(broken)
+
+
 class ClientPerformanceReport(unittest.TestCase):
     def test_native_profile_rejects_unbounded_or_invalid_work(self):
         profile = dict(version=1, network_events=16, apply_ms=2, draw_ms=1,

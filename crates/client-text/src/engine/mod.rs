@@ -101,10 +101,12 @@ fn sentences(line: &str) -> Vec<String> {
 }
 
 /// Whether a line reads as a new command rather than an answer.
-fn commands(line: &str) -> bool {
+fn commands(line: &str, observation: &Observation) -> bool {
     let tokens = parser::tokenize(line);
     let first = tokens.first().and_then(Token::as_word).unwrap_or("");
-    lexicon::parse_verb(first).is_some()
+    tor_client_common::abilities::match_command(observation, line)
+        .is_ok_and(|value| value.is_some())
+        || lexicon::parse_verb(first).is_some()
         || (tokens.len() == 1 && lexicon::parse_direction(first).is_some())
         || matches!(
             first,
@@ -256,7 +258,7 @@ impl Engine {
                     chain.push_back(Ok(choice.then.clone()));
                     chain.extend(pending.rest.into_iter().map(Err));
                 }
-                None if current && !commands(&line) => {
+                None if current && !commands(&line, &link.client().state().observation) => {
                     let labels: Vec<String> = pending
                         .question
                         .choices
@@ -287,7 +289,11 @@ impl Engine {
                 Ok(interpretation) => interpretation,
                 Err(text) => {
                     let tokens = parser::tokenize(&text);
-                    match parser::match_sentence_with_raw(&tokens, Some(&text)) {
+                    match parser::match_disclosed_sentence(
+                        &tokens,
+                        &text,
+                        &seen(link.client()).observation,
+                    ) {
                         Ok(ParsedCommand::Again) => {
                             record.say("Say again on its own to repeat a command.");
                             break;

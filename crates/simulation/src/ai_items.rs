@@ -1,7 +1,6 @@
 //! Item decisions inspect definitions only after the acting actor knows them.
 use crate::{
-    Action, ActorId, EquipmentSlot, EquipmentSlotId, EquipmentSpec, Game, ItemId, Observation,
-    TravelStep,
+    Action, ActorId, EquipmentSlotId, EquipmentSpec, Game, ItemId, Observation, TravelStep,
 };
 use tor_world::Location;
 
@@ -87,29 +86,69 @@ impl Game {
         if owner.equipment.values().any(|equipped| *equipped == item) {
             return None;
         }
-        let creature = owner.combat.as_ref()?.creature();
-        let weapon = candidate.slot == EquipmentSlot::Weapon;
-        let weapon_equipped = weapon
-            && owner.equipment.values().any(|item| {
-                self.items[item]
-                    .spec
+        let mut sockets: Vec<_> = owner.anatomy.slots.iter().enumerate().collect();
+        sockets.sort_by_key(|(index, _)| {
+            (
+                owner
                     .equipment
-                    .as_ref()
-                    .is_some_and(|gear| gear.slot == EquipmentSlot::Weapon)
-            });
-        if !weapon_equipped && dominates(candidate, None, creature) {
-            if let Some((slot, _)) = owner.anatomy.slots.iter().enumerate().find(|(slot, kind)| {
-                **kind == candidate.slot
-                    && !owner.equipment.contains_key(&EquipmentSlotId(*slot as u16))
-            }) {
-                return Some((EquipmentSlotId(slot as u16), None));
+                    .contains_key(&EquipmentSlotId(*index as u16)),
+                *index,
+            )
+        });
+        for (index, kind) in sockets {
+            if *kind != candidate.slot {
+                continue;
+            }
+            let slot = EquipmentSlotId(u16::try_from(index).ok()?);
+            let old = owner.equipment.get(&slot).copied();
+            if old.is_some_and(|old| self.known_gear(actor, old).is_none()) {
+                continue;
+            }
+            if self.gear_upgrade(actor, item, slot) {
+                return Some((slot, old));
             }
         }
-        owner.equipment.iter().find_map(|(slot, item)| {
-            let current = self.known_gear(actor, *item)?;
-            (current.slot == candidate.slot && dominates(candidate, Some(current), creature))
-                .then_some((*slot, Some(*item)))
-        })
+        None
+    }
+
+    /// Candidate evaluation uses the production modifier fold. It changes only
+    /// a private snapshot; the chosen ordinary action still owns admission.
+    fn gear_projection(&self, actor: ActorId, item: ItemId, slot: EquipmentSlotId) -> Option<Game> {
+        let mut candidate = self.clone();
+        let mut equipment = candidate.actors.get(&actor)?.equipment.clone();
+        equipment.insert(slot, item);
+        let sources = equipment
+            .iter()
+            .map(|(socket, id)| {
+                let equipment = candidate.items.get(id)?.spec.equipment.as_ref()?;
+                Some(crate::creatures::EquipmentSource {
+                    item: *id,
+                    socket: *socket,
+                    modifiers: equipment.modifiers.clone(),
+                    attack: equipment.attack.clone(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let mut owner = candidate.actors.get_mut(&actor)?;
+        let combat = owner.combat.as_mut()?;
+        let result = combat.set_equipment(sources).ok()?;
+        if result.died {
+            return None;
+        }
+        owner.equipment = equipment;
+        drop(owner);
+        Some(candidate)
+    }
+
+    fn gear_upgrade(&self, actor: ActorId, item: ItemId, slot: EquipmentSlotId) -> bool {
+        let Some(candidate) = self.gear_projection(actor, item, slot) else {
+            return false;
+        };
+        let (Some(before), Some(after)) = (gear_score(self, actor), gear_score(&candidate, actor))
+        else {
+            return false;
+        };
+        after.dominates(&before)
     }
 
     pub(crate) fn choose_gear(&self, actor: ActorId, view: &Observation) -> Option<Action> {
@@ -121,15 +160,19 @@ impl Game {
                     .map(|destination| (item.id, destination))
             })
             .collect();
-        let creature = self.creature(actor)?;
-        // Recompute a nondominated choice after removal. This avoids equipping
-        // the old item again without persisting a stale replacement target.
-        let (item, (slot, old)) = choices.iter().find(|(item, _)| {
-            let candidate = self.known_gear(actor, *item).expect("known choice");
-            !choices.iter().any(|(other, _)| {
-                self.known_gear(actor, *other).is_some_and(|gear| {
-                    gear.slot == candidate.slot && dominates(gear, Some(candidate), creature)
-                })
+        // Compare complete prospective loadouts, including item interactions,
+        // rather than folding a parallel set of equipment-only stat formulas.
+        let (item, (slot, old)) = choices.iter().find(|(item, (slot, _))| {
+            let Some(candidate) = self
+                .gear_projection(actor, *item, *slot)
+                .and_then(|game| gear_score(&game, actor))
+            else {
+                return false;
+            };
+            !choices.iter().any(|(other, (other_slot, _))| {
+                self.gear_projection(actor, *other, *other_slot)
+                    .and_then(|game| gear_score(&game, actor))
+                    .is_some_and(|other| other.dominates(&candidate))
             })
         })?;
         Some(old.map_or(
@@ -142,234 +185,317 @@ impl Game {
     }
 }
 
-/// Upgrade without lowering known check score, damage estimate or timing.
-/// Rolled damage uses twice the clipped mean as an integer heuristic, not a
-/// promise about individual rolls. Descriptor groups are compared separately.
-fn dominates(
-    new: &EquipmentSpec,
-    old: Option<&EquipmentSpec>,
-    creature: &crate::creatures::CreatureState,
-) -> bool {
-    if new.slot == EquipmentSlot::Weapon {
-        let Some(new_attack) = &new.attack else {
-            return false;
-        };
-        let score = |attack: &crate::attacks::MeleeAttack| {
-            let damage = creature.derived().damage_for_melee(attack, 0).ok()?;
-            let mut estimates = std::collections::BTreeMap::new();
-            for component in damage.components() {
-                let estimate = match component.amount() {
-                    crate::damage::DamageAmount::Fixed(value) => i64::from(value) * 2,
-                    crate::damage::DamageAmount::Rolled(pool) => (i64::from(pool.count())
-                        * (i64::from(pool.sides()) + 1)
-                        + i64::from(pool.bonus()) * 2)
-                        .max(0),
-                };
-                let key = component.key();
-                *estimates.entry((key.category, key.descriptor)).or_insert(0) += estimate;
-            }
-            let bonus = attack.bonus()
-                + i32::from(
-                    creature
-                        .derived()
-                        .attributes
-                        .get(attack.skill().attribute(creature.build().binding())),
-                )
-                + i32::from(creature.derived().skills.get(attack.skill()));
-            let phase = |duration| creature.derived().attributes.physical_duration(duration);
-            Some((
-                bonus,
-                phase(attack.wind_up()),
-                phase(attack.recovery()),
-                estimates,
-            ))
-        };
-        let Some((new_bonus, new_wind, new_recovery, new_damage)) = score(new_attack) else {
-            return false;
-        };
-        let old_attack = old
-            .and_then(|old| old.attack.as_ref())
-            .unwrap_or(&creature.derived().melee);
-        let old_score = score(old_attack);
-        let Some((old_bonus, old_wind, old_recovery, old_damage)) = old_score else {
-            return false;
-        };
-        new_bonus >= old_bonus
-            && new_wind <= old_wind
-            && new_recovery <= old_recovery
-            && old_damage
+#[derive(PartialEq, Eq)]
+struct GearScore {
+    stats: std::collections::BTreeMap<crate::rules::Stat, i64>,
+    flags: std::collections::BTreeSet<crate::content_ids::FlagId>,
+    abilities: std::collections::BTreeSet<crate::content_ids::AbilityId>,
+    protection: std::collections::BTreeMap<crate::rules::Selector, (bool, u32)>,
+    attack: AttackScore,
+}
+#[derive(PartialEq, Eq)]
+struct AttackScore {
+    bonus: i64,
+    prepare: u64,
+    recovery: u64,
+    damage: std::collections::BTreeMap<
+        (
+            crate::combat::DamageType,
+            Option<crate::content_ids::DescriptorId>,
+        ),
+        i64,
+    >,
+}
+impl GearScore {
+    fn dominates(&self, old: &Self) -> bool {
+        let improved = self
+            .stats
+            .iter()
+            .any(|(stat, value)| *value > old.stats.get(stat).copied().unwrap_or(0))
+            || self.flags.len() > old.flags.len()
+            || self.abilities.len() > old.abilities.len()
+            || self
+                .protection
                 .iter()
-                .all(|(key, value)| new_damage.get(key).copied().unwrap_or(0) >= *value)
-            && (new_bonus > old_bonus
-                || new_wind < old_wind
-                || new_recovery < old_recovery
-                || new_damage
-                    .iter()
-                    .any(|(key, value)| *value > old_damage.get(key).copied().unwrap_or(0)))
-    } else {
-        let defense = old.map_or(0, |gear| gear.defense);
-        new.defense >= defense
-            && old.is_none_or(|old| {
-                old.reductions
-                    .iter()
-                    .all(|(kind, amount)| new.reductions.get(kind).copied().unwrap_or(0) >= *amount)
-            })
-            && (new.defense > defense
-                || new.reductions.iter().any(|(kind, amount)| {
-                    *amount
-                        > old
-                            .and_then(|old| old.reductions.get(kind))
-                            .copied()
-                            .unwrap_or(0)
-                }))
+                .any(|(selector, (immune, reduction))| {
+                    let (old_immune, old_reduction) =
+                        old.protection.get(selector).copied().unwrap_or_default();
+                    (*immune && !old_immune) || (!old_immune && *reduction > old_reduction)
+                })
+            || self.attack.bonus > old.attack.bonus
+            || self.attack.prepare < old.attack.prepare
+            || self.attack.recovery < old.attack.recovery
+            || self
+                .attack
+                .damage
+                .iter()
+                .any(|(key, value)| *value > old.attack.damage.get(key).copied().unwrap_or(0));
+        improved
+            && old
+                .stats
+                .iter()
+                .all(|(stat, value)| self.stats.get(stat).copied().unwrap_or(0) >= *value)
+            && self
+                .stats
+                .iter()
+                .all(|(stat, value)| *value >= old.stats.get(stat).copied().unwrap_or(0))
+            && self.flags.is_superset(&old.flags)
+            && self.abilities.is_superset(&old.abilities)
+            && old
+                .protection
+                .iter()
+                .all(|(selector, (immune, reduction))| {
+                    let (new_immune, new_reduction) =
+                        self.protection.get(selector).copied().unwrap_or_default();
+                    (!immune || new_immune) && (new_immune || new_reduction >= *reduction)
+                })
+            && self.attack.bonus >= old.attack.bonus
+            && self.attack.prepare <= old.attack.prepare
+            && self.attack.recovery <= old.attack.recovery
+            && old
+                .attack
+                .damage
+                .iter()
+                .all(|(key, amount)| self.attack.damage.get(key).copied().unwrap_or(0) >= *amount)
     }
+}
+
+/// Read cache values only. Every candidate above was derived by the same source
+/// fold as actual equipment; damage estimates never inspect enemy protection.
+fn gear_score(game: &Game, actor: ActorId) -> Option<GearScore> {
+    use crate::rules::{AbilityStat, DefenseKind, ModifierOp, Stat};
+    let creature = game.creature(actor)?;
+    let derived = creature.derived();
+    let mut stats = std::collections::BTreeMap::new();
+    for attribute in crate::attributes::Attribute::ALL {
+        stats.insert(
+            Stat::Attribute { attribute },
+            i64::from(derived.attributes.get(attribute)),
+        );
+    }
+    for (defense, value) in [
+        (DefenseKind::Physical, derived.defenses.physical),
+        (DefenseKind::Cognitive, derived.defenses.cognitive),
+        (DefenseKind::Spiritual, derived.defenses.spiritual),
+    ] {
+        stats.insert(Stat::Defense { defense }, i64::from(value));
+    }
+    stats.insert(Stat::Health, i64::from(derived.maximum_health));
+    for resource in crate::resources::Resource::ALL {
+        stats.insert(
+            Stat::ResourceMax { resource },
+            i64::from(creature.costs().resources().maximum(resource)),
+        );
+    }
+    for (ability, values) in &derived.ability_values {
+        for (stat, value) in [
+            (AbilityStat::Dice, i64::from(values.dice)),
+            (AbilityStat::FlatBonus, i64::from(values.flat)),
+            (AbilityStat::CheckBonus, i64::from(values.check_bonus)),
+            (AbilityStat::Difficulty, i64::from(values.difficulty)),
+            (AbilityStat::Duration, values.duration as i64),
+            (AbilityStat::Range, i64::from(values.range)),
+            (AbilityStat::Preparation, -values.preparation),
+            (AbilityStat::Recovery, -values.recovery),
+        ] {
+            stats.insert(
+                Stat::Ability {
+                    ability: ability.clone(),
+                    stat,
+                },
+                value,
+            );
+        }
+    }
+    let mut protection = std::collections::BTreeMap::new();
+    for modifier in derived.sources.values().flatten() {
+        if let ModifierOp::Immunity { selector } | ModifierOp::Reduction { selector, .. } =
+            &modifier.op
+        {
+            protection.insert(
+                selector.clone(),
+                (
+                    derived.protection.has_immunity(selector),
+                    derived.protection.reduction(selector),
+                ),
+            );
+        }
+    }
+    let attack = game.selected_melee_attack(actor)?;
+    let basic = game.basic_attack(actor)?;
+    let values = derived.ability_values(&basic);
+    let damage = attack
+        .damage_with_modifiers(values.dice, values.flat, 0)
+        .ok()?;
+    let mut estimates = std::collections::BTreeMap::new();
+    for component in damage.components() {
+        let estimate = match component.amount() {
+            crate::damage::DamageAmount::Fixed(value) => i64::from(value) * 2,
+            crate::damage::DamageAmount::Rolled(pool) => (i64::from(pool.count())
+                * (i64::from(pool.sides()) + 1)
+                + i64::from(pool.bonus()) * 2)
+                .max(0),
+        };
+        let key = component.key();
+        *estimates.entry((key.category, key.descriptor)).or_insert(0) += estimate;
+    }
+    let bonus = derived.selected_attack.check_bonus;
+    // Candidate scoring consumes the same cached timing as the ability planner.
+    let timing = game.ability_timing(actor, &basic).ok()?;
+    Some(GearScore {
+        stats,
+        flags: derived.flags.clone(),
+        abilities: derived.abilities.clone(),
+        protection,
+        attack: AttackScore {
+            bonus,
+            prepare: timing.preparation,
+            recovery: timing.recovery,
+            damage: estimates,
+        },
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::DamageType;
-    use std::collections::BTreeMap;
+    use crate::EquipmentSlot;
+    use crate::{
+        combat::DamageType,
+        content_ids::DescriptorId,
+        rules::{DefenseKind, Modifier, ModifierOp, Scope, Selector, Stat},
+    };
 
-    #[test]
-    fn upgrades_do_not_trade_away_typed_protection_or_weapon_speed() {
-        let creature = crate::creatures::CreatureState::new(crate::test_creatures::build(
-            crate::test_creatures::species(),
-        ))
-        .unwrap();
-        let base = &creature.derived().melee;
-        let old = EquipmentSpec {
-            slot: EquipmentSlot::HeadArmor,
-            attack: None,
-            defense: 1,
-            reductions: BTreeMap::from([(DamageType::Impact, 2)]),
+    fn fixture() -> (Game, ActorId, Location) {
+        let mut species = crate::test_creatures::species();
+        species.default_attributes =
+            crate::attributes::Attributes::new(crate::attributes::ByAttribute {
+                strength: 5,
+                speed: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        let mut game = Game::two_room_in_stone(
+            42,
+            crate::test_creatures::content_with(species.clone(), vec![]),
+        );
+        let at = Location {
+            region: tor_world::RegionId(1),
+            position: tor_world::Position { x: 1, y: 1, z: 0 },
         };
-        let mut new = old.clone();
-        new.defense = 3;
-        assert!(dominates(&new, Some(&old), &creature));
-        new.reductions.clear();
-        assert!(!dominates(&new, Some(&old), &creature));
-        let old = EquipmentSpec {
-            slot: EquipmentSlot::Weapon,
+        let actor = game
+            .spawn_actor(at, std::num::NonZeroU64::new(100).unwrap())
+            .unwrap();
+        crate::test_creatures::configure(&mut game, actor, "neutral", species);
+        (game, actor, at)
+    }
+    fn add(game: &mut Game, actor: ActorId, at: Location, id: u64, gear: EquipmentSpec) {
+        let mut item = crate::ItemSpec::ordinary(format!("gear {id}"));
+        item.class = if gear.slot == EquipmentSlot::new("weapon").unwrap() {
+            crate::ItemClass::Weapon
+        } else {
+            crate::ItemClass::Armor
+        };
+        item.equipment = Some(gear);
+        game.place_item_stack(id, at, Some(actor), 1, item).unwrap();
+    }
+    fn defense(value: i64) -> Modifier {
+        Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::Defense {
+                    defense: DefenseKind::Physical,
+                },
+                value,
+            },
+        }
+    }
+    fn reduction(amount: u32) -> Modifier {
+        Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Reduction {
+                selector: Selector::Category {
+                    category: DamageType::Impact,
+                },
+                amount,
+            },
+        }
+    }
+    fn weapon(
+        skill: crate::attributes::Skill,
+        bonus: i32,
+        wind: u64,
+        descriptor: &str,
+        count: u16,
+    ) -> EquipmentSpec {
+        let component = crate::damage::DamageComponent::rolled(
+            DamageType::Energy,
+            Some(DescriptorId::new(descriptor).unwrap()),
+            crate::dice::DicePool::new(count, 6, 0).unwrap(),
+        );
+        let primary = component.key();
+        EquipmentSpec {
+            slot: EquipmentSlot::new("weapon").unwrap(),
             attack: Some(
-                crate::attacks::MeleeAttack::fixed(
-                    crate::attributes::Skill::HeavyWeaponry,
-                    base.bonus(),
-                    base.wind_up(),
-                    base.recovery(),
-                    DamageType::Impact,
-                    None,
-                    1,
+                crate::attacks::MeleeAttack::new(
+                    skill,
+                    bonus,
+                    wind,
+                    40,
+                    crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap(),
                 )
                 .unwrap(),
             ),
-            defense: 0,
-            reductions: BTreeMap::new(),
-        };
-        let mut new = old.clone();
-        new.attack = Some(
-            crate::attacks::MeleeAttack::fixed(
-                crate::attributes::Skill::HeavyWeaponry,
-                base.bonus() + 1,
-                base.wind_up(),
-                base.recovery(),
-                DamageType::Impact,
-                None,
-                1,
-            )
-            .unwrap(),
-        );
-        assert!(dominates(&new, Some(&old), &creature));
-        new.attack = Some(
-            crate::attacks::MeleeAttack::fixed(
-                crate::attributes::Skill::HeavyWeaponry,
-                base.bonus() + 1,
-                base.wind_up() + 1,
-                base.recovery(),
-                DamageType::Impact,
-                None,
-                1,
-            )
-            .unwrap(),
-        );
-        assert!(!dominates(&new, Some(&old), &creature));
-        new.attack = Some(
-            crate::attacks::MeleeAttack::fixed(
-                crate::attributes::Skill::HeavyWeaponry,
-                base.bonus() + 1,
-                base.wind_up(),
-                base.recovery(),
-                DamageType::Impact,
-                None,
-                0,
-            )
-            .unwrap(),
-        );
-        assert!(!dominates(&new, Some(&old), &creature));
+            modifiers: vec![],
+        }
     }
-
     #[test]
-    fn weapon_choice_uses_owned_skill_and_preserves_damage_descriptors() {
-        use crate::attacks::MeleeAttack;
-        use crate::attributes::{Attributes, ManaBinding, Skill};
-        use crate::creatures::{CreatureBuild, CreatureState, Species};
-        use crate::damage::{DamageComponent, DamageSpec};
-        use crate::dice::DicePool;
-        use crate::grants::Descriptor;
-        use crate::progression::{Class, CreatureType, HdLedger, HdSource};
-        let weapon = |skill, bonus, descriptor, count| {
-            let component = DamageComponent::rolled(
-                DamageType::Energy,
-                descriptor,
-                DicePool::new(count, 6, 0).unwrap(),
+    fn upgrades_do_not_trade_away_cached_protection_for_more_defense() {
+        let (mut game, actor, at) = fixture();
+        for (id, modifiers) in [
+            (10, vec![defense(1), reduction(2)]),
+            (11, vec![defense(3), reduction(2)]),
+            (12, vec![defense(3)]),
+            (13, vec![defense(1), reduction(2)]),
+        ] {
+            add(
+                &mut game,
+                actor,
+                at,
+                id,
+                EquipmentSpec {
+                    slot: EquipmentSlot::new("head_armor").unwrap(),
+                    attack: None,
+                    modifiers,
+                },
             );
-            let primary = component.key();
-            EquipmentSpec {
-                slot: EquipmentSlot::Weapon,
-                attack: Some(
-                    MeleeAttack::new(
-                        skill,
-                        bonus,
-                        60,
-                        40,
-                        DamageSpec::new(vec![component], Some(primary)).unwrap(),
-                    )
-                    .unwrap(),
-                ),
-                defense: 0,
-                reductions: BTreeMap::new(),
-            }
-        };
-        let old = weapon(Skill::HeavyWeaponry, 0, Some(Descriptor::Fire), 1);
-        let mut build = CreatureBuild::new(
-            Species {
-                id: "weapon_judge".into(),
-                kind: CreatureType::Humanoid,
-                subtypes: Default::default(),
-                anatomy: crate::AnatomySpec::humanoid(),
-                default_attributes: Attributes::new([5, 1, 1, 1, 1, 1]).unwrap(),
-                melee: old.attack.clone().unwrap(),
-                grants: vec![],
-            },
-            HdLedger::seeded(vec![HdSource::Class(Class::Warrior)], 42).unwrap(),
-            ManaBinding::Intellect,
-        )
-        .unwrap();
-        build.train(0, Skill::HeavyWeaponry).unwrap();
-        let creature = CreatureState::new(build).unwrap();
-        let before = creature.clone();
-        // Better nominal weapon bonus does not compensate for losing owned training/Strength.
-        let light = weapon(Skill::LightWeaponry, 1, Some(Descriptor::Fire), 2);
-        assert!(!dominates(&light, Some(&old), &creature));
-        // More fire dice is an upgrade; replacing fire with cold is a tradeoff.
-        let fire = weapon(Skill::HeavyWeaponry, 0, Some(Descriptor::Fire), 2);
-        assert!(dominates(&fire, Some(&old), &creature));
-        assert!(dominates(&fire, None, &creature));
-        let cold = weapon(Skill::HeavyWeaponry, 0, Some(Descriptor::Cold), 3);
-        assert!(!dominates(&cold, Some(&old), &creature));
-        assert_eq!(
-            creature, before,
-            "equipment scoring cannot alter owned source state"
-        );
+        }
+        game.equip_authored(actor, ItemId(10), EquipmentSlotId(3))
+            .unwrap();
+        assert!(game.gear_upgrade(actor, ItemId(11), EquipmentSlotId(3)));
+        assert!(!game.gear_upgrade(actor, ItemId(12), EquipmentSlotId(3)));
+        assert!(!game.gear_upgrade(actor, ItemId(13), EquipmentSlotId(3)));
+    }
+    #[test]
+    fn weapon_upgrades_use_owned_attributes_and_preserve_descriptor_damage_and_timing() {
+        use crate::attributes::Skill;
+        let (mut game, actor, at) = fixture();
+        for (id, gear) in [
+            (10, weapon(Skill::HeavyWeaponry, 0, 60, "fire", 1)),
+            (11, weapon(Skill::LightWeaponry, 1, 60, "fire", 2)),
+            (12, weapon(Skill::HeavyWeaponry, 0, 60, "fire", 2)),
+            (13, weapon(Skill::HeavyWeaponry, 0, 60, "cold", 3)),
+            (14, weapon(Skill::HeavyWeaponry, 1, 100, "fire", 2)),
+        ] {
+            add(&mut game, actor, at, id, gear);
+        }
+        game.equip_authored(actor, ItemId(10), EquipmentSlotId(0))
+            .unwrap();
+        let before = game.clone();
+        assert!(!game.gear_upgrade(actor, ItemId(11), EquipmentSlotId(0)));
+        assert!(game.gear_upgrade(actor, ItemId(12), EquipmentSlotId(0)));
+        assert!(!game.gear_upgrade(actor, ItemId(13), EquipmentSlotId(0)));
+        assert!(!game.gear_upgrade(actor, ItemId(14), EquipmentSlotId(0)));
+        assert_eq!(game, before);
     }
 }

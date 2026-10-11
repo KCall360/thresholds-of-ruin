@@ -73,9 +73,24 @@ def binaries():
     return _binaries
 
 
-def creature_package(test, name, *, hostile=False, abilities=("power_strike", "magic_bolt", "fear")):
+def creature_package(test, name, *, hostile=False, abilities=("power_strike", "magic_bolt", "fear"), ability_aliases=None):
     package = test.directory / name
     shutil.copytree(ROOT / "scenarios/two-room", package)
+    from arena_matrix import toml_source
+    from ruleset_sources import load_rules
+    rules_path = package / "rules.toml"
+    rules_path.write_text(toml_source(load_rules(rules_path)), encoding="utf-8", newline="\n")
+    if ability_aliases:
+        import copy
+        import tomllib
+        from arena_matrix import toml_source
+        rules_path = package / "rules.toml"
+        rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
+        for identity, (template, display_name) in ability_aliases.items():
+            definition = copy.deepcopy(next(value for value in rules["abilities"] if value["id"] == template))
+            definition.update(id=identity, name=display_name, basic_attack=False)
+            rules["abilities"].append(definition)
+        rules_path.write_text(toml_source(rules), encoding="utf-8", newline="\n")
     manifest = package / "scenario.toml"
     source = manifest.read_text(encoding="utf-8")
     build = ('creature = { species = "human", name = "trainee", faction = "neutral", '
@@ -86,16 +101,17 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
     if hostile:
         source = source.replace('"turn_ticks" = 100', '"turn_ticks" = 10')
         source += '\nfactions = { neutral = [], foe = ["neutral"] }\n'
-    grants = ", ".join([
-        *('{ type = "ability", ability = "' + ability + '" }' for ability in abilities),
-        '{ type = "magical" }', '{ type = "health", amount = 200 }',
+    modifiers = ", ".join([
+        *('{ scope = "always", op = { kind = "grant_ability", ability = "' + ability + '" } }' for ability in abilities),
+        '{ scope = "always", op = { kind = "flag", flag = "magical" } }',
+        '{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 200 } }',
     ])
     source += ('\nai_profiles = { practice = { memory_ticks = 100, flee_percent = 0 } }\n'
                '[creatures.species.human]\nkind = "humanoid"\n'
                'attributes = { strength = 2, speed = 1, intellect = 2, '
                'willpower = 2, awareness = 1, presence = 1 }\n'
                'melee = { skill = "heavy_weaponry", bonus = 0, wind_up = 60, recovery = 40, damage = { primary = { category = "impact", sides = 6 }, components = [{ category = "impact", amount = { type = "rolled", count = 1, sides = 6, bonus = 0 } }] } }\n'
-               'grants = [' + grants + ']\n')
+               'modifiers = [' + modifiers + ']\n')
     manifest.write_text(source, encoding="utf-8", newline="\n")
     region = package / "regions/1.toml"
     source = region.read_text(encoding="utf-8")
@@ -115,7 +131,7 @@ def creature_package(test, name, *, hostile=False, abilities=("power_strike", "m
 
 def resource(frame, name):
     stats = frame["state"]["observation"]["combat"]["own_stats"]
-    return next(pool for pool in stats["resources"] if pool["resource"] == name)
+    return next(pool for pool in stats["resources"] if pool["resource"]["id"] == name)
 
 
 
@@ -500,3 +516,8 @@ class ProcessTestCase(unittest.TestCase):
         def key(name, down):
             subprocess.run(["xdotool", "keydown" if down else "keyup", "--window", handle, name], check=True, timeout=10)
         return key
+
+
+def content_ids(values):
+    """Machine identities from a current disclosed content list."""
+    return [value["id"] for value in values]

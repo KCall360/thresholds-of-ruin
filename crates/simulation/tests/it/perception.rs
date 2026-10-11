@@ -11,7 +11,7 @@ fn cell(region: u64, x: i32, y: i32, z: i32) -> Location {
 
 #[test]
 fn portal_sight_discloses_only_visible_locations_and_does_not_grant_reach_or_visit() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 3, 1, 0), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -49,7 +49,7 @@ fn portal_sight_discloses_only_visible_locations_and_does_not_grant_reach_or_vis
 
 #[test]
 fn geometry_setup_is_atomic_and_vertical_movement_requires_an_explicit_link() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, super::creature_fixture::content());
     game.add_region(Region {
         id: RegionId(3),
         name: "Upper".into(),
@@ -82,7 +82,7 @@ fn geometry_setup_is_atomic_and_vertical_movement_requires_an_explicit_link() {
 
 #[test]
 fn movement_keeps_the_observers_axes_when_crossing_a_rotated_join() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     game.add_region(Region {
         id: RegionId(3),
         name: "Remote".into(),
@@ -132,7 +132,7 @@ fn movement_keeps_the_observers_axes_when_crossing_a_rotated_join() {
 /// another angle) and in every view of it others get.
 #[test]
 fn an_actors_asset_is_disclosed_with_it_and_to_itself() {
-    let mut game = Game::two_room_in_stone(1);
+    let mut game = Game::two_room_in_stone(1, super::creature_fixture::content());
     let ticks = NonZeroU64::new(100).unwrap();
     let me = game.spawn_actor(cell(1, 1, 1, 0), ticks).unwrap();
     let other = game.spawn_actor(cell(1, 3, 1, 0), ticks).unwrap();
@@ -163,6 +163,7 @@ fn lighting_combines_body_awareness_with_distant_visual_perception() {
         )
         .unwrap(),
         42,
+        super::creature_fixture::content(),
     );
     let actor = game
         .spawn_actor(cell(1, 2, 3, 1), NonZeroU64::new(100).unwrap())

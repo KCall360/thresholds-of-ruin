@@ -1,5 +1,5 @@
 //! Backend-only journal and developer setup types. Never sent to a frontend.
-pub use crate::actions::{Ability, Action, Direction};
+pub use crate::actions::{Action, Direction};
 use serde::{Deserialize, Serialize};
 use tor_protocol::{
     ActorId, Anchor, AnnotationCategory, Audience, Author, BranchId, ClientSource, EntryId,
@@ -79,8 +79,9 @@ pub enum Command {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     AbilityStarted {
-        #[serde(with = "crate::storage::schema::Ability")]
-        ability: crate::actions::Ability,
+        #[serde(with = "crate::storage::schema::ability_id")]
+        id: tor_simulation::content_ids::AbilityId,
+        name: String,
         #[serde(with = "crate::storage::schema::ActorId")]
         target: ActorId,
     },
@@ -88,10 +89,6 @@ pub enum Event {
     ItemStarted {
         #[serde(with = "crate::storage::schema::Action")]
         action: Action,
-    },
-    AttackStarted {
-        #[serde(with = "crate::storage::schema::ActorId")]
-        target: ActorId,
     },
     DoorChanged {
         door: u64,
@@ -420,7 +417,7 @@ impl AdmittedWork<'_> {
 
     pub(crate) fn matches_intention(self, queued: &tor_simulation::QueuedIntention) -> bool {
         queued.origin == self.origin()
-            && self.matches(queued.work)
+            && self.matches(queued.work.clone())
             && match self {
                 Self::Travel(_, destination) => queued
                     .movement_context
@@ -433,7 +430,7 @@ impl AdmittedWork<'_> {
         match self {
             Self::Human(action) => {
                 let original = crate::adapt::action(action);
-                work == tor_simulation::IntentionWork::Action(original)
+                work == tor_simulation::IntentionWork::Action(original.clone())
                     || matches!(work, tor_simulation::IntentionWork::ResumePreparation { work } if work.action() == original)
             }
             Self::AutonomousDecision => work == tor_simulation::IntentionWork::AiDecision,

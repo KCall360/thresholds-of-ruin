@@ -1,180 +1,168 @@
-use crate::attributes::{Attribute, Attributes};
-use crate::grants::{Descriptor, Grant, Selector};
-use crate::progression::{Class, CreatureType};
-use crate::talents::Talent;
-use crate::AnatomySpec;
+//! Validated scenario-owned definitions, shared by every actor in a game.
+use super::BuildError;
+use crate::attributes::{Attribute, Attributes, ByAttribute};
+use crate::content_ids::{
+    ClassId, ConditionId, SpeciesId, SubtypeId, TalentId, TemplateId, TypeId,
+};
+use crate::rules::{Modifier, Ruleset};
+use crate::{ActorId, AnatomySpec, ItemId};
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Subtype {
-    Air,
-    Angel,
-    Aquatic,
-    Archon,
-    Augmented,
-    Chaotic,
-    Cold,
-    Earth,
-    Evil,
-    Extraplanar,
-    Fire,
-    Goblinoid,
-    Good,
-    Incorporeal,
-    Lawful,
-    Native,
-    Reptilian,
-    Shapechanger,
-    Swarm,
-    Water,
-}
-
-impl Subtype {
-    pub const ALL: [Self; 20] = [
-        Self::Air,
-        Self::Angel,
-        Self::Aquatic,
-        Self::Archon,
-        Self::Augmented,
-        Self::Chaotic,
-        Self::Cold,
-        Self::Earth,
-        Self::Evil,
-        Self::Extraplanar,
-        Self::Fire,
-        Self::Goblinoid,
-        Self::Good,
-        Self::Incorporeal,
-        Self::Lawful,
-        Self::Native,
-        Self::Reptilian,
-        Self::Shapechanger,
-        Self::Swarm,
-        Self::Water,
-    ];
-
-    /// Only fire/cold immunity and ancestry identity are currently adapted.
-    /// A catalog label must not imply unsupported planar, movement or body rules.
-    pub fn mechanics_deferred(self) -> bool {
-        !matches!(
-            self,
-            Self::Fire | Self::Cold | Self::Goblinoid | Self::Reptilian
-        )
-    }
-
-    pub(super) fn grants(self) -> &'static [Grant] {
-        match self {
-            Self::Fire => &[Grant::Immunity(Selector::Descriptor(Descriptor::Fire))],
-            Self::Cold => &[Grant::Immunity(Selector::Descriptor(Descriptor::Cold))],
-            _ => &[],
-        }
-    }
-}
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum GrantSource {
-    Species(String),
-    Type(CreatureType),
-    Subtype(Subtype),
-    Class(Class),
-    Template(String),
-    Talent(Talent),
+pub enum SourceId {
+    Species(SpeciesId),
+    Type(TypeId),
+    Subtype(SubtypeId),
+    Class(ClassId),
+    Template(TemplateId),
+    Talent(TalentId),
+    Equipment(ItemId),
+    Condition(ConditionId, ActorId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Species {
-    pub id: String,
-    pub kind: CreatureType,
-    pub subtypes: BTreeSet<Subtype>,
+    pub id: SpeciesId,
+    pub kind: TypeId,
+    pub subtypes: BTreeSet<SubtypeId>,
     pub default_attributes: Attributes,
     pub anatomy: AnatomySpec,
     pub melee: crate::attacks::MeleeAttack,
-    pub grants: Vec<Grant>,
+    pub modifiers: Vec<Modifier>,
 }
-
 impl Species {
-    pub(super) fn valid(&self) -> bool {
-        valid_id(&self.id)
-            && self.anatomy.valid()
-            && Attribute::ALL
-                .into_iter()
-                .all(|attribute| self.default_attributes.get(attribute) <= 5)
-            && valid_grants(&self.grants)
+    fn validate(&self, rules: &Ruleset) -> Result<(), BuildError> {
+        if !self.anatomy.valid(rules)
+            || rules.creature_type(&self.kind).is_none()
+            || self.subtypes.iter().any(|id| rules.subtype(id).is_none())
+            || Attribute::ALL.into_iter().any(|attribute| {
+                self.default_attributes.get(attribute) > rules.constants().attribute_cap
+            })
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        rules
+            .validate_damage(self.melee.damage())
+            .map_err(|_| BuildError::InvalidDefinition)?;
+        rules
+            .validate_modifiers(&self.modifiers)
+            .map_err(|_| BuildError::InvalidDefinition)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
-    pub id: String,
+    pub id: TemplateId,
     pub priority: i16,
-    pub kind: Option<CreatureType>,
-    pub add_subtypes: BTreeSet<Subtype>,
-    pub remove_subtypes: BTreeSet<Subtype>,
-    pub adjustments: [i16; 6],
-    pub overrides: BTreeMap<Attribute, u16>,
-    pub grants: Vec<Grant>,
+    pub kind: Option<TypeId>,
+    pub add_subtypes: BTreeSet<SubtypeId>,
+    pub remove_subtypes: BTreeSet<SubtypeId>,
+    pub adjustments: ByAttribute<i16>,
+    pub overrides: ByAttribute<Option<u16>>,
+    pub modifiers: Vec<Modifier>,
 }
-
 impl Template {
-    pub fn new(id: &str, priority: i16) -> Self {
+    pub fn new(id: TemplateId, priority: i16) -> Self {
         Self {
-            id: id.into(),
+            id,
             priority,
             kind: None,
             add_subtypes: BTreeSet::new(),
             remove_subtypes: BTreeSet::new(),
-            adjustments: [0; 6],
-            overrides: BTreeMap::new(),
-            grants: vec![],
+            adjustments: ByAttribute::default(),
+            overrides: ByAttribute::default(),
+            modifiers: vec![],
         }
     }
-
-    pub fn zombified(priority: i16) -> Self {
-        Self {
-            kind: Some(CreatureType::Undead),
-            adjustments: [2, -1, 0, 0, 0, 0],
-            overrides: BTreeMap::from([(Attribute::Intellect, 0)]),
-            grants: vec![Grant::Mindless],
-            ..Self::new("zombified", priority)
-        }
-    }
-
-    pub(super) fn valid(&self) -> bool {
-        valid_id(&self.id)
-            && self.add_subtypes.is_disjoint(&self.remove_subtypes)
-            && self
-                .adjustments
+    fn validate(&self, rules: &Ruleset) -> Result<(), BuildError> {
+        if self
+            .kind
+            .as_ref()
+            .is_some_and(|id| rules.creature_type(id).is_none())
+            || !self.add_subtypes.is_disjoint(&self.remove_subtypes)
+            || self
+                .add_subtypes
                 .iter()
-                .all(|value| (-1_000..=1_000).contains(value))
-            && self.overrides.values().all(|&value| value <= 1_000)
-            && valid_grants(&self.grants)
+                .chain(&self.remove_subtypes)
+                .any(|id| rules.subtype(id).is_none())
+            || self.adjustments.iter().any(|(_, v)| {
+                !(-crate::limits::STAT_MAGNITUDE..=crate::limits::STAT_MAGNITUDE)
+                    .contains(&i64::from(*v))
+            })
+            || self
+                .overrides
+                .iter()
+                .any(|(_, v)| v.is_some_and(|v| v > rules.constants().derived_attribute_cap))
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        rules
+            .validate_modifiers(&self.modifiers)
+            .map_err(|_| BuildError::InvalidDefinition)
     }
 }
 
-fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 60
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScenarioCatalog {
+    pub species: BTreeMap<SpeciesId, Species>,
+    pub templates: BTreeMap<TemplateId, Template>,
+}
+impl ScenarioCatalog {
+    pub fn validate(&self, rules: &Ruleset) -> Result<(), BuildError> {
+        if self.species.len() > crate::limits::CATALOG_ENTRIES
+            || self.templates.len() > crate::limits::CATALOG_ENTRIES
+        {
+            return Err(BuildError::InvalidDefinition);
+        }
+        for (id, species) in &self.species {
+            if id != &species.id {
+                return Err(BuildError::InvalidDefinition);
+            }
+            species.validate(rules)?;
+        }
+        for (id, template) in &self.templates {
+            if id != &template.id {
+                return Err(BuildError::InvalidDefinition);
+            }
+            template.validate(rules)?;
+        }
+        Ok(())
+    }
 }
 
-fn valid_grants(grants: &[Grant]) -> bool {
-    grants.len() <= 32
-        && grants.iter().copied().all(Grant::valid)
-        && grants
-            .iter()
-            .enumerate()
-            .all(|(index, grant)| !grants[..index].contains(grant))
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Content {
+    pub(crate) rules: Arc<Ruleset>,
+    pub(crate) catalog: Arc<ScenarioCatalog>,
 }
-
-pub(super) fn type_grants(kind: CreatureType) -> &'static [Grant] {
-    match kind {
-        CreatureType::Undead | CreatureType::Construct | CreatureType::Plant => &[
-            Grant::Immunity(Selector::Descriptor(Descriptor::Fear)),
-            Grant::Immunity(Selector::Descriptor(Descriptor::MindAffecting)),
-        ],
-        CreatureType::Ooze | CreatureType::Vermin => &[Grant::Mindless],
-        _ => &[],
+impl Content {
+    pub fn rules(&self) -> &Arc<Ruleset> {
+        &self.rules
+    }
+    pub fn catalog(&self) -> &ScenarioCatalog {
+        &self.catalog
+    }
+    pub fn new(rules: Arc<Ruleset>, mut catalog: ScenarioCatalog) -> Result<Arc<Self>, BuildError> {
+        catalog.validate(&rules)?;
+        let mut pool = crate::content_ids::Interner::default();
+        catalog.species = std::mem::take(&mut catalog.species)
+            .into_values()
+            .map(|mut species| {
+                species.id.intern(&mut pool);
+                (species.id.clone(), species)
+            })
+            .collect();
+        catalog.templates = std::mem::take(&mut catalog.templates)
+            .into_values()
+            .map(|mut template| {
+                template.id.intern(&mut pool);
+                (template.id.clone(), template)
+            })
+            .collect();
+        Ok(Arc::new(Self {
+            rules,
+            catalog: Arc::new(catalog),
+        }))
     }
 }

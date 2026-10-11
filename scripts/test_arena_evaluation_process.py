@@ -1,13 +1,50 @@
 """Offline evaluation launches the actual arena CLI and ordinary backend."""
 import json
+import hashlib
+import tomllib
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from process_harness import ProcessTestCase, ROOT
+from ruleset_sources import load_rules
 
 
 class ArenaEvaluationProcesses(ProcessTestCase):
+    def test_mana_recovery_changes_sustained_ranged_throughput_across_a_sight_clear_barrier(self):
+        from arena_matrix import encounter, toml_source
+        canonical = load_rules(ROOT / "scenarios/mob-arena/rules.toml")
+        current_period = next(value for value in canonical["resources"] if value["resource"] == "mana")["recovery_period"]
+        self.assertLess(current_period, 1000)
+        counts = {}
+        for period in [1000, current_period]:
+            package = self.directory / ("sustain-" + str(period))
+            (package / "regions").mkdir(parents=True)
+            rules = load_rules(ROOT / "scenarios/mob-arena/rules.toml")
+            next(value for value in rules["resources"] if value["resource"] == "mana")["recovery_period"] = period
+            manifest, region = encounter("sustain", 4, True, False, "rules.toml")
+            manifest["arena"]["ticks"] = 10000
+            manifest["creatures"]["species"]["opponent"]["modifiers"] = [
+                {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
+            region["walls"] = [[4, y, 0] for y in range(5)]
+            for name, document in [("scenario.toml", manifest), ("rules.toml", rules), ("regions/1.toml", region)]:
+                (package / name).write_text(toml_source(document), encoding="utf-8", newline="\n")
+            validation = subprocess.run([self.bin / ("tor-scenario" + self.suffix), "validate", package],
+                                        capture_output=True, text=True, encoding="utf-8", timeout=15)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            result = subprocess.run([self.bin / ("tor-arena" + self.suffix), "--scenario", package,
+                                     "--all-ai", "--seed", "42"], capture_output=True, text=True,
+                                    encoding="utf-8", timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["tick"], "10000")
+            self.assertEqual(report["termination"], {"type": "tick_limit"})
+            caster = next(actor for actor in report["participants"] if actor["faction"] == "blue")
+            self.assertNotIn("basic_melee", caster["abilities"])
+            counts[period] = int(caster["abilities"]["magic_bolt"]["resolutions"])
+        self.assertGreater(counts[1000], 4)
+        self.assertGreater(counts[current_period], counts[1000])
+
     def test_cli_seeded_report_limits_reproducibility_and_failures(self):
         package = self.directory / "arena"
         shutil.copytree(ROOT / "scenarios/mob-arena", package)
@@ -23,6 +60,15 @@ class ArenaEvaluationProcesses(ProcessTestCase):
         first = run("--all-ai", "--seed", "42")
         self.assertEqual(first.returncode, 0, first.stderr)
         report = json.loads(first.stdout)
+        rules_source = (package / "rules.toml").read_text(encoding="utf-8")
+        self.assertEqual(report["format"], "tor-arena-run-v2")
+        self.assertEqual(report["ruleset"], load_rules(package / "rules.toml")["id"])
+        certificate = json.loads((package / "validation.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["ruleset_hash"], certificate["ruleset_hash"])
+        self.assertIn("import", tomllib.loads(rules_source))
+        self.assertNotEqual(report["ruleset_hash"], hashlib.sha256(rules_source.encode()).hexdigest())
+        self.assertEqual(report["input"]["ruleset_hash"], report["ruleset_hash"])
+
         self.assertEqual(report["actions"], "32")
         self.assertEqual(report["termination"], {"type": "action_limit"})
         self.assertEqual(len(report["participants"]), 4)

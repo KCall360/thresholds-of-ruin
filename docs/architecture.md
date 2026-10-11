@@ -55,12 +55,28 @@ outside persisted game state, read no clock, and never affect rule decisions.
 
 ## Combat and autonomous actors
 
-Combat state belongs to each actor, while the simulation owns a seeded,
-checkpointed combat random stream, directed faction hostility, and run objectives.
-Hit checking and typed damage resolution are separate steps; future attack
-outcomes can extend them without changing the d20 rule implicitly. Wind-up is
-persisted progress; recovery remains scheduler time. Physics applies impact damage
-at contact, using the same death and interruption rules as attacks.
+The server resolves an explicit shared general-rule import and scenario-specific
+identity-keyed overrides before constructing content. It validates the complete
+result, binds authored/effective/dependency hashes and saves the resolved content.
+Simulation knows no source paths or import loader; restore does not consult a
+changed external rules source.
+
+Each game owns immutable validated ruleset/catalog content, an explicit rules RNG
+and an event log. Actors own build references and mutable creature state; one
+source fold derives equipment, talents, conditions and protection. Adventure and
+arena policy are tagged variants with death, action and deadline hooks.
+
+Abilities, including basic melee, admit immutable plans retained in preparations.
+Typed ability/equip/unequip/drink variants carry only their valid fields. Planning,
+pure resolution and execution orchestration have separate modules. Resolution
+consumes a snapshot and explicit RNG; the actor-local lifecycle application
+boundary commits mutations, reconciles preparations, performs death cleanup and
+emits events. Rebuilds, equipment changes and timed resource/condition changes
+use the same boundary. Resolver preview and commit share one effect-state kernel. Items and physics use the same damage
+and effect kernels. Generic observer steps accompany the same outcome rather than
+re-running a diagnostic resolver. Active-time baselines and an indexed deadline
+queue avoid scanning every timed actor for local mutations. See the
+[creature rules reference](creature-implementation.md) for source and timer rules.
 
 AI consumes its actor's perception and expiring memory. The backend admits a
 decision to the simulation-owned queue without choosing an action or advancing

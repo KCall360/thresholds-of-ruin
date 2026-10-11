@@ -316,8 +316,7 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
             }
         }
         Goal::UseAbility { ability, target } => {
-            match tor_client_common::abilities::action(&scene.state.observation, *ability, *target)
-            {
+            match tor_client_common::abilities::action(&scene.state.observation, ability, *target) {
                 Ok(action) => act(action),
                 Err(reason) => Step::Finish(End::Refused(reason)),
             }
@@ -344,10 +343,22 @@ fn step(goal: &Goal, scene: &Scene, acted: bool, approached: bool) -> Step {
             _ => Step::Finish(End::Gone),
         },
         Goal::Attack { target } => match scene.get(Key::Actor(*target)) {
-            Some(r) if r.reachable || approached => act(Action::Attack { target: *target }),
+            Some(r) if r.reachable || approached => {
+                match tor_client_common::abilities::basic_action(&scene.state.observation, *target)
+                {
+                    Ok(action) => act(action),
+                    Err(reason) => Step::Finish(End::Refused(reason)),
+                }
+            }
             Some(_) => match scene.approach(Key::Actor(*target)) {
                 Some(cell) => Step::Travel(cell),
-                None => act(Action::Attack { target: *target }),
+                None => match tor_client_common::abilities::basic_action(
+                    &scene.state.observation,
+                    *target,
+                ) {
+                    Ok(action) => act(action),
+                    Err(reason) => Step::Finish(End::Refused(reason)),
+                },
             },
             None => Step::Finish(End::Gone),
         },

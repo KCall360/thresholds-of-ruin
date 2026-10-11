@@ -22,22 +22,13 @@ pub fn decode_action(
         return Err(unavailable());
     }
     Ok(match action {
-        p::Action::UseAbility { ability, target } => {
+        p::Action::UseAbility { id, target } => {
+            let id = s::content_ids::AbilityId::new(id).map_err(|_| unavailable())?;
             let actor = std::iter::once(observation.actor)
                 .chain(observation.visible_actors.iter().map(|actor| actor.id))
                 .find(|actor| scope.actor(*actor) == *target)
                 .ok_or_else(unavailable)?;
-            a::Action::UseAbility {
-                ability: crate::adapt::requested_ability(*ability),
-                target: actor,
-            }
-        }
-        p::Action::Attack { target } => {
-            let actor = std::iter::once(observation.actor)
-                .chain(observation.visible_actors.iter().map(|actor| actor.id))
-                .find(|actor| scope.actor(*actor) == *target)
-                .ok_or_else(unavailable)?;
-            a::Action::Attack { target: actor }
+            a::Action::UseAbility { id, target: actor }
         }
         p::Action::SetDoor { door, open } => {
             let identity = observation
@@ -106,11 +97,8 @@ pub fn decode_action(
 /// Encode backend action facts explicitly for the current wire schema.
 pub fn encode_action(action: &a::Action, scope: &TargetScope) -> p::Action {
     match action {
-        a::Action::UseAbility { ability, target } => p::Action::UseAbility {
-            ability: crate::adapt::wire_ability(*ability),
-            target: scope.actor(*target),
-        },
-        a::Action::Attack { target } => p::Action::Attack {
+        a::Action::UseAbility { id, target } => p::Action::UseAbility {
+            id: id.to_string(),
             target: scope.actor(*target),
         },
         a::Action::SetDoor { door, open } => p::Action::SetDoor {
@@ -465,17 +453,17 @@ pub fn disclose_entry(
         | JournalContent::IntentionContinued { action, event, .. } => Content::Action {
             action: encode_action(action, scope),
             event: match event {
-                Event::AbilityStarted { ability, target } => VisibleEvent::AbilityStarted {
-                    ability: crate::adapt::wire_ability(*ability),
+                Event::AbilityStarted { id, name, target } => VisibleEvent::AbilityStarted {
+                    ability: p::ContentRef {
+                        id: id.to_string(),
+                        name: name.clone(),
+                    },
                     target: scope.actor(s::ActorId(target.0)),
                 },
                 Event::ItemStarted { action } => VisibleEvent::ItemStarted {
                     action: encode_action(action, scope),
                 },
                 Event::PreparationPaused => VisibleEvent::PreparationPaused,
-                Event::AttackStarted { target } => VisibleEvent::AttackStarted {
-                    target: scope.actor(s::ActorId(target.0)),
-                },
                 Event::DoorChanged { door, open } => VisibleEvent::DoorChanged {
                     door: scope.door(*door),
                     open: *open,

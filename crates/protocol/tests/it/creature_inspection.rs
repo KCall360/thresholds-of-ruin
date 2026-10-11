@@ -1,193 +1,174 @@
+use super::creature::{content, stats};
 use tor_protocol::*;
-
-fn report() -> CreatureInspectionView {
-    let skills = [
-        "athletics",
-        "heavy_weaponry",
-        "agility",
-        "light_weaponry",
-        "stealth",
-        "thievery",
-        "crafting",
-        "deduction",
-        "lore",
-        "medicine",
-        "discipline",
-        "intimidation",
-        "insight",
-        "perception",
-        "survival",
-        "deception",
-        "leadership",
-        "persuasion",
-        "spellcasting",
-    ];
-    let attributes = serde_json::json!({"strength":1,"speed":1,"intellect":1,"willpower":1,"awareness":1,"presence":1});
-    serde_json::from_value(serde_json::json!({
-        "actor":"2", "tick":"0", "name":"test mage", "faction":"blue",
-        "species":{"id":"human","kind":"humanoid","subtypes":[],"attributes":attributes,"melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}}},
-        "initial_attributes":attributes, "templates":[],
-        "max_hp":7, "hp":4, "injury":3, "dead":false,
-        "stats":{"kind":"humanoid","subtypes":[],"hit_dice":["mage"],"attributes":attributes,
-            "skills":skills.iter().map(|skill| serde_json::json!({"skill":skill,"rank":if *skill=="spellcasting" {1} else {0}})).collect::<Vec<_>>(),
-            "defenses":{"physical":2,"cognitive":2,"spiritual":2},"binding":"intellect",
-            "resources":[{"resource":"stamina","balance":3,"maximum":3,"available":3,"reserved":0},{"resource":"focus","balance":3,"maximum":3,"available":3,"reserved":0},{"resource":"mana","balance":2,"maximum":2,"available":2,"reserved":0}],
-            "active_talents":["magic_bolt"],"dormant_talents":[],"abilities":["basic_melee","magic_bolt"]},
-        "hit_dice":[{"ordinal":1,"source":"mage","health_seed":"18446744073709551615","health_die":6,"base_health":6,"training":["spellcasting"],"attribute":null,"talent":"magic_bolt"}],
-        "grants":[{"source":{"type":"species","id":"human"},"grants":[]},{"source":{"type":"class","class":"mage"},"grants":[{"type":"magical"}]},{"source":{"type":"talent","talent":"magic_bolt"},"grants":[{"type":"ability","ability":"magic_bolt"}]}],
-        "fear":[]
-    })).unwrap()
-}
-
-#[test]
-fn privileged_inspection_round_trips_large_seeds_and_explicit_owned_sources() {
-    let report = report();
-    assert!(report.validate().is_ok());
-    assert_eq!(report.hit_dice[0].health_seed, u64::MAX);
-    let encoded = serde_json::to_value(&report).unwrap();
-    assert_eq!(
-        encoded["hit_dice"][0]["health_seed"],
-        "18446744073709551615"
-    );
-    assert_eq!(
-        serde_json::from_value::<CreatureInspectionView>(encoded).unwrap(),
-        report
-    );
-}
-
-#[test]
-fn privileged_inspection_rejects_inconsistent_ownership_health_and_grants() {
-    let original = report();
-    let mut malformed = original.clone();
-    malformed.hit_dice[0].ordinal = 0;
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.hit_dice[0].training.push(Skill::Discipline);
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.stats.active_talents.clear();
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.hp = 5;
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.dead = true;
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.max_hp = 0;
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.grants[1]
-        .grants
-        .push(InspectionGrant::PhysicalDefense { modifier: 1001 });
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.grants[1].source = InspectionGrantSource::Template {
-        id: "unknown".into(),
-    };
-    assert!(malformed.validate().is_err());
-    let mut malformed = original.clone();
-    malformed.grants.push(malformed.grants[0].clone());
-    assert!(malformed.validate().is_err());
-    let mut encoded = serde_json::to_value(original).unwrap();
-    encoded["world_state"] = serde_json::json!({});
-    assert!(serde_json::from_value::<CreatureInspectionView>(encoded).is_err());
-}
-
-#[test]
-fn privileged_inspection_rejects_fear_that_coexists_with_immunity() {
-    for descriptor in [
-        InspectionDescriptor::Fear,
-        InspectionDescriptor::MindAffecting,
-    ] {
-        let mut value = report();
-        value.fear.push(InspectionFear {
-            causer: ActorId(99),
-            remaining_ticks: 30,
-        });
-        assert!(value.validate().is_ok());
-        value.grants[0].grants.push(InspectionGrant::Immunity {
-            selector: InspectionSelector::Descriptor { descriptor },
-        });
-        assert!(value.validate().is_err());
+pub(super) fn attack() -> AttackView {
+    AttackView {
+        skill: content("fixture_skill"),
+        bonus: 2,
+        wind_up: 60,
+        recovery: 40,
+        damage: DamageView {
+            primary: DamageKeyView {
+                category: DamageType::Energy,
+                descriptor: Some(content("fixture_descriptor")),
+                sides: Some(6),
+            },
+            components: vec![DamageComponentView {
+                category: DamageType::Energy,
+                descriptor: Some(content("fixture_descriptor")),
+                amount: DamageAmountView::Rolled {
+                    count: 1,
+                    sides: 6,
+                    bonus: 1,
+                },
+            }],
+        },
     }
 }
-
-#[test]
-fn privileged_inspection_keeps_fear_with_reductions_and_unrelated_immunities() {
-    let mut value = report();
-    value.fear.push(InspectionFear {
-        causer: ActorId(99),
-        remaining_ticks: 30,
-    });
-    value.grants[0].grants.extend([
-        InspectionGrant::Reduction {
-            selector: InspectionSelector::Descriptor {
-                descriptor: InspectionDescriptor::Fear,
-            },
-            amount: 100,
+fn report() -> CreatureInspectionView {
+    let stats = stats();
+    CreatureInspectionView {
+        actor: ActorId(1),
+        tick: 5,
+        name: "Subject".into(),
+        faction: "Blue".into(),
+        species: content("fixture_species"),
+        natural_attack: attack(),
+        selected_attack: SelectedAttackView {
+            category: "equipment".into(),
+            source: content("fixture_weapon"),
+            socket: Some(0),
+            attack: attack(),
+            attribute: content("fixture_attribute"),
+            attribute_value: 2,
+            rank: 1,
+            check_bonus: 5,
+            abilities: vec![],
         },
-        InspectionGrant::Immunity {
-            selector: InspectionSelector::Category {
-                category: DamageType::Spirit,
-            },
-        },
-        InspectionGrant::Immunity {
-            selector: InspectionSelector::Descriptor {
-                descriptor: InspectionDescriptor::Cold,
-            },
-        },
-    ]);
-    assert!(value.validate().is_ok());
-    let encoded = serde_json::to_string(&value).unwrap();
-    let restored: CreatureInspectionView = serde_json::from_str(&encoded).unwrap();
-    assert_eq!(restored, value);
-    assert!(restored.validate().is_ok());
+        initial_attributes: stats.attributes,
+        templates: vec![content("fixture_template")],
+        max_hp: 10,
+        hp: 8,
+        injury: 2,
+        dead: false,
+        hit_dice: vec![InspectionHitDie {
+            ordinal: 1,
+            source: stats.hit_dice[0].clone(),
+            health_seed: u64::MAX,
+            health_die: 10,
+            base_health: 10,
+            training: vec![content("fixture_skill")],
+            attribute: None,
+            talent: Some(content("fixture_talent")),
+        }],
+        stats,
+        sources: vec![InspectionSource {
+            owner: None,
+            category: "talent".into(),
+            source: content("fixture_talent"),
+            rows: vec![CombatTraceStep {
+                id: "add".into(),
+                name: "Add".into(),
+                fields: vec![DiagnosticField {
+                    id: "value".into(),
+                    name: "Value".into(),
+                    value: DiagnosticValue::Signed { value: 7 },
+                }],
+            }],
+        }],
+        conditions: vec![ConditionView {
+            condition: content("fixture_condition"),
+            source: ActorId(2),
+            remaining_ticks: 20,
+        }],
+    }
 }
-
 #[test]
-fn natural_attack_inspection_rejects_invalid_sources_and_noncanonical_components() {
-    let source = report();
-    for case in 0..10 {
-        let mut changed = source.clone();
-        let attack = &mut changed.species.melee;
+fn private_inspection_uses_disclosed_identity_generic_sources_and_named_ledger_facts() {
+    let report = report();
+    report.validate().unwrap();
+    let encoded = serde_json::to_value(&report).unwrap();
+    assert_eq!(encoded["hit_dice"][0]["health_seed"], u64::MAX.to_string());
+    assert_eq!(
+        serde_json::from_value::<CreatureInspectionView>(encoded.clone()).unwrap(),
+        report
+    );
+    let mut forged = encoded;
+    forged["sources"][0]["cached_authority"] = true.into();
+    assert!(serde_json::from_value::<CreatureInspectionView>(forged).is_err());
+}
+#[test]
+fn private_inspection_rejects_structural_inconsistency_without_reimplementing_content_rules() {
+    for case in 0..17 {
+        let mut value = report();
         match case {
-            0 => attack.skill = Skill::Spellcasting,
-            1 => attack.bonus = 1001,
-            2 => attack.wind_up = 0,
-            3 => attack.recovery = 1_000_001,
-            4 => attack.damage.primary.sides = Some(8),
-            5 => attack.damage.components.clear(),
-            6 => attack
-                .damage
-                .components
-                .push(attack.damage.components[0].clone()),
-            7 => {
-                attack.damage.components[0].amount = DamageAmountView::Rolled {
+            0 => value.actor = ActorId(0),
+            1 => value.name = "x".repeat(61),
+            2 => value.hp = 11,
+            3 => value.injury = 1,
+            4 => value.hit_dice[0].ordinal = 2,
+            5 => value.hit_dice[0].health_die = 0,
+            6 => value.templates.push(value.templates[0].clone()),
+            7 => value.sources.push(value.sources[0].clone()),
+            8 => value.conditions[0].remaining_ticks = 0,
+            9 => value.stats.abilities.push(value.stats.abilities[0].clone()),
+            10 => value.stats.resources[0].available = u32::MAX,
+            11 => {
+                value.natural_attack.damage.components[0].amount = DamageAmountView::Rolled {
                     count: 65,
                     sides: 6,
                     bonus: 0,
                 }
             }
-            8 => attack.damage.components[0].amount = DamageAmountView::Fixed { value: 1_000_001 },
-            9 => {
-                attack.damage.primary.descriptor = Some(InspectionDescriptor::Fire);
-                attack.damage.components[0].descriptor = Some(InspectionDescriptor::Fire);
-                attack.damage.components.push(DamageComponentView {
-                    category: DamageType::Energy,
-                    descriptor: Some(InspectionDescriptor::Fire),
-                    amount: DamageAmountView::Fixed { value: 1 },
-                });
-            }
+            12 => value.stats.skills[0].skill.id = "invalid id".into(),
+            13 => value.selected_attack.attack.bonus = 1001,
+            14 => value.selected_attack.source.id = "invalid id".into(),
+            15 => value.selected_attack.rank = 6,
+            16 => value.selected_attack.abilities.push(CombatTraceStep {
+                id: "invalid id".into(),
+                name: "invalid".into(),
+                fields: vec![],
+            }),
             _ => unreachable!(),
         }
-        assert!(
-            changed.validate().is_err(),
-            "accepted malformed natural attack {case}"
-        );
+        assert!(value.validate().is_err(), "case {case}");
     }
-    let mut encoded = serde_json::to_value(source).unwrap();
-    encoded["species"]["melee"]["damage"]["components"][0]["amount"]["unknown"] =
-        serde_json::json!(1);
-    assert!(serde_json::from_value::<CreatureInspectionView>(encoded).is_err());
+}
+#[test]
+fn distinct_condition_sources_share_a_content_id_without_colliding() {
+    let mut value = report();
+    value.sources[0].category = "condition".into();
+    value.sources[0].owner = Some(ActorId(1));
+    let mut second = value.sources[0].clone();
+    second.owner = Some(ActorId(2));
+    value.sources.push(second);
+    value.validate().unwrap();
+}
+
+#[test]
+fn selected_attack_profiles_share_the_disclosed_content_reference_bound() {
+    let mut value = report();
+    let profile = CombatTraceStep {
+        id: "ability_profile".into(),
+        name: "Ability profile".into(),
+        fields: vec![],
+    };
+    for count in [257, MAX_CONTENT_REFERENCES] {
+        value.selected_attack.abilities = vec![profile.clone(); count];
+        assert!(value.validate().is_ok(), "valid profile count {count}");
+    }
+    value.selected_attack.abilities.push(profile);
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn selected_attack_socket_uses_the_equipment_socket_bound_without_content_coupling() {
+    let mut value = report();
+    for socket in [None, Some(0), Some(63)] {
+        value.selected_attack.socket = socket;
+        value.validate().unwrap();
+    }
+    for socket in [64, u16::MAX] {
+        value.selected_attack.socket = Some(socket);
+        assert!(value.validate().is_err(), "invalid socket {socket}");
+    }
 }

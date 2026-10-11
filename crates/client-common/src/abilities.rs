@@ -1,91 +1,173 @@
-//! Ability affordances from the attached actor's disclosed build. These are
-//! suggestions, never authority: the server rechecks grants and targets, and
-//! reserves resources only when preparation actually starts.
-use tor_protocol::{Ability, Action, ActorTarget, Observation, Technique};
-
-pub fn choices(view: &Observation) -> Vec<Ability> {
+//! Dynamic ability affordances from the server-disclosed personal catalog.
+use tor_protocol::{AbilityTargetKind, AbilityView, Action, ActorTarget, Observation};
+pub fn available(view: &Observation) -> &[AbilityView] {
     view.combat
         .as_ref()
         .and_then(|combat| combat.own_stats.as_ref())
-        .map(|stats| {
-            stats
-                .abilities
-                .iter()
-                .filter_map(|technique| match technique {
-                    Technique::BasicMelee => None,
-                    Technique::PowerStrike => Some(Ability::PowerStrike),
-                    Technique::MagicBolt => Some(Ability::MagicBolt),
-                    Technique::Fear => Some(Ability::Fear),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        .map_or(&[], |stats| &stats.abilities)
 }
-
-pub fn action(view: &Observation, ability: Ability, target: ActorTarget) -> Result<Action, String> {
-    if !choices(view).contains(&ability) {
-        return Err(format!(
-            "You don't have {}.",
-            crate::narration::ability_name(ability)
-        ));
-    }
-    if target == view.self_target || !view.visible_actors.iter().any(|actor| actor.id == target) {
-        return Err("That creature is not a visible target.".into());
-    }
-    // Funding and physical reach stay authoritative. In particular, a retained
-    // preparation may already own a hold, and queueing never pays a cost.
-    Ok(Action::UseAbility { ability, target })
+pub fn choices(view: &Observation) -> Vec<AbilityView> {
+    available(view)
+        .iter()
+        .filter(|ability| !ability.basic_attack)
+        .cloned()
+        .collect()
 }
-
+pub fn basic_action(view: &Observation, target: ActorTarget) -> Result<Action, String> {
+    let ability = available(view)
+        .iter()
+        .find(|a| a.basic_attack)
+        .ok_or("You don't have a basic attack.")?;
+    action(view, &ability.id, target)
+}
+pub fn action(view: &Observation, id: &str, target: ActorTarget) -> Result<Action, String> {
+    let ability = available(view)
+        .iter()
+        .find(|ability| ability.id == id)
+        .ok_or_else(|| format!("You don't have {id}."))?;
+    let valid = match ability.target_kind {
+        AbilityTargetKind::SelfOnly => target == view.self_target,
+        AbilityTargetKind::Actor => {
+            target != view.self_target && view.visible_actors.iter().any(|actor| actor.id == target)
+        }
+    };
+    if !valid {
+        return Err("That creature is not a valid visible target.".into());
+    }
+    Ok(Action::UseAbility {
+        id: id.into(),
+        target,
+    })
+}
+/// Match a disclosed name or ID at the start of input, preferring the longest
+/// match and refusing ambiguous names. No game-specific vocabulary lives here.
+pub fn match_command<'a, 'b>(
+    view: &'a Observation,
+    line: &'b str,
+) -> Result<Option<(&'a AbilityView, &'b str)>, String> {
+    let line = line.trim();
+    let mut found = Vec::new();
+    let boundaries: Vec<_> = line
+        .char_indices()
+        .filter(|(_, c)| c.is_whitespace())
+        .map(|(index, _)| index)
+        .chain(std::iter::once(line.len()))
+        .collect();
+    for ability in available(view).iter().filter(|a| !a.basic_attack) {
+        let aliases = [
+            ability.name.to_lowercase(),
+            ability.id.to_lowercase(),
+            ability.id.replace('_', " ").to_lowercase(),
+            ability.name.to_lowercase().replace(' ', ""),
+        ];
+        let length = boundaries
+            .iter()
+            .copied()
+            .filter(|&end| {
+                aliases
+                    .iter()
+                    .any(|alias| line[..end].to_lowercase() == *alias)
+            })
+            .max();
+        if let Some(length) = length {
+            found.push((length, ability));
+        }
+    }
+    found.sort_by_key(|(length, _)| std::cmp::Reverse(*length));
+    match found.as_slice() {
+        [] => Ok(None),
+        [(length, ability), rest @ ..] => {
+            if rest.iter().any(|(other, _)| other == length) {
+                return Err("That ability name is ambiguous; use its ID.".into());
+            }
+            Ok(Some((ability, line.get(*length..).unwrap_or("").trim())))
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn choices_and_actions_use_only_personal_grants_and_visible_nonself_targets() {
-        let target = ActorTarget::from_digest([2; 32]);
-        let mut view: Observation = serde_json::from_value(serde_json::json!({
-            "actor": "1", "self_target": ActorTarget::from_digest([1; 32]), "tick": "0",
-            "position": {"x": 0, "y": 0, "z": 0}, "ready": true,
-            "places": [], "visible_cells": [], "ground_items": [], "inventory": [],
-            "visible_actors": [{"id": target, "name": "goblin", "description": "", "position": {"x": 6, "y": 0, "z": 0}}],
-            "combat": {"hp": 1, "max_hp": 1, "preparation_remaining": null, "preparation_active": false,
-                "recovery_remaining": "0", "actors": [], "events": [], "objective": null,
-                "victory": false, "dead": false, "terminal": false,
-                "own_stats": {"kind": "humanoid", "subtypes": [], "hit_dice": ["warrior"],
-                    "attributes": {"strength": 1, "speed": 1, "intellect": 1, "willpower": 1, "awareness": 1, "presence": 1},
-                    "skills": [], "defenses": {"physical": 12, "cognitive": 12, "spiritual": 12},
-                    "binding": "intellect", "resources": [], "active_talents": [], "dormant_talents": [],
-                    "abilities": ["basic_melee", "power_strike", "magic_bolt", "fear"]}
-            }
-        })).unwrap();
-        let before = view.clone();
-        assert_eq!(
-            choices(&view),
-            [Ability::PowerStrike, Ability::MagicBolt, Ability::Fear]
-        );
-        for ability in choices(&view) {
-            assert_eq!(
-                action(&view, ability, target),
-                Ok(Action::UseAbility { ability, target })
-            );
-            assert!(action(&view, ability, view.self_target).is_err());
-            assert!(action(&view, ability, ActorTarget::from_digest([9; 32])).is_err());
-        }
-        assert_eq!(view, before);
+    fn arbitrary_disclosed_ability_matches_name_id_and_compact_name() {
+        let mut view = crate::test_support::observation();
+        let mut ability = crate::test_support::ability("shimmer_wave");
+        ability.name = "Shimmer Wave".into();
         view.combat
             .as_mut()
             .unwrap()
             .own_stats
             .as_mut()
             .unwrap()
-            .abilities = vec![Technique::BasicMelee];
-        assert!(choices(&view).is_empty());
+            .abilities
+            .push(ability.clone());
+        let before = view.clone();
+        for line in [
+            "shimmer wave sentinel",
+            "shimmer_wave sentinel",
+            "shimmerwave sentinel",
+        ] {
+            let (selected, target) = match_command(&view, line).unwrap().unwrap();
+            assert_eq!(selected.id, "shimmer_wave");
+            assert_eq!(target, "sentinel");
+            assert_eq!(
+                action(&view, &selected.id, view.visible_actors[0].id),
+                Ok(Action::UseAbility {
+                    id: "shimmer_wave".into(),
+                    target: view.visible_actors[0].id
+                })
+            );
+        }
+        assert_eq!(view, before);
+        assert!(action(&view, "missing", view.visible_actors[0].id).is_err());
+    }
+    #[test]
+    fn self_only_and_visible_actor_targets_are_distinct() {
+        let mut view = crate::test_support::observation();
+        let mut ability = crate::test_support::ability("mend");
+        ability.reach = tor_protocol::AbilityReach::SelfOnly;
+        ability.target_kind = AbilityTargetKind::SelfOnly;
+        view.combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .push(ability);
+        assert!(action(&view, "mend", view.self_target).is_ok());
+        assert!(action(&view, "mend", view.visible_actors[0].id).is_err());
+        assert!(basic_action(&view, view.self_target).is_err());
+    }
+    #[test]
+    fn unicode_names_preserve_target_boundaries_and_ambiguous_names_require_id() {
+        let mut view = crate::test_support::observation();
+        let mut ability = crate::test_support::ability("glow");
+        ability.name = "İşık".into();
+        view.combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .push(ability.clone());
         assert_eq!(
-            action(&view, Ability::Fear, target),
-            Err("You don't have fear.".into())
+            match_command(&view, "İşık sentinel").unwrap().unwrap().1,
+            "sentinel"
         );
-        view.combat = None;
-        assert!(choices(&view).is_empty());
+        ability.id = "other_glow".into();
+        view.combat
+            .as_mut()
+            .unwrap()
+            .own_stats
+            .as_mut()
+            .unwrap()
+            .abilities
+            .push(ability);
+        assert!(match_command(&view, "İşık sentinel").is_err());
+        assert_eq!(
+            match_command(&view, "glow sentinel").unwrap().unwrap().0.id,
+            "glow"
+        );
     }
 }

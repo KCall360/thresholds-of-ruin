@@ -1,8 +1,24 @@
-//! Validated private combat reports shared by Text and ASCII presentation.
-use tor_protocol::{
-    CombatDiagnosticsView, CombatTraceStep, DiagnosticCombatant, InvalidCombatDiagnostics,
-};
-
+//! Generic diagnostic rendering uses disclosed labels and captured values only.
+use tor_protocol::*;
+pub fn trace_lines(step: &CombatTraceStep) -> Vec<String> {
+    let mut rows = vec![step.name.clone()];
+    rows.extend(step.fields.iter().map(|field| {
+        let value = match &field.value {
+            DiagnosticValue::Text { value } => value.clone(),
+            DiagnosticValue::Signed { value } => value.to_string(),
+            DiagnosticValue::Unsigned { value } => value.to_string(),
+            DiagnosticValue::Bool { value } => value.to_string(),
+            DiagnosticValue::Dice { values } => values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+            DiagnosticValue::Content { value } => format!("{} ({})", value.name, value.id),
+        };
+        format!("  {}: {value}", field.name)
+    }));
+    rows
+}
 fn state(rows: &mut Vec<String>, label: &str, value: &DiagnosticCombatant) {
     rows.push(format!(
         "{label}: HP {}/{}, injury {}, dead {}",
@@ -10,83 +26,47 @@ fn state(rows: &mut Vec<String>, label: &str, value: &DiagnosticCombatant) {
         value.maximum_health,
         value
             .injury
-            .map_or_else(|| "legacy".into(), |v| v.to_string()),
+            .map_or_else(|| "unavailable".into(), |v| v.to_string()),
         value.dead
     ));
-    for resource in &value.resources {
+    for pool in &value.resources {
         rows.push(format!(
-            "  {:?}: balance {}/{}, available {}, recovery elapsed {}",
-            resource.resource,
-            resource.balance,
-            resource.maximum,
-            resource.available,
-            resource.recovery_elapsed
+            "  {}: balance {}/{}, available {}, recovery elapsed {}",
+            pool.resource.name, pool.balance, pool.maximum, pool.available, pool.recovery_elapsed
         ));
     }
-    for fear in &value.fear {
+    for condition in &value.conditions {
         rows.push(format!(
-            "  Fear from actor {}: {} active ticks",
-            fear.causer.0, fear.remaining_ticks
+            "  {} from actor {}: {} active ticks",
+            condition.condition.name, condition.source.0, condition.remaining_ticks
         ));
     }
 }
-
-fn step(rows: &mut Vec<String>, value: &CombatTraceStep) {
-    match value {
-        CombatTraceStep::AttackStarted { net_edge } => rows.push(format!("Attack: net edge {net_edge}")),
-        CombatTraceStep::Check { check } => {
-            rows.push(format!("Check {:?} ({:?}, {:?}): attribute {} + rank {} + modifier {} vs {}",
-                check.skill, check.attribute, check.binding, check.attribute_value, check.rank, check.modifier, check.threshold));
-            rows.push(format!("  d20 {}, second {}, kept {}, total {}, success {}", check.first,
-                check.second.map_or_else(|| "none".into(), |v| v.to_string()), check.kept, check.total, check.success));
-            rows.push(format!("  Edge input {}, allocated {}, unused {}; RNG {} -> {}",
-                check.input_edge, check.edge, check.unused_edge, check.rng_before, check.rng_after));
-        }
-        CombatTraceStep::AttackMissed { unused_edge } => rows.push(format!("Miss: unused edge {unused_edge}")),
-        CombatTraceStep::DamageStarted { net_edge } => rows.push(format!("Damage: net edge {net_edge}")),
-        CombatTraceStep::Component { component } => {
-            let dice = component.expression.map_or_else(|| "fixed".into(), |value|
-                format!("{}d{}{:+}", value.count, value.sides, value.bonus));
-            let descriptor = component.descriptor.map_or_else(|| "none".into(), |value| format!("{value:?}"));
-            rows.push(format!("Component {:?}, descriptor {}, dice {}: rolled {:?}, kept {:?}, raw {}",
-                component.category, descriptor, dice, component.rolled, component.kept, component.raw));
-            rows.push(format!("  Edge {}; RNG {} -> {}; immunity category {}, descriptor {}; after immunity {}",
-                component.edge, component.rng_before, component.rng_after, component.category_immune,
-                component.descriptor_immune, component.after_immunity));
-        }
-        CombatTraceStep::Reduction { selector, category, before, capacity, after } => rows.push(format!(
-            "Reduction {selector:?}/{category:?}: {before}, capacity {capacity}, remaining {after}")),
-        CombatTraceStep::DamageFinished { raw, after_immunity, after_descriptors, total, unused_edge } => rows.push(format!(
-            "Damage totals: raw {raw}, after immunity {after_immunity}, after descriptors {after_descriptors}, protected {total}; unused edge {unused_edge}")),
-        CombatTraceStep::FearStarted { difficulty, duration, net_edge, difficulty_attribute, difficulty_rank, difficulty_bonus, duration_bonus } => rows.push(format!(
-            "Fear: difficulty {difficulty} = 10 + Willpower {difficulty_attribute} + rank {difficulty_rank} + bonus {difficulty_bonus}; duration {duration} = 300 + bonus {duration_bonus}; edge {net_edge}")),
-        CombatTraceStep::FearImmunity { fear, mind_affecting } => rows.push(format!(
-            "Fear immunity: fear {fear}, mind affecting {mind_affecting}")),
-        CombatTraceStep::FearFinished { applied, duration } => rows.push(format!("Fear applied {applied}, duration {duration}")),
-    }
-}
-
 pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidCombatDiagnostics> {
     report.validate()?;
     let mut rows = vec![format!(
-        "Combat diagnostics: capture {}, tick {}, captured {}, retained {}, dropped {}, through {}",
-        if report.enabled { "on" } else { "off" },
-        report.tick,
+        "Combat diagnostics: {}; captured {}, dropped {}, retained {}",
+        if report.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
         report.captured,
-        report.retained,
         report.dropped,
-        report.through
+        report.retained
     )];
     for record in &report.records {
         rows.push(format!(
-            "Record {}: tick {}, actor {} -> actor {}, {:?}, applied {}, HP lost {}",
+            "Record {} at tick {}: actor {} -> {}; {}: {:?}",
             record.sequence,
             record.tick,
             record.actor.0,
             record.target.0,
-            record.ability,
-            record.applied,
-            record.damage
+            record
+                .ability
+                .as_ref()
+                .map_or("Effect", |ability| ability.name.as_str()),
+            record.outcome.result
         ));
         rows.push(format!(
             "  Intention {:?}, origin {:?}; preparation {}, started {}, remaining {}, recovery {}",
@@ -97,19 +77,43 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
             record.remaining,
             record.recovery
         ));
-        if let Some(cost) = record.charge {
+        if let Some(cost) = &record.charge {
             rows.push(format!(
-                "  Cost {:?}: start {}, resolution {}",
-                cost.resource, cost.start, cost.resolution
+                "  Cost {}: start {}, resolution {}",
+                cost.resource.name, cost.start, cost.resolution
             ));
         }
         state(&mut rows, "Actor before", &record.actor_before);
         state(&mut rows, "Target before", &record.target_before);
-        for value in &record.trace.steps {
-            step(&mut rows, value);
+        for step in &record.trace.steps {
+            rows.extend(trace_lines(step));
         }
         if record.trace.truncated {
             rows.push("Trace truncated.".into());
+        }
+        for effect in &record.outcome.effects {
+            rows.push(match effect {
+                DiagnosticEffect::Damage { target, amount } => {
+                    format!("  Actor {}: {amount} damage", target.0)
+                }
+                DiagnosticEffect::Heal { target, amount } => {
+                    format!("  Actor {}: {amount} healing", target.0)
+                }
+                DiagnosticEffect::Restore {
+                    target,
+                    resource,
+                    amount,
+                } => format!("  Actor {}: {amount} {} restored", target.0, resource.name),
+                DiagnosticEffect::Condition {
+                    target,
+                    condition,
+                    source,
+                    duration,
+                } => format!(
+                    "  Actor {}: {} from {} for {duration} ticks",
+                    target.0, condition.name, source.0
+                ),
+            });
         }
         state(&mut rows, "Actor after", &record.actor_after);
         state(&mut rows, "Target after", &record.target_after);
@@ -126,7 +130,6 @@ pub fn lines(report: &CombatDiagnosticsView) -> Result<Vec<String>, InvalidComba
     }
     Ok(rows)
 }
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -142,58 +145,26 @@ pub(crate) mod tests {
         }
     }
     #[test]
-    fn validates_before_formatting_and_shows_empty_capture_state() {
-        let mut report = CombatDiagnosticsView {
-            enabled: false,
-            tick: 0,
-            captured: 0,
-            dropped: 0,
-            retained: 0,
-            through: 0,
-            records: vec![],
-        };
-        assert!(lines(&report).unwrap()[0].contains("capture off"));
-        report.enabled = true;
-        assert!(lines(&report).unwrap()[0].contains("capture on"));
-        report.retained = 1;
+    fn validates_before_formatting() {
+        let mut report = report();
+        assert!(lines(&report).unwrap().join("\n").contains("disabled"));
+        report.retained = 65;
         assert!(lines(&report).is_err());
     }
     #[test]
-    fn check_rows_preserve_draws_operands_edge_and_rng() {
-        let mut rows = vec![];
-        step(
-            &mut rows,
-            &CombatTraceStep::Check {
-                check: tor_protocol::DiagnosticCheck {
-                    skill: tor_protocol::Skill::HeavyWeaponry,
-                    binding: tor_protocol::ManaBinding::Intellect,
-                    attribute: tor_protocol::InspectionAttribute::Strength,
-                    attribute_value: 5,
-                    rank: 2,
-                    modifier: -1,
-                    threshold: 15,
-                    input_edge: 2,
-                    edge: 1,
-                    unused_edge: 1,
-                    rng_before: 123,
-                    rng_after: 456,
-                    first: 4,
-                    second: Some(17),
-                    kept: 17,
-                    total: 23,
-                    success: true,
-                },
-            },
+    fn arbitrary_trace_labels_and_large_integers_render_without_catalogs() {
+        let step = CombatTraceStep {
+            id: "custom".into(),
+            name: "Custom mechanism".into(),
+            fields: vec![DiagnosticField {
+                id: "seed".into(),
+                name: "Seed".into(),
+                value: DiagnosticValue::Unsigned { value: u64::MAX },
+            }],
+        };
+        assert_eq!(
+            trace_lines(&step),
+            ["Custom mechanism", "  Seed: 18446744073709551615"]
         );
-        let text = rows.join("\n");
-        for expected in [
-            "attribute 5 + rank 2 + modifier -1 vs 15",
-            "d20 4, second 17, kept 17",
-            "total 23, success true",
-            "Edge input 2, allocated 1, unused 1",
-            "RNG 123 -> 456",
-        ] {
-            assert!(text.contains(expected), "{text}");
-        }
     }
 }

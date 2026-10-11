@@ -18,7 +18,7 @@ use crate::journal::{
     WizardResult,
 };
 
-pub(crate) const ARCHIVE_VERSION: u32 = 25;
+pub(crate) const ARCHIVE_VERSION: u32 = 26;
 #[path = "arena_evaluation.rs"]
 pub mod arena_evaluation;
 #[path = "checkpoint.rs"]
@@ -185,6 +185,117 @@ mod observation_reuse_tests {
             tor_simulation::diagnostics::work_counts().observations,
             before.observations
         );
+    }
+
+    #[test]
+    fn wizard_preloads_do_not_publish_views_from_before_mutation_or_rewind() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        engine.enable_wizard().unwrap();
+        let initial = engine.state(actor).unwrap().observation;
+        for (step, operation) in [
+            WizardOperation::Teleport {
+                actor,
+                position: Position {
+                    region: 7,
+                    x: 4,
+                    y: 1,
+                    z: 0,
+                },
+            },
+            WizardOperation::Rewind { target: None },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            engine
+                .command(
+                    "test",
+                    "test",
+                    actor,
+                    &format!("wizard-{step}"),
+                    &engine.branch().clone(),
+                    Command::Wizard {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        operation,
+                    },
+                )
+                .unwrap();
+            assert_matches_uncached(&engine, actor);
+            if step == 0 {
+                assert_ne!(engine.state(actor).unwrap().observation, initial);
+            }
+        }
+        assert_eq!(engine.state(actor).unwrap().observation, initial);
+    }
+
+    #[test]
+    fn streamed_move_views_survive_residency_changes_and_exact_replay() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/streaming-corridor");
+        let mut scenario = crate::scenario_package::load(&root, 5, None, false).unwrap();
+        scenario.streaming = Some(crate::Streaming {
+            active_radius: 0,
+            load_radius: 0,
+        });
+        let mut engine = Engine::memory(scenario).unwrap();
+        let actor = ActorId(1);
+        let mut transitions = 0;
+        for step in 0..40 {
+            for observer in engine.actors() {
+                engine.state(observer).unwrap();
+            }
+            engine
+                .command(
+                    "player",
+                    "test",
+                    actor,
+                    &format!("step-{step}"),
+                    &engine.branch().clone(),
+                    Command::AdmitIntention {
+                        expected_revision: engine.revision(actor).unwrap(),
+                        action: Action::Move {
+                            direction: Direction::East,
+                        },
+                    },
+                )
+                .unwrap();
+            let mut profile = CommandProfile::default();
+            let before = tor_simulation::diagnostics::work_counts();
+            engine
+                .execute_intention_profiled(None, Some(&mut profile))
+                .unwrap()
+                .unwrap();
+            let after = tor_simulation::diagnostics::work_counts();
+            transitions += profile.region_changes;
+            assert!(
+                after.observations - before.observations
+                    <= engine.actors().len() * (1 + profile.region_changes),
+                "residency comparison repeated a pre-transition observation: {profile:?}"
+            );
+            let before_read = tor_simulation::diagnostics::work_counts();
+            for observer in engine.actors() {
+                engine.state(observer).unwrap();
+            }
+            assert_eq!(
+                tor_simulation::diagnostics::work_counts().observations,
+                before_read.observations,
+                "discarded a finalized residency view at step {step}"
+            );
+        }
+        assert!(transitions > 0);
+        let expected = engine.state(actor).unwrap();
+        let replayed = Engine::replay(engine.archive.clone(), None, None).unwrap();
+        assert_eq!(replayed.game, engine.game);
+        assert_eq!(replayed.revisions, engine.revisions);
+        assert_eq!(replayed.state(actor).unwrap(), expected);
     }
 
     #[test]
@@ -393,6 +504,23 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    pub(crate) fn ruleset_hash(&self) -> String {
+        crate::scenario_package::source_digest(self.package.as_ref().map_or(
+            include_str!("../../simulation/data/default-ruleset.toml"),
+            |package| {
+                package
+                    .resolved_rules_source
+                    .as_deref()
+                    .unwrap_or(&package.rules_source)
+            },
+        ))
+    }
+    pub(crate) fn content(&self) -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
+        match &self.package {
+            Some(package) => package.content(),
+            None => diagnostic_content(),
+        }
+    }
     pub fn two_room(seed: u64) -> Self {
         Self {
             seed,
@@ -437,9 +565,19 @@ impl Scenario {
     }
 }
 
-fn scenario_game(scenario: &Scenario) -> Game {
+pub(crate) fn diagnostic_content() -> Result<Arc<tor_simulation::creatures::Content>, Failure> {
+    let document = toml::from_str(include_str!("../../simulation/data/default-ruleset.toml"))
+        .map_err(|_| invalid_archive())?;
+    let rules =
+        tor_simulation::rules::Ruleset::validate(document).map_err(|_| invalid_archive())?;
+    tor_simulation::creatures::Content::new(rules, Default::default())
+        .map_err(|_| invalid_archive())
+}
+
+fn scenario_game(scenario: &Scenario) -> Result<Game, Failure> {
+    let content = scenario.content()?;
     if scenario.regions <= 2 {
-        return Game::two_room_in_stone(scenario.seed);
+        return Ok(Game::two_room_in_stone(scenario.seed, content));
     }
     let rooms = (1..=scenario.regions)
         .map(|id| tor_world::Region {
@@ -496,7 +634,7 @@ fn scenario_game(scenario: &Scenario) -> Game {
             }
         }
     }
-    Game::new(world, scenario.seed)
+    Ok(Game::new(world, scenario.seed, content))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,6 +865,7 @@ pub(crate) struct Archive {
     pub(crate) wizard_game: bool,
     pub(crate) version: u32,
     pub(crate) ruleset: String,
+    pub(crate) ruleset_hash: String,
     #[serde(with = "crate::storage::schema::scenario")]
     pub(crate) scenario: Scenario,
     #[serde(with = "crate::storage::schema::BranchId")]
@@ -1108,7 +1247,7 @@ impl Candidate {
             // Loading, detaching, or activating regions can change both the
             // projected scene and scheduler readiness. Recompute at the new
             // boundary instead of publishing a pre-transition observation.
-            self.observations.clear();
+            let previous_views = std::mem::take(&mut self.observations);
             // Only observers whose view the transition changed move on, so
             // an update never discloses a change nobody could see.
             let stayed: Vec<_> = self
@@ -1118,12 +1257,20 @@ impl Candidate {
                 .filter(|id| self.game.has_actor(SimActor(id.0)))
                 .collect();
             for actor in stayed {
-                if revision_view(&before, actor)? != revision_view(&self.game, actor)? {
+                // Successful action execution already resolved this exact
+                // pre-transition boundary. Other callers have no retained view.
+                let old = match previous_views.get(&actor) {
+                    Some(view) => view.clone(),
+                    None => Arc::new(revision_view(&before, actor)?),
+                };
+                let new = Arc::new(revision_view(&self.game, actor)?);
+                if new != old {
                     let revision = self.revisions.get_mut(&actor).expect("loaded actor");
                     *revision = revision.checked_add(1).ok_or_else(|| {
                         Failure::new(ErrorCode::InvalidAction, "Revision exhausted")
                     })?;
                 }
+                self.observations.insert(actor, new);
             }
             self.revisions.follow(&self.game)?;
         }
@@ -1240,7 +1387,7 @@ impl Engine {
             }
             (None, None) => match &scenario.package {
                 Some(package) => package.build(scenario.seed, true)?,
-                None => scenario_game(&scenario),
+                None => scenario_game(&scenario)?,
             },
             (Some(1), None) => crate::performance_fixture::game(scenario.seed, scenario.regions)?,
             _ => return Err(invalid_archive()),
@@ -1284,6 +1431,7 @@ impl Engine {
                 wizard_game: false,
                 version: ARCHIVE_VERSION,
                 ruleset: RULESET.into(),
+                ruleset_hash: scenario.ruleset_hash(),
                 scenario,
                 branch,
                 records: Vec::new(),
@@ -1473,6 +1621,7 @@ impl Engine {
         if archive.version != ARCHIVE_VERSION
             || Uuid::parse_str(&archive.view_salt).is_err()
             || archive.ruleset != RULESET
+            || archive.ruleset_hash != archive.scenario.ruleset_hash()
             || Uuid::parse_str(&archive.branch.0).is_err()
         {
             return Err(invalid_archive());
@@ -2295,7 +2444,6 @@ impl Engine {
         let perception_changed = match action {
             Action::Wait => self.game.wait_changes_perception(SimActor(actor.0)),
             Action::Move { .. }
-            | Action::Attack { .. }
             | Action::UseAbility { .. }
             | Action::Equip { .. }
             | Action::Unequip { .. }
@@ -2541,6 +2689,9 @@ impl Engine {
                 operation,
             } => {
                 candidate.load_for_wizard(self.regions.as_mut(), operation)?;
+                // The preload transition may retain views, but the wizard
+                // operation now mutates that boundary (or restores a rewind).
+                candidate.observations.clear();
                 let result = candidate.apply_wizard(
                     receipt,
                     operation,
@@ -3053,17 +3204,26 @@ impl Candidate {
                     CreatureAdvancement::AddHitDie { source } => {
                         let seed =
                             crate::creature_authoring::actor_health_seed(self.game.seed(), actor.0);
-                        build.add_hit_die((*source).into(), seed)
+                        build.add_hit_die(
+                            crate::creature_authoring::hit_die_source(
+                                source,
+                                build.content().rules(),
+                            )?,
+                            seed,
+                        )
                     }
                     CreatureAdvancement::Train { owner, skill } => {
-                        build.train(index(*owner)?, (*skill).into())
+                        build.train(index(*owner)?, crate::creature_authoring::skill(skill)?)
                     }
-                    CreatureAdvancement::IncreaseAttribute { owner, attribute } => {
-                        build.increase_attribute(index(*owner)?, (*attribute).into())
-                    }
-                    CreatureAdvancement::SelectTalent { owner, talent } => {
-                        build.select_talent(index(*owner)?, (*talent).into())
-                    }
+                    CreatureAdvancement::IncreaseAttribute { owner, attribute } => build
+                        .increase_attribute(
+                            index(*owner)?,
+                            crate::creature_authoring::attribute(attribute)?,
+                        ),
+                    CreatureAdvancement::SelectTalent { owner, talent } => build.select_talent(
+                        index(*owner)?,
+                        crate::creature_authoring::talent(talent, build.content().rules())?,
+                    ),
                 }
                 .map_err(|_| invalid())?;
                 self.rebuild_wizard_creature(id, build)?;
@@ -3082,13 +3242,15 @@ impl Candidate {
                     .ok_or_else(invalid)?;
                 let id = SimActor(actor.0);
                 let mut build = self.game.creature(id).ok_or_else(invalid)?.build().clone();
-                let mut templates = build.templates().to_vec();
-                let existing = templates.iter().position(|value| &value.id == template);
+                let mut templates = build.template_ids().to_vec();
+                let existing = templates
+                    .iter()
+                    .position(|value| value.as_str() == template);
                 if *enabled {
                     if existing.is_some() {
                         return Err(invalid());
                     }
-                    templates.push(definition.clone());
+                    templates.push(definition.id.clone());
                 } else {
                     templates.remove(existing.ok_or_else(invalid)?);
                 }

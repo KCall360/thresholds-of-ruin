@@ -15,7 +15,7 @@ class ArenaSearchProcesses(ProcessTestCase):
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         matrix = self.directory / "matrix"
-        inventory = create_matrix(matrix, compiler, "interactions-v26", ["42"],
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42"],
                                    families=["strength_heavy"], levels=[4])
         plan = matrix / inventory["cases"][0]["plan"]
         parameter_spec = self.directory / "parameters.json"

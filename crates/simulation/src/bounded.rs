@@ -3,7 +3,7 @@ use serde::de::{Error, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{fmt, marker::PhantomData};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub(crate) struct Bounded<T, const MAXIMUM: usize>(pub Vec<T>);
 impl<'de, T: Deserialize<'de>, const MAXIMUM: usize> Deserialize<'de> for Bounded<T, MAXIMUM> {
@@ -42,4 +42,23 @@ pub(crate) fn required_option<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
     Option::<T>::deserialize(deserializer)
+}
+
+/// Named persistence objects never accept serde's alternate positional sequence form.
+pub(crate) fn named_map<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    struct Named<T>(std::marker::PhantomData<T>);
+    impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de> for Named<T> {
+        type Value = T;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a named record object")
+        }
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<T, M::Error> {
+            T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
+    }
+    deserializer.deserialize_map(Named(std::marker::PhantomData))
 }

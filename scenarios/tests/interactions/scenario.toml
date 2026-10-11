@@ -1,26 +1,26 @@
 format = 2
 id = "interactions"
 version = "1.0"
-ruleset = "interactions-v26"
+ruleset = "rules.toml"
 default_character = 1
 characters = [{ id = 1, anchor = "1/start", creature = { species = "figure", name = "figure", faction = "neutral", binding = "intellect", hit_dice = [{ source = "racial" }] } }]
 
 [archetypes.sword]
 class = "weapon"
 name = "sword"
-equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 4, wind_up = 60, recovery = 40, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 6 } }] } } }
+equipment = { slot = "weapon", attack = { skill = "heavy_weaponry", bonus = 4, wind_up = 60, recovery = 40, damage = { primary = { category = "keen" }, components = [{ category = "keen", amount = { type = "fixed", value = 6 } }] } }, modifiers = [] }
 
 [archetypes.mail]
 class = "armor"
 name = "mail"
-equipment = { slot = "body_armor", defense = 3, reductions = { impact = 2 } }
+equipment = { slot = "body_armor", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 3 } }, { scope = "always", op = { kind = "reduction", selector = { kind = "category", category = "impact" }, amount = 2 } }] }
 
 [archetypes.band]
 class = "ring"
 name = "ring of protection"
 identity = "protection"
 appearance_pool = "rings"
-equipment = { slot = "ring", defense = 1 }
+equipment = { slot = "ring", modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "defense", defense = "physical" }, value = 1 } }] }
 
 [archetypes.healing]
 class = "potion"
@@ -28,7 +28,7 @@ name = "potion of healing"
 identity = "healing"
 appearance_pool = "potions"
 stackable = true
-consumable = { effects = [{ type = "heal", amount = 5 }] }
+consumable = { effects = [{ kind = "heal", amount = { kind = "fixed", amount = 5 } }] }
 
 [archetypes.poison]
 class = "potion"
@@ -36,7 +36,7 @@ name = "potion of poison"
 identity = "poison"
 appearance_pool = "potions"
 stackable = true
-consumable = { effects = [{ type = "damage", components = { vital = 8 } }] }
+consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 8 } }] } }] }
 
 [appearance_pools.potions]
 appearances = ["red potion"]
@@ -46,11 +46,11 @@ confounding = true
 appearances = ["silver ring"]
 
 # Synthetic one-HD fixture subjects leave training and talent slots unspent.
-# Fixed attacks and source grants control health, hit probability and timing.
+# Fixed attacks and source modifiers control health, hit probability and timing.
 
 [creatures.species.figure]
 kind = "humanoid"
 attributes = { strength = 0, speed = 0, intellect = 0, willpower = 0, awareness = 0, presence = 0 }
 anatomy = { slots = ["weapon", "body_armor", "ring", "ring"] }
 melee = { skill = "heavy_weaponry", bonus = 2, wind_up = 60, recovery = 40, damage = { primary = { category = "impact" }, components = [{ category = "impact", amount = { type = "fixed", value = 4 } }] } }
-grants = [{ type = "health", amount = 22 }]
+modifiers = [{ scope = "always", op = { kind = "add", stat = { kind = "health" }, value = 22 } }]

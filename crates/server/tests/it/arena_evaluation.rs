@@ -15,7 +15,12 @@ fn scenario(actions: u64, ticks: u64) -> Scenario {
     arena.actions = actions;
     arena.ticks = ticks;
     scenario.package = Some(std::sync::Arc::new(
-        Package::from_parts(manifest, package.region_defs().unwrap()).unwrap(),
+        Package::from_parts(
+            manifest,
+            package.region_defs().unwrap(),
+            &package.rules_source,
+        )
+        .unwrap(),
     ));
     scenario
 }
@@ -53,6 +58,12 @@ fn ordinary_engine_arena_report_is_deterministic_bounded_and_conserves_damage() 
     let value = serde_json::to_value(&report).unwrap();
     assert_eq!(value["actions"], "32");
     assert_eq!(report.input_hash.len(), 64);
+    let source = scenario(32, 100000);
+    let certificate = &source.package.as_ref().unwrap().certificate;
+    assert_eq!(report.format, "tor-arena-run-v2");
+    assert_eq!(report.ruleset, certificate.ruleset);
+    assert_eq!(report.ruleset_hash, certificate.ruleset_hash);
+    assert_eq!(report.input.ruleset_hash, report.ruleset_hash);
 }
 
 #[test]

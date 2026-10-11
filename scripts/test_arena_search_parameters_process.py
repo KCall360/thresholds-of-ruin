@@ -9,11 +9,130 @@ from arena_matrix import create_matrix
 
 
 class SearchParameterProcesses(ProcessTestCase):
+    def test_ruleset_economy_and_talent_edits_change_actual_backend_outcomes(self):
+        from arena_matrix import encounter, toml_source
+        from arena_search_parameters import materialize
+        import hashlib
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        binary = self.bin / ("tor-arena" + self.suffix)
+        sources = self.directory / "rules-sources"
+        rules = tomllib.loads((ROOT / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+        inputs = {}
+        for orientation in ["forward", "mirrored"]:
+            package = sources / orientation
+            (package / "regions").mkdir(parents=True)
+            manifest, region = encounter("sustain", 8, True, orientation == "mirrored", "rules.toml")
+            manifest["arena"]["ticks"] = 10000
+            manifest["creatures"]["species"]["opponent"]["modifiers"] = [
+                {"scope": "always", "op": {"kind": "set", "stat": {"kind": "health"}, "value": 100000}}]
+            region["walls"] = [[4, y, 0] for y in range(5)]
+            for name, document in [("scenario.toml", manifest), ("rules.toml", rules), ("regions/1.toml", region)]:
+                (package / name).write_text(toml_source(document), encoding="utf-8", newline="\n")
+            inputs[orientation] = str(package)
+        plan = self.directory / "rules-plan.json"
+        plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
+                                    "seeds": ["42"], "faction": "blue"}), encoding="utf-8")
+        mana = next(i for i, value in enumerate(rules["resources"]) if value["resource"] == "mana")
+        bolt = next(i for i, value in enumerate(rules["abilities"]) if value["id"] == "magic_bolt")
+        talents = {value["id"]: i for i, value in enumerate(rules["talents"])}
+        changes = {
+            "mana_period": (["resources", mana, "recovery_period"], 400),
+            "mana_capacity": (["resources", mana, "capacity", "base"], 3),
+            "bolt_resolution_cost": (["abilities", bolt, "cost", "resolution"], 0),
+            "arcane_reserve": (["talents", talents["arcane_reserve"], "modifiers", 0, "op", "value"], 3),
+            "potent_bolt": (["talents", talents["potent_bolt"], "modifiers", 0, "op", "value"], 2),
+        }
+        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+            name: {"space": {"type": "integer", "low": 0, "high": 1000},
+                   "targets": [{"file": "rules.toml", "path": path}]}
+            for name, (path, _) in changes.items()}}
+        values = {name: value for name, (_, value) in changes.items()}
+        output = self.directory / "rules-candidate"
+        self.assertEqual(materialize(compiler, plan, spec, values, output)["status"], "valid")
+        batch_path = self.directory / "rules-batch"
+        batch = run_batch(binary, output / "plan.json", batch_path)
+        self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
+        for run in batch["runs"]:
+            package = output / (run["variant"] + "-" + run["orientation"])
+            source = (package / "rules.toml").read_text(encoding="utf-8")
+            document = tomllib.loads(source)
+            for name, (path, value) in changes.items():
+                actual, original = document, rules
+                for key in path:
+                    actual, original = actual[key], original[key]
+                self.assertNotEqual(value, original, name + " must change behavior, not only reserialize")
+                self.assertEqual(actual, value if run["variant"] == "candidate" else original)
+            self.assertEqual(run["report"]["ruleset_hash"], hashlib.sha256(source.encode()).hexdigest())
+            self.assertEqual(run["report"]["termination"], {"type": "tick_limit"})
+        for orientation in ["forward", "mirrored"]:
+            actors = {run["variant"]: next(actor for actor in run["report"]["participants"]
+                                           if actor["faction"] == "blue")
+                      for run in batch["runs"] if run["orientation"] == orientation}
+            mana_maximum = {variant: next(resource["maximum"] for resource in actor["initial"]["resources"]
+                                         if resource["resource"] == "mana")
+                            for variant, actor in actors.items()}
+            self.assertEqual(mana_maximum["candidate"] - mana_maximum["baseline"], 2)
+            self.assertGreater(int(actors["candidate"]["abilities"]["magic_bolt"]["resolutions"]),
+                               int(actors["baseline"]["abilities"]["magic_bolt"]["resolutions"]))
+            self.assertGreater(int(actors["candidate"]["damage_dealt"]), int(actors["baseline"]["damage_dealt"]))
+            self.assertTrue(all("basic_melee" not in actor["abilities"] for actor in actors.values()))
+        # Planned sustain limits are metrics observations, never win/loss results.
+        self.assertEqual(batch["summary"]["paired_seeds"], 0)
+        self.assertEqual(batch["summary"]["excluded_seeds"], ["42"])
+        self.assertEqual(replay(binary, batch_path), (True, 4))
+
+    def test_imported_sources_materialize_into_replayable_detached_arena_inputs(self):
+        from arena_matrix import toml_source
+        from arena_search_parameters import materialize
+        from ruleset_sources import load_rules
+        import hashlib
+        compiler = self.bin / ("tor-scenario" + self.suffix)
+        binary = self.bin / ("tor-arena" + self.suffix)
+        imported = self.directory / "import.toml"
+        imported.write_text('import = "interactions-v27"\noverrides = [{op = "set", path = ["resources", "mana", "recovery_period"], value = 897}]\n', encoding="utf-8")
+        expected = load_rules(imported)
+        matrix = self.directory / "import-matrix"
+        inventory = create_matrix(matrix, compiler, str(imported), ["42"], families=["sustain"], levels=[4])
+        self.assertEqual(set(inventory["rules_dependencies"]), {"interactions-v27"})
+        plan = matrix / inventory["cases"][0]["plan"]
+        for variant in ["baseline", "candidate"]:
+            for orientation in ["forward", "mirrored"]:
+                path = plan.parent / (variant + "-" + orientation) / "rules.toml"
+                self.assertEqual(tomllib.loads(path.read_text()), expected)
+                # Exercise parameter materialization on authored imports too.
+                path.write_text(imported.read_text(), encoding="utf-8")
+        mana = next(i for i, resource in enumerate(expected["resources"]) if resource["resource"] == "mana")
+        spec = {"format": "tor-arena-search-parameters-v1", "parameters": {
+            "mana_period": {"space": {"type": "integer", "low": 1, "high": 1000},
+                            "targets": [{"file": "rules.toml", "path": ["resources", mana, "recovery_period"]}]}}}
+        prepared = self.directory / "import-candidate"
+        result = materialize(compiler, plan, spec, {"mana_period": 719}, prepared)
+        self.assertEqual(result["status"], "valid")
+        self.assertTrue(all(result["rules_dependencies"].values()))
+        batch_path = self.directory / "import-batch"
+        batch = run_batch(binary, prepared / "plan.json", batch_path)
+        self.assertTrue(all(run["status"] == "ok" for run in batch["runs"]))
+        for run in batch["runs"]:
+            source = (prepared / (run["variant"] + "-" + run["orientation"]) / "rules.toml").read_text()
+            document = tomllib.loads(source)
+            self.assertNotIn("import", document)
+            self.assertEqual(document["resources"][mana]["recovery_period"],
+                             719 if run["variant"] == "candidate" else 897)
+            self.assertEqual(run["report"]["ruleset_hash"], hashlib.sha256(source.encode()).hexdigest())
+        # Deliberately alter the authored import: retained replay uses only its
+        # validated standalone snapshots and cannot resolve the changed source.
+        for variant in ["baseline", "candidate"]:
+            for orientation in ["forward", "mirrored"]:
+                (plan.parent / (variant + "-" + orientation) / "rules.toml").write_text(
+                    'import = "unknown"\n', encoding="utf-8")
+        self.assertEqual(replay(binary, batch_path), (True, 4))
+        self.assertEqual(tomllib.loads(toml_source(expected)), expected)
+
     def test_cli_preserves_sources_and_compiler_rejects_illegal_ordinary_attributes(self):
         compiler = self.bin / ("tor-scenario" + self.suffix)
         binary = self.bin / ("tor-arena" + self.suffix)
         matrix = self.directory / "matrix"
-        inventory = create_matrix(matrix, compiler, "interactions-v26", ["42", "43"],
+        inventory = create_matrix(matrix, compiler, str(ROOT / "scenarios/mob-arena/rules.toml"), ["42", "43"],
                                    families=["strength_heavy"], levels=[4])
         plan = matrix / inventory["cases"][0]["plan"]
         case = plan.parent

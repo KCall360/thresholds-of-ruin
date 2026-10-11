@@ -1,5 +1,5 @@
 """Validate combat workload v1; counters include warmup, timings exclude it."""
-from workload_report import is_duration, main, positive_counts, require, summarize_matrix
+from workload_report import is_duration, main, nonnegative_counts, positive_counts, require, summarize_matrix
 
 CASES = {(2, 0), (2, 1000), (8, 0), (8, 1000)}
 PHASES = {"simulation", "perception", "navigation", "revision", "checkpoint_capture"}
@@ -10,7 +10,8 @@ def check_row(row):
     require(len(row["command_ms"]) == len(row["decision_ms"]) == 64, "each sample times 64 commands and decisions")
     require(0 < len(row["client_apply_ms"]) <= 64, "the client applies between 1 and 64 updates")
     require(len(row["client_apply_ms"]) == len(row["client_draw_ms"]), "every applied update is drawn")
-    positive_counts(row, COUNTS)
+    positive_counts(row, [field for field in COUNTS if field != "scenes"])
+    nonnegative_counts(row, ["scenes"])
     phases = row["phase_totals_ms"]
     require(set(phases) == PHASES, "phase totals must name every phase")
     require(all(is_duration(v) for v in phases.values()), "phase totals must be durations")

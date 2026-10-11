@@ -23,7 +23,7 @@ class TextProcesses(ProcessTestCase):
     def test_unavailable_ability_commands_do_not_submit_or_advance(self):
         client, _ = self.text_client()
         for command in ["power strike nobody", "magic bolt nobody", "fear nobody"]:
-            self.assertIn("No matching actor is visible.", client.command(command))
+            self.assertIn("Unknown command.", client.command(command))
             self.assertIn("tick 0.", client.command("look"))
 
     def setUp(self):

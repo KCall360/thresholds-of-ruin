@@ -1,5 +1,5 @@
 //! Item choices derived solely from the current disclosed inventory and anatomy.
-use tor_protocol::{Action, EquipmentSlot, ItemTarget, ItemView, Observation};
+use tor_protocol::{Action, ItemTarget, ItemView, Observation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemOperation {
@@ -72,21 +72,17 @@ pub fn item_action(
             if affordance.equipped_slot.is_some() {
                 return Err("That item is already equipped.".into());
             }
-            let kind = affordance.slot.ok_or("You can't equip that item.")?;
-            if kind == EquipmentSlot::Weapon
-                && interactions.inventory.iter().any(|candidate| {
-                    candidate.slot == Some(kind) && candidate.equipped_slot.is_some()
-                })
-            {
-                return Err("Remove your equipped weapon first.".into());
-            }
+            let kind = affordance
+                .slot
+                .as_ref()
+                .ok_or("You can't equip that item.")?;
             let slot = interactions
                 .slots
                 .iter()
                 .enumerate()
                 .find_map(|(index, slot)| {
                     let index = u16::try_from(index).ok()?;
-                    (*slot == kind
+                    (slot.id == kind.id
                         && !interactions
                             .inventory
                             .iter()

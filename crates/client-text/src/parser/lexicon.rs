@@ -17,9 +17,6 @@ pub enum Verb {
     Unlock,
     Lock,
     Attack,
-    PowerStrike,
-    MagicBolt,
-    Fear,
     Go,
     Climb,
     Enter,
@@ -94,9 +91,6 @@ impl Verb {
             Verb::Unlock => "unlock",
             Verb::Lock => "lock",
             Verb::Attack => "attack",
-            Verb::PowerStrike => "powerstrike",
-            Verb::MagicBolt => "bolt",
-            Verb::Fear => "fear",
             Verb::Go => "go",
             Verb::Climb => "climb",
             Verb::Enter => "enter",
@@ -200,9 +194,6 @@ pub enum Pronoun {
 
 pub fn parse_verb(word: &str) -> Option<Verb> {
     match word {
-        "powerstrike" => Some(Verb::PowerStrike),
-        "bolt" => Some(Verb::MagicBolt),
-        "fear" => Some(Verb::Fear),
         "look" | "l" => Some(Verb::Look),
         "examine" | "x" | "inspect" | "study" | "check" | "describe" => Some(Verb::Examine),
         "read" | "peruse" | "skim" => Some(Verb::Read),

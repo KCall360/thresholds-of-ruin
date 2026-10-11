@@ -153,7 +153,13 @@ fn lighting_survives_eviction_checkpoint_journal_replay_and_rewind() {
         lit: true,
     }];
     let authored = directory.path().join("package");
-    scenario_package::write_package(&authored, &package.manifest, &regions).unwrap();
+    scenario_package::write_package(
+        &authored,
+        &package.manifest,
+        &regions,
+        &package.rules_source,
+    )
+    .unwrap();
     scenario_package::validate(&authored).unwrap();
     let mut scenario = scenario_package::load(&authored, 5, None, false).unwrap();
     scenario.streaming = Some(Streaming {

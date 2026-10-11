@@ -14,7 +14,7 @@ fn body(height: i32, eye: [i32; 3]) -> BodySpec {
 #[test]
 fn a_humanoid_sees_over_a_waist_wall_only_from_its_head_and_offsets_stay_at_its_feet() {
     for (eye, sees_behind) in [([0, 0, 1], true), ([0, 0, 0], false)] {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, super::creature_fixture::content());
         let feet = Location {
             region: RegionId(1),
             position: Position { x: 0, y: 0, z: 0 },
@@ -82,7 +82,7 @@ fn the_eye_turns_with_a_body_lying_sideways_after_a_rotated_portal() {
             region: RegionId(region),
             position: Position { x, y: 1, z },
         };
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, super::creature_fixture::content());
         let id = game
             .spawn_actor(at(1, 7, 10), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -146,7 +146,7 @@ fn upright_bodies_of_every_height_see_from_their_eye_and_keep_offsets_at_the_fee
             position: Position { x, y: 1, z },
         };
         world.set_wall(at(1, 0), true).unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, super::creature_fixture::content());
         let actor = game
             .spawn_actor(at(0, 0), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -203,7 +203,7 @@ fn occupied_cells_win_when_eye_projection_conflicts_at_a_one_way_physical_join()
                 1,
             )
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, super::creature_fixture::content());
         let id = game
             .spawn_actor(feet, NonZeroU64::new(100).unwrap())
             .unwrap();

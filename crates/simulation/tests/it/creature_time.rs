@@ -1,11 +1,27 @@
 use std::{collections::BTreeSet, num::NonZeroU64};
+use tor_simulation::content_ids::{AbilityId, TemplateId};
 use tor_simulation::creatures::Template;
-use tor_simulation::grants::Grant;
 use tor_simulation::resources::Resource;
+use tor_simulation::rules::{DefenseKind, Modifier, ModifierOp, Scope, Stat};
 use tor_simulation::{Action, ActorId, CreatureIdentity, Game, MemoryRecords, RegionTransition};
 use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 fn game() -> (Game, ActorId, ActorId) {
+    let original = super::creature_state::build();
+    let mut template = Template::new(TemplateId::new("capacity").unwrap(), 0);
+    template.modifiers = Resource::ALL
+        .into_iter()
+        .map(|resource| Modifier {
+            scope: Scope::Always,
+            op: ModifierOp::Add {
+                stat: Stat::ResourceMax { resource },
+                value: 2,
+            },
+        })
+        .collect();
+    let enhanced = super::creature_state::with_template(&original, template);
+    let mut base = enhanced.clone();
+    base.set_templates(vec![]).unwrap();
     let world = World::new(
         (1..=3)
             .map(|id| Region {
@@ -17,7 +33,7 @@ fn game() -> (Game, ActorId, ActorId) {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, base.content().clone());
     let mut ids = vec![];
     for (region, ticks) in [(1, 99), (3, 150)] {
         let id = game
@@ -35,7 +51,7 @@ fn game() -> (Game, ActorId, ActorId) {
                 name: format!("subject{region}"),
                 faction: "neutral".into(),
             },
-            super::creature_state::build(),
+            base.clone(),
         )
         .unwrap();
         ids.push(id);
@@ -44,12 +60,14 @@ fn game() -> (Game, ActorId, ActorId) {
         .unwrap();
     game.add_default_reference_points().unwrap();
     game.refresh_navigation();
-    let mut build = game.creature(ids[1]).unwrap().build().clone();
-    let mut template = Template::new("capacity", 0);
-    template.grants = vec![Grant::Stamina(2), Grant::Focus(2), Grant::Mana(2)];
-    build.set_templates(vec![template]).unwrap();
-    game.rebuild_creature(ids[1], build).unwrap();
-    game.apply_fear_condition(ids[1], ids[0], 400).unwrap();
+    game.rebuild_creature(ids[1], enhanced).unwrap();
+    game.apply_condition(
+        ids[1],
+        &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+        ids[0],
+        400,
+    )
+    .unwrap();
     (game, ids[0], ids[1])
 }
 
@@ -65,7 +83,7 @@ fn round_trip(game: &Game) -> Game {
     let snapshot = game.checkpoint(&mut shared);
     let data = serde_json::to_vec(&(snapshot, shared)).unwrap();
     let (snapshot, shared) = serde_json::from_slice(&data).unwrap();
-    Game::restore_checkpoint(snapshot, &shared).unwrap()
+    Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap()
 }
 
 #[test]
@@ -105,7 +123,10 @@ fn timer_deadlines_survive_checkpoint_and_shift_only_after_thaw() {
     assert_eq!(game.tick(), 645);
     assert_eq!(game.next_creature_event_tick(), Some(695));
     assert_eq!(
-        game.creature(subject).unwrap().fear().remaining(player),
+        game.creature(subject).unwrap().conditions().remaining(
+            &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+            player
+        ),
         Some(250)
     );
     advance(&mut game, 2500);
@@ -129,7 +150,13 @@ fn recovery_and_fear_follow_fast_forward_resting_physics_and_moving_physics_equa
             assert_eq!(state.costs().resources().balance(resource), 4);
             assert_eq!(state.costs().resources().recovery_elapsed(resource), 99);
         }
-        assert_eq!(state.fear().remaining(source), Some(301));
+        assert_eq!(
+            state.conditions().remaining(
+                &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+                source
+            ),
+            Some(301)
+        );
         let mut restored = round_trip(&game);
         advance(&mut game, 2000);
         advance(&mut restored, 2000);
@@ -139,7 +166,7 @@ fn recovery_and_fear_follow_fast_forward_resting_physics_and_moving_physics_equa
             assert_eq!(state.costs().resources().balance(resource), 6);
             assert_eq!(state.costs().resources().recovery_elapsed(resource), 0);
         }
-        assert!(state.fear().sources().is_empty());
+        assert!(state.conditions().is_empty());
     }
 }
 
@@ -148,7 +175,7 @@ fn frozen_and_detached_timers_keep_fractional_progress_without_thaw_catch_up() {
     for detach in [false, true] {
         let (mut game, player, subject) = game();
         advance(&mut game, 99);
-        let before = game.creature(subject).unwrap().clone();
+        let before = game.creature(subject).unwrap().into_owned();
         let mut records = MemoryRecords::default();
         game.transition_regions(
             &RegionTransition {
@@ -167,7 +194,7 @@ fn frozen_and_detached_timers_keep_fractional_progress_without_thaw_catch_up() {
         }
         assert_eq!(game.tick(), 594);
         if !detach {
-            assert_eq!(game.creature(subject), Some(&before));
+            assert_eq!(game.creature(subject).as_deref(), Some(&before));
         }
         game = round_trip(&game);
         game.transition_regions(
@@ -178,7 +205,7 @@ fn frozen_and_detached_timers_keep_fractional_progress_without_thaw_catch_up() {
             &mut records,
         )
         .unwrap();
-        assert_eq!(game.creature(subject), Some(&before));
+        assert_eq!(game.creature(subject).as_deref(), Some(&before));
         game.act(player, Action::Wait).unwrap();
         assert_eq!(game.tick(), 645);
         let state = game.creature(subject).unwrap();
@@ -195,14 +222,21 @@ fn frozen_and_detached_timers_keep_fractional_progress_without_thaw_catch_up() {
             state.costs().resources().recovery_elapsed(Resource::Focus),
             150
         );
-        assert_eq!(state.fear().remaining(player), Some(250));
+        assert_eq!(
+            state.conditions().remaining(
+                &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+                player
+            ),
+            Some(250)
+        );
     }
 }
 
 #[test]
-fn fear_expiring_at_resolution_does_not_penalize_the_check() {
+fn condition_expiry_keeps_the_check_operands_owned_by_preparation() {
     for duration in [50, 100] {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game =
+            Game::two_room_in_stone(42, super::creature_state::build().content().clone());
         for x in 1..=2 {
             let actor = game
                 .spawn_actor(
@@ -224,48 +258,55 @@ fn fear_expiring_at_resolution_does_not_penalize_the_check() {
             .unwrap();
         }
         game.refresh_navigation();
-        game.apply_fear_condition(ActorId(1), ActorId(2), duration)
-            .unwrap();
-        let state = game.creature(ActorId(1)).unwrap();
-        let damage = state.derived().melee_damage(0).unwrap();
+        game.apply_condition(
+            ActorId(1),
+            &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+            ActorId(2),
+            duration,
+        )
+        .unwrap();
+        let ability = AbilityId::new("basic_melee").unwrap();
+        let admitted = game.ability_plan(ActorId(1), &ability, ActorId(2)).unwrap();
         let mut rng = 42;
-        let expected = tor_simulation::damage::AttackCheck {
-            check: tor_simulation::attributes::SkillCheck {
-                skill: state.build().species().melee.skill(),
-                binding: state.build().binding(),
-                modifier: 0,
-                threshold: game
-                    .creature(ActorId(2))
-                    .unwrap()
-                    .derived()
-                    .defenses
-                    .physical,
-            },
-            attributes: state.derived().attributes,
-            skills: state.derived().skills,
-        }
-        .resolve(
+        let defender = game.creature(ActorId(2)).unwrap();
+        let snapshot = tor_simulation::abilities::Snapshot::capture(&defender);
+        let expected = tor_simulation::abilities::resolve(
+            admitted.resolution().unwrap(),
+            &snapshot,
             &mut rng,
-            tor_simulation::dice::Edge::from_counts(0, u32::from(duration > 50)),
-            &damage,
-            &game.creature(ActorId(2)).unwrap().derived().protection,
+            &mut (),
         );
-        game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-            .unwrap();
+        game.act(
+            ActorId(1),
+            Action::UseAbility {
+                id: ability,
+                target: ActorId(2),
+            },
+        )
+        .unwrap();
         game.act(ActorId(2), Action::Wait).unwrap();
-        assert!(game.combat_events().iter().any(|event| matches!(event, tor_simulation::combat::CombatEvent::Resolved { hit, damage, .. } if *hit == expected.check.success && *damage == expected.damage.as_ref().map_or(0, |damage| damage.total))));
+        assert!(game.combat_events().iter().any(|event| matches!(event,
+            tor_simulation::combat::CombatEvent::Resolved { outcome } if outcome == &expected)));
     }
 }
 
 #[test]
 fn intermediate_expiry_does_not_stop_the_loop_while_all_actors_prepare_attacks() {
-    let mut game = Game::two_room_in_stone(42);
     // Keep both attacks as misses so an ordinary hit interruption cannot mask
     // whether an intermediate timer returned before preparation completed.
     let mut build = super::creature_state::build();
-    let mut protection = Template::new("test_defense", 0);
-    protection.grants = vec![Grant::PhysicalDefense(100)];
-    build.set_templates(vec![protection]).unwrap();
+    let mut protection = Template::new(TemplateId::new("test_defense").unwrap(), 0);
+    protection.modifiers = vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Defense {
+                defense: DefenseKind::Physical,
+            },
+            value: 100,
+        },
+    }];
+    build = super::creature_state::with_template(&build, protection);
+    let mut game = Game::two_room_in_stone(42, build.content().clone());
     for x in 1..=2 {
         let id = game
             .spawn_actor(
@@ -287,12 +328,29 @@ fn intermediate_expiry_does_not_stop_the_loop_while_all_actors_prepare_attacks()
         .unwrap();
     }
     game.refresh_navigation();
-    game.apply_fear_condition(ActorId(1), ActorId(2), 10)
-        .unwrap();
-    game.act(ActorId(1), Action::Attack { target: ActorId(2) })
-        .unwrap();
-    game.act(ActorId(2), Action::Attack { target: ActorId(1) })
-        .unwrap();
+    game.apply_condition(
+        ActorId(1),
+        &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+        ActorId(2),
+        10,
+    )
+    .unwrap();
+    game.act(
+        ActorId(1),
+        Action::UseAbility {
+            id: AbilityId::new("basic_melee").unwrap(),
+            target: ActorId(2),
+        },
+    )
+    .unwrap();
+    game.act(
+        ActorId(2),
+        Action::UseAbility {
+            id: AbilityId::new("basic_melee").unwrap(),
+            target: ActorId(1),
+        },
+    )
+    .unwrap();
     assert!(
         game.tick() >= 50,
         "stopped at an internal timer before attacks resolved"
@@ -321,11 +379,14 @@ fn terminal_physics_stops_timer_credit_at_the_actual_tick_and_fear_outlives_its_
     let injury = game.health(player).unwrap().0 - 1;
     game.apply_effects(
         player,
-        &[tor_simulation::EffectSpec::Damage {
-            components: std::collections::BTreeMap::from([(
-                tor_simulation::combat::DamageType::Impact,
-                injury,
-            )]),
+        &[tor_simulation::rules::Effect::Damage {
+            damage: tor_simulation::rules::DamageExpr::Components {
+                components: vec![tor_simulation::rules::DamageComponentExpr {
+                    category: tor_simulation::combat::DamageType::Impact,
+                    descriptor: None,
+                    amount: tor_simulation::rules::AmountExpr::Fixed { amount: injury },
+                }],
+            },
         }],
     )
     .unwrap();
@@ -336,7 +397,13 @@ fn terminal_physics_stops_timer_credit_at_the_actual_tick_and_fear_outlives_its_
     assert!(!game.alive(player));
     assert!(game.run_outcome().terminal);
     let state = game.creature(subject).unwrap();
-    assert_eq!(state.fear().remaining(player), Some(400 - game.tick()));
+    assert_eq!(
+        state.conditions().remaining(
+            &tor_simulation::content_ids::ConditionId::new("fear").unwrap(),
+            player
+        ),
+        Some(400 - game.tick())
+    );
     for resource in Resource::ALL {
         assert_eq!(state.costs().resources().balance(resource), 4);
         assert_eq!(

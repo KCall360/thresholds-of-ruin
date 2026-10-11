@@ -196,7 +196,7 @@ pub fn write(path: impl AsRef<Path>, mut archive: Value) {
     tx.commit().unwrap();
 }
 
-/// Copy a package: its manifest, region files, index and certificate.
+/// Copy a package: its manifest, named rules source, region files, index and certificate.
 pub fn copy_package(from: &Path, to: &Path) {
     std::fs::create_dir_all(to.join("regions")).unwrap();
     for name in ["scenario.toml", "index.json", "validation.json"] {
@@ -204,6 +204,12 @@ pub fn copy_package(from: &Path, to: &Path) {
             std::fs::copy(from.join(name), to.join(name)).unwrap();
         }
     }
+    let manifest: toml::Value =
+        toml::from_str(&std::fs::read_to_string(from.join("scenario.toml")).unwrap()).unwrap();
+    let rules = manifest["ruleset"].as_str().unwrap();
+    let destination = to.join(rules);
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::copy(from.join(rules), destination).unwrap();
     for entry in std::fs::read_dir(from.join("regions")).unwrap() {
         let entry = entry.unwrap();
         std::fs::copy(entry.path(), to.join("regions").join(entry.file_name())).unwrap();

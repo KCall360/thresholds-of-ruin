@@ -224,6 +224,7 @@ impl DiskCheckpoint {
     pub(super) fn restore(self, archive: Archive) -> Result<Engine, Failure> {
         if self.version != ARCHIVE_VERSION
             || self.ruleset != RULESET
+            || archive.ruleset_hash != archive.scenario.ruleset_hash()
             || self.record_count != archive.records.len()
             || self.wizard_game && !archive.wizard_game
             || self.boundaries.is_empty()
@@ -275,8 +276,10 @@ impl DiskCheckpoint {
                 return Err(invalid_archive());
             }
         }
-        let mut restore = RestoreContext::new(&self.shared);
-        let game = restore.restore(self.game).ok_or_else(invalid_archive)?;
+        let mut restore = RestoreContext::new(&self.shared, archive.scenario.content()?);
+        let game = restore
+            .restore(self.game)
+            .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
         if !self.revisions.valid_for(&game)
             || !lifecycle.valid_game(
                 &game,
@@ -332,7 +335,9 @@ impl DiskCheckpoint {
             {
                 return Err(invalid_archive());
             }
-            let game = restore.restore(boundary.game).ok_or_else(invalid_archive)?;
+            let game = restore
+                .restore(boundary.game)
+                .map_err(|error| Failure::new(ErrorCode::InvalidArchive, &error.to_string()))?;
             if !boundary.revisions.valid_for(&game) || !lifecycle.valid_game(&game, &boundary.id) {
                 return Err(invalid_archive());
             }
@@ -406,7 +411,7 @@ impl DiskCheckpoint {
                         .is_none_or(|queued| {
                             queued.id != intention
                                 || queued.origin != work.origin()
-                                || !work.matches(queued.work)
+                                || !work.matches(queued.work.clone())
                                 || queued.state != tor_simulation::IntentionState::Queued
                         })
                     {
@@ -470,6 +475,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn checkpoint_actors_reference_the_catalog_once_in_the_archive() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/interactions");
+        let engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        let archive = serde_json::to_value(&engine.archive).unwrap();
+        let catalog = &archive["scenario"]["package"]["manifest"]["creatures"];
+        assert!(catalog["species"]
+            .as_object()
+            .is_some_and(|species| !species.is_empty()));
+        assert!(archive["scenario"]["package"]["rules_source"].is_string());
+        assert_eq!(
+            archive["ruleset_hash"],
+            archive["scenario"]["package"]["certificate"]["ruleset_hash"]
+        );
+        let disk = Checkpoint::capture(&engine).encode("test", 0);
+        let saved = serde_json::to_value(&disk).unwrap();
+        let mut count = 0;
+        for pool in saved["shared"]["actors"].as_array().unwrap() {
+            for actor in pool.as_object().unwrap().values() {
+                if actor["combat"].is_object() {
+                    count += 1;
+                    assert!(actor["combat"]["creature"]["build"]["species"].is_string());
+                    assert!(actor["combat"]["creature"]["build"]
+                        .get("catalog")
+                        .is_none());
+                }
+            }
+        }
+        assert!(count > 0);
+        assert!(saved.get("rules_source").is_none());
+        assert!(saved["shared"].get("catalog").is_none());
+    }
+
+    #[test]
+    fn forged_checkpoint_species_ids_fail_restore_without_creating_definitions() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scenarios/tests/interactions");
+        let engine =
+            Engine::memory(crate::scenario_package::load(&root, 42, None, false).unwrap()).unwrap();
+        let mut saved =
+            serde_json::to_value(Checkpoint::capture(&engine).encode("test", 0)).unwrap();
+        for pool in saved["shared"]["actors"].as_array_mut().unwrap() {
+            for actor in pool.as_object_mut().unwrap().values_mut() {
+                if actor["combat"].is_object() {
+                    actor["combat"]["creature"]["build"]["species"] =
+                        serde_json::json!("missing_species");
+                }
+            }
+        }
+        let disk: DiskCheckpoint = serde_json::from_value(saved).unwrap();
+        assert!(disk.restore(engine.archive.clone()).is_err());
+    }
+
+    #[test]
     fn explored_checkpoint_preserves_exact_navigation_at_every_rewind_boundary() {
         let trace = tor_test_support::performance::Trace::load();
         let mut engine = Engine::memory(Scenario::performance(trace.seed, 16, 1).unwrap()).unwrap();
@@ -509,16 +569,16 @@ mod tests {
         );
         let disk: DiskCheckpoint = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
-            Game::restore_checkpoint(disk.game, &disk.shared),
-            Some(engine.game.clone())
+            Game::restore_checkpoint(disk.game, &disk.shared, engine.game.content().clone()),
+            Ok(engine.game.clone())
         );
         assert_eq!(disk.boundaries.len(), engine.boundaries.len());
         for (saved, original) in disk.boundaries.into_iter().zip(&engine.boundaries) {
             assert_eq!(saved.id, original.id);
             assert_eq!(saved.revisions, original.revisions);
             assert_eq!(
-                Game::restore_checkpoint(saved.game, &disk.shared),
-                Some(original.game.clone())
+                Game::restore_checkpoint(saved.game, &disk.shared, engine.game.content().clone()),
+                Ok(original.game.clone())
             );
         }
     }
@@ -608,8 +668,8 @@ mod tests {
         let value = serde_json::to_value(&checkpoint).unwrap();
         let decoded: DiskCheckpoint = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(
-            Game::restore_checkpoint(decoded.game, &decoded.shared),
-            Some(engine.game.clone())
+            Game::restore_checkpoint(decoded.game, &decoded.shared, engine.game.content().clone()),
+            Ok(engine.game.clone())
         );
         for damage in ["index", "duplicate", "empty", "unknown", "missing", "flat"] {
             let mut broken = value.clone();

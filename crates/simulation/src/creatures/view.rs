@@ -1,18 +1,20 @@
 //! Personal inspection projection. No seeds, reservation identities, private
 //! grant provenance or other actors' records cross this boundary.
 
-use super::{CreatureState, Subtype};
+use super::CreatureState;
 use crate::attributes::{Attributes, Defenses, ManaBinding, SkillRanks};
-use crate::grants::Ability;
-use crate::progression::{CreatureType, HdSource};
+use crate::content_ids::{AbilityId, SubtypeId, TalentId, TypeId};
+use crate::progression::HdSource;
 use crate::resources::Resource;
-use crate::talents::Talent;
-use std::collections::BTreeSet;
+use crate::rules::Ruleset;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnStats {
-    pub kind: CreatureType,
-    pub subtypes: BTreeSet<Subtype>,
+    pub rules: Arc<Ruleset>,
+    pub kind: TypeId,
+    pub subtypes: BTreeSet<SubtypeId>,
     /// Advancement order, without the private per-die random seeds.
     pub hit_dice: Vec<HdSource>,
     pub attributes: Attributes,
@@ -20,11 +22,12 @@ pub struct OwnStats {
     pub defenses: Defenses,
     pub binding: ManaBinding,
     pub resources: Vec<ResourceView>,
-    pub active_talents: BTreeSet<Talent>,
-    pub dormant_talents: BTreeSet<Talent>,
+    pub active_talents: BTreeSet<TalentId>,
+    pub dormant_talents: BTreeSet<TalentId>,
     /// Granted techniques; target validity and affordability are checked when
     /// invoking them, rather than promised by an inspection snapshot.
-    pub abilities: BTreeSet<Ability>,
+    pub abilities: BTreeSet<AbilityId>,
+    pub ability_reaches: BTreeMap<AbilityId, crate::rules::Reach>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +44,8 @@ impl CreatureState {
         let derived = self.derived();
         let costs = self.costs();
         OwnStats {
-            kind: derived.kind,
+            rules: self.build().content().rules.clone(),
+            kind: derived.kind.clone(),
             subtypes: derived.subtypes.clone(),
             hit_dice: self
                 .build()
@@ -71,6 +75,7 @@ impl CreatureState {
             active_talents: derived.active_talents.clone(),
             dormant_talents: derived.dormant_talents.clone(),
             abilities: derived.abilities.clone(),
+            ability_reaches: derived.ability_reaches.clone(),
         }
     }
 }

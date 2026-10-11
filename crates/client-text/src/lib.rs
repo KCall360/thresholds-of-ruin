@@ -6,7 +6,7 @@ pub mod engine;
 pub mod narrative;
 pub mod parser;
 
-pub const HELP: &str = "Commands: attack <actor>, power strike <actor>, magic bolt <actor>, fear <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
+pub const HELP: &str = "Commands: attack <actor>, <disclosed ability name> <actor>, places, name <place number> <new name>, look (l), inventory (i), stats, north/east/south/west/ne/se/sw/nw/up/down (n/e/s/w/ne/se/sw/nw/u/d), go <direction>, take/drop [quantity] <name or #id>, equip/remove/drink <name or #id>, wait (.), control, release, sync, save, history [before-id], note <text>, bookmark <text>, quit (q), branch-history <branch> [before-id].\nWizard credential: wizard <server developer command>.\nNotes/bookmarks are private user notes on the current state.\nannotate <user|frontend> <private|actor> <note|bookmark|explanation> <here|state:N|entry:ID> <text>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -25,17 +25,43 @@ pub enum Input {
 pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
     let (verb, rest) = word(line.trim());
     let verb = verb.to_ascii_lowercase();
-    let (verb, rest) = match (verb.as_str(), word(rest)) {
-        ("power", ("strike", noun)) => ("powerstrike".to_owned(), noun),
-        ("magic", ("bolt", noun)) => ("bolt".to_owned(), noun),
-        _ => (verb, rest),
-    };
     let action = |action| {
         Ok(Input::Command(Command::Act {
             expected_revision: state.revision,
             action,
         }))
     };
+    if let Some((ability, noun)) =
+        tor_client_common::abilities::match_command(&state.observation, line)?
+    {
+        let target = if ability.target_kind == AbilityTargetKind::SelfOnly && noun.is_empty() {
+            state.observation.self_target
+        } else {
+            let matches: Vec<_> = state
+                .observation
+                .visible_actors
+                .iter()
+                .filter(|a| {
+                    a.id != state.observation.self_target
+                        && (a.name.to_lowercase().contains(&noun.to_lowercase())
+                            || noun
+                                .strip_prefix('#')
+                                .and_then(|s| s.parse::<ActorTarget>().ok())
+                                == Some(a.id))
+                })
+                .collect();
+            match matches.as_slice() {
+                [actor] => actor.id,
+                [] => return Err("No matching actor is visible.".into()),
+                _ => return Err("Which actor? Use the ability name followed by #id.".into()),
+            }
+        };
+        return action(tor_client_common::abilities::action(
+            &state.observation,
+            &ability.id,
+            target,
+        )?);
+    }
     match (verb.as_str(), rest) {
         ("equip" | "wear" | "wield" | "remove" | "unequip" | "drink" | "quaff", noun)
             if !noun.is_empty() =>
@@ -71,13 +97,7 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
                 )),
             }
         }
-        ("attack" | "hit" | "fight" | "powerstrike" | "bolt" | "fear", noun) => {
-            let ability = match verb.as_str() {
-                "powerstrike" => Some(Ability::PowerStrike),
-                "bolt" => Some(Ability::MagicBolt),
-                "fear" => Some(Ability::Fear),
-                _ => None,
-            };
+        ("attack" | "hit" | "fight", noun) => {
             let mut actors: Vec<_> = state
                 .observation
                 .visible_actors
@@ -94,12 +114,10 @@ pub fn parse(line: &str, state: &StateView) -> Result<Input, String> {
             actors.sort_by_key(|a| a.id);
             actors.dedup_by_key(|a| a.id);
             match actors.as_slice() {
-                [actor] => action(match ability {
-                    Some(ability) => {
-                        tor_client_common::abilities::action(&state.observation, ability, actor.id)?
-                    }
-                    None => Action::Attack { target: actor.id },
-                }),
+                [actor] => action(tor_client_common::abilities::basic_action(
+                    &state.observation,
+                    actor.id,
+                )?),
                 [] => Err("No matching actor is visible.".into()),
                 _ => Err(format!("Which actor? Use {verb} #id.")),
             }

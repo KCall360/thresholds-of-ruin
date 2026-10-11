@@ -1,5 +1,5 @@
 """Validate and summarize items workload v1 without dumping raw samples."""
-from workload_report import main, positive_counts, require, summarize_matrix
+from workload_report import main, nonnegative_counts, positive_counts, require, summarize_matrix
 
 CASES = {(16, 8), (1000, 256)}
 COUNTS = ["disclosed_bytes", "saved_bytes", "observations", "scenes", "item_candidates", "stack_candidates", "knowledge_checks"]
@@ -8,7 +8,8 @@ COUNTS = ["disclosed_bytes", "saved_bytes", "observations", "scenes", "item_cand
 def check_row(row):
     require(row["transfers"] == len(row["transfer_ms"]) == 20, "each sample times 20 transfers")
     require(len(row["client_apply_ms"]) == len(row["client_render_ms"]) == 20, "the client applies and renders each transfer")
-    positive_counts(row, COUNTS)
+    positive_counts(row, [field for field in COUNTS if field != "scenes"])
+    nonnegative_counts(row, ["scenes"])
 
 
 def summarize(rows):

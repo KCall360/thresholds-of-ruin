@@ -1,13 +1,15 @@
 //! Capacity-preserving resource balances and deterministic active-time recovery.
 
-use crate::attributes::{Attribute, Attributes, ManaBinding};
+use crate::rules::Ruleset;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceError {
     InvalidState,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 #[serde(rename_all = "snake_case")]
 pub enum Resource {
@@ -18,42 +20,64 @@ pub enum Resource {
 
 impl Resource {
     pub const ALL: [Self; 3] = [Self::Stamina, Self::Focus, Self::Mana];
+}
 
-    fn recovery_period(self) -> u64 {
-        match self {
-            Self::Stamina => 100,
-            Self::Focus => 300,
-            Self::Mana => 1_000,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ByResource<T> {
+    pub stamina: T,
+    pub focus: T,
+    pub mana: T,
+}
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for ByResource<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields<T> {
+            stamina: T,
+            focus: T,
+            mana: T,
         }
+        let fields: Fields<T> = crate::bounded::named_map(deserializer)?;
+        Ok(Self {
+            stamina: fields.stamina,
+            focus: fields.focus,
+            mana: fields.mana,
+        })
     }
 }
+impl<T> ByResource<T> {
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> ByResource<U> {
+        ByResource {
+            stamina: f(self.stamina),
+            focus: f(self.focus),
+            mana: f(self.mana),
+        }
+    }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ResourceMaxima {
-    pub stamina: u32,
-    pub focus: u32,
-    pub mana: u32,
-}
-
-impl ResourceMaxima {
-    /// Build derivation supplies magical capability; owning a binding alone
-    /// does not grant Mana. Additional source-owned capacity grants apply later.
-    pub fn derived(attributes: Attributes, binding: ManaBinding, magical: bool) -> Self {
+    pub fn from_fn(mut f: impl FnMut(Resource) -> T) -> Self {
         Self {
-            stamina: 2 + u32::from(attributes.get(Attribute::Strength)),
-            focus: 2 + u32::from(attributes.get(Attribute::Willpower)),
-            mana: if magical {
-                2 + u32::from(attributes.get(binding.attribute()))
-            } else {
-                0
-            },
+            stamina: f(Resource::Stamina),
+            focus: f(Resource::Focus),
+            mana: f(Resource::Mana),
         }
     }
-
-    fn values(self) -> [u32; 3] {
-        [self.stamina, self.focus, self.mana]
+    pub fn get(&self, resource: Resource) -> &T {
+        match resource {
+            Resource::Stamina => &self.stamina,
+            Resource::Focus => &self.focus,
+            Resource::Mana => &self.mana,
+        }
+    }
+    pub fn get_mut(&mut self, resource: Resource) -> &mut T {
+        match resource {
+            Resource::Stamina => &mut self.stamina,
+            Resource::Focus => &mut self.focus,
+            Resource::Mana => &mut self.mana,
+        }
     }
 }
+pub type ResourceMaxima = ByResource<u32>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Pool {
@@ -98,7 +122,8 @@ impl Pool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resources {
-    pools: [Pool; 3],
+    pools: ByResource<Pool>,
+    periods: ByResource<u64>,
 }
 
 impl Resources {
@@ -106,41 +131,65 @@ impl Resources {
     /// fractional active recovery. Invalid state rejects rather than clamps.
     pub fn from_recorded(
         maxima: ResourceMaxima,
-        balances: [u32; 3],
-        elapsed: [u64; 3],
+        balances: ByResource<u32>,
+        elapsed: ByResource<u64>,
+        rules: &Ruleset,
     ) -> Result<Self, ResourceError> {
-        let mut resources = Self::new(maxima);
+        let mut resources = Self::new(maxima, rules);
         for resource in Resource::ALL {
-            let index = resource as usize;
-            let pool = &mut resources.pools[index];
-            if balances[index] > pool.maximum
-                || elapsed[index] >= resource.recovery_period()
-                || (balances[index] == pool.maximum && elapsed[index] != 0)
+            let pool = resources.pools.get_mut(resource);
+            if *balances.get(resource) > pool.maximum
+                || *elapsed.get(resource) >= *resources.periods.get(resource)
+                || (*balances.get(resource) == pool.maximum && *elapsed.get(resource) != 0)
             {
                 return Err(ResourceError::InvalidState);
             }
-            pool.balance = balances[index];
-            pool.remainder = elapsed[index];
+            pool.balance = *balances.get(resource);
+            pool.remainder = *elapsed.get(resource);
         }
         Ok(resources)
     }
 
-    pub fn new(maxima: ResourceMaxima) -> Self {
-        Self {
-            pools: maxima.values().map(Pool::new),
+    pub fn new(maxima: ResourceMaxima, rules: &Ruleset) -> Self {
+        let mut periods = ByResource {
+            stamina: 1,
+            focus: 1,
+            mana: 1,
+        };
+        for definition in &rules.document().resources {
+            *periods.get_mut(definition.resource) = definition.recovery_period;
         }
+        Self {
+            pools: ByResource::from_fn(|resource| Pool::new(*maxima.get(resource))),
+            periods,
+        }
+    }
+    pub fn set_recovery_rules(&mut self, rules: &Ruleset) {
+        for definition in &rules.document().resources {
+            *self.periods.get_mut(definition.resource) = definition.recovery_period;
+            self.pools.get_mut(definition.resource).remainder %= definition.recovery_period;
+        }
+    }
+    pub fn restore(&mut self, resource: Resource, amount: u32) -> u32 {
+        let pool = self.pools.get_mut(resource);
+        let restored = amount.min(pool.maximum - pool.balance);
+        pool.balance += restored;
+        if pool.balance == pool.maximum {
+            pool.remainder = 0;
+        }
+        restored
     }
 
     pub fn balance(&self, resource: Resource) -> u32 {
-        self.pools[resource as usize].balance
+        self.pools.get(resource).balance
     }
 
     pub fn maximum(&self, resource: Resource) -> u32 {
-        self.pools[resource as usize].maximum
+        self.pools.get(resource).maximum
     }
 
     pub fn recovery_elapsed(&self, resource: Resource) -> u64 {
-        self.pools[resource as usize].remainder
+        self.pools.get(resource).remainder
     }
 
     /// Active ticks until the next balance change. Full pools have no event;
@@ -149,22 +198,24 @@ impl Resources {
         Resource::ALL
             .into_iter()
             .filter_map(|resource| {
-                let pool = self.pools[resource as usize];
-                (pool.balance < pool.maximum).then(|| resource.recovery_period() - pool.remainder)
+                let pool = *self.pools.get(resource);
+                (pool.balance < pool.maximum).then(|| *self.periods.get(resource) - pool.remainder)
             })
             .min()
     }
 
     pub fn set_maxima(&mut self, maxima: ResourceMaxima) {
-        for (pool, maximum) in self.pools.iter_mut().zip(maxima.values()) {
-            pool.set_maximum(maximum);
+        for resource in Resource::ALL {
+            self.pools
+                .get_mut(resource)
+                .set_maximum(*maxima.get(resource));
         }
     }
 
     /// Direct spending primitive. Action execution additionally owns reservations
     /// and paid-cost history; queue admission must not invoke this method.
     pub fn spend(&mut self, resource: Resource, amount: u32) -> bool {
-        let pool = &mut self.pools[resource as usize];
+        let pool = self.pools.get_mut(resource);
         if amount > pool.balance {
             return false;
         }
@@ -176,7 +227,9 @@ impl Resources {
     /// this method and receive no catch-up recovery on reactivation.
     pub fn advance_active(&mut self, ticks: u64) {
         for resource in Resource::ALL {
-            self.pools[resource as usize].recover(ticks, resource.recovery_period());
+            self.pools
+                .get_mut(resource)
+                .recover(ticks, *self.periods.get(resource));
         }
     }
 }

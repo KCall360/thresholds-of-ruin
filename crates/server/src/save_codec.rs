@@ -65,6 +65,7 @@ pub(super) fn region_frame(
 pub(super) fn decode_region(
     bytes: &[u8],
     id: u64,
+    content: std::sync::Arc<tor_simulation::creatures::Content>,
 ) -> Result<tor_simulation::RegionRecord, Failure> {
     if bytes.len() < 24
         || bytes.len() > MAX_REGION + 24
@@ -82,7 +83,9 @@ pub(super) fn decode_region(
     {
         return Err(invalid_archive());
     }
-    strict(&bytes[24..])
+    strict::<tor_simulation::RegionRecordData>(&bytes[24..])?
+        .restore(content)
+        .map_err(|error| Failure::new(tor_protocol::ErrorCode::InvalidArchive, &error.to_string()))
 }
 pub(super) fn decode(bytes: &[u8], sequence: u64) -> Result<(u16, &[u8]), Failure> {
     if bytes.len() < 24 || bytes.len() > MAX_PAYLOAD + 24 {

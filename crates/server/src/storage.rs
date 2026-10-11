@@ -232,6 +232,7 @@ impl RegionWrite {
 fn read_region_row(
     conn: &Connection,
     id: tor_simulation::RecordId,
+    content: Arc<tor_simulation::creatures::Content>,
 ) -> Result<Option<tor_simulation::RegionRecord>, Failure> {
     let bytes: Option<Vec<u8>> = conn
         .query_row(
@@ -241,7 +242,9 @@ fn read_region_row(
         )
         .optional()
         .map_err(saved_row_failure)?;
-    bytes.map(|bytes| decode_region(&bytes, id.0)).transpose()
+    bytes
+        .map(|bytes| decode_region(&bytes, id.0, content))
+        .transpose()
 }
 /// Reads the save's copies of region files, on a connection of its own
 /// opened on first use. A copy is checked against the package index's hash
@@ -271,6 +274,7 @@ impl SourceReader {
 /// Reads region rows on a connection of its own, opened on first use.
 #[derive(Debug)]
 pub(crate) struct RegionReader {
+    content: Arc<tor_simulation::creatures::Content>,
     path: PathBuf,
     conn: Option<Connection>,
 }
@@ -282,7 +286,7 @@ impl RegionReader {
         if self.conn.is_none() {
             self.conn = Some(connection(&self.path)?);
         }
-        read_region_row(self.conn.as_ref().unwrap(), id)
+        read_region_row(self.conn.as_ref().unwrap(), id, self.content.clone())
     }
 }
 fn connection(path: &Path) -> Result<Connection, Failure> {
@@ -759,6 +763,7 @@ struct Shared {
 }
 #[derive(Debug)]
 struct Owner {
+    content: Arc<tor_simulation::creatures::Content>,
     shared: Arc<Shared>,
     /// Serializes producers without blocking worker progress or status readers.
     admission: Mutex<()>,
@@ -858,6 +863,7 @@ impl Store {
                 }
             })
             .collect::<Result<_, Failure>>()?;
+        let content = archive.scenario.content()?;
         let shared = Arc::new(Shared {
             save_id: save_id.clone(),
             policy,
@@ -892,6 +898,7 @@ impl Store {
             .map_err(|_| storage_failure())?;
         Ok((
             Self(Arc::new(Owner {
+                content,
                 shared,
                 admission: Mutex::new(()),
                 thread: Mutex::new(Some(thread)),
@@ -1049,7 +1056,7 @@ impl Store {
         if reader.is_none() {
             *reader = Some(connection(&self.0.path)?);
         }
-        read_region_row(reader.as_ref().unwrap(), id)
+        read_region_row(reader.as_ref().unwrap(), id, self.0.content.clone())
     }
     /// A reader of the save's region file copies, on a connection of its own.
     pub(crate) fn source_reader(&self) -> SourceReader {
@@ -1065,6 +1072,7 @@ impl Store {
     /// A reader of region rows with its own connection, for another thread.
     pub(crate) fn region_reader(&self) -> RegionReader {
         RegionReader {
+            content: self.0.content.clone(),
             path: self.0.path.clone(),
             conn: None,
         }
@@ -1518,7 +1526,12 @@ mod tests {
         )
         .unwrap();
         let before = SAVED_BYTES_COPIED.with(std::cell::Cell::get);
-        assert!(read_region_row(&conn, tor_simulation::RecordId(1)).is_err());
+        assert!(read_region_row(
+            &conn,
+            tor_simulation::RecordId(1),
+            crate::engine::diagnostic_content().unwrap()
+        )
+        .is_err());
         assert_eq!(
             SAVED_BYTES_COPIED.with(std::cell::Cell::get) - before,
             0,
@@ -1608,11 +1621,14 @@ mod tests {
         assert!(commit(&mut conn, &write(&[7], vec![(7, other)]), "").is_err());
         assert_eq!(stored(&conn), [(7, row.clone())]);
         // Rows decode to their record, and only under their own identity.
-        assert_eq!(decode_region(&row, 7).unwrap(), record);
-        assert!(decode_region(&row, 8).is_err());
+        assert_eq!(
+            decode_region(&row, 7, package.content().unwrap()).unwrap(),
+            record
+        );
+        assert!(decode_region(&row, 8, package.content().unwrap()).is_err());
         let mut damaged = row.clone();
         *damaged.last_mut().unwrap() ^= 1;
-        assert!(decode_region(&damaged, 7).is_err());
+        assert!(decode_region(&damaged, 7, package.content().unwrap()).is_err());
         // Rows the checkpoint still refers to stay without being rewritten;
         // the others are deleted with the checkpoint that stops referring to
         // them, and a failure keeps them.
@@ -2079,6 +2095,7 @@ mod tests {
         let bytes = encode_checkpoint(&checkpoint.encode(&save_id, TO_HALL_4 as u64)).unwrap();
         let mut regions = RegionWrite::encode(&checkpoint).unwrap();
         let conn = connection(path).unwrap();
+        let content = corridor().content().unwrap();
         regions.rows = checkpoint
             .referenced()
             .into_iter()
@@ -2087,7 +2104,7 @@ mod tests {
                     .records
                     .get(&id)
                     .map(|record| (**record).clone())
-                    .or_else(|| read_region_row(&conn, id).unwrap())
+                    .or_else(|| read_region_row(&conn, id, content.clone()).unwrap())
                     .unwrap();
                 (id.0, region_frame(id.0, &record).unwrap())
             })

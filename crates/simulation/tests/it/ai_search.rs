@@ -7,10 +7,8 @@ use tor_world::{Extent, Location, Position, Region, RegionId, World};
 
 #[test]
 fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_completion() {
-    use tor_simulation::{
-        checkpoint::SharedState, ConsumableSpec, EffectSpec, ItemClass, ItemId, ItemSpec,
-    };
-    let mut game = Game::two_room(42);
+    use tor_simulation::{checkpoint::SharedState, ConsumableSpec, ItemClass, ItemId, ItemSpec};
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let at = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -38,18 +36,14 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
     potion.concealed = true;
     potion.appearance = "red potion".into();
     potion.consumable = Some(ConsumableSpec {
-        effects: vec![EffectSpec::Heal { amount: 10 }],
+        effects: vec![tor_simulation::rules::Effect::Heal {
+            amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },
+        }],
     });
     game.place_item_stack(20, at(2), Some(ai), 2, potion)
         .unwrap();
     game.identify_item(ai, ItemId(20)).unwrap();
-    game.apply_effects(
-        ai,
-        &[EffectSpec::Damage {
-            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 15)]),
-        }],
-    )
-    .unwrap();
+    game.apply_effects(ai, &[damage(15)]).unwrap();
     game.refresh_navigation();
     game.act(human, Action::Wait).unwrap();
     assert_eq!(
@@ -66,7 +60,7 @@ fn autonomous_healing_intention_survives_checkpoint_and_consumes_only_on_complet
         serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
             .unwrap();
     let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(restored.preparation(ai), game.preparation(ai));
     while restored.preparation(ai).is_some() {
         restored
@@ -83,7 +77,14 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         checkpoint::SharedState, AnatomySpec, EquipmentSlot, EquipmentSlotId, EquipmentSpec,
         ItemClass, ItemId, ItemSpec,
     };
-    let mut game = Game::two_room(42);
+    let mut species = super::creature_fixture::species();
+    species.anatomy = AnatomySpec {
+        slots: vec![EquipmentSlot::new("body_armor").unwrap()],
+    };
+    let mut game = Game::two_room(
+        42,
+        super::creature_fixture::content_with(species.clone(), vec![]),
+    );
     let at = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -94,20 +95,23 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
     let ai = game
         .spawn_actor(at(2), NonZeroU64::new(100).unwrap())
         .unwrap();
-    let mut species = super::creature_fixture::species();
-    species.anatomy = AnatomySpec {
-        slots: vec![EquipmentSlot::BodyArmor],
-    };
     super::creature_fixture::configure(&mut game, ai, "neutral", species);
     game.configure_ai(ai, AiProfile::default()).unwrap();
     for (id, defense) in [(10, 1), (11, 3)] {
         let mut item = ItemSpec::ordinary(format!("mail {id}"));
         item.class = ItemClass::Armor;
         item.equipment = Some(EquipmentSpec {
-            slot: EquipmentSlot::BodyArmor,
+            slot: EquipmentSlot::new("body_armor").unwrap(),
             attack: None,
-            defense,
-            reductions: BTreeMap::new(),
+            modifiers: vec![tor_simulation::rules::Modifier {
+                scope: tor_simulation::rules::Scope::Always,
+                op: tor_simulation::rules::ModifierOp::Add {
+                    stat: tor_simulation::rules::Stat::Defense {
+                        defense: tor_simulation::rules::DefenseKind::Physical,
+                    },
+                    value: defense,
+                },
+            }],
         });
         game.place_item_stack(id, at(2), Some(ai), 1, item).unwrap();
     }
@@ -128,7 +132,7 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
         serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
             .unwrap();
     let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     assert_eq!(restored.preparation(ai), game.preparation(ai));
     for _ in 0..16 {
         if restored.preparation(ai).is_none() {
@@ -176,10 +180,8 @@ fn autonomous_armor_replacement_resumes_checkpointed_removal_before_equipping_up
 
 #[test]
 fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares() {
-    use tor_simulation::{
-        checkpoint::SharedState, ConsumableSpec, EffectSpec, ItemClass, ItemId, ItemSpec,
-    };
-    let mut game = Game::two_room(42);
+    use tor_simulation::{checkpoint::SharedState, ConsumableSpec, ItemClass, ItemId, ItemSpec};
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let at = |x| Location {
         region: RegionId(1),
         position: Position { x, y: 1, z: 0 },
@@ -201,7 +203,9 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
     potion.class = ItemClass::Potion;
     potion.stackable = true;
     potion.consumable = Some(ConsumableSpec {
-        effects: vec![EffectSpec::Heal { amount: 10 }],
+        effects: vec![tor_simulation::rules::Effect::Heal {
+            amount: tor_simulation::rules::AmountExpr::Fixed { amount: 10 },
+        }],
     });
     game.place_item_stack(20, at(2), None, 3, potion).unwrap();
     game.refresh_navigation();
@@ -223,7 +227,7 @@ fn autonomous_loot_checkpoint_preserves_split_stack_and_does_not_collect_spares(
         serde_json::from_value(serde_json::to_value(game.checkpoint(&mut shared)).unwrap())
             .unwrap();
     let shared = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
-    let mut restored = Game::restore_checkpoint(snapshot, &shared).unwrap();
+    let mut restored = Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap();
     let view = restored.observe(ai).unwrap();
     assert_eq!(view.inventory.len(), 1);
     assert_eq!(view.inventory[0].quantity, 1);
@@ -258,7 +262,7 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
             bounds: Extent::new(16, 16, 1).unwrap(),
         })
         .unwrap();
-    let mut game = Game::new(world, 42);
+    let mut game = Game::new(world, 42, super::creature_fixture::content());
     let at = |x, y| Location {
         region: RegionId(1),
         position: Position { x, y, z: 0 },
@@ -295,7 +299,26 @@ fn a_many_target_decision_uses_one_remembered_topology_search() {
     let before = work_counts().route_searches;
     assert_eq!(
         game.next_ai_action(),
-        Some((ai, Action::Attack { target: human }))
+        Some((
+            ai,
+            Action::UseAbility {
+                id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: human
+            }
+        ))
     );
     assert_eq!(work_counts().route_searches - before, 1);
+}
+
+fn damage(amount: u32) -> tor_simulation::rules::Effect {
+    use tor_simulation::rules::{AmountExpr, DamageComponentExpr, DamageExpr, Effect};
+    Effect::Damage {
+        damage: DamageExpr::Components {
+            components: vec![DamageComponentExpr {
+                category: tor_simulation::combat::DamageType::Vital,
+                descriptor: None,
+                amount: AmountExpr::Fixed { amount },
+            }],
+        },
+    }
 }

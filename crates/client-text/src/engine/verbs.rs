@@ -41,7 +41,7 @@ pub enum Goal {
         target: ActorTarget,
     },
     UseAbility {
-        ability: Ability,
+        ability: String,
         target: ActorTarget,
     },
     Approach {
@@ -268,6 +268,22 @@ pub fn interpret(
     referents: &mut Referents,
 ) -> Interpretation {
     match command {
+        ParsedCommand::Ability { id, direct } => {
+            bind(direct, scene, referents, Domain::Figures, &|r| {
+                let target = match r.key {
+                    Key::Actor(target) => target,
+                    Key::Me => scene.state.observation.self_target,
+                    _ => return say("Choose a living creature."),
+                };
+                match tor_client_common::abilities::action(&scene.state.observation, id, target) {
+                    Ok(_) => goal(Goal::UseAbility {
+                        ability: id.clone(),
+                        target,
+                    }),
+                    Err(reason) => say(reason),
+                }
+            })
+        }
         ParsedCommand::Intransitive { verb } => intransitive(*verb, scene),
         ParsedCommand::Directional { direction } => directional(*direction, scene),
         ParsedCommand::Step { direction } => goal(Goal::Step {
@@ -337,9 +353,6 @@ fn needs_object(verb: Verb) -> bool {
             | Verb::Unlock
             | Verb::Lock
             | Verb::Attack
-            | Verb::PowerStrike
-            | Verb::MagicBolt
-            | Verb::Fear
             | Verb::Wear
             | Verb::Wield
             | Verb::Remove
@@ -557,40 +570,6 @@ fn transitive(
                         r.name.trim_end_matches(" corpse")
                     )),
                     _ => say(format!("Attacking {} would achieve nothing.", r.the())),
-                },
-            )
-        }
-        (Verb::PowerStrike | Verb::MagicBolt | Verb::Fear, indirect) => {
-            let ability = match verb {
-                Verb::PowerStrike => Ability::PowerStrike,
-                Verb::MagicBolt => Ability::MagicBolt,
-                _ => Ability::Fear,
-            };
-            if indirect.is_some() {
-                return say(format!("Use {} <creature>.", verb.as_str()));
-            }
-            if !tor_client_common::abilities::choices(&scene.state.observation).contains(&ability) {
-                return say(format!(
-                    "You don't have {}.",
-                    narration::ability_name(ability)
-                ));
-            }
-            bind(
-                direct,
-                scene,
-                referents,
-                Domain::Figures,
-                &|r| match r.key {
-                    Key::Actor(target) => match tor_client_common::abilities::action(
-                        &scene.state.observation,
-                        ability,
-                        target,
-                    ) {
-                        Ok(_) => goal(Goal::UseAbility { ability, target }),
-                        Err(reason) => say(reason),
-                    },
-                    Key::Me => say("Choose another creature."),
-                    _ => say("Choose a living creature."),
                 },
             )
         }

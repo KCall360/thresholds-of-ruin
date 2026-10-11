@@ -209,7 +209,7 @@ impl Game {
         if !body.valid() || !self.body_fits(id, actor.location, actor.orientation, &body) {
             return Err(GameError::Blocked);
         }
-        let mut actor = self.actors.get_mut(&id).expect("validated actor");
+        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
         actor.body = tor_world::Shared::new(body);
         actor.motion.acceleration_remainder = [0; 3];
         Ok(())
@@ -470,16 +470,16 @@ impl Game {
             .is_none()
         })
     }
-    pub(crate) fn advance_physics(&mut self, until: u64) -> u64 {
+    pub(crate) fn advance_physics(&mut self, until: u64) -> Result<u64, GameError> {
         if until <= self.tick {
-            return self.tick;
+            return Ok(self.tick);
         }
         let moving = self.actors.values().any(|a| a.motion.velocity != [0; 3])
             || self.items.values().any(|i| i.motion.velocity != [0; 3]);
         if !self.world.has_gravity() && !moving {
             self.tick = until;
-            self.settle_creature_time();
-            return until;
+            self.settle_creature_time()?;
+            return Ok(until);
         }
         for tick in self.tick + 1..=until {
             self.tick = tick;
@@ -508,7 +508,7 @@ impl Game {
                     &a.body,
                     a.motion,
                     tick,
-                );
+                )?;
                 if at != a.location || frame != a.orientation {
                     self.physics.displaced.insert(id);
                 }
@@ -519,10 +519,10 @@ impl Game {
                 a.visited.insert(at.region);
                 drop(a);
                 // Falling into a frozen region freezes the actor there.
-                self.sync_actor_lifecycle(id);
-                if self.combat.outcome.terminal {
-                    self.settle_creature_time();
-                    return tick;
+                self.sync_actor_lifecycle(id)?;
+                if self.run_outcome().terminal {
+                    self.settle_creature_time()?;
+                    return Ok(tick);
                 }
             }
             let ids: Vec<_> = self
@@ -564,7 +564,7 @@ impl Game {
                     },
                     i.motion.clone(),
                     tick,
-                );
+                )?;
                 self.items
                     .edit(id, |i| {
                         i.location = ItemLocation::Ground(at);
@@ -576,25 +576,31 @@ impl Game {
             if !active {
                 break;
             }
-            self.resolve_attacks();
-            self.check_objective();
-            if self.combat.outcome.terminal {
-                self.settle_creature_time();
-                return tick;
+            // Due conditions and capacity changes precede work completion on
+            // moving ticks, just as they do on the stationary fast path.
+            self.settle_creature_time()?;
+            if self.run_outcome().terminal {
+                return Ok(tick);
+            }
+            self.resolve_preparations()?;
+            self.check_run_policy()?;
+            if self.run_outcome().terminal {
+                self.settle_creature_time()?;
+                return Ok(tick);
             }
             if self
                 .next_actor()
                 .is_some_and(|id| self.actors[&id].ready_at <= tick)
             {
-                self.settle_creature_time();
-                return tick;
+                self.settle_creature_time()?;
+                return Ok(tick);
             }
         }
         // Resting physics can stop early. Settle once at the requested boundary;
         // lifecycle changes already settled before switching active clocks.
         self.tick = until;
-        self.settle_creature_time();
-        until
+        self.settle_creature_time()?;
+        Ok(until)
     }
     fn needs_integration(
         &self,
@@ -626,7 +632,7 @@ impl Game {
         body: &BodySpec,
         mut motion: MotionState,
         tick: u64,
-    ) -> (Location, u8, MotionState) {
+    ) -> Result<(Location, u8, MotionState), GameError> {
         crate::diagnostics::physics_step();
         let gravity = self.gravity_sum(at, frame, body);
         for axis in 0..3 {
@@ -712,15 +718,20 @@ impl Game {
                                 actor.orientation = frame;
                                 actor.motion = motion.clone();
                                 drop(actor);
-                                self.apply_damage(
-                                    id,
-                                    &std::collections::BTreeMap::from([(
+                                let damage = crate::damage::DamageSpec::new(
+                                    vec![crate::damage::DamageComponent::fixed(
                                         crate::combat::DamageType::Impact,
+                                        None,
                                         damage,
-                                    )]),
-                                );
+                                    )],
+                                    None,
+                                )
+                                .map_err(|_| {
+                                    GameError::Rule(crate::abilities::RuleError::InvalidDefinition)
+                                })?;
+                                self.apply_damage(id, &damage)?;
                                 if !self.alive(id) {
-                                    return (at, frame, MotionState::default());
+                                    return Ok((at, frame, MotionState::default()));
                                 }
                             }
                         }
@@ -728,7 +739,7 @@ impl Game {
                 }
             }
         }
-        (at, frame, motion)
+        Ok((at, frame, motion))
     }
 }
 fn cap_velocity(v: &mut [i64; 3]) {
@@ -751,7 +762,7 @@ mod definition_sharing_tests {
 
     #[test]
     fn body_edits_detach_snapshots_and_keep_checkpoint_encoding() {
-        let mut game = Game::two_room(42);
+        let mut game = Game::two_room(42, crate::test_creatures::content());
         let at = Location {
             region: RegionId(1),
             position: Position { x: 1, y: 1, z: 0 },
@@ -782,7 +793,7 @@ mod definition_sharing_tests {
             serde_json::to_value(&body).unwrap()
         );
         let decoded = serde_json::from_value(encoded).unwrap();
-        let restored = Game::restore_checkpoint(decoded, &shared).unwrap();
+        let restored = Game::restore_checkpoint(decoded, &shared, game.content().clone()).unwrap();
         assert_eq!(restored, game);
         assert_eq!(
             restored.actors.at(&restored.world, extra),
@@ -801,7 +812,7 @@ mod definition_sharing_tests {
                     bounds: Extent::new(unrelated + 2, 3, 1).unwrap(),
                 })
                 .unwrap();
-            let mut game = Game::new(world, 42);
+            let mut game = Game::new(world, 42, crate::test_creatures::content());
             for x in 0..=unrelated {
                 game.spawn_actor(
                     Location {

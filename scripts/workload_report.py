@@ -82,6 +82,13 @@ def positive_counts(row, fields):
                 f"{field} must be a positive count")
 
 
+def nonnegative_counts(row, fields):
+    """Computation counts may be zero when existing work is reused."""
+    for field in fields:
+        require(type(row[field]) is int and row[field] >= 0,
+                f"{field} must be a nonnegative integer computation count")
+
+
 def main(summarize):
     """Command-line entry point: validate the samples file and print the summary."""
     import sys

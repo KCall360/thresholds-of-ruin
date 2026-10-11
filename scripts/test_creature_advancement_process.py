@@ -1,4 +1,5 @@
 """Wizard advancement through the real server, Text and headless clients."""
+from process_harness import content_ids
 import subprocess
 
 from process_harness import ProcessTestCase, WIZARD_TOKEN
@@ -10,7 +11,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         package = creature_package(self, "advancement", abilities=("power_strike",))
         manifest = package / "scenario.toml"
         source = manifest.read_text(encoding="utf-8")
-        source = source.replace('archetypes = { ', 'archetypes = { injury = { class = "potion", name = "injury potion", consumable = { effects = [{ type = "damage", components = { vital = 3 } }] } }, ', 1)
+        source = source.replace('archetypes = { ', 'archetypes = { injury = { class = "potion", name = "injury potion", consumable = { effects = [{ kind = "damage", damage = { kind = "components", components = [{ category = "vital", amount = { kind = "fixed", amount = 3 } }] } }] } }, ', 1)
         manifest.write_text(source, encoding="utf-8", newline="\n")
         region = package / "regions/1.toml"
         source = region.read_text(encoding="utf-8")
@@ -34,7 +35,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 warrior"))
         advanced = self.request(observer, {"type": "snapshot"})
         combat = advanced["state"]["observation"]["combat"]
-        self.assertEqual(combat["own_stats"]["hit_dice"], original["own_stats"]["hit_dice"] + ["warrior"])
+        self.assertEqual(content_ids(combat["own_stats"]["hit_dice"]), content_ids(original["own_stats"]["hit_dice"]) + ["warrior"])
         self.assertEqual(combat["own_stats"]["skills"], original["own_stats"]["skills"])
         self.assertGreater(combat["max_hp"], original["max_hp"])
         self.assertEqual(combat["max_hp"] - combat["hp"], original["max_hp"] - original["hp"])
@@ -76,8 +77,8 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         trained = self.request(observer, {"type": "snapshot"})
         stats = trained["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(stats["attributes"]["strength"], original["attributes"]["strength"] + 1)
-        self.assertIn("hardiness", stats["active_talents"])
-        self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"] == "athletics"), 1)
+        self.assertIn("hardiness", content_ids(stats["active_talents"]))
+        self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"]["id"] == "athletics"), 1)
         for command in (
             "wizard creature train 1 4 lore",
             "wizard creature attribute 1 4 speed",
@@ -92,8 +93,8 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         removed = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
         self.assertEqual(removed["attributes"], original["attributes"])
         self.assertEqual(removed["skills"], original["skills"])
-        self.assertNotIn("hardiness", removed["active_talents"])
-        self.assertEqual(len(removed["hit_dice"]), 3)
+        self.assertNotIn("hardiness", content_ids(removed["active_talents"]))
+        self.assertEqual(len(content_ids(removed["hit_dice"])), 3)
 
     def test_adding_a_die_after_zero_hd_never_revives_the_actor(self):
         package = creature_package(self, "dead-advancement", abilities=("power_strike",))
@@ -110,7 +111,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertTrue(advanced["dead"])
         self.assertEqual(advanced["hp"], 0)
         self.assertGreater(advanced["max_hp"], 0)
-        self.assertEqual(advanced["own_stats"]["hit_dice"], ["warrior"])
+        self.assertEqual(content_ids(advanced["own_stats"]["hit_dice"]), ["warrior"])
 
     def test_older_owned_talent_goes_dormant_and_reactivates_with_its_class_requirement(self):
         package = creature_package(self, "dormant-advancement", abilities=("power_strike",))
@@ -120,16 +121,16 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         self.assertNotIn("Server error", wizard.command("wizard creature train 1 1 spellcasting"))
         self.assertNotIn("Server error", wizard.command("wizard creature talent 1 1 magic_bolt"))
         active = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
-        self.assertIn("magic_bolt", active["active_talents"])
-        self.assertIn("magic_bolt", active["abilities"])
+        self.assertIn("magic_bolt", content_ids(active["active_talents"]))
+        self.assertIn("magic_bolt", content_ids(active["abilities"]))
         self.assertNotIn("Server error", wizard.command("wizard creature remove-hd 1"))
         dormant = self.request(observer, {"type": "snapshot"})
         stats = dormant["state"]["observation"]["combat"]["own_stats"]
-        self.assertEqual(stats["hit_dice"], ["warrior"])
-        self.assertIn("magic_bolt", stats["dormant_talents"])
-        self.assertNotIn("magic_bolt", stats["active_talents"])
-        self.assertNotIn("magic_bolt", stats["abilities"])
-        self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"] == "spellcasting"), 1)
+        self.assertEqual(content_ids(stats["hit_dice"]), ["warrior"])
+        self.assertIn("magic_bolt", content_ids(stats["dormant_talents"]))
+        self.assertNotIn("magic_bolt", content_ids(stats["active_talents"]))
+        self.assertNotIn("magic_bolt", content_ids(stats["abilities"]))
+        self.assertEqual(next(skill["rank"] for skill in stats["skills"] if skill["skill"]["id"] == "spellcasting"), 1)
         observer.stop()
         wizard.stop()
         server.stop()
@@ -139,7 +140,7 @@ class CreatureAdvancementProcesses(ProcessTestCase):
         wizard, _ = self.text_client(WIZARD_TOKEN, observe=True)
         self.assertNotIn("Server error", wizard.command("wizard creature add-hd 1 mage"))
         reactivated = self.request(observer, {"type": "snapshot"})["state"]["observation"]["combat"]["own_stats"]
-        self.assertIn("magic_bolt", reactivated["active_talents"])
-        self.assertNotIn("magic_bolt", reactivated["dormant_talents"])
-        self.assertIn("magic_bolt", reactivated["abilities"])
-        self.assertEqual(next(skill["rank"] for skill in reactivated["skills"] if skill["skill"] == "spellcasting"), 1)
+        self.assertIn("magic_bolt", content_ids(reactivated["active_talents"]))
+        self.assertNotIn("magic_bolt", content_ids(reactivated["dormant_talents"]))
+        self.assertIn("magic_bolt", content_ids(reactivated["abilities"]))
+        self.assertEqual(next(skill["rank"] for skill in reactivated["skills"] if skill["skill"]["id"] == "spellcasting"), 1)

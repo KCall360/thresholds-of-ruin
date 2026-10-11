@@ -103,8 +103,8 @@ pub struct App {
     pub bump_attacks: BumpAttacks,
     pub pace_ms: u64,
     pub attack_targets: Vec<ActorView>,
-    pub ability_choices: Vec<Ability>,
-    pub selected_ability: Option<Ability>,
+    pub ability_choices: Vec<AbilityView>,
+    pub selected_ability: Option<AbilityView>,
     /// The look cursor, while choosing a cell to describe.
     pub look_cursor: Option<Position>,
     pub inventory_open: bool,
@@ -531,7 +531,7 @@ impl App {
         )
     }
 
-    fn select_targets(&mut self, ability: Option<Ability>) {
+    fn select_targets(&mut self, ability: Option<AbilityView>) {
         self.selected_ability = ability;
         self.attack_targets = self
             .state
@@ -558,14 +558,9 @@ impl App {
         let Some(target) = self.attack_targets.get(self.selected) else {
             return "No target is visible.".into();
         };
-        let operation = self.selected_ability.map_or_else(
+        let operation = self.selected_ability.as_ref().map_or_else(
             || "Attack".to_owned(),
-            |ability| {
-                format!(
-                    "Use {} on",
-                    tor_client_common::narration::ability_name(ability)
-                )
-            },
+            |ability| format!("Use {} on", ability.name),
         );
         format!(
             "{operation} {}? Up/Down select, Enter confirms, Esc cancels.",
@@ -692,18 +687,32 @@ impl App {
                             .min(self.ability_choices.len() - 1)
                     }
                     Key::Enter => {
-                        let ability = self.ability_choices[self.selected];
+                        let ability = self.ability_choices[self.selected].clone();
                         self.ability_choices.clear();
                         if self.state.as_ref().is_some_and(|state| {
                             tor_client_common::abilities::choices(&state.state().observation)
                                 .contains(&ability)
                         }) {
+                            if ability.target_kind == AbilityTargetKind::SelfOnly {
+                                let action = self.state.as_ref().map(|state| {
+                                    tor_client_common::abilities::action(
+                                        &state.state().observation,
+                                        &ability.id,
+                                        state.state().observation.self_target,
+                                    )
+                                });
+                                return match action {
+                                    Some(Ok(action)) => self.act(action),
+                                    Some(Err(reason)) => {
+                                        self.status = reason;
+                                        Effect::None
+                                    }
+                                    None => Effect::None,
+                                };
+                            }
                             self.select_targets(Some(ability));
                         } else {
-                            self.status = format!(
-                                "You don't have {}.",
-                                tor_client_common::narration::ability_name(ability)
-                            );
+                            self.status = format!("You don't have {}.", ability.name);
                         }
                     }
                     _ => {}
@@ -730,7 +739,7 @@ impl App {
                         let action = self.state.as_ref().map(|state| {
                             tor_client_common::abilities::action(
                                 &state.state().observation,
-                                ability,
+                                &ability.id,
                                 target,
                             )
                         });
@@ -743,7 +752,20 @@ impl App {
                             None => Effect::None,
                         };
                     }
-                    return self.act(Action::Attack { target });
+                    let action = self.state.as_ref().map(|state| {
+                        tor_client_common::abilities::basic_action(
+                            &state.state().observation,
+                            target,
+                        )
+                    });
+                    return match action {
+                        Some(Ok(action)) => self.act(action),
+                        Some(Err(reason)) => {
+                            self.status = reason;
+                            Effect::None
+                        }
+                        None => Effect::None,
+                    };
                 }
                 _ => {}
             }
@@ -1591,7 +1613,13 @@ impl App {
                         }),
                     }
             }) {
-                action = Action::Attack { target: target.id };
+                match tor_client_common::abilities::basic_action(view, target.id) {
+                    Ok(attack) => action = attack,
+                    Err(reason) => {
+                        self.status = reason;
+                        return Effect::None;
+                    }
+                }
             }
         }
         let expected_revision = state.state().revision;
@@ -1740,11 +1768,7 @@ pub fn history_text(entry: &HistoryEntry) -> String {
             }
             Event::Waited => "Waited.".into(),
             Event::PreparationPaused => "Preparation paused.".into(),
-            Event::AttackStarted { .. } => "Prepared an attack.".into(),
-            Event::AbilityStarted { ability, .. } => format!(
-                "Prepared {}.",
-                tor_client_common::narration::ability_name(*ability)
-            ),
+            Event::AbilityStarted { ability, .. } => format!("Prepared {}.", ability.name),
             Event::ItemStarted { action } => match action {
                 tor_protocol::Action::Equip { .. } => "Began equipping an item.".into(),
                 tor_protocol::Action::Unequip { .. } => "Began removing an item.".into(),
@@ -1866,15 +1890,6 @@ impl InventoryEntry {
     }
 }
 
-fn slot_phrase(slot: EquipmentSlot) -> &'static str {
-    match slot {
-        EquipmentSlot::Weapon => "weapon in hand",
-        EquipmentSlot::Ring => "on a finger",
-        EquipmentSlot::Amulet => "around the neck",
-        _ => "being worn",
-    }
-}
-
 /// Everything carried, lettered and in disclosed order.
 pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
     o.inventory
@@ -1888,7 +1903,7 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                 o.interactions
                     .as_ref()
                     .and_then(|i| i.slots.get(index as usize))
-                    .map_or_else(|| "in use".into(), |slot| slot_phrase(*slot).to_owned())
+                    .map_or_else(|| "in use".into(), |slot| slot.equipped_phrase.clone())
             });
             let stats = affordance
                 .and_then(|a| a.known_equipment.as_ref())
@@ -1897,8 +1912,8 @@ pub fn inventory_entries(app: &App, o: &Observation) -> Vec<InventoryEntry> {
                     if let Some(attack) = &known.attack {
                         parts.push(format!("attack {:+}", attack.bonus));
                     }
-                    if known.defense != 0 {
-                        parts.push(format!("defense {:+}", known.defense));
+                    for modifier in &known.modifiers {
+                        parts.extend(tor_client_common::combat_diagnostics::trace_lines(modifier));
                     }
                     parts.join(", ")
                 })

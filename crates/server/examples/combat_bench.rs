@@ -26,26 +26,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .species
                     .get_mut(&hero_species)
                     .unwrap();
-                hero.grants.retain(|grant| {
-                    !matches!(grant, tor_server::creature_authoring::Grant::Health { .. })
-                });
-                hero.grants
-                    .push(tor_server::creature_authoring::Grant::Health {
-                        amount: 1_000_000 - 8,
-                    });
-                let attack = hero.melee.restore().expect("validated fixture melee");
-                hero.melee = tor_simulation::attacks::MeleeAttackRecord::capture(
-                    &tor_simulation::attacks::MeleeAttack::fixed(
-                        attack.skill(),
-                        attack.bonus(),
-                        attack.wind_up(),
-                        attack.recovery(),
-                        tor_simulation::combat::DamageType::Keen,
-                        None,
-                        1,
+                hero.modifiers.retain(|grant| {
+                    !matches!(
+                        grant.op,
+                        tor_server::creature_authoring::Op::Add {
+                            stat: tor_server::creature_authoring::Stat::Health,
+                            ..
+                        }
                     )
-                    .expect("bounded fixture melee"),
-                );
+                });
+                hero.modifiers
+                    .push(tor_server::creature_authoring::Modifier {
+                        scope: tor_server::creature_authoring::Scope::Always,
+                        op: tor_server::creature_authoring::Op::Add {
+                            stat: tor_server::creature_authoring::Stat::Health,
+                            value: 1_000_000 - 8,
+                        },
+                    });
+                hero.melee.damage = tor_server::creature_authoring::Damage {
+                    primary: Some(tor_server::creature_authoring::DamageKey {
+                        category: tor_server::scenario_package::DamageType::Keen,
+                        descriptor: None,
+                        sides: None,
+                    }),
+                    components: vec![tor_server::creature_authoring::Component {
+                        category: tor_server::scenario_package::DamageType::Keen,
+                        descriptor: None,
+                        amount: tor_server::creature_authoring::Amount::Fixed { value: 1 },
+                    }],
+                };
                 let mut regions = package.region_defs()?;
                 let region = &mut regions[0];
                 region.size = [16, 8, 2];
@@ -58,13 +67,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .species
                     .get_mut(&enemy_species)
                     .unwrap();
-                enemy_species.grants.retain(|grant| {
-                    !matches!(grant, tor_server::creature_authoring::Grant::Health { .. })
+                enemy_species.modifiers.retain(|grant| {
+                    !matches!(
+                        grant.op,
+                        tor_server::creature_authoring::Op::Add {
+                            stat: tor_server::creature_authoring::Stat::Health,
+                            ..
+                        }
+                    )
                 });
                 enemy_species
-                    .grants
-                    .push(tor_server::creature_authoring::Grant::Health {
-                        amount: 1_000_000 - 8,
+                    .modifiers
+                    .push(tor_server::creature_authoring::Modifier {
+                        scope: tor_server::creature_authoring::Scope::Always,
+                        op: tor_server::creature_authoring::Op::Add {
+                            stat: tor_server::creature_authoring::Stat::Health,
+                            value: 1_000_000 - 8,
+                        },
                     });
                 region.actors = (2..=actors)
                     .map(|id| {
@@ -74,7 +93,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         enemy
                     })
                     .collect();
-                scenario_package::write_package(directory.path(), &package.manifest, &regions)?;
+                scenario_package::write_package(
+                    directory.path(),
+                    &package.manifest,
+                    &regions,
+                    &package.rules_source,
+                )?;
                 scenario_package::validate(directory.path())?;
                 let scenario = scenario_package::load(directory.path(), 42, None, false)?;
                 let path = directory.path().join("run.db");
@@ -137,13 +161,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             });
                             (
                                 player,
-                                Some(match target {
-                                    Some(a) => engine.decode_action(
-                                        player,
-                                        &tor_protocol::Action::Attack { target: a.id },
-                                    )?,
-                                    None => Action::Wait,
-                                }),
+                                Some(
+                                    match target.zip(
+                                        observation
+                                            .combat
+                                            .as_ref()
+                                            .and_then(|combat| combat.own_stats.as_ref())
+                                            .and_then(|stats| {
+                                                stats
+                                                    .abilities
+                                                    .iter()
+                                                    .find(|ability| ability.basic_attack)
+                                            }),
+                                    ) {
+                                        Some((a, ability)) => engine.decode_action(
+                                            player,
+                                            &tor_protocol::Action::UseAbility {
+                                                id: ability.id.clone(),
+                                                target: a.id,
+                                            },
+                                        )?,
+                                        None => Action::Wait,
+                                    },
+                                ),
                             )
                         };
                     let decision_ms = decision_start.elapsed().as_secs_f64() * 1000.;

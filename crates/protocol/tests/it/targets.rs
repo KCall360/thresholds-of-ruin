@@ -2,18 +2,23 @@ use std::collections::BTreeSet;
 use tor_protocol::{ActorTarget, DoorTarget, ItemTarget};
 
 #[test]
-fn paid_ability_commands_and_events_round_trip_with_opaque_targets() {
+fn data_defined_ability_commands_and_events_round_trip_with_opaque_targets() {
     let target = ActorTarget::from_digest([9; 32]);
-    for ability in ["power_strike", "magic_bolt", "fear"] {
-        let action = serde_json::json!({"type":"use_ability", "ability":ability, "target":target});
+    for ability in [
+        "power_strike",
+        "magic_bolt",
+        "fear",
+        "basic_melee",
+        "custom_ability",
+    ] {
+        let action = serde_json::json!({"type":"use_ability", "id":ability, "target":target});
         let decoded = serde_json::from_value::<tor_protocol::Action>(action.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), action);
-        let event =
-            serde_json::json!({"type":"ability_started", "ability":ability, "target":target});
+        let event = serde_json::json!({"type":"ability_started", "ability":{"id":ability,"name":"Disclosed ability"}, "target":target});
         let decoded = serde_json::from_value::<tor_protocol::Event>(event.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), event);
         for outcome in ["applied", "unaffected", "miss"] {
-            let event = serde_json::json!({"type":"ability", "ability":ability, "caster":target, "target":null, "outcome":outcome});
+            let event = serde_json::json!({"type":"ability", "ability":{"id":ability,"name":"Disclosed ability"}, "caster":target, "target":null, "outcome":outcome});
             let decoded =
                 serde_json::from_value::<tor_protocol::CombatEventView>(event.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), event);
@@ -23,18 +28,12 @@ fn paid_ability_commands_and_events_round_trip_with_opaque_targets() {
             serde_json::json!(ItemTarget::from_digest([9; 32])),
         ] {
             let action =
-                serde_json::json!({"type":"use_ability", "ability":ability, "target":bad_target});
+                serde_json::json!({"type":"use_ability", "id":ability, "target":bad_target});
             assert!(serde_json::from_value::<tor_protocol::Action>(action).is_err());
         }
     }
-    for ability in ["basic_melee", "unknown", "MagicBolt"] {
-        assert!(serde_json::from_value::<tor_protocol::Action>(
-            serde_json::json!({"type":"use_ability", "ability":ability, "target":target})
-        )
-        .is_err());
-    }
     assert!(serde_json::from_value::<tor_protocol::Action>(
-        serde_json::json!({"type":"use_ability", "ability":"fear", "target":target, "cost":0})
+        serde_json::json!({"type":"use_ability", "id":"fear", "target":target, "cost":0})
     )
     .is_err());
 }

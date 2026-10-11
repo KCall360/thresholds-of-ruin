@@ -47,8 +47,10 @@ authoritative until the guide is corrected.
 | Performance targets, results, and open work | [Performance and scalable persistence](performance-persistence.md) |
 | Benchmarks, before-and-after comparisons, and the performance ledger | [Performance harness](performance-harness.md) |
 | Privileged setup for testing | [Wizard mode](wizard-mode.md) |
-| Accepted future requirements | [Game design plan](game-design-plan.md), [creature implementation plan](creature-implementation.md) |
+| Accepted future requirements | [Game design plan](game-design-plan.md), [creature rules reference](creature-implementation.md) |
 | Accepted refactor scope and implementation status | [Refactor guide](refactoring.md) |
+| Principles and target shape for the rules engine (proposed) | [Rules architecture refactor guide](rules-architecture.md) |
+| Refactor plan for the creature, combat and arena code (proposed) | [Creature and combat refactor](creature-refactor.md) |
 | Text engine and parser internals | [IF engine](if-engine.md), [IF parser](if-parser-architecture.md), [spatial narrative summary](spatial-narrative-architecture.md) |
 | Build the Rogue adaptation in stages | [Rogue scenario plan](rogue-scenario-plan.md) |
 | Compare the researched Rogue rules and content | [Reference specifications](game-specifications/README.md), [Rogue overview](game-specifications/rogue-5.4.4/README.md), [rules](game-specifications/rogue-5.4.4/rules.md), [catalog](game-specifications/rogue-5.4.4/content.md), [TOR capability assessment](game-specifications/rogue-5.4.4/implementation.md) |

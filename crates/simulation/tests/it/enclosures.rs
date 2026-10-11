@@ -4,7 +4,7 @@ use tor_world::{Direction, Location, Position, RegionId};
 
 #[test]
 fn real_surfaces_are_disclosed_and_empty_headroom_does_not_allow_flying() {
-    let mut game = Game::two_room_in_stone(42);
+    let mut game = Game::two_room_in_stone(42, super::creature_fixture::content());
     let location = Location {
         region: RegionId(1),
         position: Position { x: 1, y: 1, z: 0 },

@@ -39,11 +39,11 @@ class AsciiMessageProcesses(ProcessTestCase):
             self.assertNotIn("You move east", turn)
             self.assertNotIn("HP ", turn)
             seen.append(turn)
-            if "You kill the ruin scout!" in turn:
+            if "The ruin scout died." in turn:
                 killed = frame
                 break
         self.assertIsNotNone(killed, seen)
-        self.assertTrue(any("struck the ruin scout" in turn for turn in seen), seen)
+        self.assertIn("You used Attack on the ruin scout.", killed["messages"]["turn"])
         self.assertEqual(killed["messages"]["shown"][0][:24], killed["messages"]["turn"][:24])
         # Earlier turns went to the log.
         self.assertTrue(any("ruin scout" in turn for turn in killed["messages"]["log"]))

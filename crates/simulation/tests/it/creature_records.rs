@@ -1,99 +1,97 @@
-use std::collections::BTreeSet;
-use tor_simulation::attributes::{Attributes, ManaBinding, Skill};
-use tor_simulation::combat::DamageType;
-use tor_simulation::creatures::record::BuildRecord;
-use tor_simulation::creatures::{CreatureBuild, Species, Subtype, Template};
-use tor_simulation::dice::DicePool;
-use tor_simulation::grants::{Ability, Descriptor, Grant, Selector};
-use tor_simulation::progression::{Class, CreatureType, HdLedger, HdSource};
-use tor_simulation::talents::Talent;
-use tor_simulation::AnatomySpec;
+use super::creature_fixture;
+use std::collections::BTreeMap;
+use tor_simulation::attributes::{Attributes, ByAttribute, Skill};
+use tor_simulation::content_ids::{TalentId, TemplateId};
+use tor_simulation::creatures::record::{BuildRecord, CreatureRecord};
+use tor_simulation::creatures::{CreatureBuild, CreatureState, Template};
+use tor_simulation::progression::HdSource;
+use tor_simulation::rules::{Modifier, ModifierOp, Scope, Stat};
 
 fn build() -> CreatureBuild {
-    let species = Species {
-        id: "record_subject".into(),
-        kind: CreatureType::Humanoid,
-        subtypes: BTreeSet::from([Subtype::Goblinoid, Subtype::Fire]),
-        default_attributes: Attributes::new([1; 6]).unwrap(),
-        anatomy: AnatomySpec::humanoid(),
-        melee: tor_simulation::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-            let component = tor_simulation::damage::DamageComponent::rolled(
-                tor_simulation::combat::DamageType::Impact,
-                None,
-                DicePool::new(1, 6, -1).unwrap(),
-            );
-            let primary = component.key();
-            tor_simulation::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-        })
-        .unwrap(),
-        grants: vec![Grant::Immunity(Selector::Descriptor(Descriptor::Cold))],
-    };
-    let ledger = HdLedger::seeded(
-        vec![
-            HdSource::Class(Class::Warrior),
-            HdSource::Class(Class::Mage),
-            HdSource::Class(Class::Mage),
-            HdSource::Class(Class::Mage),
-            HdSource::Class(Class::Mage),
-        ],
-        42,
-    )
-    .unwrap();
-    let mut build = CreatureBuild::new(species, ledger, ManaBinding::Presence).unwrap();
+    let mut template = Template::new(TemplateId::new("armored").unwrap(), 0);
+    template.modifiers.push(Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Health,
+            value: 5,
+        },
+    });
+    let mut build = creature_fixture::build_with(
+        creature_fixture::species(),
+        vec![template],
+        &[HdSource::Racial, HdSource::Racial],
+    );
     build
-        .set_initial_attributes(Attributes::new([2, 1, 3, 2, 1, 4]).unwrap())
+        .set_initial_attributes(
+            Attributes::new(ByAttribute {
+                strength: 2,
+                speed: 1,
+                intellect: 3,
+                willpower: 2,
+                awareness: 1,
+                presence: 4,
+            })
+            .unwrap(),
+        )
         .unwrap();
     build.train(0, Skill::Intimidation).unwrap();
-    build.train(1, Skill::Spellcasting).unwrap();
-    build.select_talent(0, Talent::Fear).unwrap();
-    build.select_talent(1, Talent::MagicBolt).unwrap();
-    build.select_talent(2, Talent::FearMastery).unwrap();
-    build.set_templates(vec![Template::zombified(0)]).unwrap();
+    build
+        .select_talent(0, TalentId::new("hardiness").unwrap())
+        .unwrap();
+    build
+        .set_templates(vec![TemplateId::new("armored").unwrap()])
+        .unwrap();
     build
 }
-
 fn value() -> serde_json::Value {
     serde_json::to_value(BuildRecord::capture(&build())).unwrap()
 }
-
 fn rejected(value: serde_json::Value) -> bool {
     match serde_json::from_value::<BuildRecord>(value) {
         Err(_) => true,
-        Ok(record) => record.restore().is_err(),
+        Ok(record) => record.restore(build().content().clone()).is_err(),
     }
 }
 
 #[test]
-fn build_record_round_trip_preserves_seeds_choices_and_dormancy() {
+fn build_record_round_trip_preserves_seeds_choices_and_catalog_references() {
     let original = build();
-    let data = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
-    let restored = serde_json::from_slice::<BuildRecord>(&data)
+    let bytes = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
+    let restored = serde_json::from_slice::<BuildRecord>(&bytes)
         .unwrap()
-        .restore()
+        .restore(original.content().clone())
         .unwrap();
     assert_eq!(restored, original);
     assert_eq!(restored.derive().unwrap(), original.derive().unwrap());
-    assert_eq!(restored.unspent_talent_slots(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        original.content(),
+        restored.content()
+    ));
     assert_eq!(
         serde_json::to_vec(&BuildRecord::capture(&restored)).unwrap(),
-        data
+        bytes
     );
 }
 
 #[test]
-fn saved_records_contain_choices_without_derived_combat_caches() {
+fn saved_actor_records_contain_named_choices_and_ids_without_definitions_or_caches() {
     let record = value();
-    assert_eq!(
-        record["initial_attributes"],
-        serde_json::json!([2, 1, 3, 2, 1, 4])
-    );
-    assert_eq!(record["binding"], 3);
-    assert_eq!(record["species"]["kind"], 7);
-    assert!(record.get("maximum_health").is_none());
-    assert!(record.get("defenses").is_none());
-    assert!(record.get("active_talents").is_none());
-    assert!(record.get("protection").is_none());
-    assert_eq!(record["hd"].as_array().unwrap().len(), 5);
+    assert_eq!(record["initial_attributes"]["strength"], 2);
+    assert_eq!(record["binding"], "intellect");
+    assert_eq!(record["species"], "unit_subject");
+    assert_eq!(record["templates"], serde_json::json!(["armored"]));
+    assert_eq!(record["choices"][0]["talent"], "hardiness");
+    for field in [
+        "maximum_health",
+        "defenses",
+        "active_talents",
+        "protection",
+        "catalog",
+        "modifiers",
+    ] {
+        assert!(record.get(field).is_none(), "{field}");
+    }
+    assert_eq!(record["hd"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -103,42 +101,45 @@ fn unknown_fields_and_missing_nullable_choice_fields_reject() {
     assert!(rejected(record));
     for field in ["talent", "attribute"] {
         let mut record = value();
-        record["choices"][4].as_object_mut().unwrap().remove(field);
+        record["choices"][1].as_object_mut().unwrap().remove(field);
         assert!(rejected(record), "missing {field} silently defaulted");
     }
+}
+
+#[test]
+fn missing_catalog_references_reject_before_deriving_a_creature() {
+    for (field, entry) in [
+        ("species", serde_json::json!("missing")),
+        ("templates", serde_json::json!(["missing"])),
+    ] {
+        let mut record = value();
+        record[field] = entry;
+        assert!(rejected(record));
+    }
     let mut record = value();
-    record["templates"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("kind");
+    record["choices"][0]["talent"] = serde_json::json!("missing");
+    assert!(rejected(record));
+    let mut record = value();
+    record["hd"][0]["source"] = serde_json::json!({"kind":"class", "id":"missing"});
     assert!(rejected(record));
 }
 
 #[test]
-fn unknown_catalog_ids_invalid_ranks_and_duplicate_set_members_reject() {
-    let mut record = value();
-    record["species"]["kind"] = serde_json::json!(255);
-    assert!(rejected(record));
-    for skill in ["not-a-skill", "spellcasting"] {
+fn positional_ids_legacy_definitions_and_invalid_mechanism_names_reject() {
+    for (field, entry) in [
+        ("binding", serde_json::json!(255)),
+        ("species", serde_json::json!({"id":"unit_subject","kind":7})),
+        ("initial_attributes", serde_json::json!([1, 1, 1, 1, 1, 1])),
+    ] {
         let mut record = value();
-        record["species"]["melee"]["skill"] = serde_json::json!(skill);
+        record[field] = entry;
         assert!(rejected(record));
     }
     let mut record = value();
-    record["binding"] = serde_json::json!(255);
+    record["choices"][0]["training"] = serde_json::json!(["not-a-skill"]);
     assert!(rejected(record));
     let mut record = value();
-    record["choices"][0]["training"] = serde_json::json!([255]);
-    assert!(rejected(record));
-    let mut record = value();
-    let duplicate = record["species"]["subtypes"][0].clone();
-    record["species"]["subtypes"]
-        .as_array_mut()
-        .unwrap()
-        .push(duplicate);
-    assert!(rejected(record));
-    let mut record = value();
-    record["initial_attributes"][0] = serde_json::json!(6);
+    record["initial_attributes"]["strength"] = serde_json::json!(6);
     assert!(rejected(record));
 }
 
@@ -154,62 +155,19 @@ fn record_collection_bounds_and_owned_slot_counts_reject() {
     record["choices"].as_array_mut().unwrap().pop();
     assert!(rejected(record));
     let mut record = value();
-    record["choices"][0]["training"] = serde_json::json!([0, 0, 0]);
-    assert!(serde_json::from_value::<BuildRecord>(record).is_err());
+    record["choices"][0]["training"] = serde_json::json!(["athletics", "athletics", "athletics"]);
+    assert!(rejected(record));
     let mut record = value();
-    record["species"]["id"] = serde_json::json!("x".repeat(61));
-    assert!(serde_json::from_value::<BuildRecord>(record).is_err());
-}
-
-#[test]
-fn all_grant_variants_and_catalog_types_round_trip() {
-    let grants = vec![
-        Grant::Health(2),
-        Grant::Stamina(2),
-        Grant::Focus(2),
-        Grant::Mana(2),
-        Grant::PhysicalDefense(1),
-        Grant::MeleeFlat(-1),
-        Grant::MeleeDice(1),
-        Grant::BoltFlat(1),
-        Grant::BoltDice(1),
-        Grant::FearDifficulty(1),
-        Grant::FearDuration(10),
-        Grant::Immunity(Selector::Category(DamageType::Vital)),
-        Grant::Reduction(Selector::Descriptor(Descriptor::Cold), 2),
-        Grant::Ability(Ability::PowerStrike),
-        Grant::Mindless,
-        Grant::Magical,
-    ];
-    for kind in CreatureType::ALL {
-        let mut species = build().species().clone();
-        species.kind = kind;
-        species.subtypes = Subtype::ALL.into_iter().collect();
-        species.grants = grants.clone();
-        let original = CreatureBuild::new(
-            species,
-            HdLedger::seeded(vec![HdSource::Racial], 7).unwrap(),
-            ManaBinding::Awareness,
-        )
-        .unwrap();
-        let data = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
-        let restored = serde_json::from_slice::<BuildRecord>(&data)
-            .unwrap()
-            .restore()
-            .unwrap();
-        assert_eq!(restored, original);
-        assert_eq!(restored.derive().unwrap(), original.derive().unwrap());
-    }
+    record["templates"] = serde_json::json!(["armored", "armored"]);
+    assert!(rejected(record));
 }
 
 #[test]
 fn empty_ledger_and_retained_templates_restore_without_revival() {
     let mut original = build();
     while original.remove_latest().is_some() {}
-    let data = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
-    let restored = serde_json::from_slice::<BuildRecord>(&data)
-        .unwrap()
-        .restore()
+    let restored = BuildRecord::capture(&original)
+        .restore(original.content().clone())
         .unwrap();
     assert_eq!(restored, original);
     assert_eq!(restored.derive().unwrap().maximum_health, 0);
@@ -217,35 +175,15 @@ fn empty_ledger_and_retained_templates_restore_without_revival() {
 }
 
 #[test]
-fn nested_record_shapes_ids_and_definition_limits_reject() {
+fn nested_record_shapes_and_duplicate_owned_talents_reject() {
     let mut record = value();
     record["hd"][0]["source"]["unexpected"] = serde_json::json!(true);
     assert!(rejected(record));
     let mut record = value();
-    record["species"]["grants"][0]["value"]["id"] = serde_json::json!(255);
-    assert!(rejected(record));
-    let mut record = value();
-    record["species"]["melee"]["damage"]["components"][0]["amount"]["count"] =
-        serde_json::json!(65);
-    assert!(rejected(record));
-    let mut record = value();
-    record["templates"][0]["overrides"] = serde_json::json!([
-        {"attribute": 2, "value": 0}, {"attribute": 2, "value": 1}
-    ]);
-    assert!(rejected(record));
-    let mut record = value();
-    record["species"]["grants"] = serde_json::json!([
-        {"kind": "health", "value": 1_000_001}
-    ]);
-    assert!(rejected(record));
-    let mut record = value();
-    record["templates"][0]["adjustments"] = serde_json::json!([1001, 0, 0, 0, 0, 0]);
+    record["choices"][1]["talent"] = record["choices"][0]["talent"].clone();
     assert!(rejected(record));
     let mut record = value();
     record["choices"][0]["attribute"] = serde_json::json!(0);
-    assert!(rejected(record));
-    let mut record = value();
-    record["choices"][3]["talent"] = record["choices"][0]["talent"].clone();
     assert!(rejected(record));
 }
 
@@ -254,10 +192,192 @@ fn streaming_json_decoder_enforces_collection_and_identifier_limits() {
     let mut record = value();
     let die = record["hd"][0].clone();
     record["hd"] = serde_json::Value::Array(vec![die; 257]);
-    let data = serde_json::to_vec(&record).unwrap();
-    assert!(serde_json::from_slice::<BuildRecord>(&data).is_err());
-    record = value();
-    record["species"]["id"] = serde_json::json!("bad id");
-    let data = serde_json::to_vec(&record).unwrap();
-    assert!(serde_json::from_slice::<BuildRecord>(&data).is_err());
+    assert!(serde_json::from_slice::<BuildRecord>(&serde_json::to_vec(&record).unwrap()).is_err());
+    for id in ["bad id".to_owned(), "x".repeat(257)] {
+        let mut record = value();
+        record["species"] = serde_json::json!(id);
+        assert!(
+            serde_json::from_slice::<BuildRecord>(&serde_json::to_vec(&record).unwrap()).is_err()
+        );
+    }
+}
+
+#[test]
+fn mutable_creature_records_use_named_pools_and_restore_injury_with_shared_content() {
+    let mut creature = CreatureState::new(build()).unwrap();
+    creature.damage(3);
+    let record = serde_json::to_value(CreatureRecord::capture(&creature)).unwrap();
+    assert!(record["pools"]["stamina"]["balance"].is_number());
+    assert!(record.get("balances").is_none());
+    let restored = serde_json::from_value::<CreatureRecord>(record)
+        .unwrap()
+        .restore(creature.build().content().clone(), vec![])
+        .unwrap();
+    assert_eq!(restored, creature);
+}
+
+#[test]
+fn records_preserve_ruleset_training_budgets_above_the_standard_default() {
+    use tor_simulation::attributes::ManaBinding;
+    use tor_simulation::creatures::{Content, ScenarioCatalog};
+    use tor_simulation::progression::{HdLedger, HitDie};
+    use tor_simulation::rules::Ruleset;
+    let mut document = creature_fixture::ruleset().document().clone();
+    document.constants.racial_training_points = 3;
+    let species = creature_fixture::species();
+    let id = species.id.clone();
+    let content = Content::new(
+        Ruleset::validate(document).unwrap(),
+        ScenarioCatalog {
+            species: BTreeMap::from([(id.clone(), species)]),
+            templates: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let mut original = CreatureBuild::new(
+        content.clone(),
+        id,
+        HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
+        ManaBinding::Intellect,
+    )
+    .unwrap();
+    for skill in [Skill::Athletics, Skill::Intimidation, Skill::Lore] {
+        original.train(0, skill).unwrap();
+    }
+    let bytes = serde_json::to_vec(&BuildRecord::capture(&original)).unwrap();
+    let restored = serde_json::from_slice::<BuildRecord>(&bytes)
+        .unwrap()
+        .restore(content)
+        .unwrap();
+    assert_eq!(restored, original);
+}
+
+#[test]
+fn named_engine_maps_reject_positional_arrays_and_unknown_fields() {
+    use tor_simulation::resources::ByResource;
+    assert!(serde_json::from_str::<ByAttribute<u16>>("[1,2,3,4,5,6]").is_err());
+    assert!(serde_json::from_str::<ByResource<u32>>("[1,2,3]").is_err());
+    assert!(serde_json::from_str::<ByResource<u32>>(
+        r#"{"stamina":1,"focus":2,"mana":3,"other":4}"#
+    )
+    .is_err());
+    assert_eq!(
+        serde_json::from_str::<ByResource<u32>>(r#"{"stamina":1,"focus":2,"mana":3}"#).unwrap(),
+        ByResource {
+            stamina: 1,
+            focus: 2,
+            mana: 3
+        }
+    );
+}
+
+#[test]
+fn public_restoration_accepts_only_structurally_valid_equipment_sources() {
+    use tor_simulation::{
+        creatures::{CreatureStateError, EquipmentSource},
+        EquipmentSlotId, ItemId,
+    };
+    let original = CreatureState::new(build()).unwrap();
+    for item in [ItemId(0), ItemId(u64::MAX)] {
+        let equipment = vec![EquipmentSource {
+            item,
+            socket: EquipmentSlotId(0),
+            modifiers: vec![],
+            attack: None,
+        }];
+        assert_eq!(
+            CreatureState::from_recorded(
+                original.build().clone(),
+                0,
+                false,
+                original.costs().clone(),
+                original.conditions().clone(),
+                equipment.clone()
+            ),
+            Err(CreatureStateError::Inconsistent)
+        );
+        assert_eq!(
+            CreatureRecord::capture(&original)
+                .restore(original.build().content().clone(), equipment),
+            Err(CreatureStateError::Inconsistent)
+        );
+    }
+}
+
+#[test]
+fn rules_attribute_cap_above_five_survives_build_and_game_restore() {
+    use std::num::NonZeroU64;
+    use tor_simulation::attributes::{Attribute, ManaBinding};
+    use tor_simulation::creatures::{Content, ScenarioCatalog};
+    use tor_simulation::progression::{HdLedger, HitDie};
+    use tor_simulation::rules::Ruleset;
+    use tor_simulation::{CreatureIdentity, Game};
+    use tor_world::{Location, Position, RegionId};
+
+    let six = Attributes::new(ByAttribute::from_fn(|_| 6)).unwrap();
+    let mut species = creature_fixture::species();
+    species.default_attributes = six;
+    let catalog = ScenarioCatalog {
+        species: BTreeMap::from([(species.id.clone(), species.clone())]),
+        templates: BTreeMap::new(),
+    };
+    let baseline = creature_fixture::ruleset();
+    assert!(Content::new(baseline.clone(), catalog.clone()).is_err());
+    let mut document = baseline.document().clone();
+    document.constants.attribute_cap = 6;
+    let content = Content::new(Ruleset::validate(document).unwrap(), catalog).unwrap();
+    let mut build = CreatureBuild::new(
+        content.clone(),
+        species.id,
+        HdLedger::new(vec![HitDie::new(HdSource::Racial, 42)]).unwrap(),
+        ManaBinding::Intellect,
+    )
+    .unwrap();
+    build.set_initial_attributes(six).unwrap();
+    assert_eq!(
+        build.derive().unwrap().attributes.get(Attribute::Strength),
+        6
+    );
+    let record: BuildRecord =
+        serde_json::from_value(serde_json::to_value(BuildRecord::capture(&build)).unwrap())
+            .unwrap();
+    assert_eq!(record.restore(content.clone()).unwrap(), build);
+
+    let mut game = Game::two_room_in_stone(42, content.clone());
+    let actor = game
+        .spawn_actor(
+            Location {
+                region: RegionId(1),
+                position: Position { x: 1, y: 1, z: 0 },
+            },
+            NonZeroU64::new(100).unwrap(),
+        )
+        .unwrap();
+    game.configure_creature(
+        actor,
+        CreatureIdentity {
+            name: "Six".into(),
+            faction: "neutral".into(),
+        },
+        build,
+    )
+    .unwrap();
+    let mut shared = tor_simulation::checkpoint::SharedState::default();
+    let saved = serde_json::to_vec(&(game.checkpoint(&mut shared), shared)).unwrap();
+    let (snapshot, shared) = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(
+        Game::restore_checkpoint(snapshot, &shared, content).unwrap(),
+        game
+    );
+
+    let mut capped = creature_fixture::build(creature_fixture::species());
+    let before = capped.clone();
+    assert!(capped.set_initial_attributes(six).is_err());
+    assert_eq!(capped, before);
+    let mut forged = serde_json::to_value(BuildRecord::capture(&capped)).unwrap();
+    forged["initial_attributes"]["strength"] = serde_json::json!(6);
+    assert!(serde_json::from_value::<BuildRecord>(forged)
+        .unwrap()
+        .restore(capped.content().clone())
+        .is_err());
 }

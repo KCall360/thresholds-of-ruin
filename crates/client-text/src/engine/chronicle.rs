@@ -43,15 +43,14 @@ pub enum Beat {
         open: bool,
     },
     Waited,
-    AttackBegan,
     ItemBegan(String),
     ItemFinished(String),
     AbilityBegan(String),
-    AbilityEffect(String),
-    Blow {
+    AbilityResolved {
+        ability: ContentRef,
         attacker: Who,
         target: Who,
-        outcome: AttackOutcome,
+        outcome: AbilityOutcome,
     },
     /// The character's attack was interrupted.
     Interrupted,
@@ -179,7 +178,6 @@ impl Chronicler {
                 Event::ItemStarted { .. } => beats.push(Beat::ItemBegan(
                     tor_client_common::narration::action(event, a),
                 )),
-                Event::AttackStarted { .. } => beats.push(Beat::AttackBegan),
                 Event::AbilityStarted { .. } => beats.push(Beat::AbilityBegan(
                     tor_client_common::narration::action(event, a),
                 )),
@@ -208,15 +206,14 @@ impl Chronicler {
             if fresh {
                 for e in &combat.events {
                     beats.push(match *e {
-                        CombatEventView::Ability { .. } => {
-                            Beat::AbilityEffect(tor_client_common::narration::combat_event(e, b, a))
-                        }
-                        CombatEventView::Attack {
-                            attacker,
+                        CombatEventView::Ability {
+                            caster,
                             target,
+                            ref ability,
                             outcome,
-                        } => Beat::Blow {
-                            attacker: self.who(attacker, a.self_target),
+                        } => Beat::AbilityResolved {
+                            ability: ability.clone(),
+                            attacker: self.who(caster, a.self_target),
                             target: self.who(target, a.self_target),
                             outcome,
                         },
@@ -361,19 +358,19 @@ mod tests {
         after.observation.combat.as_mut().unwrap().events = vec![CombatEventView::Ability {
             caster: Some(after.observation.self_target),
             target: Some(target),
-            ability: Ability::Fear,
+            ability: tor_client_common::test_support::content("fear"),
             outcome: AbilityOutcome::Applied,
         }];
         let entry = action(Event::AbilityStarted {
-            ability: Ability::Fear,
+            ability: tor_client_common::test_support::content("fear"),
             target,
         });
         let beats =
             Chronicler::default().observe(&before, &after, Some(&entry), &Palette::default());
-        assert!(beats.contains(&Beat::AbilityBegan("You prepare to use fear.".into())));
-        assert!(beats.contains(&Beat::AbilityEffect(
-            "You frightened the ruin scout.".into()
-        )));
+        assert!(beats.contains(&Beat::AbilityBegan("You prepare to use Fear.".into())));
+        assert!(beats
+            .iter()
+            .any(|beat| matches!(beat,Beat::AbilityResolved{ability,..} if ability.id=="fear")));
     }
 
     #[test]
@@ -385,10 +382,11 @@ mod tests {
         let combat = after.observation.combat.as_mut().unwrap();
         combat.hp = 44;
         combat.events = vec![
-            CombatEventView::Attack {
-                attacker: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
+            CombatEventView::Ability {
+                ability: tor_client_common::test_support::content("basic_melee"),
+                caster: Some(tor_protocol::ActorTarget::from_digest([1; 32])),
                 target: Some(tor_protocol::ActorTarget::from_digest([2; 32])),
-                outcome: AttackOutcome::Hit,
+                outcome: AbilityOutcome::Applied,
             },
             CombatEventView::Died {
                 actor: tor_protocol::ActorTarget::from_digest([2; 32]),
@@ -401,10 +399,11 @@ mod tests {
         assert_eq!(
             Chronicler::default().observe(&before, &after, None, &Palette::default()),
             [
-                Beat::Blow {
+                Beat::AbilityResolved {
+                    ability: tor_client_common::test_support::content("basic_melee"),
                     attacker: Who::Me,
                     target: Who::Figure(scout.clone()),
-                    outcome: AttackOutcome::Hit,
+                    outcome: AbilityOutcome::Applied,
                 },
                 Beat::Died(Who::Figure(scout.clone())),
                 Beat::Hp {

@@ -43,8 +43,6 @@ impl From<ItemClass> for tor_simulation::ItemClass {
     }
 }
 
-use std::collections::BTreeMap;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DamageType {
@@ -67,103 +65,143 @@ impl From<DamageType> for tor_simulation::combat::DamageType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EquipmentSlot {
-    Weapon,
-    BodyArmor,
-    Shield,
-    HeadArmor,
-    HandsArmor,
-    FeetArmor,
-    Cloak,
-    Ring,
-    Amulet,
-}
-impl From<EquipmentSlot> for tor_simulation::EquipmentSlot {
-    fn from(value: EquipmentSlot) -> Self {
-        match value {
-            EquipmentSlot::Weapon => Self::Weapon,
-            EquipmentSlot::BodyArmor => Self::BodyArmor,
-            EquipmentSlot::Shield => Self::Shield,
-            EquipmentSlot::HeadArmor => Self::HeadArmor,
-            EquipmentSlot::HandsArmor => Self::HandsArmor,
-            EquipmentSlot::FeetArmor => Self::FeetArmor,
-            EquipmentSlot::Cloak => Self::Cloak,
-            EquipmentSlot::Ring => Self::Ring,
-            EquipmentSlot::Amulet => Self::Amulet,
-        }
-    }
-}
+pub type EquipmentSlot = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnatomySpec {
     pub slots: Vec<EquipmentSlot>,
 }
-impl From<AnatomySpec> for tor_simulation::AnatomySpec {
-    fn from(value: AnatomySpec) -> Self {
-        Self {
-            slots: value.slots.into_iter().map(Into::into).collect(),
+impl AnatomySpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::AnatomySpec, crate::Failure> {
+        let slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let id = tor_simulation::EquipmentSlot::new(slot)
+                    .map_err(|_| super::fail(format!("Invalid equipment slot ID {slot:?}")))?;
+                if rules.equipment_slot(&id).is_none() {
+                    return Err(super::fail(format!("Unknown equipment slot {slot:?}")));
+                }
+                Ok(id)
+            })
+            .collect::<Result<Vec<_>, crate::Failure>>()?;
+        let anatomy = tor_simulation::AnatomySpec { slots };
+        if !anatomy.valid(rules) {
+            return Err(super::fail("Invalid anatomy"));
         }
+        Ok(anatomy)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentSpec {
     pub slot: EquipmentSlot,
-    pub attack: Option<tor_simulation::attacks::MeleeAttack>,
+    pub attack: Option<crate::creature_authoring::Melee>,
     #[serde(default)]
-    pub defense: i32,
-    #[serde(default)]
-    pub reductions: BTreeMap<DamageType, u32>,
+    pub modifiers: Vec<crate::creature_authoring::Modifier>,
 }
-impl From<EquipmentSpec> for tor_simulation::EquipmentSpec {
-    fn from(value: EquipmentSpec) -> Self {
-        Self {
-            slot: value.slot.into(),
-            attack: value.attack,
-            defense: value.defense,
-            reductions: value
-                .reductions
-                .into_iter()
-                .map(|(kind, amount)| (kind.into(), amount))
-                .collect(),
+impl EquipmentSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::EquipmentSpec, crate::Failure> {
+        let modifiers = self
+            .modifiers
+            .iter()
+            .map(crate::creature_authoring::Modifier::compile)
+            .collect::<Result<Vec<_>, _>>()?;
+        rules
+            .validate_modifiers(&modifiers)
+            .map_err(|error| super::fail(format!("Invalid equipment modifier: {error:?}")))?;
+        let slot = tor_simulation::EquipmentSlot::new(&self.slot)
+            .map_err(|_| super::fail(format!("Invalid equipment slot ID {:?}", self.slot)))?;
+        if rules.equipment_slot(&slot).is_none() {
+            return Err(super::fail(format!(
+                "Unknown equipment slot {:?}",
+                self.slot
+            )));
         }
+        Ok(tor_simulation::EquipmentSpec {
+            slot,
+            attack: self
+                .attack
+                .as_ref()
+                .map(|attack| attack.compile(rules))
+                .transpose()?,
+            modifiers,
+        })
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiceExpr {
+    pub count: u16,
+    pub sides: u16,
+    pub bonus: i32,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum EffectSpec {
-    Heal {
-        amount: u32,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AmountExpr {
+    Fixed { amount: u32 },
+    Rolled { dice: DiceExpr },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DamageComponentExpr {
+    pub category: DamageType,
+    pub descriptor: Option<String>,
+    pub amount: AmountExpr,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DamageExpr {
+    SelectedWeapon {
+        impact_bonus: u32,
     },
-    Damage {
-        components: BTreeMap<DamageType, u32>,
+    Components {
+        components: Vec<DamageComponentExpr>,
     },
 }
-impl From<EffectSpec> for tor_simulation::EffectSpec {
-    fn from(value: EffectSpec) -> Self {
-        match value {
-            EffectSpec::Heal { amount } => Self::Heal { amount },
-            EffectSpec::Damage { components } => Self::Damage {
-                components: components
-                    .into_iter()
-                    .map(|(kind, amount)| (kind.into(), amount))
-                    .collect(),
-            },
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Effect {
+    Damage {
+        damage: DamageExpr,
+    },
+    Heal {
+        amount: AmountExpr,
+    },
+    ApplyCondition {
+        condition: String,
+        duration: u64,
+    },
+    Restore {
+        resource: String,
+        amount: AmountExpr,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsumableSpec {
-    pub effects: Vec<EffectSpec>,
+    pub effects: Vec<Effect>,
 }
-impl From<ConsumableSpec> for tor_simulation::ConsumableSpec {
-    fn from(value: ConsumableSpec) -> Self {
-        Self {
-            effects: value.effects.into_iter().map(Into::into).collect(),
-        }
+impl ConsumableSpec {
+    pub(crate) fn compile(
+        &self,
+        rules: &tor_simulation::rules::Ruleset,
+    ) -> Result<tor_simulation::ConsumableSpec, crate::Failure> {
+        let value =
+            serde_json::to_value(&self.effects).map_err(|error| super::fail(error.to_string()))?;
+        let effects: Vec<tor_simulation::rules::Effect> = serde_json::from_value(value)
+            .map_err(|error| super::fail(format!("Invalid item effect: {error}")))?;
+        rules
+            .validate_effects(&effects)
+            .map_err(|error| super::fail(format!("Invalid item effect: {error:?}")))?;
+        Ok(tor_simulation::ConsumableSpec { effects })
     }
 }
 
@@ -207,5 +245,103 @@ impl From<AiProfile> for tor_simulation::ai::AiProfile {
             memory_ticks: value.memory_ticks,
             flee_percent: value.flee_percent,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rules() -> std::sync::Arc<tor_simulation::rules::Ruleset> {
+        tor_simulation::rules::Ruleset::validate(
+            toml::from_str(tor_simulation::rules::DEFAULT_RULESET_TOML).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn equipment_slot_references_compile_from_data_and_reject_unknown_ids() {
+        let mut document = rules().document().clone();
+        document
+            .equipment_slots
+            .push(tor_simulation::rules::EquipmentSlotDef {
+                id: tor_simulation::EquipmentSlot::new("tentacle").unwrap(),
+                name: "Tentacle".into(),
+                equipped_phrase: "held by a tentacle".into(),
+                compatible_classes: vec![tor_simulation::ItemClass::Tool],
+                requires_attack: false,
+                equip_turns: 2,
+                unequip_turns: 4,
+            });
+        let rules = tor_simulation::rules::Ruleset::validate(document).unwrap();
+        let anatomy = AnatomySpec {
+            slots: vec!["tentacle".into(), "tentacle".into()],
+        };
+        let compiled = anatomy.compile(&rules).unwrap();
+        assert_eq!(compiled.slots[0].as_str(), "tentacle");
+        let equipment = EquipmentSpec {
+            slot: "tentacle".into(),
+            attack: None,
+            modifiers: vec![],
+        };
+        assert!(equipment
+            .compile(&rules)
+            .unwrap()
+            .validate_rules(tor_simulation::ItemClass::Tool, &rules)
+            .is_ok());
+        for slot in ["missing_slot", "invalid slot"] {
+            assert!(AnatomySpec {
+                slots: vec![slot.into()]
+            }
+            .compile(&rules)
+            .is_err());
+            assert!(EquipmentSpec {
+                slot: slot.into(),
+                ..equipment.clone()
+            }
+            .compile(&rules)
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn generic_item_effects_compile_and_reject_unknown_content_references() {
+        let valid = ConsumableSpec {
+            effects: vec![Effect::Heal {
+                amount: AmountExpr::Fixed { amount: 5 },
+            }],
+        };
+        assert!(valid.compile(&rules()).is_ok());
+        let missing = ConsumableSpec {
+            effects: vec![Effect::ApplyCondition {
+                condition: "missing_condition".into(),
+                duration: 100,
+            }],
+        };
+        assert!(missing.compile(&rules()).is_err());
+        let missing_descriptor = ConsumableSpec {
+            effects: vec![Effect::Damage {
+                damage: DamageExpr::Components {
+                    components: vec![DamageComponentExpr {
+                        category: DamageType::Energy,
+                        descriptor: Some("missing_descriptor".into()),
+                        amount: AmountExpr::Fixed { amount: 5 },
+                    }],
+                },
+            }],
+        };
+        assert!(missing_descriptor.compile(&rules()).is_err());
+    }
+
+    #[test]
+    fn old_item_effect_and_equipment_shapes_are_rejected() {
+        assert!(serde_json::from_value::<ConsumableSpec>(serde_json::json!({
+            "effects": [{"type":"heal", "amount":5}]
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<EquipmentSpec>(serde_json::json!({
+            "slot":"body_armor", "attack":null, "defense":1, "reductions":{}
+        }))
+        .is_err());
     }
 }

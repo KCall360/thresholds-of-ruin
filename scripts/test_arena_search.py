@@ -9,6 +9,23 @@ class ArenaSearchTests(unittest.TestCase):
         return {"format": "tor-arena-search-v1", "plan": "plan.json", "parameter_spec": "parameters.json",
                 "seed": "42", "constraints": [{"name": "budget", "coefficients": {"strength": 1}, "maximum": 4}]}
 
+    def test_campaign_fingerprint_rejects_general_rules_drift_between_trials(self):
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch
+        import arena_search as search
+        with tempfile.TemporaryDirectory() as directory:
+            general = Path(directory) / "rules.toml"
+            general.write_bytes(search.DEFAULT_RULESET.read_bytes())
+            with patch.object(search, "DEFAULT_RULESET", general):
+                hashes = search.module_hashes()
+                self.assertIn("ruleset_sources.py", hashes)
+                self.assertIn("general_rules", hashes)
+                general.write_bytes(general.read_bytes() + b"\n# source drift\n")
+                self.assertNotEqual(search.module_hashes(), hashes)
+                with self.assertRaisesRegex(ValueError, "general rules source changed"):
+                    search.evaluate(None, None, {"modules": hashes}, Path(directory), "training", 0, {})
+
     def test_defaults_and_strict_configuration(self):
         space = {"strength": {"type": "integer", "low": 0, "high": 5}}
         config = validate_config(self.config(), space)

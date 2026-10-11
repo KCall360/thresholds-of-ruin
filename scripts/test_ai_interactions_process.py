@@ -49,7 +49,7 @@ class AiInteractionProcesses(ProcessTestCase):
                 self.assertEqual(names[chosen["item"]], "heavy_blade")
                 break
         self.assertIsNotNone(chosen, "AI must equip the actual upgrade")
-        self.assertEqual(chosen["known_equipment"]["attack"]["skill"], "heavy_weaponry")
+        self.assertEqual(chosen["known_equipment"]["attack"]["skill"]["id"], "heavy_weaponry")
 
     def test_ai_takes_one_ground_healing_unit_and_keeps_the_remaining_stack(self):
         package = self.save.parent / "ground-healing"
@@ -143,7 +143,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "attack", "target": target})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
         for _ in range(4):
             self.act(player, {"type": "wait"})
         state = self.request(observer, {"type": "snapshot"})["state"]["observation"]
@@ -158,7 +158,7 @@ class AiInteractionProcesses(ProcessTestCase):
         observer, _ = self.client(WIZARD_TOKEN, observe=True, actor=2)
         player, initial = self.client()
         target = next(actor["id"] for actor in initial["state"]["observation"]["visible_actors"] if actor["name"] == "ruin guard")
-        self.act(player, {"type": "attack", "target": target})
+        self.act(player, {"type": "use_ability", "id": "basic_melee", "target": target})
         healed = None
         for _ in range(5):
             state = self.request(observer, {"type": "snapshot"})

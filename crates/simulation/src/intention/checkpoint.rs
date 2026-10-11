@@ -123,7 +123,10 @@ mod tests {
         assert_eq!(decoded.capture(&queue).entries, suspended.entries);
         assert_eq!(serde_json::to_vec(&decoded).unwrap(), bytes);
         queue.entries.get_mut(&ActorId(1)).unwrap().work = IntentionWork::ResumePreparation {
-            work: crate::Work::Attack { target: ActorId(2) },
+            work: crate::Work::UseAbility {
+                id: crate::content_ids::AbilityId::new("basic_melee").unwrap(),
+                target: ActorId(2),
+            },
         };
         pool.capture(&queue);
         assert_eq!(pool.entries.len(), 4);

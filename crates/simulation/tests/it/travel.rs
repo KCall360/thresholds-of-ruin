@@ -11,7 +11,7 @@ fn cell(x: i32, y: i32) -> Location {
 
 #[test]
 fn travel_uses_remembered_connections_and_ordinary_actions() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -30,7 +30,7 @@ fn travel_uses_remembered_connections_and_ordinary_actions() {
 
 #[test]
 fn unseen_changes_do_not_change_a_remembered_route() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -47,7 +47,7 @@ fn unseen_changes_do_not_change_a_remembered_route() {
 
 #[test]
 fn unknown_destinations_and_walls_are_unavailable() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -95,7 +95,7 @@ fn routes_cross_rotated_joins_and_preserve_view_directions() {
             1,
         )
         .unwrap();
-    let mut game = Game::new(world, 0);
+    let mut game = Game::new(world, 0, super::creature_fixture::content());
     let actor = game
         .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -115,7 +115,7 @@ fn routes_cross_rotated_joins_and_preserve_view_directions() {
 fn explicit_stairs_are_known_connections_and_self_loops_terminate() {
     for named in [false, true] {
         use tor_world::{Extent, Passage, Region};
-        let mut game = Game::two_room(0);
+        let mut game = Game::two_room(0, super::creature_fixture::content());
         game.add_region(Region {
             id: RegionId(3),
             name: "Upstairs".into(),
@@ -178,7 +178,7 @@ fn explicit_stairs_are_known_connections_and_self_loops_terminate() {
 fn hidden_shortcut_cannot_affect_a_known_route() {
     // Separate scenes can disclose two locations without disclosing a link.
     use tor_world::{Extent, Passage, Region};
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, super::creature_fixture::content());
     game.add_region(Region {
         id: RegionId(3),
         name: "Other".into(),
@@ -236,8 +236,12 @@ fn splitting_a_known_space_across_a_wide_join_does_not_change_the_route() {
             1,
         )
         .unwrap();
-    let mut split = Game::new(split_world, 0);
-    let mut whole = Game::new(World::new(vec![region(1, 6)], vec![]).unwrap(), 0);
+    let mut split = Game::new(split_world, 0, super::creature_fixture::content());
+    let mut whole = Game::new(
+        World::new(vec![region(1, 6)], vec![]).unwrap(),
+        0,
+        super::creature_fixture::content(),
+    );
     let a = split
         .spawn_actor(cell(1, 1), NonZeroU64::new(100).unwrap())
         .unwrap();

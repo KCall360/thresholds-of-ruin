@@ -617,9 +617,9 @@ mod refresh_tests {
         )
         .unwrap();
         for (fixture, template) in [
-            Game::new(open, 42),
-            Game::region_corridor(42, 2),
-            Game::two_room_in_stone(42),
+            Game::new(open, 42, crate::test_creatures::content()),
+            Game::region_corridor(42, 2, crate::test_creatures::content()),
+            Game::two_room_in_stone(42, crate::test_creatures::content()),
         ]
         .into_iter()
         .enumerate()
@@ -678,7 +678,7 @@ mod refresh_tests {
 
     #[test]
     fn chart_translation_handles_extreme_offsets_and_keeps_stairs_conservative() {
-        let mut game = Game::region_corridor(42, 1);
+        let mut game = Game::region_corridor(42, 1, crate::test_creatures::content());
         let location = Location {
             region: RegionId(1),
             position: Position { x: 2, y: 1, z: 0 },
@@ -761,7 +761,7 @@ mod refresh_tests {
 
     #[test]
     fn disclosed_membership_keeps_navigation_independent_of_scene_order() {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(
                 Location {
@@ -820,7 +820,7 @@ mod refresh_tests {
                 3,
             )
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         let actor = game
             .spawn_actor(at(2, 1), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -864,7 +864,7 @@ mod refresh_tests {
                     bounds: tor_world::Extent::new(32, 8, 8).unwrap(),
                 })
                 .unwrap();
-            let mut game = Game::new(world, 42);
+            let mut game = Game::new(world, 42, crate::test_creatures::content());
             let actors: Vec<_> = (0..8)
                 .map(|n| {
                     let actor = game
@@ -946,7 +946,7 @@ mod refresh_tests {
                 bounds: tor_world::Extent::new(36, 5, 2).unwrap(),
             })
             .unwrap();
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         let cell = |x| Location {
             region: RegionId(1),
             position: Position { x, y: 2, z: 0 },
@@ -988,7 +988,7 @@ mod refresh_tests {
                 })
                 .unwrap();
         }
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         let cells: Vec<_> = (0..24)
             .map(|n| Location {
                 region: RegionId(1 + n / 12),
@@ -1040,7 +1040,7 @@ mod refresh_tests {
 
     #[test]
     fn local_refresh_matches_original_full_scan_with_stale_edges_and_door_changes() {
-        let mut game = Game::two_room_in_stone(42);
+        let mut game = Game::two_room_in_stone(42, crate::test_creatures::content());
         let location = |region, x, y| Location {
             region: RegionId(region),
             position: Position { x, y, z: 0 },
@@ -1138,7 +1138,7 @@ mod refresh_tests {
                 )
                 .unwrap();
         }
-        let mut game = Game::new(world, 42);
+        let mut game = Game::new(world, 42, crate::test_creatures::content());
         // Beside the wall, north of the gap.
         let actor = game
             .spawn_actor(at(1, 5, 1), NonZeroU64::new(100).unwrap())

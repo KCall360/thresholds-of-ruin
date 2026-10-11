@@ -24,6 +24,53 @@ class SearchParameterTests(unittest.TestCase):
         self.assertEqual(original, snapshot)
         self.assertEqual(space["strength"]["high"], 7)
 
+    def test_ruleset_numeric_parameters_preserve_ids_and_reject_structure_edits(self):
+        document = {"id": "test", "resources": [{"resource": "mana", "recovery_period": 1000}]}
+        spec = specification(["resources", 0, "recovery_period"])
+        spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+        spec["parameters"]["strength"]["space"] = {"type": "integer", "low": 600, "high": 1000}
+        patched = apply_document(document, "rules.toml", spec, {"strength": 600})
+        self.assertEqual(patched["resources"][0]["recovery_period"], 600)
+        self.assertEqual(patched["id"], "test")
+        self.assertEqual(document["resources"][0]["recovery_period"], 1000)
+        for path in [["id"], ["abilities", 0, "id"], ["abilities", 0, "check", "actor"],
+                     ["talents", 0, "modifiers", 0, "op", "kind"],
+                     ["resources", 0, "resource"]]:
+            spec["parameters"]["strength"]["targets"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_spec(spec)
+
+    def test_capacity_cost_and_every_numeric_talent_family_are_scalar_parameters(self):
+        from pathlib import Path
+        import tomllib
+        original = tomllib.loads((Path(__file__).resolve().parents[1]
+                                 / "crates/simulation/data/default-ruleset.toml").read_text(encoding="utf-8"))
+        snapshot = copy.deepcopy(original)
+        paths = [["resources", index, "capacity", "base"] for index in range(len(original["resources"]))]
+        paths += [["abilities", index, "cost", phase]
+                  for index, ability in enumerate(original["abilities"]) if "cost" in ability
+                  for phase in ["start", "resolution"]]
+        paths += [["talents", index, "modifiers", modifier, "op", field]
+                  for index, talent in enumerate(original["talents"])
+                  for modifier, value in enumerate(talent["modifiers"])
+                  for field in ["value", "amount"] if field in value["op"]]
+        for path in paths:
+            with self.subTest(path=path):
+                value = original
+                for key in path:
+                    value = value[key]
+                spec = specification(path)
+                spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+                spec["parameters"]["strength"]["space"] = {"type": "integer", "low": value, "high": value + 1}
+                actual = apply_document(original, "rules.toml", spec, {"strength": value + 1})
+                expected = copy.deepcopy(original)
+                parent = expected
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = value + 1
+                self.assertEqual(actual, expected)
+        self.assertEqual(original, snapshot)
+
     def test_geometry_identity_caps_path_traversal_and_conflicting_targets_are_rejected(self):
         for path in [["arena", "actions"], ["factions", "blue", 0],
                      ["characters", 0, "anchor"], ["characters", 0, "creature", "faction"],
@@ -51,6 +98,57 @@ class SearchParameterTests(unittest.TestCase):
 
 
 class MaterializationRecoveryTests(unittest.TestCase):
+    def test_import_materialization_detaches_both_variants_and_pins_general_source(self):
+        import json
+        from pathlib import Path
+        import subprocess
+        import tempfile
+        import tomllib
+        from unittest.mock import patch
+        import arena_search_parameters as parameters
+        import ruleset_sources
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compiler = root / "compiler"
+            compiler.write_bytes(b"fixed compiler")
+            general = root / "general.toml"
+            original_general = ruleset_sources.DEFAULT_RULESET.read_bytes()
+            general.write_bytes(original_general)
+            inputs = {}
+            for orientation in ("forward", "mirrored"):
+                package = root / orientation
+                package.mkdir()
+                (package / "scenario.toml").write_text(f'# {orientation}\nruleset = "rules.toml"\n', encoding="utf-8")
+                (package / "rules.toml").write_text('import = "interactions-v27"\n', encoding="utf-8")
+                inputs[orientation] = str(package)
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({"baseline": inputs, "candidate": inputs,
+                                        "seeds": ["42"], "faction": "blue"}), encoding="utf-8")
+            rules = tomllib.loads(original_general.decode())
+            mana = next(i for i, resource in enumerate(rules["resources"]) if resource["resource"] == "mana")
+            spec = specification(["resources", mana, "recovery_period"])
+            spec["parameters"]["strength"]["targets"][0]["file"] = "rules.toml"
+            spec["parameters"]["strength"]["space"] = {"type": "integer", "low": 1, "high": 1000}
+            valid = subprocess.CompletedProcess([], 0, "valid", "")
+            output = root / "materialized"
+            with patch("ruleset_sources.DEFAULT_RULESET", general), patch.object(parameters.subprocess, "run", return_value=valid):
+                result = parameters.materialize(compiler, plan, spec, {"strength": 897}, output)
+                self.assertTrue(all(dependencies for dependencies in result["rules_dependencies"].values()))
+                for variant in ["baseline", "candidate"]:
+                    expected = copy.deepcopy(rules)
+                    if variant == "candidate":
+                        expected["resources"][mana]["recovery_period"] = 897
+                    for orientation in ["forward", "mirrored"]:
+                        actual = tomllib.loads((output / (variant + "-" + orientation) / "rules.toml").read_text())
+                        self.assertEqual(actual, expected)
+                        self.assertNotIn("import", actual)
+                general.write_bytes(original_general + b"\n# dependency changed\n")
+                with self.assertRaisesRegex(ValueError, "inputs"):
+                    parameters.materialize(compiler, plan, spec, {"strength": 897}, output, resume=True)
+                # Authored packages remain imports, while retained packages need no source.
+                for package in inputs.values():
+                    self.assertEqual(tomllib.loads((Path(package) / "rules.toml").read_text()), {"import": "interactions-v27"})
+
     def test_resume_reuses_validated_packages_and_rejects_input_or_result_drift(self):
         import json
         from pathlib import Path

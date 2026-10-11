@@ -177,9 +177,21 @@ impl PreparedArchetype {
                 catalog,
                 manifest,
             )?,
-            anatomy: author.anatomy.clone().map(Into::into),
-            equipment: author.equipment.clone().map(Into::into),
-            consumable: author.consumable.clone().map(Into::into),
+            anatomy: author
+                .anatomy
+                .as_ref()
+                .map(|anatomy| anatomy.compile(catalog.content().rules()))
+                .transpose()?,
+            equipment: author
+                .equipment
+                .as_ref()
+                .map(|equipment| equipment.compile(catalog.content().rules()))
+                .transpose()?,
+            consumable: author
+                .consumable
+                .as_ref()
+                .map(|consumable| consumable.compile(catalog.content().rules()))
+                .transpose()?,
             class: author.class.into(),
 
             body: author.body.clone().map(Into::into),
@@ -232,14 +244,24 @@ impl PreparedDefinitions {
 
     #[cfg(test)]
     pub fn new(manifest: &Manifest, selected: u64) -> Result<Self, Failure> {
-        Self::new_with_source(manifest, selected, || None)
+        Self::new_with_source(
+            manifest,
+            selected,
+            crate::scenario_package::parse_rules(
+                include_str!("../../simulation/data/default-ruleset.toml"),
+                "test rules",
+            )
+            .unwrap(),
+            || None,
+        )
     }
     pub fn new_with_source(
         manifest: &Manifest,
         selected: u64,
+        rules: Arc<tor_simulation::rules::Ruleset>,
         source: impl Fn() -> Option<Arc<str>>,
     ) -> Result<Self, Failure> {
-        let catalog = manifest.creatures.compile()?;
+        let catalog = manifest.creatures.compile(rules)?;
         let ai_profiles: BTreeMap<_, _> = manifest
             .ai_profiles
             .iter()
@@ -277,8 +299,11 @@ impl PreparedDefinitions {
                             .map(Cow::Owned),
                             anatomy: author
                                 .anatomy
-                                .clone()
-                                .map(|anatomy| Cow::Owned(anatomy.into())),
+                                .as_ref()
+                                .map(|anatomy| {
+                                    anatomy.compile(catalog.content().rules()).map(Cow::Owned)
+                                })
+                                .transpose()?,
                             known_identities: author.known_identities.clone(),
 
                             body: author.body.clone().map(|body| Cow::Owned(body.into())),
@@ -367,8 +392,13 @@ impl PreparedDefinitions {
             recipe,
             anatomy: author
                 .anatomy
-                .clone()
-                .map(|anatomy| Cow::Owned(anatomy.into()))
+                .as_ref()
+                .map(|anatomy| {
+                    anatomy
+                        .compile(self.catalog.content().rules())
+                        .map(Cow::Owned)
+                })
+                .transpose()?
                 .or_else(|| inherited.anatomy.as_ref().map(Cow::Borrowed)),
             known_identities: author.known_identities.clone(),
 
@@ -489,7 +519,7 @@ mod tests {
             }))
             .unwrap(),
         );
-        super::super::Package::from_parts(manifest, regions).unwrap()
+        super::super::Package::from_parts(manifest, regions, &template.rules_source).unwrap()
     }
 
     #[test]
@@ -508,7 +538,7 @@ mod tests {
         }
         assert_eq!(game.tick(), 7);
         assert_eq!(
-            game.arena_run().unwrap().stop,
+            game.arena_run().unwrap().stop().cloned(),
             Some(tor_simulation::arena::ArenaStop::TickLimit)
         );
     }
@@ -564,8 +594,12 @@ mod tests {
         let actor = regions[0].actors.pop().unwrap();
         assert_eq!(actor.id, 2);
         regions[1].actors.push(actor);
-        let package =
-            super::super::Package::from_parts(template.manifest.clone(), regions).unwrap();
+        let package = super::super::Package::from_parts(
+            template.manifest.clone(),
+            regions,
+            &template.rules_source,
+        )
+        .unwrap();
         let mut scenario = crate::Scenario::two_room(42);
         scenario.actors.clear();
         scenario.package = Some(std::sync::Arc::new(package));
@@ -598,8 +632,12 @@ mod tests {
         let template = arena_package();
         let mut manifest = template.manifest.clone();
         manifest.arena.as_mut().unwrap().control = super::super::ArenaControl::Manual;
-        let package =
-            super::super::Package::from_parts(manifest, template.region_defs().unwrap()).unwrap();
+        let package = super::super::Package::from_parts(
+            manifest,
+            template.region_defs().unwrap(),
+            &template.rules_source,
+        )
+        .unwrap();
         let mut game = package.build(42, true).unwrap();
         assert!(!game.is_ai(tor_simulation::ActorId(1)));
         assert!(game.next_ai_action().is_none());
@@ -633,9 +671,12 @@ mod tests {
                 6 => manifest.characters[0].creature = None,
                 _ => unreachable!(),
             }
-            let result =
-                super::super::Package::from_parts(manifest, template.region_defs().unwrap())
-                    .and_then(|package| package.build(42, true));
+            let result = super::super::Package::from_parts(
+                manifest,
+                template.region_defs().unwrap(),
+                &template.rules_source,
+            )
+            .and_then(|package| package.build(42, true));
             assert!(result.is_err(), "invalid arena case {case}");
         }
     }
@@ -646,7 +687,7 @@ mod tests {
         manifest.creatures = serde_json::from_value(serde_json::json!({"species": {"human": {
             "kind": "humanoid", "attributes": {"strength": 2, "speed": 1, "intellect": 2, "willpower": 2, "awareness": 1, "presence": 1},
             "melee":{"skill":"heavy_weaponry","bonus":0,"wind_up":60,"recovery":40,"damage":{"primary":{"category":"impact","descriptor":null,"sides":6},"components":[{"category":"impact","descriptor":null,"amount":{"type":"rolled","count":1,"sides":6,"bonus":0}}]}},
-            "grants": [{"type": "ability", "ability": "magic_bolt"}]
+            "modifiers": [{"scope":"always", "op":{"kind":"grant_ability", "ability":"magic_bolt"}}]
         }}})).unwrap();
         manifest.characters[0].creature = Some(serde_json::from_value(serde_json::json!({
             "species": "human", "name": "test creature", "faction": "neutral", "binding": "intellect",
@@ -676,7 +717,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let package = super::super::Package::from_parts(manifest, regions).unwrap();
+        let package =
+            super::super::Package::from_parts(manifest, regions, &template.rules_source).unwrap();
         let first = package.build(42, true).unwrap();
         let second = package.build(42, true).unwrap();
         let mut shared = tor_simulation::checkpoint::SharedState::default();
@@ -697,15 +739,22 @@ mod tests {
         assert!(selected
             .derived()
             .abilities
-            .contains(&tor_simulation::grants::Ability::MagicBolt));
+            .contains(&tor_simulation::content_ids::AbilityId::new("magic_bolt").unwrap()));
     }
 
     #[test]
     fn creature_validation_precedes_lazy_faction_diagnostics() {
         let mut manifest = creature_manifest();
-        PreparedDefinitions::new_with_source(&manifest, 1, || {
-            panic!("successful compilation must not acquire diagnostic source")
-        })
+        PreparedDefinitions::new_with_source(
+            &manifest,
+            1,
+            crate::scenario_package::parse_rules(
+                include_str!("../../simulation/data/default-ruleset.toml"),
+                "test rules",
+            )
+            .unwrap(),
+            || panic!("successful compilation must not acquire diagnostic source"),
+        )
         .unwrap();
         manifest.factions.insert("other".into(), Default::default());
         let original = manifest.characters[0].creature.as_ref().unwrap().clone();
@@ -715,9 +764,16 @@ mod tests {
             .unwrap()
             .hit_dice
             .clear();
-        let error = PreparedDefinitions::new_with_source(&manifest, 1, || {
-            panic!("invalid choices precede faction source acquisition")
-        })
+        let error = PreparedDefinitions::new_with_source(
+            &manifest,
+            1,
+            crate::scenario_package::parse_rules(
+                include_str!("../../simulation/data/default-ruleset.toml"),
+                "test rules",
+            )
+            .unwrap(),
+            || panic!("invalid choices precede faction source acquisition"),
+        )
         .unwrap_err();
         assert!(error.message.contains("require 1 to 256 hit dice"));
         manifest.characters[0].creature = Some(original);
@@ -728,10 +784,19 @@ mod tests {
             .expect("the creature faction is declared")
             + 1;
         let reads = std::cell::Cell::new(0);
-        let error = PreparedDefinitions::new_with_source(&manifest, 1, || {
-            reads.set(reads.get() + 1);
-            Some(source.clone())
-        })
+        let error = PreparedDefinitions::new_with_source(
+            &manifest,
+            1,
+            crate::scenario_package::parse_rules(
+                include_str!("../../simulation/data/default-ruleset.toml"),
+                "test rules",
+            )
+            .unwrap(),
+            || {
+                reads.set(reads.get() + 1);
+                Some(source.clone())
+            },
+        )
         .unwrap_err();
         assert_eq!(reads.get(), 1);
         assert!(
@@ -792,28 +857,67 @@ mod tests {
         let arrow = &manifest.archetypes["arrow"];
         assert_eq!(item_asset(arrow, &manifest), Some("item.arrow"));
         assert_eq!(
-            PreparedArchetype::new(arrow, &manifest, &manifest.creatures.compile().unwrap())
-                .unwrap()
-                .item_asset
-                .as_deref(),
+            PreparedArchetype::new(
+                arrow,
+                &manifest,
+                &manifest
+                    .creatures
+                    .compile(
+                        crate::scenario_package::parse_rules(
+                            include_str!("../../simulation/data/default-ruleset.toml"),
+                            "test rules"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap()
+            )
+            .unwrap()
+            .item_asset
+            .as_deref(),
             Some("item.arrow")
         );
         let hidden = &manifest.archetypes["healing"];
         assert_eq!(item_asset(hidden, &manifest), Some("item.shared"));
         assert_eq!(
-            PreparedArchetype::new(hidden, &manifest, &manifest.creatures.compile().unwrap())
-                .unwrap()
-                .item_asset
-                .as_deref(),
+            PreparedArchetype::new(
+                hidden,
+                &manifest,
+                &manifest
+                    .creatures
+                    .compile(
+                        crate::scenario_package::parse_rules(
+                            include_str!("../../simulation/data/default-ruleset.toml"),
+                            "test rules"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap()
+            )
+            .unwrap()
+            .item_asset
+            .as_deref(),
             Some("item.shared")
         );
         manifest.appearance_pools.get_mut("potions").unwrap().asset = None;
         let hidden = &manifest.archetypes["healing"];
         assert_eq!(item_asset(hidden, &manifest), None);
         assert_eq!(
-            PreparedArchetype::new(hidden, &manifest, &manifest.creatures.compile().unwrap())
-                .unwrap()
-                .item_asset,
+            PreparedArchetype::new(
+                hidden,
+                &manifest,
+                &manifest
+                    .creatures
+                    .compile(
+                        crate::scenario_package::parse_rules(
+                            include_str!("../../simulation/data/default-ruleset.toml"),
+                            "test rules"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap()
+            )
+            .unwrap()
+            .item_asset,
             None
         );
     }
@@ -918,8 +1022,18 @@ mod tests {
         ))
         .unwrap();
         manifest.creatures = definitions.creatures;
-        manifest.creatures.species.get_mut("figure").unwrap().grants =
-            vec![crate::creature_authoring::Grant::Health { amount: 33 }];
+        manifest
+            .creatures
+            .species
+            .get_mut("figure")
+            .unwrap()
+            .modifiers = vec![crate::creature_authoring::Modifier {
+            scope: crate::creature_authoring::Scope::Always,
+            op: crate::creature_authoring::Op::Add {
+                stat: crate::creature_authoring::Stat::Health,
+                value: 33,
+            },
+        }];
         let mut creature = definitions.characters[0].creature.clone().unwrap();
         creature.name = "guard".into();
         manifest.archetypes.insert(

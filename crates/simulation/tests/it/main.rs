@@ -12,6 +12,7 @@ mod arena_run;
 mod attack_definition;
 mod attributes;
 mod combat;
+mod conditions;
 mod costs;
 #[path = "../../test_support/creatures.rs"]
 mod creature_fixture;
@@ -25,7 +26,7 @@ mod diagonal;
 mod dice;
 mod doors;
 mod enclosures;
-mod fear;
+mod equipment_modifiers;
 mod health;
 mod interactions;
 mod item_index;
@@ -42,3 +43,5 @@ mod sight;
 mod talents;
 mod travel;
 mod wizard_setup;
+
+mod rules_mechanics;

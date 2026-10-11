@@ -2,7 +2,7 @@
  "client": [
   {
    "frontend": "headless",
-   "protocol": 32,
+   "protocol": 33,
    "token": "a-sample-credential",
    "type": "hello"
   },
@@ -251,8 +251,9 @@
     "branch": "branch-1",
     "command": {
      "action": {
+      "id": "basic_melee",
       "target": "a_0202020202020202020202020202020202020202020202020202020202020202",
-      "type": "attack"
+      "type": "use_ability"
      },
      "expected_revision": "3",
      "type": "act"
@@ -274,7 +275,7 @@
     "branch": "branch-1",
     "command": {
      "action": {
-      "ability": "power_strike",
+      "id": "power_strike",
       "target": "a_0202020202020202020202020202020202020202020202020202020202020202",
       "type": "use_ability"
      },
@@ -298,7 +299,7 @@
     "branch": "branch-1",
     "command": {
      "action": {
-      "ability": "magic_bolt",
+      "id": "magic_bolt",
       "target": "a_0202020202020202020202020202020202020202020202020202020202020202",
       "type": "use_ability"
      },
@@ -322,7 +323,7 @@
     "branch": "branch-1",
     "command": {
      "action": {
-      "ability": "fear",
+      "id": "fear",
       "target": "a_0202020202020202020202020202020202020202020202020202020202020202",
       "type": "use_ability"
      },
@@ -511,12 +512,12 @@
    "type": "request"
   }
  ],
- "protocol": 32,
+ "protocol": 33,
  "server": [
   {
    "context": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "cursor": {
      "sequence": "4",
      "tick": "0"
@@ -525,26 +526,26 @@
      "readiness_revision": "2",
      "stream": {
       "epoch": "1",
-      "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+      "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
      }
     },
     "revision": "0"
    },
    "receipt": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
-    "entry_id": "3d0da91d-8a5c-4135-b691-3feaf44fbb39",
-    "intention": "3d0da91d-8a5c-4135-b691-3feaf44fbb39",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
+    "entry_id": "1737320b-1591-48fa-999c-44012025e8b5",
+    "intention": "1737320b-1591-48fa-999c-44012025e8b5",
     "phase": "queued",
     "type": "admitted"
    },
-   "request_id": "a58c70c2-6688-4742-9f8d-724429e5289c",
+   "request_id": "11aebd43-9a2a-4298-aa95-fe37a758e88a",
    "type": "ack"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "cursor": {
      "sequence": "2",
      "tick": "0"
@@ -553,24 +554,24 @@
      "readiness_revision": "1",
      "stream": {
       "epoch": "1",
-      "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+      "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
      }
     },
     "revision": "0"
    },
    "receipt": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "entry_id": null,
     "type": "immediate"
    },
-   "request_id": "0f8c9c87-c4bc-43a6-884e-70c65c446756",
+   "request_id": "691d1553-78f4-49a6-b27b-23156ebb7bdb",
    "type": "ack"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "944544ec-7d09-4763-8001-6c7ffb2cc11e",
+    "branch": "7cc13672-694b-4487-8056-35f8d5ebf674",
     "cursor": {
      "sequence": "0",
      "tick": "0"
@@ -579,7 +580,7 @@
      "readiness_revision": "0",
      "stream": {
       "epoch": "1",
-      "stream": "69b8ddb4-94e4-421a-b38b-491f6e9a8b7d"
+      "stream": "2e741e64-6fe3-490b-865d-0a48c94c5a0d"
      }
     },
     "revision": "0"
@@ -593,13 +594,13 @@
     "through": "0",
     "tick": "0"
    },
-   "request_id": "229ea253-0ae6-41d2-80f9-80f8601127eb",
+   "request_id": "88e49aa1-d061-4fea-826c-0059a1a72b18",
    "type": "combat_diagnostics"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "944544ec-7d09-4763-8001-6c7ffb2cc11e",
+    "branch": "7cc13672-694b-4487-8056-35f8d5ebf674",
     "cursor": {
      "sequence": "0",
      "tick": "0"
@@ -608,76 +609,16 @@
      "readiness_revision": "0",
      "stream": {
       "epoch": "1",
-      "stream": "69b8ddb4-94e4-421a-b38b-491f6e9a8b7d"
+      "stream": "2e741e64-6fe3-490b-865d-0a48c94c5a0d"
      }
     },
     "revision": "0"
    },
    "report": {
     "actor": "1",
+    "conditions": [],
     "dead": false,
     "faction": "blue",
-    "fear": [],
-    "grants": [
-     {
-      "grants": [
-       {
-        "type": "magical"
-       }
-      ],
-      "source": {
-       "class": "mage",
-       "type": "class"
-      }
-     },
-     {
-      "grants": [
-       {
-        "type": "magical"
-       }
-      ],
-      "source": {
-       "id": "arcane",
-       "type": "template"
-      }
-     },
-     {
-      "grants": [
-       {
-        "ability": "power_strike",
-        "type": "ability"
-       }
-      ],
-      "source": {
-       "talent": "power_strike",
-       "type": "talent"
-      }
-     },
-     {
-      "grants": [
-       {
-        "ability": "magic_bolt",
-        "type": "ability"
-       }
-      ],
-      "source": {
-       "talent": "magic_bolt",
-       "type": "talent"
-      }
-     },
-     {
-      "grants": [
-       {
-        "ability": "fear",
-        "type": "ability"
-       }
-      ],
-      "source": {
-       "talent": "fear",
-       "type": "talent"
-      }
-     }
-    ],
     "hit_dice": [
      {
       "attribute": null,
@@ -685,11 +626,23 @@
       "health_die": 10,
       "health_seed": "7241643373533718751",
       "ordinal": 1,
-      "source": "warrior",
-      "talent": "power_strike",
+      "source": {
+       "id": "warrior",
+       "name": "Warrior"
+      },
+      "talent": {
+       "id": "power_strike",
+       "name": "Power Strike"
+      },
       "training": [
-       "heavy_weaponry",
-       "discipline"
+       {
+        "id": "heavy_weaponry",
+        "name": "Heavy weaponry"
+       },
+       {
+        "id": "discipline",
+        "name": "Discipline"
+       }
       ]
      },
      {
@@ -698,11 +651,23 @@
       "health_die": 6,
       "health_seed": "16509783645285617541",
       "ordinal": 2,
-      "source": "mage",
-      "talent": "magic_bolt",
+      "source": {
+       "id": "mage",
+       "name": "Mage"
+      },
+      "talent": {
+       "id": "magic_bolt",
+       "name": "Magic Bolt"
+      },
       "training": [
-       "spellcasting",
-       "lore"
+       {
+        "id": "spellcasting",
+        "name": "Spellcasting"
+       },
+       {
+        "id": "lore",
+        "name": "Lore"
+       }
       ]
      },
      {
@@ -711,11 +676,23 @@
       "health_die": 6,
       "health_seed": "10188219578610734101",
       "ordinal": 3,
-      "source": "mage",
-      "talent": "fear",
+      "source": {
+       "id": "mage",
+       "name": "Mage"
+      },
+      "talent": {
+       "id": "fear",
+       "name": "Fear"
+      },
       "training": [
-       "intimidation",
-       "spellcasting"
+       {
+        "id": "intimidation",
+        "name": "Intimidation"
+       },
+       {
+        "id": "spellcasting",
+        "name": "Spellcasting"
+       }
       ]
      }
     ],
@@ -731,18 +708,266 @@
     "injury": 0,
     "max_hp": 18,
     "name": "blue adept",
-    "species": {
-     "attributes": {
-      "awareness": 1,
-      "intellect": 2,
-      "presence": 1,
-      "speed": 2,
-      "strength": 2,
-      "willpower": 2
+    "natural_attack": {
+     "bonus": 0,
+     "damage": {
+      "components": [
+       {
+        "amount": {
+         "bonus": 0,
+         "count": 1,
+         "sides": 6,
+         "type": "rolled"
+        },
+        "category": "impact",
+        "descriptor": null
+       }
+      ],
+      "primary": {
+       "category": "impact",
+       "descriptor": null,
+       "sides": 6
+      }
      },
-     "id": "human",
-     "kind": "humanoid",
-     "melee": {
+     "recovery": 40,
+     "skill": {
+      "id": "heavy_weaponry",
+      "name": "Heavy weaponry"
+     },
+     "wind_up": 60
+    },
+    "selected_attack": {
+     "abilities": [
+      {
+       "fields": [
+        {
+         "id": "ability",
+         "name": "Ability",
+         "value": {
+          "type": "content",
+          "value": {
+           "id": "basic_melee",
+           "name": "Attack"
+          }
+         }
+        },
+        {
+         "id": "wind_up",
+         "name": "Wind up",
+         "value": {
+          "type": "signed",
+          "value": "43"
+         }
+        },
+        {
+         "id": "recovery",
+         "name": "Recovery",
+         "value": {
+          "type": "signed",
+          "value": "29"
+         }
+        },
+        {
+         "id": "check_modifier",
+         "name": "Check modifier",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "extra_dice",
+         "name": "Extra dice",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "flat_bonus",
+         "name": "Flat bonus",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        }
+       ],
+       "id": "ability_profile",
+       "name": "Ability profile"
+      },
+      {
+       "fields": [
+        {
+         "id": "ability",
+         "name": "Ability",
+         "value": {
+          "type": "content",
+          "value": {
+           "id": "fear",
+           "name": "Fear"
+          }
+         }
+        },
+        {
+         "id": "wind_up",
+         "name": "Wind up",
+         "value": {
+          "type": "signed",
+          "value": "72"
+         }
+        },
+        {
+         "id": "recovery",
+         "name": "Recovery",
+         "value": {
+          "type": "signed",
+          "value": "72"
+         }
+        },
+        {
+         "id": "check_modifier",
+         "name": "Check modifier",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "extra_dice",
+         "name": "Extra dice",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "flat_bonus",
+         "name": "Flat bonus",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        }
+       ],
+       "id": "ability_profile",
+       "name": "Ability profile"
+      },
+      {
+       "fields": [
+        {
+         "id": "ability",
+         "name": "Ability",
+         "value": {
+          "type": "content",
+          "value": {
+           "id": "magic_bolt",
+           "name": "Magic Bolt"
+          }
+         }
+        },
+        {
+         "id": "wind_up",
+         "name": "Wind up",
+         "value": {
+          "type": "signed",
+          "value": "72"
+         }
+        },
+        {
+         "id": "recovery",
+         "name": "Recovery",
+         "value": {
+          "type": "signed",
+          "value": "72"
+         }
+        },
+        {
+         "id": "check_modifier",
+         "name": "Check modifier",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "extra_dice",
+         "name": "Extra dice",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "flat_bonus",
+         "name": "Flat bonus",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        }
+       ],
+       "id": "ability_profile",
+       "name": "Ability profile"
+      },
+      {
+       "fields": [
+        {
+         "id": "ability",
+         "name": "Ability",
+         "value": {
+          "type": "content",
+          "value": {
+           "id": "power_strike",
+           "name": "Power Strike"
+          }
+         }
+        },
+        {
+         "id": "wind_up",
+         "name": "Wind up",
+         "value": {
+          "type": "signed",
+          "value": "43"
+         }
+        },
+        {
+         "id": "recovery",
+         "name": "Recovery",
+         "value": {
+          "type": "signed",
+          "value": "29"
+         }
+        },
+        {
+         "id": "check_modifier",
+         "name": "Check modifier",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "extra_dice",
+         "name": "Extra dice",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        },
+        {
+         "id": "flat_bonus",
+         "name": "Flat bonus",
+         "value": {
+          "type": "signed",
+          "value": "0"
+         }
+        }
+       ],
+       "id": "ability_profile",
+       "name": "Ability profile"
+      }
+     ],
+     "attack": {
       "bonus": 0,
       "damage": {
        "components": [
@@ -764,22 +989,327 @@
        }
       },
       "recovery": 40,
-      "skill": "heavy_weaponry",
+      "skill": {
+       "id": "heavy_weaponry",
+       "name": "Heavy weaponry"
+      },
       "wind_up": 60
      },
-     "subtypes": []
+     "attribute": {
+      "id": "strength",
+      "name": "Strength"
+     },
+     "attribute_value": 2,
+     "category": "species",
+     "check_bonus": "3",
+     "rank": 1,
+     "socket": null,
+     "source": {
+      "id": "human",
+      "name": "Human"
+     }
+    },
+    "sources": [
+     {
+      "category": "species",
+      "owner": null,
+      "rows": [],
+      "source": {
+       "id": "human",
+       "name": "Human"
+      }
+     },
+     {
+      "category": "type",
+      "owner": null,
+      "rows": [],
+      "source": {
+       "id": "humanoid",
+       "name": "Humanoid"
+      }
+     },
+     {
+      "category": "class",
+      "owner": null,
+      "rows": [
+       {
+        "fields": [
+         {
+          "id": "scope",
+          "name": "Scope",
+          "value": {
+           "type": "text",
+           "value": "always"
+          }
+         },
+         {
+          "id": "flag",
+          "name": "Flag",
+          "value": {
+           "type": "content",
+           "value": {
+            "id": "magical",
+            "name": "Magical"
+           }
+          }
+         }
+        ],
+        "id": "flag",
+        "name": "Flag"
+       }
+      ],
+      "source": {
+       "id": "mage",
+       "name": "Mage"
+      }
+     },
+     {
+      "category": "class",
+      "owner": null,
+      "rows": [],
+      "source": {
+       "id": "warrior",
+       "name": "Warrior"
+      }
+     },
+     {
+      "category": "template",
+      "owner": null,
+      "rows": [
+       {
+        "fields": [
+         {
+          "id": "scope",
+          "name": "Scope",
+          "value": {
+           "type": "text",
+           "value": "always"
+          }
+         },
+         {
+          "id": "flag",
+          "name": "Flag",
+          "value": {
+           "type": "content",
+           "value": {
+            "id": "magical",
+            "name": "Magical"
+           }
+          }
+         }
+        ],
+        "id": "flag",
+        "name": "Flag"
+       },
+       {
+        "fields": [
+         {
+          "id": "value",
+          "name": "Value",
+          "value": {
+           "type": "signed",
+           "value": "0"
+          }
+         }
+        ],
+        "id": "priority",
+        "name": "Priority"
+       }
+      ],
+      "source": {
+       "id": "arcane",
+       "name": "Arcane"
+      }
+     },
+     {
+      "category": "talent",
+      "owner": null,
+      "rows": [
+       {
+        "fields": [
+         {
+          "id": "scope",
+          "name": "Scope",
+          "value": {
+           "type": "text",
+           "value": "always"
+          }
+         },
+         {
+          "id": "ability",
+          "name": "Ability",
+          "value": {
+           "type": "content",
+           "value": {
+            "id": "fear",
+            "name": "Fear"
+           }
+          }
+         }
+        ],
+        "id": "grant_ability",
+        "name": "Grant ability"
+       }
+      ],
+      "source": {
+       "id": "fear",
+       "name": "Fear"
+      }
+     },
+     {
+      "category": "talent",
+      "owner": null,
+      "rows": [
+       {
+        "fields": [
+         {
+          "id": "scope",
+          "name": "Scope",
+          "value": {
+           "type": "text",
+           "value": "always"
+          }
+         },
+         {
+          "id": "ability",
+          "name": "Ability",
+          "value": {
+           "type": "content",
+           "value": {
+            "id": "magic_bolt",
+            "name": "Magic Bolt"
+           }
+          }
+         }
+        ],
+        "id": "grant_ability",
+        "name": "Grant ability"
+       }
+      ],
+      "source": {
+       "id": "magic_bolt",
+       "name": "Magic Bolt"
+      }
+     },
+     {
+      "category": "talent",
+      "owner": null,
+      "rows": [
+       {
+        "fields": [
+         {
+          "id": "scope",
+          "name": "Scope",
+          "value": {
+           "type": "text",
+           "value": "always"
+          }
+         },
+         {
+          "id": "ability",
+          "name": "Ability",
+          "value": {
+           "type": "content",
+           "value": {
+            "id": "power_strike",
+            "name": "Power Strike"
+           }
+          }
+         }
+        ],
+        "id": "grant_ability",
+        "name": "Grant ability"
+       }
+      ],
+      "source": {
+       "id": "power_strike",
+       "name": "Power Strike"
+      }
+     }
+    ],
+    "species": {
+     "id": "human",
+     "name": "Human"
     },
     "stats": {
      "abilities": [
-      "basic_melee",
-      "power_strike",
-      "magic_bolt",
-      "fear"
+      {
+       "basic_attack": true,
+       "cost": null,
+       "id": "basic_melee",
+       "name": "Attack",
+       "reach": {
+        "kind": "melee"
+       },
+       "target_kind": "actor"
+      },
+      {
+       "basic_attack": false,
+       "cost": {
+        "resolution": 1,
+        "resource": {
+         "id": "focus",
+         "name": "Focus"
+        },
+        "start": 1
+       },
+       "id": "fear",
+       "name": "Fear",
+       "reach": {
+        "kind": "sight",
+        "range": 6
+       },
+       "target_kind": "actor"
+      },
+      {
+       "basic_attack": false,
+       "cost": {
+        "resolution": 1,
+        "resource": {
+         "id": "mana",
+         "name": "Mana"
+        },
+        "start": 1
+       },
+       "id": "magic_bolt",
+       "name": "Magic Bolt",
+       "reach": {
+        "kind": "sight",
+        "range": 6
+       },
+       "target_kind": "actor"
+      },
+      {
+       "basic_attack": false,
+       "cost": {
+        "resolution": 1,
+        "resource": {
+         "id": "stamina",
+         "name": "Stamina"
+        },
+        "start": 1
+       },
+       "id": "power_strike",
+       "name": "Power Strike",
+       "reach": {
+        "kind": "melee"
+       },
+       "target_kind": "actor"
+      }
      ],
      "active_talents": [
-      "power_strike",
-      "magic_bolt",
-      "fear"
+      {
+       "id": "fear",
+       "name": "Fear"
+      },
+      {
+       "id": "magic_bolt",
+       "name": "Magic Bolt"
+      },
+      {
+       "id": "power_strike",
+       "name": "Power Strike"
+      }
      ],
      "attributes": {
       "awareness": 1,
@@ -789,7 +1319,10 @@
       "strength": 2,
       "willpower": 2
      },
-     "binding": "intellect",
+     "binding": {
+      "id": "intellect",
+      "name": "Intellect"
+     },
      "defenses": {
       "cognitive": 14,
       "physical": 14,
@@ -797,145 +1330,211 @@
      },
      "dormant_talents": [],
      "hit_dice": [
-      "warrior",
-      "mage",
-      "mage"
+      {
+       "id": "warrior",
+       "name": "Warrior"
+      },
+      {
+       "id": "mage",
+       "name": "Mage"
+      },
+      {
+       "id": "mage",
+       "name": "Mage"
+      }
      ],
-     "kind": "humanoid",
+     "kind": {
+      "id": "humanoid",
+      "name": "Humanoid"
+     },
      "resources": [
       {
        "available": 4,
        "balance": 4,
        "maximum": 4,
        "reserved": 0,
-       "resource": "stamina"
+       "resource": {
+        "id": "stamina",
+        "name": "Stamina"
+       }
       },
       {
        "available": 4,
        "balance": 4,
        "maximum": 4,
        "reserved": 0,
-       "resource": "focus"
+       "resource": {
+        "id": "focus",
+        "name": "Focus"
+       }
       },
       {
        "available": 4,
        "balance": 4,
        "maximum": 4,
        "reserved": 0,
-       "resource": "mana"
+       "resource": {
+        "id": "mana",
+        "name": "Mana"
+       }
       }
      ],
      "skills": [
       {
        "rank": 0,
-       "skill": "athletics"
+       "skill": {
+        "id": "athletics",
+        "name": "Athletics"
+       }
       },
       {
        "rank": 1,
-       "skill": "heavy_weaponry"
+       "skill": {
+        "id": "heavy_weaponry",
+        "name": "Heavy weaponry"
+       }
       },
       {
        "rank": 0,
-       "skill": "agility"
+       "skill": {
+        "id": "agility",
+        "name": "Agility"
+       }
       },
       {
        "rank": 0,
-       "skill": "light_weaponry"
+       "skill": {
+        "id": "light_weaponry",
+        "name": "Light weaponry"
+       }
       },
       {
        "rank": 0,
-       "skill": "stealth"
+       "skill": {
+        "id": "stealth",
+        "name": "Stealth"
+       }
       },
       {
        "rank": 0,
-       "skill": "thievery"
+       "skill": {
+        "id": "thievery",
+        "name": "Thievery"
+       }
       },
       {
        "rank": 0,
-       "skill": "crafting"
+       "skill": {
+        "id": "crafting",
+        "name": "Crafting"
+       }
       },
       {
        "rank": 0,
-       "skill": "deduction"
+       "skill": {
+        "id": "deduction",
+        "name": "Deduction"
+       }
       },
       {
        "rank": 1,
-       "skill": "lore"
+       "skill": {
+        "id": "lore",
+        "name": "Lore"
+       }
       },
       {
        "rank": 0,
-       "skill": "medicine"
+       "skill": {
+        "id": "medicine",
+        "name": "Medicine"
+       }
       },
       {
        "rank": 1,
-       "skill": "discipline"
+       "skill": {
+        "id": "discipline",
+        "name": "Discipline"
+       }
       },
       {
        "rank": 1,
-       "skill": "intimidation"
+       "skill": {
+        "id": "intimidation",
+        "name": "Intimidation"
+       }
       },
       {
        "rank": 0,
-       "skill": "insight"
+       "skill": {
+        "id": "insight",
+        "name": "Insight"
+       }
       },
       {
        "rank": 0,
-       "skill": "perception"
+       "skill": {
+        "id": "perception",
+        "name": "Perception"
+       }
       },
       {
        "rank": 0,
-       "skill": "survival"
+       "skill": {
+        "id": "survival",
+        "name": "Survival"
+       }
       },
       {
        "rank": 0,
-       "skill": "deception"
+       "skill": {
+        "id": "deception",
+        "name": "Deception"
+       }
       },
       {
        "rank": 0,
-       "skill": "leadership"
+       "skill": {
+        "id": "leadership",
+        "name": "Leadership"
+       }
       },
       {
        "rank": 0,
-       "skill": "persuasion"
+       "skill": {
+        "id": "persuasion",
+        "name": "Persuasion"
+       }
       },
       {
        "rank": 2,
-       "skill": "spellcasting"
+       "skill": {
+        "id": "spellcasting",
+        "name": "Spellcasting"
+       }
       }
      ],
      "subtypes": []
     },
     "templates": [
      {
-      "add_subtypes": [],
-      "adjustments": [
-       0,
-       0,
-       0,
-       0,
-       0,
-       0
-      ],
       "id": "arcane",
-      "kind": null,
-      "overrides": [],
-      "priority": 0,
-      "remove_subtypes": []
+      "name": "Arcane"
      }
     ],
     "tick": "0"
    },
-   "request_id": "0c334e13-67f8-46bf-b7b6-9f1ddc587f74",
+   "request_id": "ae8f0cc7-0f2e-4aa5-9349-87b01d566441",
    "type": "creature_inspection"
   },
   {
    "code": "invalid_action",
    "message": "Target is unavailable",
-   "request_id": "a3abfdef-57b4-4ed7-a2a1-39be063bec55",
+   "request_id": "45e56799-2cbb-46ab-9c07-dbd07deeca0a",
    "scope": {
     "context": {
      "actor": "1",
-     "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+     "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
      "cursor": {
       "sequence": "14",
       "tick": "200"
@@ -944,7 +1543,7 @@
       "readiness_revision": "5",
       "stream": {
        "epoch": "1",
-       "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+       "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
       }
      },
      "revision": "4"
@@ -956,7 +1555,7 @@
   {
    "context": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "cursor": {
      "sequence": "2",
      "tick": "0"
@@ -965,7 +1564,7 @@
      "readiness_revision": "1",
      "stream": {
       "epoch": "1",
-      "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+      "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
      }
     },
     "revision": "0"
@@ -974,13 +1573,13 @@
     "entries": [],
     "older_before": null
    },
-   "request_id": "48153e53-7c1a-4700-8ef4-341c029c9abe",
+   "request_id": "d1039188-4550-4b11-9b89-41621c7f0a7e",
    "type": "history"
   },
   {
    "context": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "cursor": {
      "sequence": "0",
      "tick": "0"
@@ -989,7 +1588,7 @@
      "readiness_revision": "0",
      "stream": {
       "epoch": "1",
-      "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+      "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
      }
     },
     "revision": "0"
@@ -1015,13 +1614,13 @@
    "type": "palette"
   },
   {
-   "request_id": "9e1aa395-34cc-4528-9bb2-be6364068f2f",
+   "request_id": "11bea661-0747-42a5-89d8-fb89d4b280ff",
    "snapshot": {
     "actor": "1",
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "2",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "14",
@@ -1037,7 +1636,7 @@
         "component": "scheduler",
         "type": "backend"
        },
-       "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+       "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
        "content": {
         "action": {
          "direction": "east",
@@ -1049,7 +1648,7 @@
         },
         "type": "action"
        },
-       "id": "781f28f3-771a-4854-a00d-36916d08b53c",
+       "id": "ae52d205-6da5-4d9a-9371-7135a80c53a4",
        "tick": "0"
       },
       {
@@ -1059,7 +1658,7 @@
         "component": "scheduler",
         "type": "backend"
        },
-       "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+       "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
        "content": {
         "action": {
          "direction": "east",
@@ -1071,7 +1670,7 @@
         },
         "type": "action"
        },
-       "id": "be7ac215-11f9-48ad-bc70-ae0553a33e9c",
+       "id": "cdfecb3b-204c-4e19-99eb-f958cd19a958",
        "tick": "100"
       }
      ],
@@ -1096,7 +1695,16 @@
        "objective": null,
        "own_stats": {
         "abilities": [
-         "basic_melee"
+         {
+          "basic_attack": true,
+          "cost": null,
+          "id": "basic_melee",
+          "name": "Attack",
+          "reach": {
+           "kind": "melee"
+          },
+          "target_kind": "actor"
+         }
         ],
         "active_talents": [],
         "attributes": {
@@ -1107,7 +1715,10 @@
          "strength": 0,
          "willpower": 0
         },
-        "binding": "intellect",
+        "binding": {
+         "id": "intellect",
+         "name": "Intellect"
+        },
         "defenses": {
          "cognitive": 10,
          "physical": 10,
@@ -1115,108 +1726,180 @@
         },
         "dormant_talents": [],
         "hit_dice": [
-         "racial"
+         {
+          "id": "racial",
+          "name": "Racial"
+         }
         ],
-        "kind": "humanoid",
+        "kind": {
+         "id": "humanoid",
+         "name": "Humanoid"
+        },
         "resources": [
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "stamina"
+          "resource": {
+           "id": "stamina",
+           "name": "Stamina"
+          }
          },
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "focus"
+          "resource": {
+           "id": "focus",
+           "name": "Focus"
+          }
          },
          {
           "available": 0,
           "balance": 0,
           "maximum": 0,
           "reserved": 0,
-          "resource": "mana"
+          "resource": {
+           "id": "mana",
+           "name": "Mana"
+          }
          }
         ],
         "skills": [
          {
           "rank": 0,
-          "skill": "athletics"
+          "skill": {
+           "id": "athletics",
+           "name": "Athletics"
+          }
          },
          {
           "rank": 0,
-          "skill": "heavy_weaponry"
+          "skill": {
+           "id": "heavy_weaponry",
+           "name": "Heavy weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "agility"
+          "skill": {
+           "id": "agility",
+           "name": "Agility"
+          }
          },
          {
           "rank": 0,
-          "skill": "light_weaponry"
+          "skill": {
+           "id": "light_weaponry",
+           "name": "Light weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "stealth"
+          "skill": {
+           "id": "stealth",
+           "name": "Stealth"
+          }
          },
          {
           "rank": 0,
-          "skill": "thievery"
+          "skill": {
+           "id": "thievery",
+           "name": "Thievery"
+          }
          },
          {
           "rank": 0,
-          "skill": "crafting"
+          "skill": {
+           "id": "crafting",
+           "name": "Crafting"
+          }
          },
          {
           "rank": 0,
-          "skill": "deduction"
+          "skill": {
+           "id": "deduction",
+           "name": "Deduction"
+          }
          },
          {
           "rank": 0,
-          "skill": "lore"
+          "skill": {
+           "id": "lore",
+           "name": "Lore"
+          }
          },
          {
           "rank": 0,
-          "skill": "medicine"
+          "skill": {
+           "id": "medicine",
+           "name": "Medicine"
+          }
          },
          {
           "rank": 0,
-          "skill": "discipline"
+          "skill": {
+           "id": "discipline",
+           "name": "Discipline"
+          }
          },
          {
           "rank": 0,
-          "skill": "intimidation"
+          "skill": {
+           "id": "intimidation",
+           "name": "Intimidation"
+          }
          },
          {
           "rank": 0,
-          "skill": "insight"
+          "skill": {
+           "id": "insight",
+           "name": "Insight"
+          }
          },
          {
           "rank": 0,
-          "skill": "perception"
+          "skill": {
+           "id": "perception",
+           "name": "Perception"
+          }
          },
          {
           "rank": 0,
-          "skill": "survival"
+          "skill": {
+           "id": "survival",
+           "name": "Survival"
+          }
          },
          {
           "rank": 0,
-          "skill": "deception"
+          "skill": {
+           "id": "deception",
+           "name": "Deception"
+          }
          },
          {
           "rank": 0,
-          "skill": "leadership"
+          "skill": {
+           "id": "leadership",
+           "name": "Leadership"
+          }
          },
          {
           "rank": 0,
-          "skill": "persuasion"
+          "skill": {
+           "id": "persuasion",
+           "name": "Persuasion"
+          }
          },
          {
           "rank": 0,
-          "skill": "spellcasting"
+          "skill": {
+           "id": "spellcasting",
+           "name": "Spellcasting"
+          }
          }
         ],
         "subtypes": []
@@ -1233,16 +1916,66 @@
        "inventory": [],
        "preparation": null,
        "slots": [
-        "weapon",
-        "shield",
-        "body_armor",
-        "head_armor",
-        "hands_armor",
-        "feet_armor",
-        "cloak",
-        "ring",
-        "ring",
-        "amulet"
+        {
+         "equipped_phrase": "weapon in hand",
+         "id": "weapon",
+         "name": "Weapon",
+         "requires_attack": true
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "shield",
+         "name": "Shield",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "body_armor",
+         "name": "Body armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "head_armor",
+         "name": "Head armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "hands_armor",
+         "name": "Hand armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "feet_armor",
+         "name": "Foot armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "cloak",
+         "name": "Cloak",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "around the neck",
+         "id": "amulet",
+         "name": "Amulet",
+         "requires_attack": false
+        }
        ]
       },
       "inventory": [],
@@ -1253,14 +1986,14 @@
        "z": 0
       },
       "ready": true,
-      "self_target": "a_c4d25718c1ee7137964e4b09dec0383ddb07720dfc50d25655418976e8429df4",
+      "self_target": "a_187da0c7c6c8683199a061b4a53bf4957cceaf80d0d677c551cf73dbb325b374",
       "tick": "200",
       "visible_actors": [],
       "visible_cells": [
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "d8e87347ecab913ce4c83c429bfe7d667efb8e66",
+        "key": "6ff5827ce37861717ca208e68de9c7d1af10e457",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1275,7 +2008,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "d489760a24ed51a99b49e53064ad3d9bcfb36e0f",
+        "key": "ce09c304e27aa96a8948d121ceb80365b041b45a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1290,7 +2023,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "85d08a6f3eab2fe8b8880d847b9e7fb34b2c8c81",
+        "key": "7b08a5fd1f1e786a8cc92e904523a333da1c6718",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1305,7 +2038,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f15bdc6b307ec43f15ff728ddd0b569c7946b9d3",
+        "key": "1bd90de31ca8bd9dfcc4bb64b2096340d9824685",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1320,7 +2053,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "a5a9b8535407ab411a8b84e06b560db732dc7291",
+        "key": "8073e206e8eae220061059342c8bcf7fd12101a2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1335,7 +2068,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "79d64a18ea62b1ec2f965ac036b10aa8baa23106",
+        "key": "68430c8741723514670e6c56c48afd8201d2cecb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1350,7 +2083,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "986a027e24832554d04c4e400d89e8d266e71b97",
+        "key": "af7c91f91fb807a8e6384ec506c64c51b7809c68",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1365,7 +2098,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1dfc25e3d0ca5cf45ae102b5464aba8c7d0c123d",
+        "key": "fb987734dca9f60a746f321352ad61f3f41b4262",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1380,7 +2113,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1f7db1a011e6c4bec003fdc8a8f069ef18f34777",
+        "key": "18aacc80f69d20c2dd4f39f6e8e82e7e6f25d71b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1395,7 +2128,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "7341d4e28d439eea22411bd5aecf76db323f77a1",
+        "key": "e7a13d2efd1dca07c975bc3c9ba6a7173b325b26",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1410,7 +2143,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f0dd9e4d30c2333d4615f3a9d6e0cb59405ce815",
+        "key": "b83cde7ee2b07bf6383a7ab36cbf3ca843d2b4cb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1425,7 +2158,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1a0accf8b739f1f6472a9390e6b3c6cb287067b2",
+        "key": "5047cdd04c9ff2e38dc7cbb8e4ae6274b44e2003",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1440,7 +2173,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "ecd7a7ee1f8c391ef4798ecd88279a358f31acc8",
+        "key": "1a173956d8af7de8a8588aba1072a839ab42612a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1455,7 +2188,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "4856a72b825c70d874216981d26893f19210bd2e",
+        "key": "162f4ab5e95dd9dcabc4c53a344b95d54513e174",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1470,7 +2203,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "0ccdf286ede22d14642ece36c423d21aca6920cb",
+        "key": "873eedef1e775a5689e6f376fcc4bff5acbfa7e8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1485,7 +2218,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b597c3e00cd224e3b993d9e8b3ba2c60c2f701fb",
+        "key": "0909aaac22e1e702776090abf30569d95f6ec8a9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1500,7 +2233,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "23e836878c5b6e0bc6904122a8bccb53ed509bcb",
+        "key": "33bd7b0d7f603b0ca6fd928451649d5fce1a2c7f",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1515,7 +2248,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "596d3e0c023412a7a7aafa1ff90fb532bd6ce0fe",
+        "key": "dbc4a8322a2163d79ddc8aae71983675adae9990",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1530,7 +2263,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "073a9c9a53fbd967bd56730055e4b72fa7a04f7a",
+        "key": "763bc0e003bb7aacb020336001f8adf820ae75f9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1545,7 +2278,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "057c3d9c8f5bd3de7a3398abb14ec3a14c9c6432",
+        "key": "c5cbab8ee97ef5516fc3156dcb80e69c64de3b4e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1560,7 +2293,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "854d14a3c9cd8fdbd0c8123933d687940cce5236",
+        "key": "63b89159376bbf5768836faa8f3652fa1241ab53",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1575,7 +2308,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "037cc84731a04dab4dc6fb95423540b9fb2fe87d",
+        "key": "cdb44a372806998dffbe76acfc6ff6d48605ece1",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1590,7 +2323,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "4955b75f7d22ef43eea0d40338f9f79c197d7584",
+        "key": "f0793e5bbe487dab176a411d54bb658cd5d820be",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1605,7 +2338,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "351c9b9615c608c85b903f08499a474cbf86f254",
+        "key": "e3ed6401bb5e973b7f968a2a4f68e5fc32bb5dfb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1620,7 +2353,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c5b0dbb397bab0a14f1c6176e1cf71294ff4b3fd",
+        "key": "cf167cac1726691438d4dc9efe566f0bbd1577e0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1635,7 +2368,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "82f84bba6ba0c7c9f9b2a74724e660f36dc7801c",
+        "key": "04a8c1912556c13415292968bda95cdab0babd6a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1650,7 +2383,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "5249859ae2346f09a523bb71eafd280210a910ef",
+        "key": "640c7b6b346789ccd8df29559275cfb94decaea7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1665,7 +2398,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "9d1d03b4c3398e76cc355867ce9aa6e849222250",
+        "key": "045a767e02ff443e3c2d6cf49d9832deb36545bd",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1680,7 +2413,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "298f1d965d56b933e77a9ada354802621700d3c2",
+        "key": "44be60608a8646db2eee81c977dbf9cc8c18c476",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1695,7 +2428,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "96b2d115e83e08a2ac19e5dee0ba42a504d6f2d8",
+        "key": "23cc815fb33a7cac9a1ac262da8eace223e13125",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1710,7 +2443,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "5cefec9c6b3cf75f498007cefba0354dddfc5212",
+        "key": "903fa056a1d9ce2804f4874878241fc49aff85fc",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1725,7 +2458,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3064847311c2e79a01a1cd87395953e64a6dbf9c",
+        "key": "8c34e61ceda3f13332494afc05b85e7d517d718c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1740,7 +2473,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f308deedb296b2638b1a7bd57ad266906976fe7a",
+        "key": "6a6f849b815d7572cb00cc128c028daa5b8cc1b9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1755,7 +2488,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3e1aa8e3a6b92e77729d04baa43259e2e924683b",
+        "key": "8e9e1f5a2272fc2a58c1f32fd8b10f705a0a5718",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1770,7 +2503,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "80adc72615d68aa3e92ad29181ef93f3918eb1ac",
+        "key": "de997c163a6b4e7e0373c02cc54e168f2ddb8112",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1785,7 +2518,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "a371bdb4812adc2742824db6e416fe536300bde6",
+        "key": "9d902897cb66a61f1734cba051c5d91119cd05d0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1800,7 +2533,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "bf4f159e91be8d7718dcac1c380d200c17f7dbd7",
+        "key": "390cda4f3aa479952cfbd98cf7111f3ab865c590",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1815,7 +2548,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f4bc9ef5891b11beb489d1eb28f7cedd234908bd",
+        "key": "c04ef2789f2dd133aa29331d747f24065230e038",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1830,7 +2563,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "a85de035763ca6a1aaad9dae8a2fac961d31bf3c",
+        "key": "a8f2cf9cb455a3c46ca8a5401acec98523fbaf0d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1845,7 +2578,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b58f9a55359548b57d7c440a5bc7af61217537eb",
+        "key": "f2cd5dc1f14c235fcca5a2f88d36ba31675f7018",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1860,7 +2593,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "eb13261e2c6afa3d45d3c11aa7eb5943ed6a1c4f",
+        "key": "5b499e50518e53fb43be5718128bdb87b66833ba",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1875,7 +2608,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "ce15c4d7389e285f352c885f0bdf86b0bf4d86c4",
+        "key": "ca7d9194452c0e7038ff617f6c04ab32f2b5370e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1890,7 +2623,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "88c339860973d8d8b153790a88036a4e53b67182",
+        "key": "4f719b2f1a4126faa8284ea5c3ac0989afee39b6",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1905,7 +2638,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "519f3b36621aec8ba6594593524143d57b6c7d05",
+        "key": "67952aedf712b4b2e4cf0d441e5d599b68e45eb0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1920,7 +2653,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b31414e18cb0e528b63ea2628bb7c64596d770b3",
+        "key": "2574627726d87cc7dca2d13c517e2f5151d423aa",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1935,7 +2668,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "d6eb75927b7e9ef4172089a65a79e30228c39497",
+        "key": "908c9e9bd6ac243a94dcf14a88e5f9e7a05ea36d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1950,7 +2683,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "599568e4bf287d4159234b2e3db06b461f12cd4e",
+        "key": "a75c035bb9c270df8527e3fc24f3cde279cd9762",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1965,7 +2698,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "67c5af24d1f0bd4fc508865adb457cf69a5b3b78",
+        "key": "e7961e1f5ca7182ecaceabb6d559f59cec1683ac",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1980,7 +2713,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "11f354204d4d29b77c0671eb2da704561fe02675",
+        "key": "ec6d12f34c7928e882e042bc639758bbfef009df",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -1995,7 +2728,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "e781ebd790865872ce03f48391c378a6932f7903",
+        "key": "2dbde2b4794e349411d3285f76affac2f4f27366",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2010,7 +2743,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f66ac47941334bd1c40f3ca6aeb241ec7a38a4b2",
+        "key": "f22e53a796cf083326fe8e5f2605602d74969a1c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2025,7 +2758,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c6ab9cbd70c594427dafd0db02133f45781d27fa",
+        "key": "4a3b5fd77bfcc62fed8c47edc89b2b1c7b436c88",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2040,7 +2773,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "52f57b57522dadf5a48bcf08b628ad2bdf55c1cc",
+        "key": "7249586c95a8cd8ef2bc498fee0000e0a79e80de",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2055,7 +2788,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1f9e74a66ad50c150774fbb363b0257480ed1bf9",
+        "key": "59439d3552dd18f72da27b3a7257b3b8c6e2e79c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2070,7 +2803,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "293348b1883c34115f4e97b10cce1431c6cc1982",
+        "key": "ba77e40846ecc6df77238f538ff210ca171e4cc9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2085,7 +2818,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c52a5435a51c54a30968679a34a903d65dd7d32e",
+        "key": "21f86a247b431ecb1de1d7085792cad9e0c519f7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2100,7 +2833,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "33f753ccbfe636856079e4e6840841e622e5a39f",
+        "key": "277007ed3afc460a2b1680bb2bfa1e04514bf5c7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2115,7 +2848,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "20ebc9b673f0cc619076606961785db74932ca38",
+        "key": "10ed7365d558be41664bf8a8cfa6f45824490ce3",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2130,7 +2863,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "0e2dade7fa29be6446ad2945cd9aab31926c3553",
+        "key": "528ff4e907eb906f9080058775f0cd908bb4bf96",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2145,7 +2878,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "d155abb981424ab9d6ebd6f067aed25fd0bf8e48",
+        "key": "aa810ebcc221fdeb3b48fc96fea7e3c772842480",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2160,7 +2893,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "caa2e9133839d8f699437c1f6ab923ed616a6bb3",
+        "key": "25380ff62fc9724ddecbcea7fb3d3e5f0b1dd533",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2175,7 +2908,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c4857d07d286dc07791005042cedfffa2805a427",
+        "key": "74224feb06dd3403124e9c696931c80a976fd35d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2190,7 +2923,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f9d01ea7bcbb124ccf0b795871bf3a9f902a8a86",
+        "key": "1815382129fe51b6ed27a6eb036c04d270864e47",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2205,7 +2938,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "62ce946193e5e895fee02630f342dc848d514afc",
+        "key": "c899211d9a92c4e002526153df4e33eed3ab0bfe",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2220,7 +2953,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c91882198a67c1c370b15aeedd277debf17e91fd",
+        "key": "e8a911cc005d920fc54988426625be68cbcafec9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2235,7 +2968,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "c24220ff3583f8ba3eaad5d12815d995483c84f1",
+        "key": "5409db8181dadaee150ed836008336cc778cf1fb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2250,7 +2983,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b74a9fe48f9048033cb8738cf3b08a287942d08e",
+        "key": "9b8de2b67b457e5a8ecf6d05e6cf1f70aec3692b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2265,7 +2998,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f64a0664bc9dd3ff3ff40ba36888cc5d2762f2e0",
+        "key": "914b30d32f7867342c37917a8a8b12cbffd0692c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2280,7 +3013,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "3dadfca05d3f547bb1ec6675d2b36a4d43c5b099",
+        "key": "0e30f4eca36d493b0ea9db2c53ea90978cfb5d84",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2295,7 +3028,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "cf496953b601f98c5292a26ddb3bd8391816af02",
+        "key": "6c78949dda448d4ea60aff8a5a2832dedad3672d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2310,7 +3043,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f26eeac9d85de5b86347171c1bdd9a2667d98341",
+        "key": "7cd563035bae56a56b8724333d54245e5fdfb07a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2325,7 +3058,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "fbd74f12abb965f916fcb44cc6c1f9b7208faf36",
+        "key": "bef38da38331636ddfd69f026b073713edcf1b39",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2340,7 +3073,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "a966dafd251001308fe1b05ed82ec44a3e94b733",
+        "key": "273adb450c08189489260a3b1013f112600824bf",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2355,7 +3088,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "e16f7cba5917c912e5ac6c54f1b0c708d1976e0d",
+        "key": "810f9401dc82e911e0546aeaedb4390f2826f43a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2370,7 +3103,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "479073e9f20c433726e53ce16d8c4c9bb5c01aa8",
+        "key": "9c6a0c5df546b16205b2428e5d5c2f7a9301d3eb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2385,7 +3118,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "93735d148b65fe37175702ae6e39bd36c0befbdf",
+        "key": "0c12cbbf90f5dee3cfd60d38b55983128104ca1c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2400,7 +3133,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "608f9106c1603dd46d27f4e08bdc996b02a7c486",
+        "key": "f1185a664679676661f0e8e01e1b310f1a20d153",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2415,7 +3148,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "e0b90c2a83d42e668f0621a23e65603d1d1d986a",
+        "key": "cd76bc94f6d51ded4c1ba84b0f3290f93c39f114",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2430,7 +3163,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "13d271c94b906044d719de69ea4921f414bfdac1",
+        "key": "1b0efef6cc37251e492fb27ff82324f45641d87c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2445,7 +3178,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "6e15733f2194ae5028bc75ca362cde8349486601",
+        "key": "e3e91bd46a9c3f753e91b051b3164d562fdfbd93",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2460,7 +3193,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "55ba61c475a8015734e8d37d644ae690328fb76a",
+        "key": "1fb716c9be3171b752be10e6bc1918c5b11ecd9e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2475,7 +3208,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "2a793ed26f19ee68540fc446dcec203ef7ad7513",
+        "key": "6c54dea02f8b6ebf17d34a77665364bde80a4dee",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2490,7 +3223,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "f30c203ca2dbfbd0184a85e6c23772637817b1eb",
+        "key": "3a2af885cbf9d3517b92230bb384333e25887ff7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2505,7 +3238,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "46952afd287f794b086efc0467dd1b4ecd84218b",
+        "key": "8661820d6bbc27a7837aca93113ca3f66763f812",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2520,7 +3253,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "ed7ccb3a9d0afd14e17f0580db6a0cf798ad54ec",
+        "key": "163bafce805d2bdd504d031fef52b96f40788576",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2535,7 +3268,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "724b5d71a8a4e5574b4cb3c04008d0f6d874295a",
+        "key": "6e1bc5168308e0e58cd53281aaf7136caf6ef1ac",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2550,7 +3283,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "9ec04b23ded30647b34cd6410ea4649adb7fef8d",
+        "key": "247a96aaec8662fb2a34d3d2c7a7d4f90145c52b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2565,7 +3298,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1806456d331c26bd14071052242d7e6c0491b3ae",
+        "key": "f6eab3afc477c7d721c8d529eb528d28a60ad930",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2580,7 +3313,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "aabf160aa36b1c1c922c30a663e7038cd5d52ae3",
+        "key": "b9fbe78fb8be19bb2e917a7821a6d65a38739636",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2595,7 +3328,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "235892ca270b8ca39e31c6851c8c2746bd65a471",
+        "key": "7fabd30222a5e80c42eef3c4736bf3d956cc48bc",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2610,7 +3343,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "0a5e4476b5d2e46f426a59ee1c751708f6295a45",
+        "key": "ca42632ea573de1bd448baf311efd5864a99f707",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2625,7 +3358,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "086af1a77715d9bb3f457ab49e40a4b4f12d44f8",
+        "key": "278415ede8a8ea525ce651ce4f0ef7334cadb193",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2640,7 +3373,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "1d6cf231cbce0b08a260f65a07881c776565a060",
+        "key": "04df24710a71ea6e6f8fcdf4621ffacee9916b68",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2655,7 +3388,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "6e1aef609818b701aecfca6941f98d2a3014fa1d",
+        "key": "cb4e58a2c5e0887d26567a37da296c63508d9bf9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2670,7 +3403,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "b124daaf75f1a88ebd9f85be5017c7a9be427fa4",
+        "key": "801231a6bfda6dd9f60b75c649a25f151c6fafb4",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2685,7 +3418,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "6664bc881112986babddb8ff9d27b2d88efa8941",
+        "key": "a57266aafeacbeaac7338599f0501a1733f86e2c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2700,7 +3433,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "364981bb5dd1d62f6430ccf625616d7d296e1289",
+        "key": "327e5d4889a52512fc34817433075630cf6598d7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2715,7 +3448,7 @@
        {
         "asset": "terrain.floor.stone",
         "door": null,
-        "key": "de440e2b2c286c53d48a137214d0ca56bccdedc2",
+        "key": "3ee9610943f6d64099cdbfa7345b4e636da4b0da",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2730,7 +3463,7 @@
        {
         "asset": "terrain.floor.cave",
         "door": null,
-        "key": "8272c72e3c92c2e3d52931fa0c3fb70b8d924d00",
+        "key": "db8211c52d36ff0ba725aff9b33689e9e5f13628",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -2755,12 +3488,12 @@
    "part": {
     "context": {
      "epoch": "1",
-     "stream": "8c4979b8-5687-4096-ab8b-fafba6989009"
+     "stream": "c72f0373-9ae0-42df-8a81-443b5c9031c2"
     },
-    "data": "{\"type\":\"snapshot\",\"request_id\":\"attach\",\"snapshot\":{\"context\":{\"stream\":\"8c4979b8-5687-4096-ab8b-fafba6989009\",\"epoch\":\"1\"},\"readiness\":{\"revision\":\"0\",\"admission\":false,\"resume\":[],\"cancel\":[]},\"intentions\":[],\"travel\":null,\"actor\":\"1\",\"branch\":\"c7940301-ab11-49e7-b2ae-54ac82512407\",\"cursor\":{\"",
+    "data": "{\"type\":\"snapshot\",\"request_id\":\"attach\",\"snapshot\":{\"context\":{\"stream\":\"c72f0373-9ae0-42df-8a81-443b5c9031c2\",\"epoch\":\"1\"},\"readiness\":{\"revision\":\"0\",\"admission\":false,\"resume\":[],\"cancel\":[]},\"intentions\":[],\"travel\":null,\"actor\":\"1\",\"branch\":\"83c35597-c2f9-4f19-977e-1dfa74f9c48a\",\"cursor\":{\"",
     "offset": 0,
     "request_id": "attach",
-    "total_bytes": 20627
+    "total_bytes": 22170
    },
    "type": "snapshot_part"
   },
@@ -2776,7 +3509,7 @@
        "type": "user",
        "user": "local"
       },
-      "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+      "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
       "content": {
        "anchor": {
         "revision": "4",
@@ -2786,15 +3519,15 @@
        "text": "Shared sample note",
        "type": "annotation"
       },
-      "id": "eeceeda7-9989-4fbb-b667-caf2ad3fcddf",
+      "id": "a4a8348a-9231-4b6d-9f93-015712d8bc6a",
       "tick": "200"
      },
      "type": "annotation"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "2",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "15",
@@ -2810,10 +3543,10 @@
      "has_control": true,
      "type": "control"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "1",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "1",
@@ -2828,17 +3561,17 @@
     "body": {
      "status": {
       "actor": "1",
-      "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
-      "entry_id": "3d0da91d-8a5c-4135-b691-3feaf44fbb39",
-      "intention": "3d0da91d-8a5c-4135-b691-3feaf44fbb39",
+      "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
+      "entry_id": "1737320b-1591-48fa-999c-44012025e8b5",
+      "intention": "1737320b-1591-48fa-999c-44012025e8b5",
       "phase": "queued"
      },
      "type": "intention"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "1",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "3",
@@ -2865,7 +3598,7 @@
        "component": "scheduler",
        "type": "backend"
       },
-      "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+      "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
       "content": {
        "action": {
         "direction": "east",
@@ -2877,7 +3610,7 @@
        },
        "type": "action"
       },
-      "id": "781f28f3-771a-4854-a00d-36916d08b53c",
+      "id": "ae52d205-6da5-4d9a-9371-7135a80c53a4",
       "tick": "0"
      },
      "state": {
@@ -2888,7 +3621,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "724b5d71a8a4e5574b4cb3c04008d0f6d874295a",
+         "key": "6e1bc5168308e0e58cd53281aaf7136caf6ef1ac",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -2903,7 +3636,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "235892ca270b8ca39e31c6851c8c2746bd65a471",
+         "key": "7fabd30222a5e80c42eef3c4736bf3d956cc48bc",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -2918,7 +3651,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "086af1a77715d9bb3f457ab49e40a4b4f12d44f8",
+         "key": "278415ede8a8ea525ce651ce4f0ef7334cadb193",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -2933,7 +3666,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "6e1aef609818b701aecfca6941f98d2a3014fa1d",
+         "key": "cb4e58a2c5e0887d26567a37da296c63508d9bf9",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -2948,7 +3681,7 @@
         {
          "asset": "terrain.floor.stone",
          "door": null,
-         "key": "364981bb5dd1d62f6430ccf625616d7d296e1289",
+         "key": "327e5d4889a52512fc34817433075630cf6598d7",
          "material": "stone",
          "place_hint": false,
          "position": {
@@ -2977,7 +3710,16 @@
        "objective": null,
        "own_stats": {
         "abilities": [
-         "basic_melee"
+         {
+          "basic_attack": true,
+          "cost": null,
+          "id": "basic_melee",
+          "name": "Attack",
+          "reach": {
+           "kind": "melee"
+          },
+          "target_kind": "actor"
+         }
         ],
         "active_talents": [],
         "attributes": {
@@ -2988,7 +3730,10 @@
          "strength": 0,
          "willpower": 0
         },
-        "binding": "intellect",
+        "binding": {
+         "id": "intellect",
+         "name": "Intellect"
+        },
         "defenses": {
          "cognitive": 10,
          "physical": 10,
@@ -2996,108 +3741,180 @@
         },
         "dormant_talents": [],
         "hit_dice": [
-         "racial"
+         {
+          "id": "racial",
+          "name": "Racial"
+         }
         ],
-        "kind": "humanoid",
+        "kind": {
+         "id": "humanoid",
+         "name": "Humanoid"
+        },
         "resources": [
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "stamina"
+          "resource": {
+           "id": "stamina",
+           "name": "Stamina"
+          }
          },
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "focus"
+          "resource": {
+           "id": "focus",
+           "name": "Focus"
+          }
          },
          {
           "available": 0,
           "balance": 0,
           "maximum": 0,
           "reserved": 0,
-          "resource": "mana"
+          "resource": {
+           "id": "mana",
+           "name": "Mana"
+          }
          }
         ],
         "skills": [
          {
           "rank": 0,
-          "skill": "athletics"
+          "skill": {
+           "id": "athletics",
+           "name": "Athletics"
+          }
          },
          {
           "rank": 0,
-          "skill": "heavy_weaponry"
+          "skill": {
+           "id": "heavy_weaponry",
+           "name": "Heavy weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "agility"
+          "skill": {
+           "id": "agility",
+           "name": "Agility"
+          }
          },
          {
           "rank": 0,
-          "skill": "light_weaponry"
+          "skill": {
+           "id": "light_weaponry",
+           "name": "Light weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "stealth"
+          "skill": {
+           "id": "stealth",
+           "name": "Stealth"
+          }
          },
          {
           "rank": 0,
-          "skill": "thievery"
+          "skill": {
+           "id": "thievery",
+           "name": "Thievery"
+          }
          },
          {
           "rank": 0,
-          "skill": "crafting"
+          "skill": {
+           "id": "crafting",
+           "name": "Crafting"
+          }
          },
          {
           "rank": 0,
-          "skill": "deduction"
+          "skill": {
+           "id": "deduction",
+           "name": "Deduction"
+          }
          },
          {
           "rank": 0,
-          "skill": "lore"
+          "skill": {
+           "id": "lore",
+           "name": "Lore"
+          }
          },
          {
           "rank": 0,
-          "skill": "medicine"
+          "skill": {
+           "id": "medicine",
+           "name": "Medicine"
+          }
          },
          {
           "rank": 0,
-          "skill": "discipline"
+          "skill": {
+           "id": "discipline",
+           "name": "Discipline"
+          }
          },
          {
           "rank": 0,
-          "skill": "intimidation"
+          "skill": {
+           "id": "intimidation",
+           "name": "Intimidation"
+          }
          },
          {
           "rank": 0,
-          "skill": "insight"
+          "skill": {
+           "id": "insight",
+           "name": "Insight"
+          }
          },
          {
           "rank": 0,
-          "skill": "perception"
+          "skill": {
+           "id": "perception",
+           "name": "Perception"
+          }
          },
          {
           "rank": 0,
-          "skill": "survival"
+          "skill": {
+           "id": "survival",
+           "name": "Survival"
+          }
          },
          {
           "rank": 0,
-          "skill": "deception"
+          "skill": {
+           "id": "deception",
+           "name": "Deception"
+          }
          },
          {
           "rank": 0,
-          "skill": "leadership"
+          "skill": {
+           "id": "leadership",
+           "name": "Leadership"
+          }
          },
          {
           "rank": 0,
-          "skill": "persuasion"
+          "skill": {
+           "id": "persuasion",
+           "name": "Persuasion"
+          }
          },
          {
           "rank": 0,
-          "skill": "spellcasting"
+          "skill": {
+           "id": "spellcasting",
+           "name": "Spellcasting"
+          }
          }
         ],
         "subtypes": []
@@ -3114,16 +3931,66 @@
        "inventory": [],
        "preparation": null,
        "slots": [
-        "weapon",
-        "shield",
-        "body_armor",
-        "head_armor",
-        "hands_armor",
-        "feet_armor",
-        "cloak",
-        "ring",
-        "ring",
-        "amulet"
+        {
+         "equipped_phrase": "weapon in hand",
+         "id": "weapon",
+         "name": "Weapon",
+         "requires_attack": true
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "shield",
+         "name": "Shield",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "body_armor",
+         "name": "Body armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "head_armor",
+         "name": "Head armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "hands_armor",
+         "name": "Hand armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "feet_armor",
+         "name": "Foot armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "cloak",
+         "name": "Cloak",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "around the neck",
+         "id": "amulet",
+         "name": "Amulet",
+         "requires_attack": false
+        }
        ]
       },
       "inventory": [],
@@ -3135,17 +4002,17 @@
       },
       "ready": false,
       "revision": "1",
-      "self_target": "a_c4d25718c1ee7137964e4b09dec0383ddb07720dfc50d25655418976e8429df4",
+      "self_target": "a_187da0c7c6c8683199a061b4a53bf4957cceaf80d0d677c551cf73dbb325b374",
       "tick": "0",
       "visible_actors": [],
       "wizard_game": false
      },
      "type": "observation_delta"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "1",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "5",
@@ -3166,10 +4033,10 @@
      },
      "type": "readiness"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "1",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "2",
@@ -3189,26 +4056,26 @@
        "type": "user",
        "user": "local"
       },
-      "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+      "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
       "content": {
-       "destination": "d8e87347ecab913ce4c83c429bfe7d667efb8e66",
+       "destination": "6ff5827ce37861717ca208e68de9c7d1af10e457",
        "type": "travel"
       },
-      "id": "589fc9e9-89d8-4aaf-963d-fca1599bd5eb",
+      "id": "6055f30e-1441-4df2-946a-47239b33120b",
       "tick": "200"
      },
      "status": {
       "completed_steps": "0",
-      "destination": "d8e87347ecab913ce4c83c429bfe7d667efb8e66",
-      "id": "589fc9e9-89d8-4aaf-963d-fca1599bd5eb",
+      "destination": "6ff5827ce37861717ca208e68de9c7d1af10e457",
+      "id": "6055f30e-1441-4df2-946a-47239b33120b",
       "phase": "active"
      },
      "type": "travel"
     },
-    "branch": "c7940301-ab11-49e7-b2ae-54ac82512407",
+    "branch": "83c35597-c2f9-4f19-977e-1dfa74f9c48a",
     "context": {
      "epoch": "2",
-     "stream": "596c127e-a16b-4afa-9aad-30df3e9ce687"
+     "stream": "1942cf0b-e588-4989-82b6-a5f7dceac358"
     },
     "cursor": {
      "sequence": "16",
@@ -3232,19 +4099,19 @@
     "max_retained_state_bytes": 16777216,
     "max_snapshot_bytes": 33554432
    },
-   "protocol": 32,
+   "protocol": 33,
    "role": "player",
    "type": "welcome",
    "user": "sample-user"
   },
   {
-   "request_id": "eb8e43db-c2a9-4a03-b4f3-bec89da4fcf9",
+   "request_id": "7c4f9e0c-b308-42a1-973d-2f7339df22df",
    "snapshot": {
     "actor": "1",
-    "branch": "52130554-71d8-444b-b407-88be5faf78c8",
+    "branch": "b1927fe8-3112-4f5b-82d4-072eb5a3cf2f",
     "context": {
      "epoch": "2",
-     "stream": "c36ff5f7-3c15-43bd-be58-b49f2fa1df3f"
+     "stream": "d037c50e-9599-495e-abb0-6993492db6c5"
     },
     "cursor": {
      "sequence": "7",
@@ -3260,22 +4127,22 @@
         "component": "scheduler",
         "type": "backend"
        },
-       "branch": "52130554-71d8-444b-b407-88be5faf78c8",
+       "branch": "b1927fe8-3112-4f5b-82d4-072eb5a3cf2f",
        "content": {
         "action": {
-         "item": "i_67e99fee47dd950f655c4e6a8033fd58580dc0320b42f27204cc7b8aa97bd935",
+         "item": "i_99a03b68f1c2cae164cc710f901207e9b7803ce4542b09c97eb2ffcd009d5b55",
          "type": "drink"
         },
         "event": {
          "action": {
-          "item": "i_67e99fee47dd950f655c4e6a8033fd58580dc0320b42f27204cc7b8aa97bd935",
+          "item": "i_99a03b68f1c2cae164cc710f901207e9b7803ce4542b09c97eb2ffcd009d5b55",
           "type": "drink"
          },
          "type": "item_started"
         },
         "type": "action"
        },
-       "id": "ee6c3f35-d757-45c6-8d15-d7cbc830f5a3",
+       "id": "35949892-78bf-4dcf-a7d2-a8c2ee8b7bc4",
        "tick": "0"
       }
      ],
@@ -3300,7 +4167,16 @@
        "objective": null,
        "own_stats": {
         "abilities": [
-         "basic_melee"
+         {
+          "basic_attack": true,
+          "cost": null,
+          "id": "basic_melee",
+          "name": "Attack",
+          "reach": {
+           "kind": "melee"
+          },
+          "target_kind": "actor"
+         }
         ],
         "active_talents": [],
         "attributes": {
@@ -3311,116 +4187,191 @@
          "strength": 0,
          "willpower": 0
         },
-        "binding": "intellect",
+        "binding": {
+         "id": "intellect",
+         "name": "Intellect"
+        },
         "defenses": {
          "cognitive": 10,
-         "physical": 10,
+         "physical": 11,
          "spiritual": 10
         },
         "dormant_talents": [],
         "hit_dice": [
-         "racial"
+         {
+          "id": "racial",
+          "name": "Racial"
+         }
         ],
-        "kind": "humanoid",
+        "kind": {
+         "id": "humanoid",
+         "name": "Humanoid"
+        },
         "resources": [
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "stamina"
+          "resource": {
+           "id": "stamina",
+           "name": "Stamina"
+          }
          },
          {
           "available": 2,
           "balance": 2,
           "maximum": 2,
           "reserved": 0,
-          "resource": "focus"
+          "resource": {
+           "id": "focus",
+           "name": "Focus"
+          }
          },
          {
           "available": 0,
           "balance": 0,
           "maximum": 0,
           "reserved": 0,
-          "resource": "mana"
+          "resource": {
+           "id": "mana",
+           "name": "Mana"
+          }
          }
         ],
         "skills": [
          {
           "rank": 0,
-          "skill": "athletics"
+          "skill": {
+           "id": "athletics",
+           "name": "Athletics"
+          }
          },
          {
           "rank": 0,
-          "skill": "heavy_weaponry"
+          "skill": {
+           "id": "heavy_weaponry",
+           "name": "Heavy weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "agility"
+          "skill": {
+           "id": "agility",
+           "name": "Agility"
+          }
          },
          {
           "rank": 0,
-          "skill": "light_weaponry"
+          "skill": {
+           "id": "light_weaponry",
+           "name": "Light weaponry"
+          }
          },
          {
           "rank": 0,
-          "skill": "stealth"
+          "skill": {
+           "id": "stealth",
+           "name": "Stealth"
+          }
          },
          {
           "rank": 0,
-          "skill": "thievery"
+          "skill": {
+           "id": "thievery",
+           "name": "Thievery"
+          }
          },
          {
           "rank": 0,
-          "skill": "crafting"
+          "skill": {
+           "id": "crafting",
+           "name": "Crafting"
+          }
          },
          {
           "rank": 0,
-          "skill": "deduction"
+          "skill": {
+           "id": "deduction",
+           "name": "Deduction"
+          }
          },
          {
           "rank": 0,
-          "skill": "lore"
+          "skill": {
+           "id": "lore",
+           "name": "Lore"
+          }
          },
          {
           "rank": 0,
-          "skill": "medicine"
+          "skill": {
+           "id": "medicine",
+           "name": "Medicine"
+          }
          },
          {
           "rank": 0,
-          "skill": "discipline"
+          "skill": {
+           "id": "discipline",
+           "name": "Discipline"
+          }
          },
          {
           "rank": 0,
-          "skill": "intimidation"
+          "skill": {
+           "id": "intimidation",
+           "name": "Intimidation"
+          }
          },
          {
           "rank": 0,
-          "skill": "insight"
+          "skill": {
+           "id": "insight",
+           "name": "Insight"
+          }
          },
          {
           "rank": 0,
-          "skill": "perception"
+          "skill": {
+           "id": "perception",
+           "name": "Perception"
+          }
          },
          {
           "rank": 0,
-          "skill": "survival"
+          "skill": {
+           "id": "survival",
+           "name": "Survival"
+          }
          },
          {
           "rank": 0,
-          "skill": "deception"
+          "skill": {
+           "id": "deception",
+           "name": "Deception"
+          }
          },
          {
           "rank": 0,
-          "skill": "leadership"
+          "skill": {
+           "id": "leadership",
+           "name": "Leadership"
+          }
          },
          {
           "rank": 0,
-          "skill": "persuasion"
+          "skill": {
+           "id": "persuasion",
+           "name": "Persuasion"
+          }
          },
          {
           "rank": 0,
-          "skill": "spellcasting"
+          "skill": {
+           "id": "spellcasting",
+           "name": "Spellcasting"
+          }
          }
         ],
         "subtypes": []
@@ -3435,7 +4386,7 @@
       "interactions": {
        "completed": [
         {
-         "item": "i_67e99fee47dd950f655c4e6a8033fd58580dc0320b42f27204cc7b8aa97bd935",
+         "item": "i_99a03b68f1c2cae164cc710f901207e9b7803ce4542b09c97eb2ffcd009d5b55",
          "type": "drink"
         }
        ],
@@ -3443,7 +4394,7 @@
         {
          "drinkable": false,
          "equipped_slot": 0,
-         "item": "i_aa5e9e6a1e662dbfacb7d7957484a3d7ebe2071d8713e4414548aca2f1108c18",
+         "item": "i_7ba134531d4c50b84b96e6ade4029298dd2fec13c5b8d6b4f629f3b5002748c5",
          "known_equipment": {
           "attack": {
            "bonus": 4,
@@ -3465,55 +4416,164 @@
             }
            },
            "recovery": 40,
-           "skill": "heavy_weaponry",
+           "skill": {
+            "id": "heavy_weaponry",
+            "name": "Heavy weaponry"
+           },
            "wind_up": 60
           },
-          "defense": 0,
-          "reductions": {}
+          "modifiers": []
          },
-         "slot": "weapon"
+         "slot": {
+          "equipped_phrase": "weapon in hand",
+          "id": "weapon",
+          "name": "Weapon",
+          "requires_attack": true
+         }
         },
         {
          "drinkable": false,
          "equipped_slot": null,
-         "item": "i_11e9bd30893f1d067424aaa1434788b6986b9642685318c3ebe107be5115bf9f",
+         "item": "i_d15e4d250b766c217539df09fd70945dacbcaed68e31433fc3868152ab58b707",
          "known_equipment": {
           "attack": null,
-          "defense": 3,
-          "reductions": {
-           "impact": 2
-          }
+          "modifiers": [
+           {
+            "fields": [
+             {
+              "id": "scope",
+              "name": "Scope",
+              "value": {
+               "type": "text",
+               "value": "always"
+              }
+             },
+             {
+              "id": "stat",
+              "name": "Stat",
+              "value": {
+               "type": "text",
+               "value": "defense"
+              }
+             },
+             {
+              "id": "defense",
+              "name": "Defense",
+              "value": {
+               "type": "content",
+               "value": {
+                "id": "physical",
+                "name": "Physical"
+               }
+              }
+             },
+             {
+              "id": "value",
+              "name": "Value",
+              "value": {
+               "type": "signed",
+               "value": "3"
+              }
+             }
+            ],
+            "id": "add",
+            "name": "Add"
+           },
+           {
+            "fields": [
+             {
+              "id": "scope",
+              "name": "Scope",
+              "value": {
+               "type": "text",
+               "value": "always"
+              }
+             },
+             {
+              "id": "category",
+              "name": "Category",
+              "value": {
+               "type": "content",
+               "value": {
+                "id": "impact",
+                "name": "Impact"
+               }
+              }
+             },
+             {
+              "id": "amount",
+              "name": "Amount",
+              "value": {
+               "type": "signed",
+               "value": "2"
+              }
+             }
+            ],
+            "id": "reduction",
+            "name": "Reduction"
+           }
+          ]
          },
-         "slot": "body_armor"
+         "slot": {
+          "equipped_phrase": "being worn",
+          "id": "body_armor",
+          "name": "Body armor",
+          "requires_attack": false
+         }
         },
         {
          "drinkable": false,
          "equipped_slot": 2,
-         "item": "i_20f60879a61c2f615a0d7a4354cf912ed674a615c38f47ac69160fdf5909844d",
+         "item": "i_117073d503a51ed1e7f7806e6c769fe4ffe05d17121dac3e23259598d1b704a5",
          "known_equipment": null,
-         "slot": "ring"
+         "slot": {
+          "equipped_phrase": "on a finger",
+          "id": "ring",
+          "name": "Ring",
+          "requires_attack": false
+         }
         },
         {
          "drinkable": true,
          "equipped_slot": null,
-         "item": "i_67e99fee47dd950f655c4e6a8033fd58580dc0320b42f27204cc7b8aa97bd935",
+         "item": "i_99a03b68f1c2cae164cc710f901207e9b7803ce4542b09c97eb2ffcd009d5b55",
          "known_equipment": null,
          "slot": null
         },
         {
          "drinkable": true,
          "equipped_slot": null,
-         "item": "i_8f9f35ac4f08f2a033905bbc81b1bd46dea496a47dec9f094c31ce0616980ec2",
+         "item": "i_2e9fda0f645a73f4c6613deec9c988392ebc2d8fdd0778bab790ab4a96fe71aa",
          "known_equipment": null,
          "slot": null
         }
        ],
        "preparation": null,
        "slots": [
-        "weapon",
-        "body_armor",
-        "ring",
-        "ring"
+        {
+         "equipped_phrase": "weapon in hand",
+         "id": "weapon",
+         "name": "Weapon",
+         "requires_attack": true
+        },
+        {
+         "equipped_phrase": "being worn",
+         "id": "body_armor",
+         "name": "Body armor",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        },
+        {
+         "equipped_phrase": "on a finger",
+         "id": "ring",
+         "name": "Ring",
+         "requires_attack": false
+        }
        ]
       },
       "inventory": [
@@ -3521,7 +4581,7 @@
         "appearance": "sword",
         "class": "weapon",
         "description": "",
-        "id": "i_aa5e9e6a1e662dbfacb7d7957484a3d7ebe2071d8713e4414548aca2f1108c18",
+        "id": "i_7ba134531d4c50b84b96e6ade4029298dd2fec13c5b8d6b4f629f3b5002748c5",
         "identified": true,
         "name": "sword",
         "quantity": "1"
@@ -3530,7 +4590,7 @@
         "appearance": "mail",
         "class": "armor",
         "description": "",
-        "id": "i_11e9bd30893f1d067424aaa1434788b6986b9642685318c3ebe107be5115bf9f",
+        "id": "i_d15e4d250b766c217539df09fd70945dacbcaed68e31433fc3868152ab58b707",
         "identified": true,
         "name": "mail",
         "quantity": "1"
@@ -3539,7 +4599,7 @@
         "appearance": "silver ring",
         "class": "ring",
         "description": "",
-        "id": "i_20f60879a61c2f615a0d7a4354cf912ed674a615c38f47ac69160fdf5909844d",
+        "id": "i_117073d503a51ed1e7f7806e6c769fe4ffe05d17121dac3e23259598d1b704a5",
         "identified": false,
         "name": "silver ring",
         "quantity": "1"
@@ -3548,7 +4608,7 @@
         "appearance": "red potion",
         "class": "potion",
         "description": "",
-        "id": "i_67e99fee47dd950f655c4e6a8033fd58580dc0320b42f27204cc7b8aa97bd935",
+        "id": "i_99a03b68f1c2cae164cc710f901207e9b7803ce4542b09c97eb2ffcd009d5b55",
         "identified": false,
         "name": "red potion",
         "quantity": "1"
@@ -3557,7 +4617,7 @@
         "appearance": "red potion",
         "class": "potion",
         "description": "",
-        "id": "i_8f9f35ac4f08f2a033905bbc81b1bd46dea496a47dec9f094c31ce0616980ec2",
+        "id": "i_2e9fda0f645a73f4c6613deec9c988392ebc2d8fdd0778bab790ab4a96fe71aa",
         "identified": false,
         "name": "red potion",
         "quantity": "2"
@@ -3570,13 +4630,13 @@
        "z": 0
       },
       "ready": true,
-      "self_target": "a_a7336eea69e0a585eff60b801105140cde5f6addb90fb2a4a8318841dc86e037",
+      "self_target": "a_2f6fcd9ef8961a37916305d4bd098694e54831ddfd9df2253c4451f6b4868bb9",
       "tick": "100",
       "visible_actors": [],
       "visible_cells": [
        {
         "door": null,
-        "key": "0446904a931d7c5d8dd9e1092478c6dabab3ff99",
+        "key": "84056c5b1099a1c15bb61187334426087740a2c5",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3590,7 +4650,7 @@
        },
        {
         "door": null,
-        "key": "94da4341f172c0a103a0a870cbca1af3dcfc00e1",
+        "key": "a286801b911beec858d34376576211e353e513bb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3604,7 +4664,7 @@
        },
        {
         "door": null,
-        "key": "4d07c8b28473f6a72622bf143cf455f1e1ff188f",
+        "key": "22b6cb1f9a9694e90c1bdcae9311bbfe54fd0a4c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3618,7 +4678,7 @@
        },
        {
         "door": null,
-        "key": "e1b83cad429a3a28761f7d6dcdfdfbd67c150485",
+        "key": "0a0a8e7b27d90be85bfdca59c3e5ff12c5b8fadd",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3632,7 +4692,7 @@
        },
        {
         "door": null,
-        "key": "c6994d08474205233ef8fdeef24b1d4e93a7957b",
+        "key": "50ea95a1b9398661e0d14cac2da3df3cc5f1a886",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3646,7 +4706,7 @@
        },
        {
         "door": null,
-        "key": "d96eb5f86ed4bc3dc0f17f96f615453d2a4e436d",
+        "key": "3d1d26a7ccafdff0e4dc2cfd0cac0b4ef9311a92",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3660,7 +4720,7 @@
        },
        {
         "door": null,
-        "key": "1b544c9b7b16d4e38f146c83b7f53925bd442757",
+        "key": "3db4d9b519bade7ec8a6824290cda38640269a75",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3674,7 +4734,7 @@
        },
        {
         "door": null,
-        "key": "6ace9b39858a7745546a0040bfe82660803a18d3",
+        "key": "3a10b01d552e0631bbfcb89b18bc06260cf81701",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3688,7 +4748,7 @@
        },
        {
         "door": null,
-        "key": "819a7eb5e5c6c10463696e7f07ae2e01d68851b2",
+        "key": "60858b51a0955713da8d727dd0cc17a6b968a0f0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3702,7 +4762,7 @@
        },
        {
         "door": null,
-        "key": "517b17e745240acc4e1bb18e2a43a007bee447b0",
+        "key": "f3d2041be683a52ad9fb02a8e5a7f8517867fef9",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3716,7 +4776,7 @@
        },
        {
         "door": null,
-        "key": "5aa58e82b48aeaca44efbe86e0acc0762d467184",
+        "key": "f86fff1638fccd7d3e77b989e6528624d983134f",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3730,7 +4790,7 @@
        },
        {
         "door": null,
-        "key": "e28eb2d66afbaed148cf0d238d2c42e7a002fa82",
+        "key": "57faa60ef159a691d1f4aa7ca4eebbb0084f88fb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3744,7 +4804,7 @@
        },
        {
         "door": null,
-        "key": "c0c74f5b6ad14807a4870b50985ee0cadb163125",
+        "key": "cb418ab6774817ee9fcf8d6f7a61521c81cde980",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3758,7 +4818,7 @@
        },
        {
         "door": null,
-        "key": "c25acf7d233cd84a145aff23a3475ad00570b620",
+        "key": "a05b246c03b0d3ef33387c1d68bbfeb366121750",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3772,7 +4832,7 @@
        },
        {
         "door": null,
-        "key": "83108ebe41608b63da1f5d904a7adaed47627412",
+        "key": "971d581bef318cd5d00b27bf07a238f53bc3f2d5",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3786,7 +4846,7 @@
        },
        {
         "door": null,
-        "key": "d9987880c54c13211819039bbc6c6f2642ec7dc2",
+        "key": "aaad3caea9d0dfe4fdcd43c9347086dcf3d18282",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3800,7 +4860,7 @@
        },
        {
         "door": null,
-        "key": "51125b5e794c6dc06c8bc990b5dadd2eebe21be2",
+        "key": "509fd738c128e1a5b0653c9cf0290e3b131c3408",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3814,7 +4874,7 @@
        },
        {
         "door": null,
-        "key": "c125c4e412aa9594baa62478b45dea1ca4c29e54",
+        "key": "830cbffc13ed204f8490e7b52d2fbc09358b65b6",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3828,7 +4888,7 @@
        },
        {
         "door": null,
-        "key": "71d4aad467edda01b15c213304bc59fd0d90841e",
+        "key": "2773c1d7348587239c525c642372fa32dbf93bc6",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3842,7 +4902,7 @@
        },
        {
         "door": null,
-        "key": "f47e8350dfe9bdf7e6cd87daef94967a2e699c99",
+        "key": "9e53627400e275e95a881aae08a7a96fbaf7b656",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3856,7 +4916,7 @@
        },
        {
         "door": null,
-        "key": "88ef29f4663eaf8e42d5c0aec6124edb0860a2f1",
+        "key": "28c825e8c164a40970fc3be44346b933dff7fd92",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3870,7 +4930,7 @@
        },
        {
         "door": null,
-        "key": "869f7a33a6dda53b1cf9f67a9db86c39ce7ad237",
+        "key": "225b74e3920fc5b3ea83e1f1af169293111f03ff",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3884,7 +4944,7 @@
        },
        {
         "door": null,
-        "key": "bf6f24d81e84f24a0dc57fcd87af5e9b3d4feb5f",
+        "key": "eb85c4a004176de99cc18972bbda82e120a9e555",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3898,7 +4958,7 @@
        },
        {
         "door": null,
-        "key": "8f04fbe8dc09df4380c2b024a5bde55cfacfe37d",
+        "key": "df3cbe7e823f6e51ebbb1e102488fe922899ca03",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3912,7 +4972,7 @@
        },
        {
         "door": null,
-        "key": "e966c866f4852e29e70fc7d0d778b15825e8d66d",
+        "key": "624ce65f3b4e2d8cb3bfbb1cac20640bf7cdd680",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3926,7 +4986,7 @@
        },
        {
         "door": null,
-        "key": "3e87e6956d63f3b7265696959e361b33310345e1",
+        "key": "6f59c28716a9fa7bea2c72d1af7542aafc3499c1",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3940,7 +5000,7 @@
        },
        {
         "door": null,
-        "key": "bcea7a4f21a3c2bdbb6916e8f55fa3a6668d5e06",
+        "key": "a0de6694dc40e340046ddc6bbef04bd32fce08ac",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3954,7 +5014,7 @@
        },
        {
         "door": null,
-        "key": "7f6476abede507add6c26fbde0fdc12264c5b736",
+        "key": "a1cdb6abfe9941a1b36a7bdea6a69ea0194d1ffb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3968,7 +5028,7 @@
        },
        {
         "door": null,
-        "key": "8d0aa1b8d40a164407a1e0509f98c123a77fc5ae",
+        "key": "ec9493e6f0b9f880361519e56a6579dfc75f2643",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -3982,7 +5042,7 @@
        },
        {
         "door": null,
-        "key": "c502ddbfc0b4e6cdeefb981f35dee238654facda",
+        "key": "cac634d574730ea55f57d064a049cf591a5510c5",
         "material": "",
         "place_hint": false,
         "position": {
@@ -3996,7 +5056,7 @@
        },
        {
         "door": null,
-        "key": "c979fbfde7b1d4ab93356b14df1fe3cb85ca7566",
+        "key": "52e56cc04d73b576e9bfe9cba5bf99519abe2488",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4010,7 +5070,7 @@
        },
        {
         "door": null,
-        "key": "b3cdf3735117ee8858c53750cb01d4c7a3bd4ad9",
+        "key": "596e4bd866d025b8b991694e691026b0c479cf65",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4024,7 +5084,7 @@
        },
        {
         "door": null,
-        "key": "4f73917d89b957a7bdb5c70097e5c03280402dcf",
+        "key": "e6bcae57becdc9ed97e7d642148ed8950f75496e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4038,7 +5098,7 @@
        },
        {
         "door": null,
-        "key": "2feab017c5ede30b7e7a4494655ffc19842d3424",
+        "key": "268d2d9a4c70075886c93265aba80cec8cfb03ad",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4052,7 +5112,7 @@
        },
        {
         "door": null,
-        "key": "6359ceaede0e0a88f5ac53c06e13536e2c9c6972",
+        "key": "b63532ee8ab02707ce0f79618bd9eb3363107b21",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4066,7 +5126,7 @@
        },
        {
         "door": null,
-        "key": "26ca6ade63ef6fd84107fb28ab990464c6df7eb0",
+        "key": "757b3bc44484a99fde86cef489e64151df2b06f6",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4080,7 +5140,7 @@
        },
        {
         "door": null,
-        "key": "65122e6c5ea29eb55d02c1ea55c6be381b01a318",
+        "key": "0990a0a90ab65e0b2a9973b52f82931f1ff76560",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4094,7 +5154,7 @@
        },
        {
         "door": null,
-        "key": "314158640421f7ef55322d8307f859754bdbd853",
+        "key": "600ca131e44ecea165588f633cc6dfff2edf58ba",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4108,7 +5168,7 @@
        },
        {
         "door": null,
-        "key": "b36e4835cf7111e16f4a5f8afbb388a1536c4350",
+        "key": "24e4b3b45a574d15c8ebad36ee4904d8286d92aa",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4122,7 +5182,7 @@
        },
        {
         "door": null,
-        "key": "6f58280df7ed32ed20bc4211fd9b238803428e7b",
+        "key": "59e052912bae5ee3b99c04703dcc633128567396",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4136,7 +5196,7 @@
        },
        {
         "door": null,
-        "key": "bdd77d74ba50c678a5763db64b2b5005581d5e5b",
+        "key": "8380d714339fd651fa021e26af41a7c974d10211",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4150,7 +5210,7 @@
        },
        {
         "door": null,
-        "key": "ef2a0484c91871d6637b1c5e7de6d59e03799d40",
+        "key": "6fa09b8f8cc2af26f395e4697d29561dd50e9b83",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4164,7 +5224,7 @@
        },
        {
         "door": null,
-        "key": "42f79bed2afdac28050dc09ae3a8d6ba7f78bcad",
+        "key": "e5c115483137f8f49c8441db36da7ff0c26893c8",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4178,7 +5238,7 @@
        },
        {
         "door": null,
-        "key": "070b7b0462c3a88b84ca6db15dcb3e8d3ecdedba",
+        "key": "87b219d31e37a586781a0fc3f39b096a6676c22c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4192,7 +5252,7 @@
        },
        {
         "door": null,
-        "key": "c88b5db594af27688b7635568709a71be9b0fb3b",
+        "key": "f5981e6172d18dad81de6b887f9c536d262afa93",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4206,7 +5266,7 @@
        },
        {
         "door": null,
-        "key": "d64efa103dda459e7ee576b305374e7634d7034e",
+        "key": "2de3ed7940c705dc3029ff6d25d4fc96cd9a6115",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4220,7 +5280,7 @@
        },
        {
         "door": null,
-        "key": "48ad31a52ac20ab1c2e83b60015643fcebfcfe33",
+        "key": "474c8ffd4a990231ea9ee2500028a364a69164fe",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4234,7 +5294,7 @@
        },
        {
         "door": null,
-        "key": "207aabab745d79c724f0a9ce05952c35a9503b05",
+        "key": "32a6b2a8acb73885d9f8c9b6f16eb8a9bfdc3618",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4248,7 +5308,7 @@
        },
        {
         "door": null,
-        "key": "c5339e0d1b746846af47373059ebf7a4cc751da6",
+        "key": "79e35b061eda8e68873c7d47911ad4253c80d33f",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4262,7 +5322,7 @@
        },
        {
         "door": null,
-        "key": "815b645acfd0e9948f86756c8a6f330f73efc74a",
+        "key": "299efa520443c00a446d64ee43a3c950dff473b7",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4276,7 +5336,7 @@
        },
        {
         "door": null,
-        "key": "2fc214a956c6147f2e0999525618a8b05be5c0e0",
+        "key": "9200df9d1eea300a53f3109dc4ec6e01474b1ccc",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4290,7 +5350,7 @@
        },
        {
         "door": null,
-        "key": "cde45e9c64f0632388910644b701a9778f036880",
+        "key": "35d2f86b3a8437802f2add2379c1b327d9c777bb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4304,7 +5364,7 @@
        },
        {
         "door": null,
-        "key": "d569b84b2b913cdeae9930dd1917604dcbb2b58e",
+        "key": "5f2e15779b9d3b61384950929c2dd993af45420d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4318,7 +5378,7 @@
        },
        {
         "door": null,
-        "key": "b6d33adc5e3986135bf81122820208688e9ad96a",
+        "key": "31ca0d5609d3c8399b53edcb35dc030067c2378e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4332,7 +5392,7 @@
        },
        {
         "door": null,
-        "key": "b1508cfa2a321063629ef17fb92f4338ae148987",
+        "key": "dac25ba40129d0a71f450770ea5779c0cab5573e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4346,7 +5406,7 @@
        },
        {
         "door": null,
-        "key": "56ac4306d36ce6e78ca7525652348843fbeac5f5",
+        "key": "5bbf595f336dbab911152d08e2181ee2b3589b80",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4360,7 +5420,7 @@
        },
        {
         "door": null,
-        "key": "28b84946709ddc95ae3f6acc758cc48527457eae",
+        "key": "3d1f567b264a6813b645db623a33600c98331adf",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4374,7 +5434,7 @@
        },
        {
         "door": null,
-        "key": "dd7f5d950f30fe2cc98a0cd20a18d62737a67c56",
+        "key": "a1b525d8775a151ab1859dbd50aca4406fc3e542",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4388,7 +5448,7 @@
        },
        {
         "door": null,
-        "key": "569ac2cd2ca1a345dbea20cad94f3a3c1f7eb7be",
+        "key": "6d49011b960e652291dbe37bb4e2213f9644c384",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4402,7 +5462,7 @@
        },
        {
         "door": null,
-        "key": "4c141826ad24118d0fca0740aeef136841e4ad40",
+        "key": "850ef8029fd1c774f159b8afb165a7e4d8165dce",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4416,7 +5476,7 @@
        },
        {
         "door": null,
-        "key": "104ce12b0063ab3c8612e58a079f074294d5777c",
+        "key": "c7359404ae489eeed119ed65f287a5a35e77a0a8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4430,7 +5490,7 @@
        },
        {
         "door": null,
-        "key": "0951c6f4e16facf72d16131913d5c5afc2007655",
+        "key": "77a67fcaa5e0e068e98dd1c89aede7cf2d23fa5e",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4444,7 +5504,7 @@
        },
        {
         "door": null,
-        "key": "342efe11bd20dfb3703dd890d08b941605706926",
+        "key": "083bede0a627f9a7099ea72bd7216dac1b1e1663",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4458,7 +5518,7 @@
        },
        {
         "door": null,
-        "key": "6af3524fbcf8206b113214c4dd14ca46841c9547",
+        "key": "5b84b903dbb417099be04d93c49df91970cde02b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4472,7 +5532,7 @@
        },
        {
         "door": null,
-        "key": "3c44646e27a82c1293a9d6051997909562af1509",
+        "key": "4be1213c5d7662e8c3fe193e7f506e91c279ee0c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4486,7 +5546,7 @@
        },
        {
         "door": null,
-        "key": "a05f2158052eb6cb172f42aaaa79977fb4fc1336",
+        "key": "0f9a1d886534a21ac2b9ae13d26ccabebc1f73bd",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4500,7 +5560,7 @@
        },
        {
         "door": null,
-        "key": "43bb17f04fedd4dfa498faa6b4b7aafb2ae4f297",
+        "key": "ecd5ebc09d8ecadec5150db4761d7db9b8cb61b0",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4514,7 +5574,7 @@
        },
        {
         "door": null,
-        "key": "e09154dcbad0107d5970b4f9808407defa939f26",
+        "key": "4503e16a03e69f0bfce788faf7ded40f918dab2e",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4528,7 +5588,7 @@
        },
        {
         "door": null,
-        "key": "ef0f986dd40e503dbbf019c1ad2b78f0379f7c1f",
+        "key": "f147e835fac4c1054172ac92a731cec74ad32b90",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4542,7 +5602,7 @@
        },
        {
         "door": null,
-        "key": "5a7fe85fc766f4caeeb40c460d1142107f12df2f",
+        "key": "c296b2d148e7f7cbe56521b932a4b85066a48149",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4556,7 +5616,7 @@
        },
        {
         "door": null,
-        "key": "9e662327ea000d76306c8b98dea0e90607ef156e",
+        "key": "59e3e05c8f5d052d023957af438b3e5798551b8b",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4570,7 +5630,7 @@
        },
        {
         "door": null,
-        "key": "c91a30919a222977a25d9a105e5b9d27f89d9bda",
+        "key": "20fa196455683901bc021427f03250581f50aacb",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4584,7 +5644,7 @@
        },
        {
         "door": null,
-        "key": "1a43ca58f6e9cf7220ad14ab74b6faaa7051720b",
+        "key": "cbdf7f15528ba64906489045a0269c84af5865d9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4598,7 +5658,7 @@
        },
        {
         "door": null,
-        "key": "a91660e2f4550f07094ec99931919dcf9326f666",
+        "key": "6ac20f9f3c07137b8ff1ca369f23fd62d2c9b9eb",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4612,7 +5672,7 @@
        },
        {
         "door": null,
-        "key": "1d4e79e063dd58798a9ecd8bdc3ac62730fccfa0",
+        "key": "49fd352a15954d372642a86138bb5e9f5999c735",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4626,7 +5686,7 @@
        },
        {
         "door": null,
-        "key": "44fd577d69afa22690c46e873c55f68cd9f130ee",
+        "key": "7b4578c683edb9058640b6f1619c2a25355f3cc8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4640,7 +5700,7 @@
        },
        {
         "door": null,
-        "key": "84a69fe21444de116b462094037e4d5853bfccda",
+        "key": "f7ed185174abce49679e022275a60c5ff59ed7d9",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4654,7 +5714,7 @@
        },
        {
         "door": null,
-        "key": "668bea84391d319221ca14827c644242651a197b",
+        "key": "235e004ae25c11c0319fab6b0dfc572551f81830",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4668,7 +5728,7 @@
        },
        {
         "door": null,
-        "key": "bcc0d3c7d8ede530c399378e8ed153341a892ece",
+        "key": "2b1fda729f7201ab9bdddefba2f4ce37460fd716",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4682,7 +5742,7 @@
        },
        {
         "door": null,
-        "key": "c0a970e9887d71e8112fba2a74f77a0389f8c57b",
+        "key": "9c83f44263a5b05b92b80f669eabad52d3ad7b78",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4696,7 +5756,7 @@
        },
        {
         "door": null,
-        "key": "7293bc0a27db098cd8d20138de9f3d7dc324a18a",
+        "key": "0e6ad95d5c250e57351ba9967539bc373721c384",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4710,7 +5770,7 @@
        },
        {
         "door": null,
-        "key": "9ae6fed0434d5687e0a4dc2fe03fcfc9d22b2c6d",
+        "key": "9ee24bf68a5ad8e938e65f42ac49b4feb7307cb3",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4724,7 +5784,7 @@
        },
        {
         "door": null,
-        "key": "a103685ceed56dd2077948d61fdf668e8c03979b",
+        "key": "67312de1b5b7085972fae24906246232af6c8d68",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4738,7 +5798,7 @@
        },
        {
         "door": null,
-        "key": "701e13732b7dbc04d96f728244a892275ff34728",
+        "key": "c98d5fb7d02fc41b37540f8ea8300041362e9c95",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4752,7 +5812,7 @@
        },
        {
         "door": null,
-        "key": "53a2a3afe3c54e74bd098161dc700d2527a4da85",
+        "key": "07bb070186ceaa7055880fe9f8809d4d8ef2ff20",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4766,7 +5826,7 @@
        },
        {
         "door": null,
-        "key": "d1e8837df4923df160e337572d26cc24ee14afa8",
+        "key": "ec6f59f2e6f952650559bb46fec3cbe98060aae2",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4780,7 +5840,7 @@
        },
        {
         "door": null,
-        "key": "9a27f12276ebe318d7d67d7bb47365be94a896a2",
+        "key": "3f07245d8f5021035f7718900ea4d385ae4b7e5d",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4794,7 +5854,7 @@
        },
        {
         "door": null,
-        "key": "e183952dcd025e05dbe51a5e278073e9fa8415b2",
+        "key": "f878bf7291c978ad61ea9e58f3408a8e7e782aa7",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4808,7 +5868,7 @@
        },
        {
         "door": null,
-        "key": "8f6b51954898f307291d83c79a1d1178ccde9a33",
+        "key": "050ac4eb9247032ae0e03a98f80b0ed641bf8437",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4822,7 +5882,7 @@
        },
        {
         "door": null,
-        "key": "817e751737805b51258e26f026b4e4db8f050b18",
+        "key": "495900fc38d0257400a3a253da02ca63445ff9fd",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4836,7 +5896,7 @@
        },
        {
         "door": null,
-        "key": "8043774b39e289f8c5f26c14b9c03272f6f7719d",
+        "key": "41f2eb66ddecbdfc219e9d9e61abafe3ff2d2e2b",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4850,7 +5910,7 @@
        },
        {
         "door": null,
-        "key": "0ae7a4ef417e0a8c5b98a2efb1d1f9e08efdf00b",
+        "key": "5fe453efffb91a0f9a043bf8ffb752ba1addbb25",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4864,7 +5924,7 @@
        },
        {
         "door": null,
-        "key": "cf4f2ea743827716ac9f78798ffed4d7aaac514a",
+        "key": "c8c950f113dc3515faf00229598d930346936e0a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4878,7 +5938,7 @@
        },
        {
         "door": null,
-        "key": "86f4325efd26ac13ef66d928e6070063bf227f5e",
+        "key": "88a29583ec998146e395ca0018b051a32a2c485f",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4892,7 +5952,7 @@
        },
        {
         "door": null,
-        "key": "062715986600e0c0cdd41bbd95820dc344701d1d",
+        "key": "6548bbb4565fb640ca65140614ba818c3080c5f2",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4906,7 +5966,7 @@
        },
        {
         "door": null,
-        "key": "57626a46707e54a819ea9a7f7961798d18ee4bd2",
+        "key": "29cf0d11a77a4f33348a501d9eda995937d5a0c0",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4920,7 +5980,7 @@
        },
        {
         "door": null,
-        "key": "95c36cf23dee41cc073c59f3d942a814f91e0f8d",
+        "key": "23004d950639b78cbf076b85d7a3366e56606db8",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4934,7 +5994,7 @@
        },
        {
         "door": null,
-        "key": "cb45dd3e75f18c13d24de43b47821502a105fd17",
+        "key": "87e0ccf2805ec6dd1c1198573bb40bc6c86db069",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4948,7 +6008,7 @@
        },
        {
         "door": null,
-        "key": "1ed7390b2ddc2c760f3326cb650ff14e3a64fad0",
+        "key": "a3b374ecdb40724898854409229e0fb09350f251",
         "material": "",
         "place_hint": false,
         "position": {
@@ -4962,7 +6022,7 @@
        },
        {
         "door": null,
-        "key": "c30676a98ce8df61d85c0c441edea21076dd5511",
+        "key": "ec8b14626aa1f7a32872a2c9d19bc25d96c9ed48",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4976,7 +6036,7 @@
        },
        {
         "door": null,
-        "key": "e4524b0ab565f46577bb3b0e9814ce6b423845b4",
+        "key": "556d152a91027426ffe396be607ffc03c37c369a",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -4990,7 +6050,7 @@
        },
        {
         "door": null,
-        "key": "5c5e8a538885dd24e82f0741b37e654105c8235d",
+        "key": "0aa1212d4845710ddd44cecf1c4d188dba2b215c",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5004,7 +6064,7 @@
        },
        {
         "door": null,
-        "key": "2d37f0dc6aa41a3a284db827d131fff48073031d",
+        "key": "0bc4cca83e0759df060b375d452576c07dcbebef",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5018,7 +6078,7 @@
        },
        {
         "door": null,
-        "key": "0ea03d5ae8c263a30265d0d45d7298f830b7008f",
+        "key": "114b428e949063aa71c3b4e4f9512b8c448265c4",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5032,7 +6092,7 @@
        },
        {
         "door": null,
-        "key": "032b09b37aeb43c3144ac9f1280f2f4dee507afa",
+        "key": "d6415d9f4c79c6ea590dbf07a36e42bbf3a4ed12",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5046,7 +6106,7 @@
        },
        {
         "door": null,
-        "key": "50f4d4fade39320dea3220e1e88cdc721d947c01",
+        "key": "afcfb2d9e880a3e444a8251612233a1f430c51d6",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5060,7 +6120,7 @@
        },
        {
         "door": null,
-        "key": "c8f066785605718c4a18989e007552789147cd61",
+        "key": "e8eb36fea1f9bdf78b637fd504a79d97189abf74",
         "material": "stone",
         "place_hint": false,
         "position": {
@@ -5074,7 +6134,7 @@
        },
        {
         "door": null,
-        "key": "3298fdbc6cc236ddd57c433b0879c90d9a619723",
+        "key": "636270d308f4efde5f8322f01a369a8ee67780d1",
         "material": "stone",
         "place_hint": false,
         "position": {

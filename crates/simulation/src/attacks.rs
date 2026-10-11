@@ -27,7 +27,7 @@ impl MeleeAttack {
         wind_up: u64,
         recovery: u64,
         category: crate::combat::DamageType,
-        descriptor: Option<crate::grants::Descriptor>,
+        descriptor: Option<crate::content_ids::DescriptorId>,
         amount: u32,
     ) -> Result<Self, AttackError> {
         let component = crate::damage::DamageComponent::fixed(category, descriptor, amount);
@@ -45,9 +45,10 @@ impl MeleeAttack {
         damage: DamageSpec,
     ) -> Result<Self, AttackError> {
         if !matches!(skill, Skill::HeavyWeaponry | Skill::LightWeaponry)
-            || !(-1000..=1000).contains(&bonus)
-            || !(1..=1_000_000).contains(&wind_up)
-            || !(1..=1_000_000).contains(&recovery)
+            || !(-crate::limits::STAT_MAGNITUDE..=crate::limits::STAT_MAGNITUDE)
+                .contains(&i64::from(bonus))
+            || !(1..=crate::limits::NUMERIC as u64).contains(&wind_up)
+            || !(1..=crate::limits::NUMERIC as u64).contains(&recovery)
             || damage.primary().is_none()
         {
             return Err(AttackError::InvalidDefinition);

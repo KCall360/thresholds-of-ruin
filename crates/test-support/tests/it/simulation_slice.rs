@@ -1,4 +1,17 @@
 use std::num::NonZeroU64;
+use std::sync::{Arc, OnceLock};
+use tor_simulation::creatures::{Content, ScenarioCatalog};
+
+fn content() -> Arc<Content> {
+    static CONTENT: OnceLock<Arc<Content>> = OnceLock::new();
+    Arc::clone(CONTENT.get_or_init(|| {
+        Content::new(
+            tor_simulation::test_support::test_ruleset(),
+            ScenarioCatalog::default(),
+        )
+        .unwrap()
+    }))
+}
 
 use tor_simulation::{Action, ActorId, Game, GameError, ItemId, OutcomeKind};
 use tor_world::{Direction, Extent, Location, Passage, Position, Region, RegionId, World};
@@ -12,7 +25,7 @@ fn start() -> Location {
 
 #[test]
 fn seeded_actor_can_observe_take_and_cross_between_rooms() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, content());
     let actor = game
         .spawn_actor(start(), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -67,7 +80,7 @@ fn seeded_actor_can_observe_take_and_cross_between_rooms() {
 
 #[test]
 fn queries_and_invalid_actions_leave_the_entire_simulation_unchanged() {
-    let mut game = Game::two_room(1);
+    let mut game = Game::two_room(1, content());
     let actor = game
         .spawn_actor(start(), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -105,7 +118,7 @@ fn queries_and_invalid_actions_leave_the_entire_simulation_unchanged() {
 #[test]
 fn identical_seed_and_actions_reproduce_state_and_event_trace() {
     fn run(seed: u64) -> (Game, Vec<tor_simulation::ActionOutcome>) {
-        let mut game = Game::two_room(seed);
+        let mut game = Game::two_room(seed, content());
         let actor = game
             .spawn_actor(start(), NonZeroU64::new(100).unwrap())
             .unwrap();
@@ -129,7 +142,7 @@ fn identical_seed_and_actions_reproduce_state_and_event_trace() {
 
 #[test]
 fn actors_have_independent_inventories_and_deterministic_variable_timing() {
-    let mut game = Game::two_room(42);
+    let mut game = Game::two_room(42, content());
     let first = game
         .spawn_actor(start(), NonZeroU64::new(100).unwrap())
         .unwrap();
@@ -175,7 +188,7 @@ fn actors_have_independent_inventories_and_deterministic_variable_timing() {
 
 #[test]
 fn actors_cannot_spawn_or_move_into_an_occupied_cell() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, content());
     let pace = NonZeroU64::new(100).unwrap();
     let first = game.spawn_actor(start(), pace).unwrap();
     assert_eq!(game.spawn_actor(start(), pace), Err(GameError::Occupied));
@@ -197,7 +210,7 @@ fn actors_cannot_spawn_or_move_into_an_occupied_cell() {
 
 #[test]
 fn time_overflow_is_rejected_without_partially_moving_an_actor() {
-    let mut game = Game::two_room(u64::MAX);
+    let mut game = Game::two_room(u64::MAX, content());
     let actor = game
         .spawn_actor(start(), NonZeroU64::new(u64::MAX).unwrap())
         .unwrap();
@@ -205,14 +218,16 @@ fn time_overflow_is_rejected_without_partially_moving_an_actor() {
     let before = game.clone();
     assert_eq!(
         game.act(actor, Action::Move(Direction::East)),
-        Err(GameError::TimeExhausted)
+        Err(GameError::Schedule(
+            tor_simulation::ScheduleError::TimeExhausted
+        ))
     );
     assert_eq!(game, before);
 }
 
 #[test]
 fn visible_items_still_require_reach_and_cannot_be_taken_twice() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, content());
     let actor = game
         .spawn_actor(
             Location {
@@ -263,7 +278,7 @@ fn visible_items_still_require_reach_and_cannot_be_taken_twice() {
 
 #[test]
 fn actors_can_see_across_boundaries_without_counting_them_as_visits() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, content());
     let pace = NonZeroU64::new(100).unwrap();
     let entry = game.spawn_actor(start(), pace).unwrap();
     let gallery = game
@@ -309,7 +324,7 @@ fn actors_can_see_across_boundaries_without_counting_them_as_visits() {
             .collect::<Vec<_>>(),
         ["copper token", "stone tablet"]
     );
-    let mut other_seed = Game::two_room(1);
+    let mut other_seed = Game::two_room(1, content());
     let actor = other_seed.spawn_actor(start(), pace).unwrap();
     assert_eq!(
         other_seed.observe(actor).unwrap().ground_items[0].name,
@@ -319,7 +334,7 @@ fn actors_can_see_across_boundaries_without_counting_them_as_visits() {
 
 #[test]
 fn equal_time_ties_are_stable_and_new_actors_join_at_the_current_tick() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, content());
     let pace = NonZeroU64::new(100).unwrap();
     let first = game.spawn_actor(start(), pace).unwrap();
     game.act(first, Action::Wait).unwrap();
@@ -346,7 +361,7 @@ fn equal_time_ties_are_stable_and_new_actors_join_at_the_current_tick() {
 
 #[test]
 fn invalid_actor_and_spawn_requests_leave_state_unchanged() {
-    let mut game = Game::two_room(0);
+    let mut game = Game::two_room(0, content());
     let before = game.clone();
     assert_eq!(game.next_actor(), None);
     assert_eq!(game.observe(ActorId(99)), Err(GameError::UnknownActor));
@@ -386,7 +401,7 @@ fn a_passage_can_return_to_the_actors_own_cell() {
         }],
     )
     .unwrap();
-    let mut game = Game::new(world, 0);
+    let mut game = Game::new(world, 0, content());
     let actor = game
         .spawn_actor(location, NonZeroU64::new(100).unwrap())
         .unwrap();

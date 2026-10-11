@@ -1,10 +1,7 @@
 //! Creature-owned actor lifecycle and strict checkpoint adapter.
-use crate::combat::{AttackSpec, CombatSpec, DamageType};
 use crate::creatures::{CreatureBuild, CreatureState, RebuildOutcome};
-use crate::grants::Selector;
 use crate::{ActorId, Game, GameError};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 use tor_world::Shared;
 
 /// Trusted backend inspection of one loaded creature. This is deliberately not
@@ -13,7 +10,7 @@ use tor_world::Shared;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreatureInspection<'a> {
     pub identity: CreatureIdentity,
-    pub creature: &'a CreatureState,
+    pub creature: std::borrow::Cow<'a, CreatureState>,
     pub stats: crate::creatures::OwnStats,
 }
 
@@ -76,175 +73,111 @@ impl crate::Actor {
     /// Discard progress and release its unpaid reservation. Start payments
     /// remain spent; paused/resumed work retains its original hold owner.
     pub(crate) fn cancel_preparation(&mut self) -> Option<crate::combat::Preparation> {
-        self.take_preparation(false)
-    }
-
-    /// Resolution spends the remainder before effects can kill either actor.
-    pub(crate) fn complete_preparation(&mut self) -> Option<crate::combat::Preparation> {
-        self.take_preparation(true)
-    }
-
-    fn take_preparation(&mut self, completed: bool) -> Option<crate::combat::Preparation> {
         let preparation = self.pending.take()?;
-        if let Some(owner) = preparation.origin_intention() {
-            if let Some(CombatState { creature, .. }) = self.combat.as_mut() {
-                // Free work owns no hold. Avoid copying shared creature state
-                // unless a reservation actually changes.
-                if creature.costs().reservation(owner).is_some() {
-                    if completed {
-                        creature
-                            .finish_cost(owner)
-                            .expect("funded preparation reservation");
-                    } else {
-                        creature.cancel_cost(owner);
-                    }
-                }
+        if let Some(owner) = preparation.hold {
+            if let Some(combat) = self.combat.as_mut() {
+                combat.creature.cancel_cost(owner);
             }
         }
         Some(preparation)
+    }
+    pub(crate) fn complete_preparation(
+        &mut self,
+    ) -> Result<Option<crate::combat::Preparation>, GameError> {
+        let Some(preparation) = self.pending.as_ref() else {
+            return Ok(None);
+        };
+        if let Some(owner) = preparation.hold {
+            self.combat
+                .as_mut()
+                .ok_or(GameError::UnknownActor)?
+                .creature
+                .finish_cost(owner)
+                .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))?;
+        }
+        Ok(self.pending.take())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CombatState {
-    /// Derived compatibility view for existing equipment/timing consumers.
-    /// Creature checkpoints persist identity and choices, never this cache.
-    pub spec: Shared<CombatSpec>,
+    pub identity: CreatureIdentity,
     creature: Shared<CreatureState>,
 }
 
-fn profile(identity: CreatureIdentity, creature: &CreatureState) -> CombatSpec {
-    let derived = creature.derived();
-    let categories = [
-        DamageType::Energy,
-        DamageType::Impact,
-        DamageType::Keen,
-        DamageType::Spirit,
-        DamageType::Vital,
-    ];
-    CombatSpec {
-        name: identity.name,
-        faction: identity.faction,
-        max_hp: derived.maximum_health,
-        defense: derived.defenses.physical,
-        attack: AttackSpec {
-            bonus: i32::from(
-                derived.attributes.get(
-                    creature
-                        .build()
-                        .species()
-                        .melee
-                        .skill()
-                        .attribute(creature.build().binding()),
-                ),
-            ) + i32::from(derived.skills.get(derived.melee.skill()))
-                + derived.melee.bonus(),
-            wind_up: derived
-                .attributes
-                .physical_duration(derived.melee.wind_up()),
-            recovery: derived
-                .attributes
-                .physical_duration(derived.melee.recovery()),
-            // Natural creature attacks resolve their dice pool in the shared
-            // damage kernel; there is no authoritative fixed damage profile.
-            damage: BTreeMap::new(),
-        },
-        immunities: categories
-            .into_iter()
-            .filter(|&category| derived.protection.immune(category, None))
-            .collect::<BTreeSet<_>>(),
-        reductions: categories
-            .into_iter()
-            .filter_map(|category| {
-                let amount = derived.protection.reduction(Selector::Category(category));
-                (amount != 0).then_some((category, amount))
-            })
-            .collect(),
-    }
-}
-
 impl CombatState {
-    fn from_creature(identity: CreatureIdentity, creature: CreatureState) -> Self {
+    pub(crate) fn from_creature(identity: CreatureIdentity, creature: CreatureState) -> Self {
         Self {
-            spec: Shared::new(profile(identity, &creature)),
+            identity,
             creature: Shared::new(creature),
         }
     }
     pub fn creature(&self) -> &CreatureState {
         &self.creature
     }
-    pub fn advance_active(&mut self, ticks: u64) {
-        self.creature.advance_active(ticks);
+    pub fn advance_active(&mut self, ticks: u64) -> crate::creatures::ActiveTimeOutcome {
+        self.creature.advance_active(ticks)
     }
     pub(crate) fn start_preparation_cost(
         &mut self,
         owner: crate::IntentionId,
         cost: crate::costs::ResourceCost,
-    ) {
+    ) -> Result<(), GameError> {
         self.creature
             .start_cost(owner, cost)
-            .expect("validated preparation cost");
+            .map(|_| ())
+            .map_err(|_| GameError::Rule(crate::abilities::RuleError::Unfunded))
     }
-    pub fn apply_fear(
+    pub fn apply_condition(
         &mut self,
+        condition: &crate::content_ids::ConditionId,
         source: ActorId,
         duration: u64,
-    ) -> Result<crate::fear::FearUpdate, GameError> {
+    ) -> Result<crate::conditions::ConditionUpdate, GameError> {
         self.creature
-            .apply_fear(source, duration)
-            .map_err(|_| GameError::InvalidLocation)
+            .apply_condition(condition, source, duration)
+            .map_err(|error| {
+                GameError::Rule(match error {
+                    crate::conditions::ConditionError::Capacity => {
+                        crate::abilities::RuleError::ConditionCapacity
+                    }
+                    _ => crate::abilities::RuleError::InvalidDefinition,
+                })
+            })
+    }
+    pub(crate) fn apply_effect(
+        &mut self,
+        source: ActorId,
+        effect: &crate::abilities::ResolvedEffect,
+    ) -> Result<Option<crate::abilities::ResolvedEffect>, GameError> {
+        effect
+            .apply_to(&mut self.creature, source)
+            .map_err(|error| {
+                GameError::Rule(match error {
+                    crate::conditions::ConditionError::Capacity => {
+                        crate::abilities::RuleError::ConditionCapacity
+                    }
+                    _ => crate::abilities::RuleError::InvalidDefinition,
+                })
+            })
     }
     pub fn hp(&self) -> u32 {
         self.creature.health().current()
     }
     pub fn valid(&self) -> bool {
-        valid_identity(&self.spec.name, &self.spec.faction)
+        self.identity.valid()
     }
-    fn identity(&self) -> CreatureIdentity {
-        CreatureIdentity {
-            name: self.spec.name.clone(),
-            faction: self.spec.faction.clone(),
-        }
+    pub(crate) fn identity(&self) -> CreatureIdentity {
+        self.identity.clone()
     }
-    pub fn damage(&mut self, amount: u32) -> u32 {
-        self.creature.damage(amount).applied
+    pub(crate) fn set_equipment(
+        &mut self,
+        equipment: Vec<crate::creatures::EquipmentSource>,
+    ) -> Result<RebuildOutcome, crate::creatures::CreatureStateError> {
+        self.creature.set_equipment(equipment)
     }
-    pub fn heal(&mut self, amount: u32) -> u32 {
-        self.creature.heal(amount)
-    }
-}
-
-#[derive(Serialize)]
-struct IdentityRef<'a> {
-    name: &'a str,
-    faction: &'a str,
-}
-
-impl Serialize for CombatState {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut record = serializer.serialize_struct("CombatState", 2)?;
-        record.serialize_field(
-            "identity",
-            &IdentityRef {
-                name: &self.spec.name,
-                faction: &self.spec.faction,
-            },
-        )?;
-        record.serialize_field("creature", &self.creature)?;
-        record.end()
-    }
-}
-impl<'de> Deserialize<'de> for CombatState {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Record {
-            identity: CreatureIdentity,
-            creature: CreatureState,
-        }
-        let record = Record::deserialize(deserializer)?;
-        Ok(Self::from_creature(record.identity, record.creature))
+    pub fn restore_resource(&mut self, resource: crate::resources::Resource, amount: u32) -> u32 {
+        self.creature.restore_resource(resource, amount)
     }
 }
 
@@ -256,36 +189,58 @@ impl Game {
         identity: CreatureIdentity,
         build: CreatureBuild,
     ) -> Result<(), GameError> {
+        if build.content().as_ref() != self.content.as_ref() {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
         if !identity.valid() {
-            return Err(GameError::InvalidLocation);
+            return Err(GameError::Build(
+                crate::creatures::BuildError::InvalidDefinition,
+            ));
         }
-        let creature = CreatureState::new(build).map_err(|_| GameError::InvalidLocation)?;
+        let creature = CreatureState::new(build).map_err(GameError::Creature)?;
         if creature.health().dead() {
-            return Err(GameError::InvalidLocation);
+            return Err(GameError::Build(
+                crate::creatures::BuildError::InvalidDefinition,
+            ));
         }
-        let mut actor = self.actors.get_mut(&id).ok_or(GameError::UnknownActor)?;
+        let active_since = self.actor_clock(id);
+        let mut outcome = self.actor_outcome(id)?;
+        let actor = &mut outcome.state;
         if actor.combat.is_some() || !actor.equipment.is_empty() {
             return Err(GameError::ActorBusy);
         }
+        actor.active_since = active_since;
         actor.anatomy = Shared::new(creature.derived().anatomy.clone());
         actor.combat = Some(CombatState::from_creature(identity, creature));
         actor.cancel_preparation();
-        Ok(())
+        self.apply_outcome(outcome)
     }
     /// Read one loaded creature without advancing time, pausing preparation,
     /// evaluating perception or changing caches. Authority belongs to the backend.
     pub fn inspect_creature(&self, id: ActorId) -> Option<CreatureInspection<'_>> {
-        let combat = self.actors.get(&id)?.combat.as_ref()?;
-        let creature = combat.creature();
+        let identity = self.actors.get(&id)?.combat.as_ref()?.identity();
+        let creature = self.creature(id)?;
+        let stats = creature.own_stats();
         Some(CreatureInspection {
-            identity: combat.identity(),
+            identity,
             creature,
-            stats: creature.own_stats(),
+            stats,
         })
     }
 
-    pub fn creature(&self, id: ActorId) -> Option<&CreatureState> {
-        Some(self.actors.get(&id)?.combat.as_ref()?.creature())
+    pub fn creature(&self, id: ActorId) -> Option<std::borrow::Cow<'_, CreatureState>> {
+        let actor = self.actors.get(&id)?;
+        let creature = actor.combat.as_ref()?.creature();
+        let elapsed = self.actor_clock(id).saturating_sub(actor.active_since);
+        if elapsed == 0 || !creature.needs_active_time() {
+            Some(std::borrow::Cow::Borrowed(creature))
+        } else {
+            let mut projected = creature.clone();
+            projected.advance_active(elapsed);
+            Some(std::borrow::Cow::Owned(projected))
+        }
     }
     /// Body-changing transformations are outside this milestone. All supported
     /// transformations preserve sockets, inventory and injury, and run ordinary
@@ -295,16 +250,22 @@ impl Game {
         id: ActorId,
         build: CreatureBuild,
     ) -> Result<RebuildOutcome, GameError> {
-        let actor = self.actors.get(&id).ok_or(GameError::UnknownActor)?;
-        let combat = actor.combat.as_ref().ok_or(GameError::InvalidLocation)?;
+        if build.content().as_ref() != self.content.as_ref() {
+            return Err(GameError::Rule(
+                crate::abilities::RuleError::InvalidDefinition,
+            ));
+        }
+        let mut application = self.settled_actor_outcome(id)?;
+        let actor = &mut application.state;
+        let combat = actor.combat.as_ref().ok_or(GameError::Rule(
+            crate::abilities::RuleError::InvalidDefinition,
+        ))?;
         let mut candidate = combat.creature().clone();
-        let mut outcome = candidate
-            .rebuild(build)
-            .map_err(|_| GameError::InvalidLocation)?;
+        let mut outcome = candidate.rebuild(build).map_err(GameError::Creature)?;
         if let Some(pending) = actor.pending.as_ref() {
-            if let crate::Work::UseAbility { ability, .. } = pending.work {
-                if !candidate.derived().abilities.contains(&ability) {
-                    if let Some(owner) = pending.origin_intention() {
+            if let Some(plan) = pending.plan.as_ability() {
+                if !candidate.derived().abilities.contains(&plan.ability) {
+                    if let Some(owner) = pending.hold {
                         candidate.cancel_cost(owner);
                         if !outcome.canceled.contains(&owner) {
                             outcome.canceled.push(owner);
@@ -314,68 +275,22 @@ impl Game {
             }
         }
         if candidate.derived().anatomy != *actor.anatomy {
-            return Err(GameError::InvalidLocation);
+            return Err(GameError::Build(
+                crate::creatures::BuildError::InvalidDefinition,
+            ));
         }
-        if outcome.died {
-            self.next_item_id
-                .checked_add(1)
-                .ok_or(GameError::IdentityExhausted)?;
-        }
-        let identity = combat.identity();
-        let mut actor = self.actors.get_mut(&id).unwrap();
-        actor.combat = Some(CombatState::from_creature(identity, candidate));
-        let interrupted = actor
-            .pending
-            .as_ref()
-            .filter(|pending| {
-                pending
-                    .origin_intention()
-                    .is_some_and(|id| outcome.canceled.contains(&id))
-            })
-            .cloned();
-        if interrupted.is_some() {
-            actor.cancel_preparation();
-            actor.ready_at = self.tick;
-        }
-        drop(actor);
-        if outcome.died {
-            self.finish_death(id);
-        } else if let Some(pending) = interrupted {
-            self.combat
-                .events
-                .push(crate::combat::CombatEvent::Interrupted {
-                    actor: id,
-                    intention: pending.intention,
-                });
-            if !self.is_ai(id) {
-                self.combat.input_boundaries.insert(id);
-            }
-        }
+        actor.combat = Some(CombatState::from_creature(combat.identity(), candidate));
+        self.apply_outcome(application)?;
         Ok(outcome)
-    }
-}
-
-#[cfg(test)]
-mod checkpoint_format_tests {
-    use super::*;
-
-    #[test]
-    fn raw_combat_profiles_are_rejected_by_the_current_checkpoint_format() {
-        let value = serde_json::json!({
-            "spec": crate::combat::CombatSpec::default(),
-            "hp": 30,
-        });
-        assert!(serde_json::from_value::<CombatState>(value).is_err());
     }
 }
 
 #[cfg(test)]
 mod preparation_cost_tests {
     use super::*;
-    use crate::attributes::{Attributes, ManaBinding, Skill};
-    use crate::costs::ResourceCost;
-    use crate::creatures::Species;
-    use crate::progression::{Class, CreatureType, HdLedger, HdSource};
+    use crate::attributes::ManaBinding;
+    use crate::content_ids::{AbilityId, ClassId};
+    use crate::progression::{HdLedger, HdSource};
     use crate::resources::Resource;
     use crate::{Action, IntentionOrigin};
     use std::num::NonZeroU64;
@@ -388,43 +303,54 @@ mod preparation_cost_tests {
         }
     }
 
-    // Install a charge on admitted preparation to exercise the common engine
-    // lifecycle before ability action authoring is connected.
+    // Costs are authored on the selected ability and retained by preparation.
     fn charged_game() -> (Game, ActorId, ActorId, crate::IntentionId) {
         charged_game_with_seed(42)
     }
 
     fn charged_game_with_seed(seed: u64) -> (Game, ActorId, ActorId, crate::IntentionId) {
-        let mut game = Game::two_room_in_stone(seed);
+        let species = crate::test_creatures::unmodified_species("cost_subject");
+        let mut document = crate::test_support::test_ruleset().document().clone();
+        let index = document
+            .abilities
+            .iter()
+            .position(|ability| ability.id.as_str() == "basic_melee")
+            .unwrap();
+        let mut free = document.abilities[index].clone();
+        free.id = AbilityId::new("free_strike").unwrap();
+        free.basic_attack = false;
+        free.name = "Free strike".into();
+        document.constants.default_abilities.push(free.id.clone());
+        document.abilities.push(free);
+        document.abilities[index].cost = Some(crate::rules::Cost {
+            resource: Resource::Stamina,
+            start: 1,
+            resolution: 1,
+        });
+        let rules = crate::rules::Ruleset::validate(document).unwrap();
+        let id = species.id.clone();
+        let content = crate::creatures::Content::new(
+            rules,
+            crate::creatures::ScenarioCatalog {
+                species: std::collections::BTreeMap::from([(id.clone(), species)]),
+                templates: Default::default(),
+            },
+        )
+        .unwrap();
+        let build = CreatureBuild::new(
+            content,
+            id,
+            HdLedger::seeded(vec![HdSource::Class(ClassId::new("warrior").unwrap())], 7).unwrap(),
+            ManaBinding::Intellect,
+        )
+        .unwrap();
+        let mut game = Game::two_room_in_stone(seed, build.content().clone());
         let actor = game
             .spawn_actor(location(1), NonZeroU64::new(100).unwrap())
             .unwrap();
         let target = game
             .spawn_actor(location(2), NonZeroU64::new(10).unwrap())
             .unwrap();
-        let build = CreatureBuild::new(
-            Species {
-                id: "cost_subject".into(),
-                kind: CreatureType::Humanoid,
-                subtypes: BTreeSet::new(),
-                default_attributes: Attributes::default(),
-                anatomy: crate::AnatomySpec::humanoid(),
-                melee: crate::attacks::MeleeAttack::new(Skill::HeavyWeaponry, 0, 60, 40, {
-                    let component = crate::damage::DamageComponent::rolled(
-                        crate::combat::DamageType::Impact,
-                        None,
-                        crate::dice::DicePool::new(1, 4, 0).unwrap(),
-                    );
-                    let primary = component.key();
-                    crate::damage::DamageSpec::new(vec![component], Some(primary)).unwrap()
-                })
-                .unwrap(),
-                grants: vec![],
-            },
-            HdLedger::seeded(vec![HdSource::Class(Class::Warrior)], 7).unwrap(),
-            ManaBinding::Intellect,
-        )
-        .unwrap();
         for id in [actor, target] {
             game.configure_creature(
                 id,
@@ -437,22 +363,16 @@ mod preparation_cost_tests {
             .unwrap();
         }
         let intention = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
-            .unwrap();
-        game.execute_next_intention().unwrap().outcome.unwrap();
-        let mut state = game.actors.get_mut(&actor).unwrap();
-        let creature = &mut state.combat.as_mut().unwrap().creature;
-        creature
-            .start_cost(
-                intention,
-                ResourceCost {
-                    resource: Resource::Stamina,
-                    start: 1,
-                    resolution: 1,
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: AbilityId::new("basic_melee").unwrap(),
+                    target,
                 },
+                IntentionOrigin::Human,
             )
             .unwrap();
-        drop(state);
+        game.execute_next_intention().unwrap().outcome.unwrap();
         (game, actor, target, intention)
     }
 
@@ -466,7 +386,8 @@ mod preparation_cost_tests {
             } else {
                 game.cancel_intention(actor, intention).unwrap();
             }
-            let costs = game.creature(actor).unwrap().costs();
+            let creature = game.creature(actor).unwrap();
+            let costs = creature.costs();
             assert!(costs.reservations().is_empty());
             assert_eq!(costs.resources().balance(Resource::Stamina), 1);
             assert_eq!(costs.available(Resource::Stamina), 1);
@@ -489,14 +410,18 @@ mod preparation_cost_tests {
         let (mut game, actor, target, original) = charged_game();
         game.pause_preparation(actor).unwrap();
         let resumed = game
-            .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+            .admit_intention(
+                actor,
+                Action::UseAbility {
+                    id: AbilityId::new("basic_melee").unwrap(),
+                    target,
+                },
+                IntentionOrigin::Human,
+            )
             .unwrap();
         assert_ne!(resumed, original);
         game.execute_next_intention().unwrap().outcome.unwrap();
-        assert_eq!(
-            game.preparation(actor).unwrap().origin_intention(),
-            Some(original)
-        );
+        assert_eq!(game.preparation(actor).unwrap().hold, Some(original));
         assert_eq!(
             game.creature(actor)
                 .unwrap()
@@ -509,7 +434,8 @@ mod preparation_cost_tests {
             game.act(target, Action::Wait).unwrap();
         }
         assert_eq!(game.tick(), 60);
-        let costs = game.creature(actor).unwrap().costs();
+        let creature = game.creature(actor).unwrap();
+        let costs = creature.costs();
         assert!(costs.reservations().is_empty());
         assert_eq!(costs.resources().balance(Resource::Stamina), 0);
         assert!(game.preparation(actor).is_none());
@@ -523,15 +449,16 @@ mod preparation_cost_tests {
                 crate::dice::roll_check(&mut rng, crate::dice::Edge::default()).kept < 10
             })
             .unwrap();
-        let (mut game, actor, target, intention) = charged_game_with_seed(seed);
+        let (mut game, actor, target, _) = charged_game_with_seed(seed);
         let target_health = game.health(target);
         for _ in 0..6 {
             game.act(target, Action::Wait).unwrap();
         }
         assert_eq!(game.health(target), target_health);
-        assert!(game.combat.events.iter().any(|event| matches!(event,
-            crate::combat::CombatEvent::Resolved { intention: Some(owner), hit: false, .. } if *owner == intention)));
-        let costs = game.creature(actor).unwrap().costs();
+        assert!(game.event_log.iter().any(|event| matches!(event,
+            crate::combat::CombatEvent::Resolved { outcome } if outcome.result == crate::abilities::OutcomeStatus::Miss)));
+        let creature = game.creature(actor).unwrap();
+        let costs = creature.costs();
         assert!(costs.reservations().is_empty());
         assert_eq!(costs.resources().balance(Resource::Stamina), 0);
     }
@@ -559,7 +486,14 @@ mod preparation_cost_tests {
                 )
                 .unwrap();
                 let replacement = game
-                    .admit_intention(actor, Action::Attack { target }, IntentionOrigin::Human)
+                    .admit_intention(
+                        actor,
+                        Action::UseAbility {
+                            id: AbilityId::new("free_strike").unwrap(),
+                            target,
+                        },
+                        IntentionOrigin::Human,
+                    )
                     .unwrap();
                 assert_ne!(replacement, original);
                 assert!(
@@ -571,12 +505,10 @@ mod preparation_cost_tests {
                     "queueing does not change payment"
                 );
                 game.execute_next_intention().unwrap().outcome.unwrap();
-                assert_eq!(
-                    game.preparation(actor).unwrap().origin_intention(),
-                    Some(replacement)
-                );
+                assert_eq!(game.preparation(actor).unwrap().hold, None);
             }
-            let costs = game.creature(actor).unwrap().costs();
+            let creature = game.creature(actor).unwrap();
+            let costs = creature.costs();
             assert!(costs.reservations().is_empty());
             assert_eq!(costs.available(Resource::Stamina), 1);
         }
@@ -588,7 +520,8 @@ mod preparation_cost_tests {
         game.teleport(target, location(4)).unwrap();
         game.act(target, Action::Wait).unwrap();
         assert!(game.preparation(actor).is_none());
-        let costs = game.creature(actor).unwrap().costs();
+        let creature = game.creature(actor).unwrap();
+        let costs = creature.costs();
         assert!(costs.reservations().is_empty());
         assert_eq!(costs.available(Resource::Stamina), 1);
     }

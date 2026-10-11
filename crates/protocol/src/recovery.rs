@@ -262,8 +262,14 @@ mod tests {
     const TEST_BUDGET: usize = MAX_SNAPSHOT_BYTES * 2;
 
     fn snapshot() -> ServerMessage {
-        let samples: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/wire-v32.json")).unwrap();
+        let samples: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/wire-v33.json"
+            ))
+            .expect("regenerate current wire samples"),
+        )
+        .unwrap();
         serde_json::from_value(
             samples["server"]
                 .as_array()

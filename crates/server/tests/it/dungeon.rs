@@ -8,7 +8,10 @@ fn default_dungeon_actors_use_owned_creature_builds() {
     let scenario = support::load("first-dungeon", 42);
     let manifest = &scenario.package.as_ref().unwrap().manifest;
 
-    let catalog = manifest.creatures.compile().unwrap();
+    let catalog = manifest
+        .creatures
+        .compile(scenario.package.as_ref().unwrap().rules().unwrap())
+        .unwrap();
     let player = manifest.characters[0].creature.as_ref().unwrap();
     for (source, id, hd) in [
         (player, 1, 4),
@@ -52,7 +55,8 @@ fn default_dungeon_actors_use_owned_creature_builds() {
         .expect("ordinary default player receives personal stats");
     assert!(stats
         .abilities
-        .contains(&tor_protocol::Technique::PowerStrike));
+        .iter()
+        .any(|ability| ability.id == "power_strike"));
     engine.enable_wizard().unwrap();
     let report = engine.inspect_creature(ActorId(1)).unwrap();
     assert_eq!(report.hit_dice.len(), 4);
@@ -61,7 +65,7 @@ fn default_dungeon_actors_use_owned_creature_builds() {
             .stats
             .skills
             .iter()
-            .find(|rank| rank.skill == tor_protocol::Skill::HeavyWeaponry)
+            .find(|rank| rank.skill.id == "heavy_weaponry")
             .unwrap()
             .rank,
         4
@@ -99,7 +103,13 @@ fn authored_dungeon_completes_retrieval_and_escape() {
             },
             |a| {
                 engine
-                    .decode_action(ActorId(1), &tor_protocol::Action::Attack { target: a.id })
+                    .decode_action(
+                        ActorId(1),
+                        &tor_protocol::Action::UseAbility {
+                            id: "basic_melee".into(),
+                            target: a.id,
+                        },
+                    )
                     .unwrap()
             },
         );
@@ -138,7 +148,8 @@ fn victory_death_and_pending_attacks_survive_durable_restart() {
         act_as(
             &mut engine,
             ActorId(1),
-            Action::Attack {
+            Action::UseAbility {
+                id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                 target: tor_simulation::ActorId(2),
             },
         )
@@ -285,7 +296,8 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack {
+        Action::UseAbility {
+            id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
         },
     )
@@ -335,7 +347,8 @@ fn suspension_is_journaled_idempotent_and_durable_with_exact_resumption() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack {
+        Action::UseAbility {
+            id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
         },
     )
@@ -373,7 +386,8 @@ fn active_ai_memory_survives_forced_checkpoint_and_restart() {
     act_as(
         &mut engine,
         ActorId(1),
-        Action::Attack {
+        Action::UseAbility {
+            id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
             target: tor_simulation::ActorId(2),
         },
     )
@@ -401,7 +415,8 @@ fn stationary_attack_does_not_rebuild_unchanged_navigation() {
             &engine.branch().clone(),
             tor_server::journal::Command::Act {
                 expected_revision: engine.revision(ActorId(1)).unwrap(),
-                action: Action::Attack {
+                action: Action::UseAbility {
+                    id: tor_simulation::content_ids::AbilityId::new("basic_melee").unwrap(),
                     target: tor_simulation::ActorId(2),
                 },
             },

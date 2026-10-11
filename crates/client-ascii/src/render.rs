@@ -460,7 +460,7 @@ impl Canvas {
                     &format!(
                         "{} {}",
                         if i == app.selected { ">" } else { " " },
-                        tor_client_common::narration::ability_name(*ability)
+                        ability.name
                     ),
                     if i == app.selected { GOLD } else { TEXT },
                     2,

@@ -1,8 +1,8 @@
+use super::abilities::id;
 use std::{
     collections::{BTreeMap, BTreeSet},
     num::NonZeroU64,
 };
-use tor_simulation::grants::Ability;
 use tor_simulation::{ActorId, BodySpec, CreatureIdentity, Game, MemoryRecords, RegionTransition};
 use tor_world::{
     Direction, Extent, Location, NamedAnchor, Passage, Position, Region, RegionId, World,
@@ -16,6 +16,11 @@ fn at(region: u64, x: i32, y: i32, z: i32) -> Location {
 }
 
 fn fixture() -> (Game, ActorId, ActorId) {
+    fixture_with_content(super::abilities::content())
+}
+fn fixture_with_content(
+    content: std::sync::Arc<tor_simulation::creatures::Content>,
+) -> (Game, ActorId, ActorId) {
     let world = World::new(
         (1..=2)
             .map(|id| Region {
@@ -27,15 +32,17 @@ fn fixture() -> (Game, ActorId, ActorId) {
         vec![],
     )
     .unwrap();
-    let mut game = Game::new(world, 42);
-    let (reference, reference_actor) = super::abilities::game();
+    let mut game = Game::new(world, 42, content.clone());
     let mut ids = vec![];
     for (location, build) in [
         (
             at(1, 1, 1, 0),
-            reference.creature(reference_actor).unwrap().build().clone(),
+            super::abilities::build(content.clone(), true),
         ),
-        (at(1, 7, 1, 0), super::creature_state::build()),
+        (
+            at(1, 7, 1, 0),
+            super::abilities::build(content.clone(), false),
+        ),
     ] {
         let id = game
             .spawn_actor(location, NonZeroU64::new(100).unwrap())
@@ -56,9 +63,9 @@ fn fixture() -> (Game, ActorId, ActorId) {
 
 fn assert_ranged(game: &Game, source: ActorId, target: ActorId, available: bool) {
     let before = game.clone();
-    for ability in [Ability::MagicBolt, Ability::Fear] {
+    for ability in [id("magic_bolt"), id("fear")] {
         assert_eq!(
-            game.ability_target_available(source, ability, target),
+            game.ability_plan(source, &ability, target).is_ok(),
             available,
             "{ability:?} targeting {target:?}"
         );
@@ -71,7 +78,7 @@ fn round_trip(game: &Game) -> Game {
     let snapshot = game.checkpoint(&mut shared);
     let bytes = serde_json::to_vec(&(snapshot, shared)).unwrap();
     let (snapshot, shared) = serde_json::from_slice(&bytes).unwrap();
-    Game::restore_checkpoint(snapshot, &shared).unwrap()
+    Game::restore_checkpoint(snapshot, &shared, game.content().clone()).unwrap()
 }
 
 #[test]
@@ -167,7 +174,9 @@ fn targeting_crosses_rotated_physical_portals_but_not_abstract_stair_disclosures
     )
     .unwrap();
     assert_ranged(&game, source, target, true);
-    assert!(!game.ability_target_available(source, Ability::PowerStrike, target));
+    assert!(!game
+        .ability_plan(source, &id("power_strike"), target)
+        .is_ok());
 
     let (mut game, source, target) = fixture();
     let landing = at(2, 1, 1, 0);
@@ -225,14 +234,78 @@ fn targeting_rejects_self_unknown_dead_frozen_and_ungranted_actors() {
     game.rebuild_creature(source, build).unwrap();
     assert_ranged(&game, source, target, false);
     game.teleport(target, at(1, 2, 1, 0)).unwrap();
-    assert!(game.ability_target_available(source, Ability::BasicMelee, target));
-    assert!(!game.ability_target_available(source, Ability::PowerStrike, target));
+    assert!(game
+        .ability_plan(source, &id("basic_melee"), target)
+        .is_ok());
+    assert!(!game
+        .ability_plan(source, &id("power_strike"), target)
+        .is_ok());
     game.apply_effects(
         target,
-        &[tor_simulation::EffectSpec::Damage {
-            components: BTreeMap::from([(tor_simulation::combat::DamageType::Vital, 1_000_000)]),
-        }],
+        &[super::abilities::damage(
+            1_000_000,
+            tor_simulation::combat::DamageType::Vital,
+        )],
     )
     .unwrap();
-    assert!(!game.ability_target_available(source, Ability::BasicMelee, target));
+    assert!(!game
+        .ability_plan(source, &id("basic_melee"), target)
+        .is_ok());
+}
+
+#[test]
+fn data_range_modifier_changes_both_disclosure_and_authoritative_targeting() {
+    use tor_simulation::{
+        content_ids::TemplateId,
+        creatures::{Content, Template},
+        rules::{AbilityStat, Modifier, ModifierOp, Reach, Scope, Stat},
+    };
+    let original = super::abilities::content();
+    let mut catalog = original.catalog().clone();
+    let mut extension = Template::new(TemplateId::new("long_reach").unwrap(), 0);
+    extension.modifiers = vec![Modifier {
+        scope: Scope::Always,
+        op: ModifierOp::Add {
+            stat: Stat::Ability {
+                ability: id("magic_bolt"),
+                stat: AbilityStat::Range,
+            },
+            value: 3,
+        },
+    }];
+    catalog.templates.insert(extension.id.clone(), extension);
+    let content = Content::new(original.rules().clone(), catalog).unwrap();
+    let (mut game, source, target) = fixture_with_content(content);
+    game.teleport(target, at(1, 9, 1, 0)).unwrap();
+    assert!(game
+        .ability_plan(source, &id("magic_bolt"), target)
+        .is_err());
+    let mut build = game.creature(source).unwrap().build().clone();
+    build
+        .set_templates(vec![
+            TemplateId::new("techniques").unwrap(),
+            TemplateId::new("long_reach").unwrap(),
+        ])
+        .unwrap();
+    game.rebuild_creature(source, build).unwrap();
+    assert_eq!(
+        game.ability_plan(source, &id("magic_bolt"), target)
+            .unwrap()
+            .as_ability()
+            .unwrap()
+            .reach,
+        Reach::Sight { range: 9 }
+    );
+    let view = game
+        .observe(source)
+        .unwrap()
+        .combat
+        .unwrap()
+        .own_stats
+        .unwrap();
+    assert_eq!(
+        view.ability_reaches[&id("magic_bolt")],
+        Reach::Sight { range: 9 }
+    );
+    assert!(game.ability_plan(source, &id("fear"), target).is_err());
 }

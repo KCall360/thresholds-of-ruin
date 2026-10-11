@@ -1,3 +1,4 @@
+use tor_client_common::test_support::equipment_slot;
 use tor_client_text::{parse, Input};
 use tor_protocol::*;
 
@@ -10,11 +11,14 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     s.observation.inventory = vec![item.clone()];
     s.observation.interactions = Some(InteractionView {
         completed: Vec::new(),
-        slots: vec![EquipmentSlot::Ring, EquipmentSlot::Ring],
+        slots: vec![
+            equipment_slot("ring", "on a finger", false),
+            equipment_slot("ring", "on a finger", false),
+        ],
         preparation: None,
         inventory: vec![ItemInteractionView {
             item: item.id,
-            slot: Some(EquipmentSlot::Ring),
+            slot: Some(equipment_slot("ring", "on a finger", false)),
             equipped_slot: None,
             known_equipment: None,
             drinkable: false,
@@ -30,6 +34,45 @@ fn equipment_and_drink_commands_use_disclosed_affordances_and_distinct_slots() {
     );
     assert!(parse("equip silver ring", &s).is_err());
     assert!(parse("drink potion of healing", &s).is_err());
+}
+
+#[test]
+fn equip_commands_support_multiple_custom_attack_sockets() {
+    let mut state = state();
+    let mut first = state.observation.ground_items[0].item.clone();
+    first.class = ItemClass::Tool;
+    first.name = "brass wing fitting".into();
+    let mut second = first.clone();
+    second.id = ItemTarget::from_digest([127; 32]);
+    second.name = "silver wing fitting".into();
+    let slot = equipment_slot("fixture_wing", "fastened to a wing", true);
+    state.observation.inventory = vec![first.clone(), second.clone()];
+    state.observation.interactions = Some(InteractionView {
+        completed: vec![],
+        slots: vec![slot.clone(); 2],
+        preparation: None,
+        inventory: vec![
+            ItemInteractionView {
+                item: first.id,
+                slot: Some(slot.clone()),
+                equipped_slot: Some(0),
+                known_equipment: None,
+                drinkable: false,
+            },
+            ItemInteractionView {
+                item: second.id,
+                slot: Some(slot),
+                equipped_slot: None,
+                known_equipment: None,
+                drinkable: false,
+            },
+        ],
+    });
+    assert!(
+        matches!(parse("equip silver wing fitting", &state).unwrap(),
+        Input::Command(Command::Act { action: Action::Equip { item, slot: 1 }, .. })
+            if item == second.id)
+    );
 }
 
 #[test]

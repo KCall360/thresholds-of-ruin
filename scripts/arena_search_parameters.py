@@ -8,6 +8,7 @@ import sys
 import tomllib
 from arena_evaluation import digest, files, read_json, seed, timeout_seconds, write_json
 from arena_matrix import toml_source
+from ruleset_sources import resolve_with_dependencies
 from arena_search_sampling import hash_json, validate_record, validate_space
 
 FORMAT = "tor-arena-search-parameters-v1"
@@ -15,6 +16,33 @@ BUILD_FIELDS = {"attributes", "binding", "species", "templates", "hit_dice"}
 
 
 def permitted(file, path):
+    if file == "rules.toml":
+        # Content identity and expression structure stay fixed. Every candidate is
+        # still validated by the ordinary scenario compiler after scalar edits.
+        if len(path) == 2 and path[0] == "constants":
+            return path[1] in {"base_defense", "attribute_cap", "derived_attribute_cap",
+                               "attribute_opportunity_interval", "racial_training_points",
+                               "duration_scale_numerator", "duration_scale_offset"}
+        if len(path) < 3 or type(path[1]) is not int:
+            return False
+        if path[0] == "resources":
+            return path[2:] in (["recovery_period"], ["capacity", "base"])
+        if path[0] == "abilities":
+            if path[2:] in (["cost", "start"], ["cost", "resolution"],
+                            ["timing", "source", "prepare"], ["timing", "source", "recover"],
+                            ["timing", "scaled_by"], ["reach", "range"],
+                            ["check", "against", "defense"], ["check", "against", "formula", "base"],
+                            ["ai", "priority"], ["ai", "minimum_resource_percent"]):
+                return True
+            return (len(path) >= 5 and path[2] in {"on_success", "on_failure"}
+                    and type(path[3]) is int
+                    and path[-1] in {"duration", "impact_bonus", "amount", "count", "sides", "bonus"}
+                    and all(type(key) is int or key in {
+                        "damage", "components", "amount", "dice", "duration", "impact_bonus",
+                        "count", "sides", "bonus"} for key in path[4:]))
+        return (path[0] in {"talents", "creature_types", "subtypes", "classes", "conditions", "flags"}
+                and len(path) == 6 and path[2] == "modifiers" and type(path[3]) is int
+                and path[4] == "op" and path[5] in {"value", "amount"})
     if file == "scenario.toml":
         if len(path) >= 4 and path[0] == "creatures" and path[1] in ("species", "templates"):
             return True
@@ -51,9 +79,9 @@ def validate_spec(value):
                 raise ValueError("Invalid parameter filename")
             parsed = PurePosixPath(file)
             if (parsed.is_absolute() or ".." in parsed.parts or "\\" in file
-                    or str(parsed) != file or (file != "scenario.toml" and
+                    or str(parsed) != file or (file not in {"scenario.toml", "rules.toml"} and
                     not (len(parsed.parts) == 2 and parsed.parts[0] == "regions" and parsed.suffix == ".toml"))):
-                raise ValueError("Target must be the manifest or a direct region TOML file")
+                raise ValueError("Target must be the manifest, rules.toml or a direct region TOML file")
             if (not isinstance(path, list) or not 1 <= len(path) <= 16 or any(
                 not ((type(key) is int and 0 <= key <= 10000) or
                      (type(key) is str and 0 < len(key) <= 128)) for key in path)):
@@ -118,11 +146,21 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
             if source == output or source in output.parents:
                 raise ValueError("Output must be outside every source package")
             sources[variant + "-" + orientation] = (source, files(source))
+    resolved_rules, dependencies, shared_sources = {}, {}, {}
+    for key, (source, _) in sources.items():
+        path = source / "rules.toml"
+        if path.exists():
+            resolved_rules[key], dependencies[key] = resolve_with_dependencies(path)
+            for identity, source_hash in dependencies[key].items():
+                if identity in shared_sources and shared_sources[identity] != source_hash:
+                    raise ValueError("Shared rules source changed during candidate resolution")
+                shared_sources[identity] = source_hash
     compiler = compiler.resolve(strict=True)
     fingerprint = digest(compiler)
     result = {"format": "tor-arena-search-candidate-v1", "params": copy.deepcopy(params),
               "parameter_spec": specification, "parameter_spec_sha256": hash_json(specification),
               "compiler_sha256": fingerprint, "source_files": {key: value[1] for key, value in sources.items()},
+              "rules_dependencies": dependencies,
               "resolved_files": {}, "status": "valid", "validation_failures": []}
     paired = {"seeds": values, "faction": plan["faction"], "timeout_seconds": timeout,
               "baseline": {}, "candidate": {}}
@@ -156,6 +194,10 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
         variant = key.split("-", 1)[0]
         target = output / key
         restore_package(source, source_files, target, output)
+        if dependencies.get(key):
+            # Baseline and candidate snapshots are both self-contained. Replay
+            # never depends on a mutable general rules source outside the batch.
+            (target / "rules.toml").write_text(toml_source(resolved_rules[key]), encoding="utf-8", newline="\n")
         if variant == "candidate":
             filenames = sorted({entry["file"] for spec in specification["parameters"].values()
                                 for entry in spec["targets"]})
@@ -174,6 +216,8 @@ def materialize(compiler, plan_path, specification, params, output, *, seeds=Non
             raise ValueError("Compiler changed during candidate validation")
         if files(source) != source_files:
             raise ValueError("Source changed during candidate snapshot")
+        if dependencies.get(key) and resolve_with_dependencies(source / "rules.toml")[1] != dependencies[key]:
+            raise ValueError("Shared rules source changed during candidate snapshot")
         failure = ({"package": key, "variant": variant,
                     "message": (validation.stdout + validation.stderr)[-2000:]}
                    if validation.returncode else None)
