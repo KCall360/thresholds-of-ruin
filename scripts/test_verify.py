@@ -55,7 +55,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(unknown, ["assets/new.png"])
 
     def test_docs_and_scripts_select_no_packages(self):
-        direct, everything, unknown = verify.classify(["docs/testing.md", "scripts/verify.py"], self.dirs)
+        direct, everything, unknown = verify.classify(["docs/development/testing.md", "scripts/verify.py"], self.dirs)
         self.assertEqual((direct, everything, unknown), (set(), False, []))
 
     def test_crate_prefix_does_not_match_a_longer_sibling(self):
@@ -100,7 +100,7 @@ class ProcessSelection(unittest.TestCase):
         self.assertEqual(len(self.select(["scripts/process_harness.py"], [])), 4)
 
     def test_docs_only_change_selects_no_process_tests(self):
-        self.assertEqual(self.select(["docs/testing.md"], []), [])
+        self.assertEqual(self.select(["docs/development/testing.md"], []), [])
 
 
 class Reporting(unittest.TestCase):
@@ -142,7 +142,7 @@ class MissingTests(unittest.TestCase):
         self.assertFalse(verify.missing_tests(["scripts/verify.py", "scripts/test_verify.py"], ""))
 
     def test_docs_only_change_does_not_warn(self):
-        self.assertFalse(verify.missing_tests(["docs/testing.md", "AGENTS.md"], "+text\n"))
+        self.assertFalse(verify.missing_tests(["docs/development/testing.md", "AGENTS.md"], "+text\n"))
 
 
 class Tiers(unittest.TestCase):

@@ -1,6 +1,6 @@
 //! Generated regions in play: built when first needed, the same in any
 //! order, replayed exactly, and different for each game seed. See
-//! docs/scenario-packages.md#generated-regions.
+//! docs/reference/scenario-packages.md#generated-regions.
 use crate::support;
 use std::path::Path;
 use tor_protocol::{ActorId, Observation};

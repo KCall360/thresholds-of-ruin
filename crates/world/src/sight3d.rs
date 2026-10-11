@@ -1,5 +1,5 @@
 //! Exact three-dimensional sight: the reference implementation of the model in
-//! `docs/sight-3d.md`. Correctness first; accelerated layers must match it.
+//! `docs/architecture/perception.md`. Correctness first; accelerated layers must match it.
 //!
 //! Geometry uses doubled coordinates relative to the eye cell: cell `o` has its
 //! centre at `2o` and its faces on odd planes. Sight lines run from the eye

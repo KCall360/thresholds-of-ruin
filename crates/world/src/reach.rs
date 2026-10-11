@@ -1,6 +1,6 @@
 //! Regions within a few steps of some cells, by any movement, physics or
 //! sight step. Region streaming pins them; see
-//! `docs/region-streaming.md#performance`. Results are reused while every
+//! `docs/architecture/streaming.md#performance`. Results are reused while every
 //! region they read is unchanged, so reuse never changes them.
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;

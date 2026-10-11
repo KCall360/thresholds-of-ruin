@@ -5,6 +5,7 @@ mod combat_diagnostics;
 mod creature;
 mod creature_inspection;
 mod delta;
+mod documentation;
 mod samples;
 mod targets;
 mod wire;

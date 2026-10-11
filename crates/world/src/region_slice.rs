@@ -1,7 +1,7 @@
 //! One region's share of the world, detached for region streaming. A detached
 //! region keeps its metadata in the world, so references into it stay
 //! checkable, while its terrain, doors and outgoing links live in the slice.
-//! See `docs/region-streaming.md#region-lifecycle-contract`.
+//! See `docs/architecture/streaming.md#region-lifecycle-contract`.
 use super::*;
 use serde::{Deserialize, Serialize};
 

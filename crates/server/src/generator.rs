@@ -2,7 +2,7 @@
 //! structure (bounds, zone, entry anchors and links) and the generator fills
 //! it on first build: `rooms` carves rooms joined by corridors that reach
 //! every entry, and places actors and items from the region's pools. See
-//! `docs/scenario-packages.md#generated-regions`.
+//! `docs/reference/scenario-packages.md#generated-regions`.
 //!
 //! A region's content depends only on its own definition and seed, never on
 //! which regions were built before, and its identities come from a range

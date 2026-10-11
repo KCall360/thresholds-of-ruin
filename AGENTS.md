@@ -2,7 +2,7 @@
 
 This file applies to any AI agent working in this repository. It supplements,
 and never replaces, [development practices](CONTRIBUTING.md) and the
-[testing policy](docs/testing.md), which apply in full.
+[testing policy](docs/development/testing.md), which apply in full.
 
 ## Working style
 
@@ -23,7 +23,7 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
 - **Add tests with every change.** Each feature gets tests at every layer it
   touches, including an actual-process acceptance test. Each bug fix gets a
   regression test that fails first. Write them in the same change, following
-  the [testing policy](docs/testing.md). Tiers only choose which existing tests
+  the [testing policy](docs/development/testing.md). Tiers only choose which existing tests
   run; a green tier doesn't count if the tests for the change are missing.
 - During development, run the failing regression first, then affected unit
   tests during edits. Run affected integration and actual-process
@@ -39,7 +39,7 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   Local full is required when CI cannot run or on request. Both-platform
   debug/release CI on the final commit remains required before merging. Record
   the tested state, commands and logs; report failures and checks not run.
-  See [verification evidence](docs/testing.md#verification-evidence-and-reuse).
+  See [verification evidence](docs/development/testing.md#verification-evidence-and-reuse).
 - `verify.py` logs each step under `.local/verify/`, checks exit codes, and
   picks build jobs from free memory. Run other commands the same way,
   redirecting stdout and stderr to log files under `.local/` (gitignored).
@@ -65,7 +65,7 @@ and never replaces, [development practices](CONTRIBUTING.md) and the
   machine fingerprint.
 - Raw samples go to GitHub release assets, never Git. **Ask the maintainer
   before creating any release or uploading anything.** See the
-  [performance harness](docs/performance-harness.md#publishing-raw-measurements).
+  [performance harness](docs/development/performance.md#publishing-raw-measurements).
 
 ## Publishing
 
@@ -109,26 +109,24 @@ For each launcher:
    separate spectator credential, and cleans up only its own processes.
 
 Launchers, their credentials, and saves stay outside Git. See the
-[performance harness](docs/performance-harness.md#observable-256-region-run)
+[performance harness](docs/development/performance.md#observable-256-region-run)
 for the shared demonstration driver.
 
-## Current work
+## Current work and protected context
 
-Use [the roadmap](docs/milestones.md) for current scope and
-[the refactor guide](docs/refactoring.md) for the completed implementation review.
-The architecture refactor is published; performance follow-up remains open.
-Three-dimensional sight is complete for its accepted scope, with the closeout
-merged after the required CI passed.
+Use [current capabilities and next work](docs/status.md) for scope and
+[architecture](docs/architecture/overview.md) for implemented boundaries.
+Performance follow-up remains open. Runtime scripting and its language remain
+undecided. Planning approval does not authorize starting a new implementation
+milestone.
 
-The accepted [Rogue plan](docs/rogue-scenario-plan.md) starts with exploration-only
-floor generation before the shared creature/item/survival features are complete.
-Planning approval does not by itself authorize starting a new implementation
-milestone. Runtime scripting and its language remain undecided.
+The accepted [Rogue plan](docs/plans/rogue.md) builds on exploration-only floor
+generation, then adds shared mechanics and content. Preserve the distinction
+between existing foundations and unfinished survival, content and objective work.
 
-The ASCII client follows NetHack's layout: messages on top that stay until the
-next command, one full-width map that merges every height, two status lines,
-and on-demand screens (no side panels). It's client-only; what needs server or
-protocol support is listed in [the ASCII client guide](docs/ascii-client.md#needs-server-or-protocol-support).
+The ASCII client uses messages on top, one full-width map that merges heights,
+two status lines and on-demand screens. Its controls and limitations live in the
+[ASCII guide](docs/play/ascii.md); clients do not invent missing server authority.
 
 Preserve the original dirty interactions checkout; it contains unpublished work
 that is not the published main baseline. Keep future work isolated where needed.

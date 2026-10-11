@@ -5,7 +5,7 @@
 //! made, so a prepared result is exactly what the command would have
 //! produced itself. Single-region work falls back on demand; generation groups
 //! wait for their specific result to avoid running duplicate floor generation.
-//! See `docs/region-streaming.md` and `docs/generation-recipes.md`.
+//! See `docs/architecture/streaming.md` and `docs/reference/generation.md`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;

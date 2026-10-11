@@ -111,7 +111,7 @@ pub struct Manifest {
     pub objective: Option<Objective>,
     /// The asset identifiers each theme may need: a client near a region
     /// with that theme gets them in its palette. See
-    /// `docs/protocol.md#asset-palettes`.
+    /// `docs/reference/protocol.md#asset-palettes`.
     #[serde(default)]
     pub assets: BTreeMap<String, Vec<String>>,
     /// Terrain assets of regions outside any zone, or in a zone without its own.
@@ -695,7 +695,7 @@ struct CachedRules {
 /// come from. Saves keep the manifest and index, and a copy of each region
 /// file once that region is built; resuming reads other region files from
 /// the package directory, checked against the index. See
-/// `docs/scenario-packages.md`.
+/// `docs/reference/scenario-packages.md`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Package {

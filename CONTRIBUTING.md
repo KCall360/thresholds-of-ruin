@@ -3,53 +3,32 @@
 This page describes how changes to Thresholds of Ruin are designed, tested,
 documented, and published. AI coding agents should also read [AGENTS.md](AGENTS.md).
 
-Before making changes, read the [architecture](docs/architecture.md), the
-[project status and roadmap](docs/milestones.md), and the
-[testing policy](docs/testing.md).
+Before making changes, read the [architecture](docs/architecture/overview.md), the
+[project status and roadmap](docs/status.md), and the
+[testing policy](docs/development/testing.md).
 
 ## Testing
 
-Every change must be tested, and the full policy is in
-[testing and verification](docs/testing.md). In short:
+Every feature needs behavior tests at each changed layer and an acceptance test
+that launches the real applications. Every bug fix needs a regression test that
+fails before the fix. Add these tests in the same change; a passing tier is not a
+substitute for missing coverage. Use TDD for simulation, protocol and interaction
+behavior. Keep performance instrumentation and workloads current.
 
-- Use test-driven development for simulation rules, protocol behavior, and
-  client interactions: write a failing behavior test, implement, then refactor.
-- Every feature needs behavior tests at each layer it changes **and** an
-  acceptance test that launches the real server and clients.
-- Every bug fix needs a regression test that fails before the fix.
-- Everything must pass on **Windows and Linux**, in **debug and release**.
-- Keep profiling instrumentation, workloads, and validators working, and run
-  targeted release-build performance comparisons for latency-sensitive changes.
-- Keep `main` green. Don't merge ignored or known-failing tests.
+Follow [setup](docs/development/setup.md), then the authoritative
+[testing workflow](docs/development/testing.md): focused tests while iterating,
+`python scripts/verify.py quick` at stable checkpoints, and a passing default
+`push` tier (or `full`) before every push. Run targeted release checks for
+performance/release-specific behavior; local full is required when CI cannot run
+or on request. Full Windows/Linux debug/release CI on the final commit remains
+required before merge, including separate tooling/dependency jobs.
 
-Every feature and bug fix adds its tests to the suite in the same change. The
-tiered checks run the suite faster, but they can only run tests that exist.
-
-- During the TDD loop, run the failing behavior/regression and affected unit
-  tests directly. Run affected integration and actual-process tests when each
-  behavior is complete; repeat them if subsequent edits affect that behavior.
-  Run `python scripts/verify.py quick` at stable, cohesive checkpoints, or cover the checkpoint with a
-  required higher tier.
-- Before every push, pass `python scripts/verify.py` (the `push` tier) or
-  `python scripts/verify.py full`. A successful full run covers the push gate
-  for unchanged inputs, toolchain and test configuration; do not repeat both.
-- The local push gate runs all debug checks. Let CI run the broad release
-  suites, including for compatibility, persistence and dependency changes. Run
-  targeted local release checks for performance or release-specific behavior;
-  local full is required when CI cannot run or on request.
-- CI's full Windows and Linux debug/release matrix on the final commit is
-  **required before every merge**.
-- Record the tested state and evidence. Follow the
-  [reuse rules](docs/testing.md#verification-evidence-and-reuse); a failed,
-  incomplete or stale run never satisfies a gate.
-
-See the [testing policy](docs/testing.md#running-the-checks) for what each tier
-runs and why. Report any check you couldn't run.
-
-The sole local exception is the native travel underscore/mouse test, enabled
-with `--waive-local-mouse` and reported as a waived failure. It remains required
-in CI; every other failure remains blocking. See the
-[exact exception](docs/testing.md#focused-iteration-and-local-mouse-exception).
+A full run covers the local push gate for unchanged inputs, toolchain and test
+configuration. Record the tested state, failures and checks not run; stale,
+incomplete or failed evidence does not satisfy a gate. The only standing local
+exception is the exact native travel mouse test documented in the testing policy,
+reported as a waived failure and still required in CI. Never weaken tests or
+infer new waivers from historical records.
 
 ## Architecture rules
 
@@ -78,7 +57,7 @@ These are enforced in review and, where possible, by tests.
 
 The project is pre-release, so it supports only the **current** protocol, save
 format, and ruleset. They're listed in the
-[roadmap](docs/milestones.md#current-implementation).
+[roadmap](docs/status.md#implemented-scope).
 
 - When a format changes, update callers, fixtures, scenario certificates, and
   documentation together.
@@ -90,26 +69,23 @@ format, and ruleset. They're listed in the
 
 ## Documentation
 
-Keep documentation roles distinct:
+Use the [documentation index](docs/README.md) and its maintenance rules.
+Current status/formats belong in [status](docs/status.md), durable boundaries and
+rationale in [architecture](docs/architecture/overview.md), current behavior in
+references/player guides, procedures in development guides, and unfinished
+requirements in plans. External research retains its pinned edition and caveats.
 
-- [`docs/milestones.md`](docs/milestones.md) is the single source of truth for
-  status, scope, and the current format versions.
-- [`docs/architecture.md`](docs/architecture.md) records durable boundaries and
-  the reasons for them. It isn't a changelog.
-- Feature guides describe **current** behavior, controls, limitations, and how
-  the feature is verified.
-- The [game design plan](docs/game-design-plan.md) records accepted future
-  requirements.
+Update the owning guide and status with a behavior change. Replace superseded
+statements; do not preserve rollout history beside current instructions. Keep one
+authoritative control/schema/policy table and link to it. Guides say “current”
+instead of repeating format numbers. Preserve useful rationale, negative results
+and measurement limitations with accessible immutable evidence; routine PR/test
+counts and local-only logs are not current reference material.
 
-When behavior changes, update the relevant guide and the roadmap in the same
-change. Replace superseded statements rather than leaving history beside current
-behavior. Guides say "the current protocol" rather than repeating version
-numbers. Git history and pull requests record who changed what and when, so
-guides don't list PR numbers, commit hashes, or CI runs. Link every new guide
-from [`docs/README.md`](docs/README.md); `scripts/test_documentation.py` rejects
-broken local links, unindexed guides, and version numbers that don't match the
-code. The [documentation index](docs/README.md#maintaining-the-docs) has the
-checklist.
+Every new page must be reachable from the docs index, including nested pages.
+Check links, anchors and executable examples after moves. Documentation tests
+check structure and selected contracts, not every semantic claim; review against
+code and tests as well. Update relevant source comments and CLI help pointers.
 
 ## Publishing
 

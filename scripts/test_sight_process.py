@@ -4,7 +4,7 @@ The `sight-3d` package's character is two cells tall and sees from its
 head. It looks over a waist-high wall, sees a creature hovering at head height,
 and can't see past a closed door that fills its two-cell doorway until it opens
 the door. The `sight-3d-giant` package compares a three-cell giant with a
-two-cell humanoid at the same start. See docs/sight-3d.md.
+two-cell humanoid at the same start. See docs/architecture/perception.md.
 """
 import unittest
 

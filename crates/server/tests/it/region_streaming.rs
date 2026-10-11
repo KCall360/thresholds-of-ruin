@@ -1,7 +1,7 @@
 //! Region streaming in the engine: a package game keeps only what its
 //! reference points need, builds regions when they're first needed, keeps
 //! detached regions on disk and replays exactly. See
-//! docs/region-streaming.md.
+//! docs/architecture/streaming.md.
 use std::path::Path;
 use tor_protocol::ActorId;
 use tor_server::journal::{Action, Direction};

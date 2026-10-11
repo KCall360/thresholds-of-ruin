@@ -1,5 +1,5 @@
 """Actual clients play a streaming game across detached halls, save, restart,
-reconnect, spectate and rewind. See docs/region-streaming.md."""
+reconnect, spectate and rewind. See docs/architecture/streaming.md."""
 import json
 import os
 import shutil

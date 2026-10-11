@@ -1,5 +1,5 @@
 //! Region streaming over real WebSocket connections: clients attached to an
-//! actor whose region leaves the loaded world. See docs/region-streaming.md.
+//! actor whose region leaves the loaded world. See docs/architecture/streaming.md.
 use futures_util::SinkExt;
 use std::collections::BTreeSet;
 use std::path::Path;

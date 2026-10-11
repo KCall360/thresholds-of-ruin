@@ -1,5 +1,5 @@
 //! Accelerated exact 3D sight. It must return exactly what
-//! [`World::eye_scene_reference`] returns; see `docs/sight-3d.md`.
+//! [`World::eye_scene_reference`] returns; see `docs/architecture/perception.md`.
 //!
 //! The model is unchanged. The speed comes from resolving plain routes
 //! directly, stepping plain cells without topology lookups, caching each
