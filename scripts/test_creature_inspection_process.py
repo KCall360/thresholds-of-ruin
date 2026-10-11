@@ -878,6 +878,6 @@ class NativeCreatureInspectionProcesses(ProcessTestCase):
         diagnostic = self.ascii_frame(wizard, lambda frame: frame["screen"]["stats"] and not frame["busy"])
         key("Return", False)
         self.assertEqual(diagnostic["state"], initial["state"])
-        self.assertIn("Combat diagnostics", "\n".join(diagnostic["stats_rows"]))
-        self.assertIn("capture on", "\n".join(diagnostic["stats_rows"]))
+        self.assertEqual(diagnostic["stats_rows"],
+                         ["Combat diagnostics: enabled; captured 0, dropped 0, retained 0"])
         wizard.stop()
